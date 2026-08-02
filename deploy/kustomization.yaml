@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# EDIT: the namespace your shared Postgres and app live in.
+namespace: databases
+
+resources:
+  - job.yaml
+
+# Builds the ConfigMap from bootstrap.sql and rewrites the Job's volume
+# reference to the hashed name automatically, so an edited SQL file produces
+# a new ConfigMap (and thus a real re-provision when you re-run the Job).
+configMapGenerator:
+  - name: iron-temple-bootstrap
+    files:
+      - bootstrap.sql
