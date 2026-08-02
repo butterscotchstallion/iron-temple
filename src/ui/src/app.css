@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+/* Synthwave palette — Tailwind v4 generates utilities (bg-neon, text-cyan, …)
+   from these theme tokens. */
+@theme {
+  --color-void: #0d021a;
+  --color-surface: #1b0b34;
+  --color-surface-2: #2a1250;
+  --color-neon: #b026ff;
+  --color-neon-soft: #7b2ff7;
+  --color-magenta: #ff2fb9;
+  --color-cyan: #05d9e8;
+  --color-sun: #ff6ac1;
+  --color-ink: #eae0ff;
+
+  --font-display: "Orbitron", ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  color: var(--color-ink);
+  background:
+    radial-gradient(1200px 600px at 50% -10%, rgba(176, 38, 255, 0.28), transparent 60%),
+    linear-gradient(180deg, #0d021a 0%, #140430 55%, #1b0b34 100%);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
