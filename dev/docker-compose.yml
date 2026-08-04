@@ -1,4 +1,7 @@
-name: iron-temple-dev
+# `version` is required by docker-compose v1 and treated as obsolete (a harmless
+# warning) by the v2 plugin, so this file works with both. The v2-only top-level
+# `name:` is omitted for the same reason; the project name defaults to `dev`.
+version: "3.8"
 
 services:
   postgres:
