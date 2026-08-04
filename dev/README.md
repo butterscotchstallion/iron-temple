@@ -22,15 +22,17 @@ connect. (Compose V1 users: `docker-compose up -d --build`, without `--wait`.)
 First start builds the image and provisions the tenant. Data persists in the
 `pgdata` volume across restarts.
 
-## Connect the API
+## Apply migrations
+The API server isn't built yet — `src/api` currently ships only the migrate
+command. Point it at the local database and apply the schema:
 ```sh
 export DATABASE_URL="postgres://iron_temple:iron_temple@localhost:5432/iron_temple?sslmode=disable"
-cd src/api && make run
+cd src/api && make migrate
 ```
 
-`make run` applies migrations automatically on startup; use `make migrate` to
-apply them without starting the server. The app connects as the `iron_temple`
-tenant role — never the superuser.
+`make migrate` applies the embedded migrations and exits. It connects as the
+`iron_temple` tenant role — never the superuser. (Once the server lands, a
+`make run` target will apply migrations on startup and serve the API.)
 
 ## Reset
 ```sh
