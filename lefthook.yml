@@ -1,0 +1,45 @@
+# Git hooks for the iron-temple monorepo, run via lefthook.
+#
+#   Install the binary: https://github.com/evilmartians/lefthook
+#   Enable the hooks:   lefthook install
+#
+# Each command only runs when matching files are staged, so a docs-only commit
+# skips the Go and UI gates entirely.
+
+pre-commit:
+  parallel: false
+  commands:
+    # ---- Backend (src/api, Go) ----
+    api-mod-tidy:
+      root: "src/api/"
+      glob: "src/api/**/*.go"
+      run: go mod tidy && git diff --exit-code -- go.mod go.sum
+    api-vet:
+      root: "src/api/"
+      glob: "src/api/**/*.go"
+      run: go vet ./...
+    api-lint:
+      root: "src/api/"
+      glob: "src/api/**/*.go"
+      run: golangci-lint run
+    api-test:
+      root: "src/api/"
+      glob: "src/api/**/*.go"
+      # -short skips the Testcontainers integration tests (which need Docker);
+      # the pure unit tests still run on every commit.
+      run: go test -short ./...
+
+    # ---- Frontend (src/ui, Svelte) ----
+    ui-generate-api:
+      root: "src/ui/"
+      glob: "src/api/openapi.yaml"
+      # Regenerate the typed client when the OpenAPI contract changes.
+      run: pnpm generate:api
+    ui-typecheck:
+      root: "src/ui/"
+      glob: "src/ui/**/*.{ts,svelte}"
+      run: pnpm check
+    ui-test:
+      root: "src/ui/"
+      glob: "src/ui/**/*.{ts,svelte}"
+      run: pnpm test:unit
