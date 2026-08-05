@@ -18,6 +18,9 @@ import (
 // applies the embedded migrations, and asserts the seed landed. Requires a
 // Docker-compatible daemon (see deploy/README.md / implementation plan).
 func TestMigrateAppliesSchemaAndSeed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires a Docker daemon (Testcontainers)")
+	}
 	ctx := context.Background()
 
 	pg, err := postgres.Run(ctx, "postgres:17-alpine",

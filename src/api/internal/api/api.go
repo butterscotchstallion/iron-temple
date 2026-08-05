@@ -34,7 +34,6 @@ func NewServer(pool *pgxpool.Pool) *Server {
 func (s *Server) Router(corsOrigin string) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: corsOrigins(corsOrigin),
