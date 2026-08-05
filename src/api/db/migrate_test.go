@@ -43,7 +43,7 @@ func TestMigrateAppliesSchemaAndSeed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}
-	defer sqlDB.Close()
+	defer func() { _ = sqlDB.Close() }()
 
 	// Migrate is idempotent, so applying twice must also succeed.
 	for i := 0; i < 2; i++ {

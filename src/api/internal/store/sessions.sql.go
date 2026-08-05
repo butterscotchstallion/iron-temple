@@ -183,6 +183,69 @@ func (q *Queries) GetSessionSet(ctx context.Context, id int32) (GetSessionSetRow
 	return i, err
 }
 
+const listSessionSets = `-- name: ListSessionSets :many
+SELECT ss.id,
+       ss.session_id,
+       ss.exercise_id,
+       e.name AS exercise_name,
+       ss.set_number,
+       ss.target_reps,
+       ss.actual_reps,
+       ss.weight_lb,
+       ss.completed
+FROM session_sets ss
+JOIN exercises e ON e.id = ss.exercise_id
+JOIN sessions s ON s.id = ss.session_id
+JOIN program_day_exercises pde
+  ON pde.program_day_id = s.program_day_id AND pde.exercise_id = ss.exercise_id
+WHERE ss.session_id = $1
+ORDER BY pde.position, ss.set_number
+`
+
+type ListSessionSetsRow struct {
+	ID           int32          `json:"id"`
+	SessionID    int32          `json:"session_id"`
+	ExerciseID   int32          `json:"exercise_id"`
+	ExerciseName string         `json:"exercise_name"`
+	SetNumber    int32          `json:"set_number"`
+	TargetReps   int32          `json:"target_reps"`
+	ActualReps   *int32         `json:"actual_reps"`
+	WeightLb     pgtype.Numeric `json:"weight_lb"`
+	Completed    bool           `json:"completed"`
+}
+
+// ListSessionSets returns a session's logged sets in prescription order
+// (by the day's exercise position, then set number), joined to exercise names.
+func (q *Queries) ListSessionSets(ctx context.Context, sessionID int32) ([]ListSessionSetsRow, error) {
+	rows, err := q.db.Query(ctx, listSessionSets, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSessionSetsRow
+	for rows.Next() {
+		var i ListSessionSetsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.ExerciseID,
+			&i.ExerciseName,
+			&i.SetNumber,
+			&i.TargetReps,
+			&i.ActualReps,
+			&i.WeightLb,
+			&i.Completed,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSessions = `-- name: ListSessions :many
 SELECT s.id,
        s.program_day_id,
