@@ -36,13 +36,23 @@ cd src/api && make migrate
 
 ## Reset
 ```sh
-( cd dev && docker compose down -v )   # -v drops the pgdata volume
+( cd dev && docker-compose down -v )   # or `docker compose`; -v drops the pgdata volume
 ```
 
 Re-provisioning happens only on a fresh volume (the init hook runs once). To
 re-run provisioning, `down -v` then `up` again.
 
 ## Notes
+- **Compose v1 vs v2:** this file works with both. `docker compose` (the v2
+  plugin) supports `--wait`; the older standalone `docker-compose` (v1) does not.
+  If `docker compose <flag>` errors with "unknown shorthand flag", the v2 plugin
+  isn't installed — drop it in with:
+  ```sh
+  mkdir -p ~/.docker/cli-plugins
+  curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 \
+    -o ~/.docker/cli-plugins/docker-compose && chmod +x ~/.docker/cli-plugins/docker-compose
+  ```
+  — or just use the `docker-compose` v1 command shown above.
 - Passwords here (`postgres` / `iron_temple`) are local-dev only. The cluster
   uses a Kubernetes Secret; never reuse these there.
 - `postgres:17-alpine` matches the Testcontainers image in the API tests.
