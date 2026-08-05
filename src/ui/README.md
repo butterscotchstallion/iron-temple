@@ -25,7 +25,8 @@ pnpm dev            # http://localhost:5173 (proxies /api -> localhost:8080)
 | `pnpm test:e2e` | Playwright end-to-end tests |
 
 ## Layout
-- `src/App.svelte` — app shell (currently static program cards + rest timer).
+- `src/App.svelte` — app shell: loads programs from the API (hey-api client), plus the rest timer.
+- `src/lib/programs.ts` — pure view helpers for program data (unit-tested).
 - `src/lib/RestTimer.svelte` — 3-minute rest countdown (Svelte 5 runes).
 - `src/lib/time.ts` — pure helpers (unit-tested in `time.test.ts`).
 - `src/lib/api/` — **generated** hey-api client (git-ignored; run `generate:api`).
@@ -34,8 +35,9 @@ pnpm dev            # http://localhost:5173 (proxies /api -> localhost:8080)
 ## Notes
 - The generated client is git-ignored and produced from `../api/openapi.yaml`;
   regenerate whenever the spec changes (wire this into pre-commit per the design).
-- `App.svelte` uses placeholder data; swapping in `listPrograms()` from the
-  generated client is the next step once the API is running.
+  Run `pnpm generate:api` before `pnpm check`/`dev` on a fresh checkout.
+- `App.svelte` loads programs via `listPrograms()`; the client's base URL is set
+  to `/api/v1` in `main.ts`, which Vite proxies to the Go API in dev.
 
 ## Version sensitivity
 This scaffold was authored without a reachable npm registry, so nothing here has
