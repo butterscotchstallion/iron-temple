@@ -23,7 +23,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("open database: %v", err)
 	}
-	defer sqlDB.Close()
+	defer func() { _ = sqlDB.Close() }()
 
 	if err := db.Migrate(sqlDB); err != nil {
 		log.Fatalf("migrate: %v", err)

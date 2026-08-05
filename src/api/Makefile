@@ -1,6 +1,6 @@
 GO ?= go
 
-.PHONY: tidy vet lint test build migrate sqlc
+.PHONY: tidy vet lint test build migrate run sqlc
 
 ## tidy: resolve and pin dependencies (needs GOPROXY reachable)
 tidy:
@@ -25,6 +25,10 @@ build:
 ## migrate: apply migrations to $DATABASE_URL
 migrate:
 	$(GO) run ./cmd/migrate
+
+## run: apply migrations on startup and serve the API (needs DATABASE_URL)
+run:
+	$(GO) run ./cmd/server
 
 ## sqlc: regenerate the typed data layer (needs sqlc on PATH; Phase 3)
 sqlc:

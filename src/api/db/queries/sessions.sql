@@ -59,6 +59,26 @@ RETURNING id, program_day_id, performed_on, notes, created_at;
 -- name: DeleteSession :execrows
 DELETE FROM sessions WHERE id = $1;
 
+-- ListSessionSets returns a session's logged sets in prescription order
+-- (by the day's exercise position, then set number), joined to exercise names.
+-- name: ListSessionSets :many
+SELECT ss.id,
+       ss.session_id,
+       ss.exercise_id,
+       e.name AS exercise_name,
+       ss.set_number,
+       ss.target_reps,
+       ss.actual_reps,
+       ss.weight_lb,
+       ss.completed
+FROM session_sets ss
+JOIN exercises e ON e.id = ss.exercise_id
+JOIN sessions s ON s.id = ss.session_id
+JOIN program_day_exercises pde
+  ON pde.program_day_id = s.program_day_id AND pde.exercise_id = ss.exercise_id
+WHERE ss.session_id = $1
+ORDER BY pde.position, ss.set_number;
+
 -- name: GetSessionSet :one
 SELECT ss.id,
        ss.session_id,
