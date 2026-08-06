@@ -1,11 +1,13 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { link } from "svelte-spa-router";
-  import { listPrograms, type ProgramSummary } from "../lib/api";
+  import { listPrograms, listSessions, type ProgramSummary } from "../lib/api";
   import { programSubtitle } from "../lib/programs";
+  import { currentStreak, STREAK_DISPLAY_THRESHOLD } from "../lib/streak";
   import RestTimer from "../lib/RestTimer.svelte";
 
   let programs = $state<ProgramSummary[]>([]);
+  let streak = $state(0);
   let loading = $state(true);
   let failed = $state(false);
 
@@ -15,12 +17,18 @@
   async function load() {
     loading = true;
     failed = false;
-    const { data, error } = await listPrograms();
-    if (error || !data) {
+    // Programs drive the cards; recent sessions drive the streak badge.
+    const [programsRes, sessionsRes] = await Promise.all([
+      listPrograms(),
+      listSessions({ query: { limit: 100 } }),
+    ]);
+    if (programsRes.error || !programsRes.data) {
       failed = true;
-    } else {
-      programs = data;
+      loading = false;
+      return;
     }
+    programs = programsRes.data;
+    streak = sessionsRes.data ? currentStreak(sessionsRes.data.items) : 0;
     loading = false;
   }
 
@@ -28,6 +36,17 @@
 </script>
 
 <div class="flex flex-col gap-8">
+  {#if streak >= STREAK_DISPLAY_THRESHOLD}
+    <section
+      class="rounded-2xl border border-sun/50 bg-surface/70 p-4 text-center shadow-[0_0_24px_-8px_rgba(255,106,193,0.7)] backdrop-blur"
+    >
+      <p class="text-2xl font-black text-sun">🔥 {streak}-session streak</p>
+      <p class="mt-0.5 text-xs uppercase tracking-[0.3em] text-ink/60">
+        Finish every set to keep it alive
+      </p>
+    </section>
+  {/if}
+
   <section class="grid gap-4 sm:grid-cols-3">
     {#if loading}
       {#each skeletons as n (n)}
