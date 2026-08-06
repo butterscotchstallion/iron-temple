@@ -10,7 +10,7 @@
   import RestTimer from "../lib/RestTimer.svelte";
 
   let { params }: { params?: { id?: string } } = $props();
-  const sessionId = Number(params?.id);
+  let sessionId = $derived(Number(params?.id));
 
   let session = $state<Session | null>(null);
   let loading = $state(true);
