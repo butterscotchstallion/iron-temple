@@ -3,7 +3,6 @@
   import { push, link } from "svelte-spa-router";
   import {
     getSession,
-    updateSession,
     updateSessionSet,
     deleteSession,
     type Session,
@@ -13,7 +12,6 @@
   import RestTimer from "../lib/RestTimer.svelte";
   import { Card } from "$lib/components/ui/card";
   import { Button, buttonVariants } from "$lib/components/ui/button";
-  import { Textarea } from "$lib/components/ui/textarea";
   import * as AlertDialog from "$lib/components/ui/alert-dialog";
 
   let { params }: { params?: { id?: string } } = $props();
@@ -22,10 +20,6 @@
   let session = $state<Session | null>(null);
   let loading = $state(true);
   let failed = $state(false);
-
-  let notes = $state("");
-  let savingNotes = $state(false);
-  let notesSaved = $state(false);
 
   // Bumped on each set completion to auto-restart the rest timer.
   let restTimerKey = $state(0);
@@ -42,7 +36,6 @@
       failed = true;
     } else {
       session = data;
-      notes = data.notes;
     }
     loading = false;
   }
@@ -60,10 +53,12 @@
     return [...byExercise.entries()].map(([name, sets]) => ({ name, sets }));
   });
 
-  const completedCount = $derived(
-    (session?.sets ?? []).filter((s) => s.completed).length,
+  // A set is "logged" once it has a rep count (success or a miss).
+  const loggedCount = $derived(
+    (session?.sets ?? []).filter((s) => s.actualReps != null).length,
   );
 
+  // Every set hit its target reps — a clean session.
   const allComplete = $derived(
     (session?.sets.length ?? 0) > 0 &&
       (session?.sets ?? []).every((s) => s.completed),
@@ -77,40 +72,69 @@
     ),
   );
 
-  // Toggle a set complete/incomplete; on completion, log the target reps.
-  async function toggle(set: SessionSet) {
-    const completed = !set.completed;
+  // Reps count up from 0 on each tap, up to the target, then clear.
+  function nextReps(set: SessionSet): number | null {
+    if (set.actualReps == null) return 1;
+    if (set.actualReps >= set.targetReps) return null; // wrap after the target
+    return set.actualReps + 1;
+  }
+
+  // Tailwind classes for a set's circular button by state.
+  function setStateClass(set: SessionSet): string {
+    if (set.actualReps == null || set.actualReps === 0) {
+      return "border-border bg-transparent text-muted-foreground";
+    }
+    if (set.completed) {
+      return "border-primary bg-primary text-primary-foreground"; // hit target
+    }
+    return "border-primary bg-primary/20 text-foreground"; // in progress
+  }
+
+  // Tap a set to add a rep (wrapping to cleared after the target). Each rep tap
+  // (re)starts the rest timer; hitting the target on the final set celebrates.
+  async function cycle(set: SessionSet) {
     const wasAllComplete = allComplete;
+    const reps = nextReps(set);
+    const completed = reps != null && reps >= set.targetReps;
+
     const { data } = await updateSessionSet({
       path: { sessionId, setId: set.id },
-      body: { completed, actualReps: completed ? set.targetReps : null },
+      body: { actualReps: reps, completed },
     });
     if (!data || !session) return;
-
     session.sets = session.sets.map((s) => (s.id === data.id ? data : s));
-    if (!completed) return;
+
+    // Clearing a set (wrap back to 0) doesn't touch the timer.
+    if (reps == null) return;
 
     const nowAllComplete = session.sets.every((s) => s.completed);
     if (nowAllComplete && !wasAllComplete) {
-      // Session finished: stop the rest timer and celebrate.
       restResetKey += 1;
       showComplete = true;
       confetti({ particleCount: 140, spread: 75, origin: { y: 0.6 } });
     } else {
-      // Otherwise a normal set completion (re)starts the rest countdown.
       restTimerKey += 1;
     }
   }
 
-  async function saveNotes() {
+  // Adjust the working weight for every set of an exercise by delta lb.
+  async function changeWeight(sets: SessionSet[], delta: number) {
+    const current = sets[0]?.weightLb ?? 0;
+    const weightLb = Math.max(0, current + delta);
+    if (weightLb === current) return;
+    const results = await Promise.all(
+      sets.map((set) =>
+        updateSessionSet({
+          path: { sessionId, setId: set.id },
+          body: { weightLb },
+        }),
+      ),
+    );
     if (!session) return;
-    savingNotes = true;
-    notesSaved = false;
-    const { data } = await updateSession({ path: { sessionId }, body: { notes } });
-    savingNotes = false;
-    if (data && session) {
-      session.notes = data.notes;
-      notesSaved = true;
+    for (const { data } of results) {
+      if (data) {
+        session.sets = session.sets.map((s) => (s.id === data.id ? data : s));
+      }
     }
   }
 
@@ -144,7 +168,7 @@
           {session.programDayName} · {session.performedOn}
         </p>
         <p class="mt-1 text-xs uppercase tracking-[0.3em] text-primary">
-          {completedCount} / {session.sets.length} sets done
+          {loggedCount} / {session.sets.length} sets logged
         </p>
       </header>
 
@@ -183,34 +207,58 @@
 
     {#each groups as group (group.name)}
       <Card class="p-5">
-        <h3 class="text-lg font-bold text-card-foreground">{group.name}</h3>
-        <div class="mt-3 flex flex-col gap-2">
+        <div class="flex items-center justify-between gap-3">
+          <h3 class="text-lg font-bold text-card-foreground">{group.name}</h3>
+          <div class="flex items-center gap-3">
+            <span class="text-sm tabular-nums text-muted-foreground">
+              {group.sets[0].targetReps} reps
+            </span>
+            <div class="flex items-center gap-1.5">
+              <Button
+                variant="outline"
+                size="icon-sm"
+                onclick={() => changeWeight(group.sets, -5)}
+                aria-label="Decrease weight by 5 lb"
+              >
+                −
+              </Button>
+              <span
+                class="min-w-16 text-center text-sm font-bold tabular-nums text-card-foreground"
+              >
+                {group.sets[0].weightLb} lb
+              </span>
+              <Button
+                variant="outline"
+                size="icon-sm"
+                onclick={() => changeWeight(group.sets, 5)}
+                aria-label="Increase weight by 5 lb"
+              >
+                +
+              </Button>
+            </div>
+          </div>
+        </div>
+        <p class="mt-1 text-xs text-muted-foreground">
+          Tap a set to add a rep; it clears after the target.
+        </p>
+        <div class="mt-3 flex flex-wrap gap-3">
           {#each group.sets as set (set.id)}
-            <Button
-              variant={set.completed ? "default" : "outline"}
-              class="w-full justify-between"
-              onclick={() => toggle(set)}
+            <button
+              type="button"
+              class="flex size-12 items-center justify-center rounded-full border text-base font-bold tabular-nums transition {setStateClass(
+                set,
+              )}"
+              onclick={() => cycle(set)}
+              aria-label={`Set ${set.setNumber}: ${
+                set.actualReps == null ? "not logged" : `${set.actualReps} reps`
+              }`}
             >
-              <span>Set {set.setNumber} · {set.targetReps} reps · {set.weightLb} lb</span>
-              <span class="text-lg">{set.completed ? "✓" : "○"}</span>
-            </Button>
+              {set.actualReps ?? 0}
+            </button>
           {/each}
         </div>
       </Card>
     {/each}
-
-    <Card class="p-5">
-      <h3 class="text-lg font-bold text-card-foreground">Notes</h3>
-      <Textarea bind:value={notes} placeholder="How did it feel?" class="mt-3" />
-      <div class="mt-3 flex items-center gap-3">
-        <Button variant="outline" size="sm" onclick={saveNotes} disabled={savingNotes}>
-          {savingNotes ? "Saving…" : "Save notes"}
-        </Button>
-        {#if notesSaved}
-          <span class="text-xs text-muted-foreground">Saved</span>
-        {/if}
-      </div>
-    </Card>
 
     <AlertDialog.Root bind:open={showComplete}>
       <AlertDialog.Content>
