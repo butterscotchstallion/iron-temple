@@ -103,3 +103,19 @@ SET actual_reps = sqlc.narg('actual_reps'),
     completed   = sqlc.arg('completed')
 WHERE id = sqlc.arg('id')
 RETURNING id, session_id, exercise_id, set_number, target_reps, actual_reps, weight_lb, completed;
+
+-- ListSessionExerciseWeights returns each exercise's top working weight for the
+-- given sessions, ordered by the day's exercise position — used to show a
+-- per-lift weight line on each history row.
+-- name: ListSessionExerciseWeights :many
+SELECT ss.session_id,
+       e.name                     AS exercise_name,
+       MAX(ss.weight_lb)::numeric AS weight_lb
+FROM session_sets ss
+JOIN exercises e ON e.id = ss.exercise_id
+JOIN sessions s ON s.id = ss.session_id
+JOIN program_day_exercises pde
+  ON pde.program_day_id = s.program_day_id AND pde.exercise_id = ss.exercise_id
+WHERE ss.session_id = ANY(@session_ids::int[])
+GROUP BY ss.session_id, e.name
+ORDER BY ss.session_id, MIN(pde.position);

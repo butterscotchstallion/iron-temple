@@ -71,23 +71,30 @@
       {#each sessions as session (session.id)}
         <li>
           <a use:link href="/sessions/{session.id}" class="group block">
-            <Card
-              class="flex flex-row items-center justify-between gap-4 p-4 transition group-hover:ring-primary/60"
-            >
-              <div>
-                <p class="font-bold text-card-foreground">{session.programName}</p>
-                <p class="mt-0.5 text-sm text-muted-foreground">
-                  {session.programDayName} · {session.performedOn}
-                </p>
+            <Card class="p-4 transition group-hover:ring-primary/60">
+              <div class="flex items-center justify-between gap-4">
+                <div>
+                  <p class="font-bold text-card-foreground">{session.programName}</p>
+                  <p class="mt-0.5 text-sm text-muted-foreground">
+                    {session.programDayName} · {session.performedOn}
+                  </p>
+                </div>
+                <div class="flex flex-col items-end gap-1">
+                  <p class="text-sm tabular-nums text-muted-foreground">
+                    {session.completedSetCount}/{session.setCount} sets
+                  </p>
+                  {#if isComplete(session)}
+                    <Badge variant="secondary">✓ Complete</Badge>
+                  {/if}
+                </div>
               </div>
-              <div class="flex flex-col items-end gap-1">
-                <p class="text-sm tabular-nums text-muted-foreground">
-                  {session.completedSetCount}/{session.setCount} sets
+              {#if session.exercises.length > 0}
+                <p class="mt-2 text-xs tabular-nums text-muted-foreground">
+                  {session.exercises
+                    .map((e) => `${e.exerciseName} ${e.weightLb}`)
+                    .join(" · ")} lb
                 </p>
-                {#if isComplete(session)}
-                  <Badge variant="secondary">✓ Complete</Badge>
-                {/if}
-              </div>
+              {/if}
             </Card>
           </a>
         </li>

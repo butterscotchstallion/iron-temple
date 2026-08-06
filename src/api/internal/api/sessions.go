@@ -65,8 +65,32 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Per-exercise top weights for the sessions on this page, grouped by session.
+	ids := make([]int32, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	weightsBySession := make(map[int32][]sessionExerciseWeightDTO, len(rows))
+	if len(ids) > 0 {
+		weights, err := s.q.ListSessionExerciseWeights(ctx, ids)
+		if err != nil {
+			internalError(w)
+			return
+		}
+		for _, wt := range weights {
+			weightsBySession[wt.SessionID] = append(weightsBySession[wt.SessionID], sessionExerciseWeightDTO{
+				ExerciseName: wt.ExerciseName,
+				WeightLb:     numericToFloat(wt.WeightLb),
+			})
+		}
+	}
+
 	items := make([]sessionSummaryDTO, 0, len(rows))
 	for _, row := range rows {
+		exercises := weightsBySession[row.ID]
+		if exercises == nil {
+			exercises = []sessionExerciseWeightDTO{}
+		}
 		items = append(items, sessionSummaryDTO{
 			ID:                row.ID,
 			ProgramID:         row.ProgramID,
@@ -76,6 +100,7 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 			PerformedOn:       dateToString(row.PerformedOn),
 			SetCount:          row.SetCount,
 			CompletedSetCount: row.CompletedSetCount,
+			Exercises:         exercises,
 		})
 	}
 
