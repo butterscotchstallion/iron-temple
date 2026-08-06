@@ -30,6 +30,7 @@
     "vitest": "^3.0.0"
   },
   "dependencies": {
-    "@hey-api/client-fetch": "^0.13.1"
+    "@hey-api/client-fetch": "^0.13.1",
+    "svelte-spa-router": "^5.1.1"
   }
 }
