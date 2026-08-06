@@ -39,6 +39,8 @@ JOIN programs p ON p.id = pd.program_id
 LEFT JOIN session_sets ss ON ss.session_id = s.id
 WHERE (sqlc.narg('program_id')::bigint IS NULL OR p.id = sqlc.narg('program_id'))
 GROUP BY s.id, pd.name, p.id, p.name
+-- Only sessions with at least one logged rep count as "started".
+HAVING COUNT(ss.id) FILTER (WHERE ss.actual_reps > 0) > 0
 ORDER BY s.performed_on DESC, s.id DESC
 LIMIT sqlc.arg('lim') OFFSET sqlc.arg('off');
 
@@ -46,7 +48,11 @@ LIMIT sqlc.arg('lim') OFFSET sqlc.arg('off');
 SELECT COUNT(*) AS total
 FROM sessions s
 JOIN program_days pd ON pd.id = s.program_day_id
-WHERE (sqlc.narg('program_id')::bigint IS NULL OR pd.program_id = sqlc.narg('program_id'));
+WHERE (sqlc.narg('program_id')::bigint IS NULL OR pd.program_id = sqlc.narg('program_id'))
+  AND EXISTS (
+    SELECT 1 FROM session_sets ls
+    WHERE ls.session_id = s.id AND ls.actual_reps > 0
+  );
 
 -- UpdateSession patches metadata; NULL args leave a column unchanged.
 -- name: UpdateSession :one
