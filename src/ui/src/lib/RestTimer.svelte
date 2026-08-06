@@ -5,10 +5,13 @@
   // The design specifies a 3-minute rest between sets; default accordingly.
   // autoStartKey: increment it to reset + auto-start the countdown (the active
   // session bumps it each time a set is completed).
+  // resetKey: increment to reset the countdown WITHOUT starting it (used when
+  // the whole session is finished — no rest needed).
   let {
     seconds = 180,
     autoStartKey = 0,
-  }: { seconds?: number; autoStartKey?: number } = $props();
+    resetKey = 0,
+  }: { seconds?: number; autoStartKey?: number; resetKey?: number } = $props();
 
   // Seed the countdown from the prop once; it's mutable state from here on, so
   // untrack the initial read to make that intent explicit.
@@ -48,6 +51,14 @@
         reset();
         start();
       }
+    });
+  });
+
+  // Reset (stop) whenever the parent bumps resetKey.
+  $effect(() => {
+    const key = resetKey;
+    untrack(() => {
+      if (key > 0) reset();
     });
   });
 

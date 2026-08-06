@@ -24,6 +24,7 @@
     "@playwright/test": "^1.49.1",
     "@sveltejs/vite-plugin-svelte": "^5.1.1",
     "@tailwindcss/vite": "^4.0.0",
+    "@types/canvas-confetti": "^1.9.0",
     "@types/node": "^26.1.2",
     "bits-ui": "^2.16.3",
     "clsx": "^2.1.1",
@@ -40,6 +41,7 @@
   },
   "dependencies": {
     "@hey-api/client-fetch": "^0.13.1",
+    "canvas-confetti": "^1.9.4",
     "svelte-spa-router": "^5.1.1"
   }
 }

@@ -9,6 +9,7 @@
     type Session,
     type SessionSet,
   } from "../lib/api";
+  import confetti from "canvas-confetti";
   import RestTimer from "../lib/RestTimer.svelte";
   import { Card } from "$lib/components/ui/card";
   import { Button, buttonVariants } from "$lib/components/ui/button";
@@ -28,6 +29,10 @@
 
   // Bumped on each set completion to auto-restart the rest timer.
   let restTimerKey = $state(0);
+  // Bumped to reset (stop) the rest timer once the whole session is done.
+  let restResetKey = $state(0);
+  // Controls the "Sets complete" celebration dialog.
+  let showComplete = $state(false);
 
   async function load() {
     loading = true;
@@ -59,17 +64,41 @@
     (session?.sets ?? []).filter((s) => s.completed).length,
   );
 
+  const allComplete = $derived(
+    (session?.sets.length ?? 0) > 0 &&
+      (session?.sets ?? []).every((s) => s.completed),
+  );
+
+  // Total weight moved this session (weight × reps over all logged sets).
+  const totalVolume = $derived(
+    (session?.sets ?? []).reduce(
+      (sum, s) => sum + s.weightLb * (s.actualReps ?? 0),
+      0,
+    ),
+  );
+
   // Toggle a set complete/incomplete; on completion, log the target reps.
   async function toggle(set: SessionSet) {
     const completed = !set.completed;
+    const wasAllComplete = allComplete;
     const { data } = await updateSessionSet({
       path: { sessionId, setId: set.id },
       body: { completed, actualReps: completed ? set.targetReps : null },
     });
-    if (data && session) {
-      session.sets = session.sets.map((s) => (s.id === data.id ? data : s));
-      // Completing a set (re)starts the rest timer; un-completing doesn't.
-      if (completed) restTimerKey += 1;
+    if (!data || !session) return;
+
+    session.sets = session.sets.map((s) => (s.id === data.id ? data : s));
+    if (!completed) return;
+
+    const nowAllComplete = session.sets.every((s) => s.completed);
+    if (nowAllComplete && !wasAllComplete) {
+      // Session finished: stop the rest timer and celebrate.
+      restResetKey += 1;
+      showComplete = true;
+      confetti({ particleCount: 140, spread: 75, origin: { y: 0.6 } });
+    } else {
+      // Otherwise a normal set completion (re)starts the rest countdown.
+      restTimerKey += 1;
     }
   }
 
@@ -145,7 +174,11 @@
       <h3 class="mb-4 text-xs uppercase tracking-[0.3em] text-muted-foreground">
         Rest Timer
       </h3>
-      <RestTimer seconds={180} autoStartKey={restTimerKey} />
+      <RestTimer
+        seconds={180}
+        autoStartKey={restTimerKey}
+        resetKey={restResetKey}
+      />
     </Card>
 
     {#each groups as group (group.name)}
@@ -178,5 +211,24 @@
         {/if}
       </div>
     </Card>
+
+    <AlertDialog.Root bind:open={showComplete}>
+      <AlertDialog.Content>
+        <AlertDialog.Header>
+          <AlertDialog.Title>Sets complete 🎉</AlertDialog.Title>
+          <AlertDialog.Description>
+            {session.programName} · {session.programDayName}
+          </AlertDialog.Description>
+        </AlertDialog.Header>
+        <p class="text-center text-sm text-muted-foreground">
+          {session.sets.length} sets · {totalVolume} lb total volume
+        </p>
+        <AlertDialog.Footer>
+          <AlertDialog.Action onclick={() => (showComplete = false)}>
+            Nice!
+          </AlertDialog.Action>
+        </AlertDialog.Footer>
+      </AlertDialog.Content>
+    </AlertDialog.Root>
   {/if}
 </div>
