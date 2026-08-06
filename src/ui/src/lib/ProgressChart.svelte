@@ -120,12 +120,16 @@
     </text>
   {/if}
 
+  <!-- Pointer-only hover overlay; the data is described by the SVG aria-label
+       and the PR / 1RM tiles, so this layer is decorative for AT. -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
   <rect
     x={padL}
     y={padT}
     width={W - padL - padR}
     height={H - padT - padB}
     fill="transparent"
+    role="presentation"
     onpointermove={onMove}
     onpointerleave={() => (hover = null)}
   />
