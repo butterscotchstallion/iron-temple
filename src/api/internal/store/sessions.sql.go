@@ -16,6 +16,10 @@ SELECT COUNT(*) AS total
 FROM sessions s
 JOIN program_days pd ON pd.id = s.program_day_id
 WHERE ($1::bigint IS NULL OR pd.program_id = $1)
+  AND EXISTS (
+    SELECT 1 FROM session_sets ls
+    WHERE ls.session_id = s.id AND ls.actual_reps > 0
+  )
 `
 
 func (q *Queries) CountSessions(ctx context.Context, programID *int64) (int64, error) {
@@ -183,6 +187,59 @@ func (q *Queries) GetSessionSet(ctx context.Context, id int32) (GetSessionSetRow
 	return i, err
 }
 
+const listSessionExerciseWeights = `-- name: ListSessionExerciseWeights :many
+SELECT ss.session_id,
+       e.name                      AS exercise_name,
+       COUNT(ss.id)                AS set_count,
+       MAX(ss.target_reps)::int    AS reps,
+       MAX(ss.weight_lb)::numeric  AS weight_lb
+FROM session_sets ss
+JOIN exercises e ON e.id = ss.exercise_id
+JOIN sessions s ON s.id = ss.session_id
+JOIN program_day_exercises pde
+  ON pde.program_day_id = s.program_day_id AND pde.exercise_id = ss.exercise_id
+WHERE ss.session_id = ANY($1::int[])
+GROUP BY ss.session_id, e.name
+ORDER BY ss.session_id, MIN(pde.position)
+`
+
+type ListSessionExerciseWeightsRow struct {
+	SessionID    int32          `json:"session_id"`
+	ExerciseName string         `json:"exercise_name"`
+	SetCount     int64          `json:"set_count"`
+	Reps         int32          `json:"reps"`
+	WeightLb     pgtype.Numeric `json:"weight_lb"`
+}
+
+// ListSessionExerciseWeights returns each exercise's top working weight for the
+// given sessions, ordered by the day's exercise position — used to show a
+// per-lift weight line on each history row.
+func (q *Queries) ListSessionExerciseWeights(ctx context.Context, sessionIds []int32) ([]ListSessionExerciseWeightsRow, error) {
+	rows, err := q.db.Query(ctx, listSessionExerciseWeights, sessionIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSessionExerciseWeightsRow
+	for rows.Next() {
+		var i ListSessionExerciseWeightsRow
+		if err := rows.Scan(
+			&i.SessionID,
+			&i.ExerciseName,
+			&i.SetCount,
+			&i.Reps,
+			&i.WeightLb,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSessionSets = `-- name: ListSessionSets :many
 SELECT ss.id,
        ss.session_id,
@@ -261,6 +318,7 @@ JOIN programs p ON p.id = pd.program_id
 LEFT JOIN session_sets ss ON ss.session_id = s.id
 WHERE ($1::bigint IS NULL OR p.id = $1)
 GROUP BY s.id, pd.name, p.id, p.name
+HAVING COUNT(ss.id) FILTER (WHERE ss.actual_reps > 0) > 0
 ORDER BY s.performed_on DESC, s.id DESC
 LIMIT $3 OFFSET $2
 `
@@ -284,6 +342,7 @@ type ListSessionsRow struct {
 
 // ListSessions returns paginated session summaries, most recent first,
 // optionally filtered to one program. Pass NULL program_id for all programs.
+// Only sessions with at least one logged rep count as "started".
 func (q *Queries) ListSessions(ctx context.Context, arg ListSessionsParams) ([]ListSessionsRow, error) {
 	rows, err := q.db.Query(ctx, listSessions, arg.ProgramID, arg.Off, arg.Lim)
 	if err != nil {

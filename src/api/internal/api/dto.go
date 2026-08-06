@@ -93,15 +93,23 @@ type sessionDTO struct {
 	Sets           []sessionSetDTO `json:"sets"`
 }
 
+type sessionExerciseWeightDTO struct {
+	ExerciseName string  `json:"exerciseName"`
+	Sets         int64   `json:"sets"`
+	Reps         int32   `json:"reps"`
+	WeightLb     float64 `json:"weightLb"`
+}
+
 type sessionSummaryDTO struct {
-	ID                int32  `json:"id"`
-	ProgramID         int32  `json:"programId"`
-	ProgramName       string `json:"programName"`
-	ProgramDayID      int32  `json:"programDayId"`
-	ProgramDayName    string `json:"programDayName"`
-	PerformedOn       string `json:"performedOn"`
-	SetCount          int64  `json:"setCount"`
-	CompletedSetCount int64  `json:"completedSetCount"`
+	ID                int32                      `json:"id"`
+	ProgramID         int32                      `json:"programId"`
+	ProgramName       string                     `json:"programName"`
+	ProgramDayID      int32                      `json:"programDayId"`
+	ProgramDayName    string                     `json:"programDayName"`
+	PerformedOn       string                     `json:"performedOn"`
+	SetCount          int64                      `json:"setCount"`
+	CompletedSetCount int64                      `json:"completedSetCount"`
+	Exercises         []sessionExerciseWeightDTO `json:"exercises"`
 }
 
 type sessionListDTO struct {

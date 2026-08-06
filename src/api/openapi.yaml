@@ -542,10 +542,25 @@ components:
           type: integer
           example: 180
 
+    SessionExerciseWeight:
+      description: An exercise's set/rep prescription and top weight for a session.
+      type: object
+      required: [exerciseName, sets, reps, weightLb]
+      properties:
+        exerciseName:
+          type: string
+        sets:
+          type: integer
+        reps:
+          type: integer
+        weightLb:
+          type: number
+          minimum: 0
+
     SessionSummary:
       type: object
       required:
-        [id, programId, programName, programDayId, programDayName, performedOn, setCount, completedSetCount]
+        [id, programId, programName, programDayId, programDayName, performedOn, setCount, completedSetCount, exercises]
       properties:
         id:
           type: integer
@@ -567,6 +582,11 @@ components:
           type: integer
         completedSetCount:
           type: integer
+        exercises:
+          type: array
+          description: Per-exercise top weights, in prescription order.
+          items:
+            $ref: "#/components/schemas/SessionExerciseWeight"
 
     SessionList:
       type: object

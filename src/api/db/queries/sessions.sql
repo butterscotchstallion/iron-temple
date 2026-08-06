@@ -39,6 +39,8 @@ JOIN programs p ON p.id = pd.program_id
 LEFT JOIN session_sets ss ON ss.session_id = s.id
 WHERE (sqlc.narg('program_id')::bigint IS NULL OR p.id = sqlc.narg('program_id'))
 GROUP BY s.id, pd.name, p.id, p.name
+-- Only sessions with at least one logged rep count as "started".
+HAVING COUNT(ss.id) FILTER (WHERE ss.actual_reps > 0) > 0
 ORDER BY s.performed_on DESC, s.id DESC
 LIMIT sqlc.arg('lim') OFFSET sqlc.arg('off');
 
@@ -46,7 +48,11 @@ LIMIT sqlc.arg('lim') OFFSET sqlc.arg('off');
 SELECT COUNT(*) AS total
 FROM sessions s
 JOIN program_days pd ON pd.id = s.program_day_id
-WHERE (sqlc.narg('program_id')::bigint IS NULL OR pd.program_id = sqlc.narg('program_id'));
+WHERE (sqlc.narg('program_id')::bigint IS NULL OR pd.program_id = sqlc.narg('program_id'))
+  AND EXISTS (
+    SELECT 1 FROM session_sets ls
+    WHERE ls.session_id = s.id AND ls.actual_reps > 0
+  );
 
 -- UpdateSession patches metadata; NULL args leave a column unchanged.
 -- name: UpdateSession :one
@@ -103,3 +109,21 @@ SET actual_reps = sqlc.narg('actual_reps'),
     completed   = sqlc.arg('completed')
 WHERE id = sqlc.arg('id')
 RETURNING id, session_id, exercise_id, set_number, target_reps, actual_reps, weight_lb, completed;
+
+-- ListSessionExerciseWeights returns each exercise's top working weight for the
+-- given sessions, ordered by the day's exercise position — used to show a
+-- per-lift weight line on each history row.
+-- name: ListSessionExerciseWeights :many
+SELECT ss.session_id,
+       e.name                      AS exercise_name,
+       COUNT(ss.id)                AS set_count,
+       MAX(ss.target_reps)::int    AS reps,
+       MAX(ss.weight_lb)::numeric  AS weight_lb
+FROM session_sets ss
+JOIN exercises e ON e.id = ss.exercise_id
+JOIN sessions s ON s.id = ss.session_id
+JOIN program_day_exercises pde
+  ON pde.program_day_id = s.program_day_id AND pde.exercise_id = ss.exercise_id
+WHERE ss.session_id = ANY(@session_ids::int[])
+GROUP BY ss.session_id, e.name
+ORDER BY ss.session_id, MIN(pde.position);
