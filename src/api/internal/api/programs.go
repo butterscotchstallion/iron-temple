@@ -28,6 +28,29 @@ func (s *Server) listExercises(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+func (s *Server) getExerciseHistory(w http.ResponseWriter, r *http.Request) {
+	id, ok := idParam(r, "exerciseId")
+	if !ok {
+		notFound(w, "exercise not found")
+		return
+	}
+	rows, err := s.q.ListExerciseHistory(r.Context(), id)
+	if err != nil {
+		internalError(w)
+		return
+	}
+	out := make([]exerciseHistoryPointDTO, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, exerciseHistoryPointDTO{
+			PerformedOn: dateToString(row.PerformedOn),
+			WeightLb:    numericToFloat(row.WeightLb),
+			Reps:        row.Reps,
+			Completed:   row.Completed,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (s *Server) listPrograms(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.q.ListPrograms(r.Context())
 	if err != nil {

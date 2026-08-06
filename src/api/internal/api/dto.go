@@ -22,6 +22,13 @@ type exerciseDTO struct {
 	Name string `json:"name"`
 }
 
+type exerciseHistoryPointDTO struct {
+	PerformedOn string  `json:"performedOn"`
+	WeightLb    float64 `json:"weightLb"`
+	Reps        int32   `json:"reps"`
+	Completed   bool    `json:"completed"`
+}
+
 type programSummaryDTO struct {
 	ID              int32  `json:"id"`
 	Name            string `json:"name"`

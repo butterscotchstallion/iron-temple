@@ -5,6 +5,8 @@
   import ProgramDetail from "./routes/ProgramDetail.svelte";
   import ActiveSession from "./routes/ActiveSession.svelte";
   import History from "./routes/History.svelte";
+  import Progress from "./routes/Progress.svelte";
+  import ExerciseProgress from "./routes/ExerciseProgress.svelte";
 
   // Hash-based routes (svelte-spa-router). "/" lands on the current program's
   // workout; "/programs" is the picker for switching.
@@ -14,6 +16,8 @@
     "/programs/:id": ProgramDetail,
     "/sessions/:id": ActiveSession,
     "/history": History,
+    "/progress": Progress,
+    "/exercises/:id": ExerciseProgress,
     // Fallback: unknown paths go home.
     "*": Home,
   };
@@ -34,6 +38,7 @@
     <nav class="mt-4 flex justify-center gap-6 text-xs font-semibold uppercase tracking-[0.3em]">
       <a href="/" use:link class="text-muted-foreground transition hover:text-foreground">Workout</a>
       <a href="/history" use:link class="text-muted-foreground transition hover:text-foreground">History</a>
+      <a href="/progress" use:link class="text-muted-foreground transition hover:text-foreground">Progress</a>
     </nav>
   </header>
 

@@ -46,6 +46,7 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/health", s.getHealth)
 		r.Get("/exercises", s.listExercises)
+		r.Get("/exercises/{exerciseId}/history", s.getExerciseHistory)
 
 		r.Route("/programs", func(r chi.Router) {
 			r.Get("/", s.listPrograms)
