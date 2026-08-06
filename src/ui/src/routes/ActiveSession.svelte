@@ -10,6 +10,7 @@
   } from "../lib/api";
   import confetti from "canvas-confetti";
   import RestTimer from "../lib/RestTimer.svelte";
+  import PlateBar from "../lib/PlateBar.svelte";
   import { Card } from "$lib/components/ui/card";
   import { Button, buttonVariants } from "$lib/components/ui/button";
   import * as AlertDialog from "$lib/components/ui/alert-dialog";
@@ -238,7 +239,10 @@
             </div>
           </div>
         </div>
-        <p class="mt-1 text-xs text-muted-foreground">
+        <div class="mt-3 flex justify-center">
+          <PlateBar weightLb={group.sets[0].weightLb} />
+        </div>
+        <p class="mt-3 text-xs text-muted-foreground">
           Tap a set to add a rep; it clears after the target.
         </p>
         <div class="mt-3 flex flex-wrap gap-3">
