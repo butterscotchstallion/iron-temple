@@ -88,9 +88,9 @@
                   {/if}
                 </div>
               </div>
-              {#if session.exercises.length > 0}
+              {#if (session.exercises ?? []).length > 0}
                 <p class="mt-2 text-xs tabular-nums text-muted-foreground">
-                  {session.exercises
+                  {(session.exercises ?? [])
                     .map((e) => `${e.exerciseName} ${e.weightLb}`)
                     .join(" · ")} lb
                 </p>
