@@ -3,12 +3,14 @@
   import Programs from "./routes/Programs.svelte";
   import ProgramDetail from "./routes/ProgramDetail.svelte";
   import ActiveSession from "./routes/ActiveSession.svelte";
+  import History from "./routes/History.svelte";
 
-  // Hash-based routes (svelte-spa-router). History screen will slot in here.
+  // Hash-based routes (svelte-spa-router).
   const routes = {
     "/": Programs,
     "/programs/:id": ProgramDetail,
     "/sessions/:id": ActiveSession,
+    "/history": History,
     // Fallback: unknown paths go back to the programs list.
     "*": Programs,
   };
@@ -26,6 +28,10 @@
     <p class="mt-2 text-sm uppercase tracking-[0.35em] text-cyan/80">
       Lift · Log · Progress
     </p>
+    <nav class="mt-4 flex justify-center gap-6 text-xs font-semibold uppercase tracking-[0.3em]">
+      <a href="/" use:link class="text-cyan/80 transition hover:text-cyan">Programs</a>
+      <a href="/history" use:link class="text-cyan/80 transition hover:text-cyan">History</a>
+    </nav>
   </header>
 
   <Router {routes} />
