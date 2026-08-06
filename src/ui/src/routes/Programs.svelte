@@ -4,6 +4,8 @@
   import { listPrograms, listSessions, type ProgramSummary } from "../lib/api";
   import { programSubtitle } from "../lib/programs";
   import { currentStreak, STREAK_DISPLAY_THRESHOLD } from "../lib/streak";
+  import { Card } from "$lib/components/ui/card";
+  import { Button } from "$lib/components/ui/button";
 
   let programs = $state<ProgramSummary[]>([]);
   let streak = $state(0);
@@ -36,50 +38,37 @@
 
 <div class="flex flex-col gap-8">
   {#if streak >= STREAK_DISPLAY_THRESHOLD}
-    <section
-      class="rounded-2xl border border-sun/50 bg-surface/70 p-4 text-center shadow-[0_0_24px_-8px_rgba(255,106,193,0.7)] backdrop-blur"
-    >
-      <p class="text-2xl font-black text-sun">🔥 {streak}-session streak</p>
-      <p class="mt-0.5 text-xs uppercase tracking-[0.3em] text-ink/60">
+    <Card class="border-primary/40 bg-primary/5 p-6 text-center ring-primary/30">
+      <p class="text-2xl font-black text-primary">🔥 {streak}-session streak</p>
+      <p class="mt-0.5 text-xs uppercase tracking-[0.3em] text-muted-foreground">
         Finish every set to keep it alive
       </p>
-    </section>
+    </Card>
   {/if}
 
   <section class="grid gap-4 sm:grid-cols-3">
     {#if loading}
       {#each skeletons as n (n)}
-        <article
-          class="h-24 animate-pulse rounded-2xl border border-neon/20 bg-surface/50"
-          aria-hidden="true"
-        ></article>
+        <Card class="h-24 animate-pulse" aria-hidden="true"></Card>
       {/each}
     {:else if failed}
-      <div
-        class="col-span-full rounded-2xl border border-magenta/40 bg-surface/60 p-6 text-center"
-        role="alert"
-      >
-        <p class="text-sm text-ink/80">Couldn't load programs.</p>
-        <button
-          class="mt-3 rounded-full border border-cyan/60 bg-cyan/10 px-5 py-2 font-semibold text-ink transition hover:bg-cyan/25"
-          onclick={load}
-        >
-          Retry
-        </button>
-      </div>
+      <Card class="col-span-full p-6 text-center" role="alert">
+        <p class="text-sm text-muted-foreground">Couldn't load programs.</p>
+        <Button variant="outline" class="mt-3" onclick={load}>Retry</Button>
+      </Card>
     {:else if programs.length === 0}
-      <p class="col-span-full text-center text-sm text-ink/60">
+      <p class="col-span-full text-center text-sm text-muted-foreground">
         No programs yet.
       </p>
     {:else}
       {#each programs as program (program.id)}
-        <a
-          href="/programs/{program.id}"
-          use:link
-          class="block rounded-2xl border border-neon/30 bg-surface/70 p-5 shadow-[0_0_24px_-8px_rgba(176,38,255,0.6)] backdrop-blur transition hover:border-neon/70"
-        >
-          <h2 class="text-lg font-bold text-ink">{program.name}</h2>
-          <p class="mt-1 text-sm text-ink/70">{programSubtitle(program)}</p>
+        <a use:link href="/programs/{program.id}" class="group block">
+          <Card class="h-full p-5 transition group-hover:ring-primary/60">
+            <h2 class="text-lg font-bold text-card-foreground">{program.name}</h2>
+            <p class="mt-1 text-sm text-muted-foreground">
+              {programSubtitle(program)}
+            </p>
+          </Card>
         </a>
       {/each}
     {/if}
