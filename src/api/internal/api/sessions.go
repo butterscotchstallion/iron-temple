@@ -80,6 +80,8 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 		for _, wt := range weights {
 			weightsBySession[wt.SessionID] = append(weightsBySession[wt.SessionID], sessionExerciseWeightDTO{
 				ExerciseName: wt.ExerciseName,
+				Sets:         wt.SetCount,
+				Reps:         wt.Reps,
 				WeightLb:     numericToFloat(wt.WeightLb),
 			})
 		}

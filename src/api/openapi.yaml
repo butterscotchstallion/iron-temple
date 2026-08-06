@@ -543,12 +543,16 @@ components:
           example: 180
 
     SessionExerciseWeight:
-      description: An exercise's top working weight for a session.
+      description: An exercise's set/rep prescription and top weight for a session.
       type: object
-      required: [exerciseName, weightLb]
+      required: [exerciseName, sets, reps, weightLb]
       properties:
         exerciseName:
           type: string
+        sets:
+          type: integer
+        reps:
+          type: integer
         weightLb:
           type: number
           minimum: 0

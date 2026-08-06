@@ -89,11 +89,23 @@
                 </div>
               </div>
               {#if (session.exercises ?? []).length > 0}
-                <p class="mt-2 text-xs tabular-nums text-muted-foreground">
-                  {(session.exercises ?? [])
-                    .map((e) => `${e.exerciseName} ${e.weightLb}`)
-                    .join(" · ")} lb
-                </p>
+                <table class="mt-3 w-full text-sm">
+                  <tbody>
+                    {#each session.exercises ?? [] as ex (ex.exerciseName)}
+                      <tr>
+                        <td class="py-0.5 pr-4 font-medium text-card-foreground">
+                          {ex.exerciseName}
+                        </td>
+                        <td class="py-0.5 pr-4 tabular-nums text-muted-foreground">
+                          {ex.sets}×{ex.reps}
+                        </td>
+                        <td class="py-0.5 text-right tabular-nums text-muted-foreground">
+                          {ex.weightLb} lb
+                        </td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
               {/if}
             </Card>
           </a>

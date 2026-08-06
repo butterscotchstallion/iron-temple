@@ -95,6 +95,8 @@ type sessionDTO struct {
 
 type sessionExerciseWeightDTO struct {
 	ExerciseName string  `json:"exerciseName"`
+	Sets         int64   `json:"sets"`
+	Reps         int32   `json:"reps"`
 	WeightLb     float64 `json:"weightLb"`
 }
 

@@ -115,8 +115,10 @@ RETURNING id, session_id, exercise_id, set_number, target_reps, actual_reps, wei
 -- per-lift weight line on each history row.
 -- name: ListSessionExerciseWeights :many
 SELECT ss.session_id,
-       e.name                     AS exercise_name,
-       MAX(ss.weight_lb)::numeric AS weight_lb
+       e.name                      AS exercise_name,
+       COUNT(ss.id)                AS set_count,
+       MAX(ss.target_reps)::int    AS reps,
+       MAX(ss.weight_lb)::numeric  AS weight_lb
 FROM session_sets ss
 JOIN exercises e ON e.id = ss.exercise_id
 JOIN sessions s ON s.id = ss.session_id
