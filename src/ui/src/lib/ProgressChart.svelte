@@ -10,11 +10,11 @@
 
   // viewBox units; the SVG scales to its container via w-full.
   const W = 320;
-  const H = 180;
+  const H = 190;
   const padL = 40;
   const padR = 14;
-  const padT = 16;
-  const padB = 26;
+  const padT = 18;
+  const padB = 34;
 
   const n = $derived(points.length);
   const weights = $derived(points.map((p) => p.weightLb));
@@ -38,9 +38,24 @@
       .map((p, i) => `${i === 0 ? "M" : "L"} ${xAt(i)} ${yAt(p.weightLb)}`)
       .join(" "),
   );
-  const yTicks = $derived(
-    [yHi, (yLo + yHi) / 2, yLo].map((v) => Math.round(v)),
-  );
+  const yTicks = $derived([yHi, (yLo + yHi) / 2, yLo].map((v) => Math.round(v)));
+
+  // Up to four evenly-spaced session indices for x-axis date labels.
+  const xTicks = $derived.by(() => {
+    if (n === 0) return [];
+    if (n === 1) return [0];
+    const count = Math.min(4, n);
+    const set = new Set<number>();
+    for (let k = 0; k < count; k++) {
+      set.add(Math.round((k / (count - 1)) * (n - 1)));
+    }
+    return [...set];
+  });
+
+  function shortDate(iso: string): string {
+    const parts = iso.split("-");
+    return `${Number(parts[1])}/${Number(parts[2])}`;
+  }
 
   let hover = $state<number | null>(null);
   function onMove(e: PointerEvent) {
@@ -58,6 +73,7 @@
   role="img"
   aria-label={`Weight over ${n} session${n === 1 ? "" : "s"}`}
 >
+  <!-- y gridlines + weight labels -->
   {#each yTicks as t (t)}
     <line
       x1={padL}
@@ -76,6 +92,24 @@
       {t}
     </text>
   {/each}
+  <text
+    x={padL - 6}
+    y={padT - 6}
+    text-anchor="end"
+    class="fill-muted-foreground text-[8px] uppercase tracking-wider"
+  >
+    lb
+  </text>
+
+  <!-- x axis baseline -->
+  <line
+    x1={padL}
+    x2={W - padR}
+    y1={H - padB}
+    y2={H - padB}
+    class="stroke-border"
+    stroke-width="1"
+  />
 
   {#if n > 1}
     <path
@@ -90,6 +124,26 @@
 
   {#each points as p, i (i)}
     <circle cx={xAt(i)} cy={yAt(p.weightLb)} r="3" class="fill-primary" />
+  {/each}
+
+  <!-- x-axis date ticks + labels -->
+  {#each xTicks as i (i)}
+    <line
+      x1={xAt(i)}
+      x2={xAt(i)}
+      y1={H - padB}
+      y2={H - padB + 3}
+      class="stroke-border"
+      stroke-width="1"
+    />
+    <text
+      x={xAt(i)}
+      y={H - padB + 13}
+      text-anchor="middle"
+      class="fill-muted-foreground text-[8px] tabular-nums"
+    >
+      {shortDate(points[i].performedOn)}
+    </text>
   {/each}
 
   {#if hover !== null}
