@@ -249,7 +249,7 @@
           {#each group.sets as set (set.id)}
             <button
               type="button"
-              class="flex size-12 items-center justify-center rounded-full border text-base font-bold tabular-nums transition {setStateClass(
+              class="flex size-12 cursor-pointer items-center justify-center rounded-full border text-base font-bold tabular-nums transition {setStateClass(
                 set,
               )}"
               onclick={() => cycle(set)}
