@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { link } from "svelte-spa-router";
   import { listPrograms, type ProgramSummary } from "../lib/api";
   import { programSubtitle } from "../lib/programs";
   import RestTimer from "../lib/RestTimer.svelte";
@@ -55,7 +56,8 @@
     {:else}
       {#each programs as program (program.id)}
         <a
-          href="#/programs/{program.id}"
+          href="/programs/{program.id}"
+          use:link
           class="block rounded-2xl border border-neon/30 bg-surface/70 p-5 shadow-[0_0_24px_-8px_rgba(176,38,255,0.6)] backdrop-blur transition hover:border-neon/70"
         >
           <h2 class="text-lg font-bold text-ink">{program.name}</h2>
