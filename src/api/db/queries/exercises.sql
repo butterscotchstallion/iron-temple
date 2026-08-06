@@ -14,8 +14,8 @@ WHERE id = $1;
 -- name: ListExerciseHistory :many
 SELECT s.performed_on,
        MAX(ss.weight_lb)::numeric               AS weight_lb,
-       COALESCE(MAX(ss.actual_reps), 0)::int    AS reps,
-       COALESCE(BOOL_AND(ss.completed), false)  AS completed
+       COALESCE(MAX(ss.actual_reps), 0)::int        AS reps,
+       COALESCE(BOOL_AND(ss.completed), false)::bool AS completed
 FROM session_sets ss
 JOIN sessions s ON s.id = ss.session_id
 WHERE ss.exercise_id = $1
