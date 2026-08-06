@@ -1,18 +1,21 @@
 <script lang="ts">
   import Router, { link } from "svelte-spa-router";
+  import Home from "./routes/Home.svelte";
   import Programs from "./routes/Programs.svelte";
   import ProgramDetail from "./routes/ProgramDetail.svelte";
   import ActiveSession from "./routes/ActiveSession.svelte";
   import History from "./routes/History.svelte";
 
-  // Hash-based routes (svelte-spa-router).
+  // Hash-based routes (svelte-spa-router). "/" lands on the current program's
+  // workout; "/programs" is the picker for switching.
   const routes = {
-    "/": Programs,
+    "/": Home,
+    "/programs": Programs,
     "/programs/:id": ProgramDetail,
     "/sessions/:id": ActiveSession,
     "/history": History,
-    // Fallback: unknown paths go back to the programs list.
-    "*": Programs,
+    // Fallback: unknown paths go home.
+    "*": Home,
   };
 </script>
 
@@ -29,8 +32,8 @@
       Lift · Log · Progress
     </p>
     <nav class="mt-4 flex justify-center gap-6 text-xs font-semibold uppercase tracking-[0.3em]">
-      <a href="/" use:link class="text-cyan/80 transition hover:text-cyan">Programs</a>
-      <a href="/history" use:link class="text-cyan/80 transition hover:text-cyan">History</a>
+      <a href="/" use:link class="text-muted-foreground transition hover:text-foreground">Workout</a>
+      <a href="/history" use:link class="text-muted-foreground transition hover:text-foreground">History</a>
     </nav>
   </header>
 

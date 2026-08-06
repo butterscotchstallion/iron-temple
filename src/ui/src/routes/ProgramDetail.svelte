@@ -77,11 +77,11 @@
 
 <div class="flex flex-col gap-6">
   <a
-    href="/"
+    href="/programs"
     use:link
     class="text-sm text-muted-foreground transition hover:text-foreground"
   >
-    ← Programs
+    Change program
   </a>
 
   {#if loading}

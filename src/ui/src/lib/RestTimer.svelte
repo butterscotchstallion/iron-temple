@@ -3,7 +3,12 @@
   import { formatTime } from "./time";
 
   // The design specifies a 3-minute rest between sets; default accordingly.
-  let { seconds = 180 }: { seconds?: number } = $props();
+  // autoStartKey: increment it to reset + auto-start the countdown (the active
+  // session bumps it each time a set is completed).
+  let {
+    seconds = 180,
+    autoStartKey = 0,
+  }: { seconds?: number; autoStartKey?: number } = $props();
 
   // Seed the countdown from the prop once; it's mutable state from here on, so
   // untrack the initial read to make that intent explicit.
@@ -32,6 +37,19 @@
     stop();
     remaining = seconds;
   }
+
+  // Reset + auto-start whenever the parent bumps autoStartKey (a set was
+  // completed). Only autoStartKey is tracked; the reset/start mutations are
+  // untracked so ticking state changes don't re-trigger this effect.
+  $effect(() => {
+    const key = autoStartKey;
+    untrack(() => {
+      if (key > 0) {
+        reset();
+        start();
+      }
+    });
+  });
 
   // Clear the interval if the component is destroyed mid-countdown.
   $effect(() => () => stop());
