@@ -65,6 +65,7 @@ test("navigates into a program's detail", async ({ page }) => {
 
   await expect(page).toHaveURL(/#\/programs\/1$/);
   await expect(page.getByRole("heading", { name: "Workout A" })).toBeVisible();
-  await expect(page.getByText("Squat")).toBeVisible();
+  // exact: the program description also contains "Squat"; match only the set line.
+  await expect(page.getByText("Squat", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Start" })).toBeVisible();
 });
