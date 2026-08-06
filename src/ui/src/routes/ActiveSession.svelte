@@ -224,7 +224,9 @@
           {session.sets.length} sets · {totalVolume} lb total volume
         </p>
         <AlertDialog.Footer>
-          <AlertDialog.Action>Nice!</AlertDialog.Action>
+          <AlertDialog.Action onclick={() => (showComplete = false)}>
+            Nice!
+          </AlertDialog.Action>
         </AlertDialog.Footer>
       </AlertDialog.Content>
     </AlertDialog.Root>
