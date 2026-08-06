@@ -1,6 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
-// Mobile-first, targeting iPad per the design.
+// Run e2e on Firefox (the target browser). Firefox doesn't support Playwright's
+// mobile device emulation, so we apply an iPad-landscape viewport to keep the
+// design's tablet framing without the unsupported isMobile/touch flags.
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
@@ -16,8 +18,11 @@ export default defineConfig({
   },
   projects: [
     {
-      name: "ipad",
-      use: { ...devices["iPad (gen 7) landscape"] },
+      name: "firefox",
+      use: {
+        ...devices["Desktop Firefox"],
+        viewport: { width: 1080, height: 810 },
+      },
     },
   ],
 });
