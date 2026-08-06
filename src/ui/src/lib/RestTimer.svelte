@@ -1,10 +1,13 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { formatTime } from "./time";
 
   // The design specifies a 3-minute rest between sets; default accordingly.
   let { seconds = 180 }: { seconds?: number } = $props();
 
-  let remaining = $state(seconds);
+  // Seed the countdown from the prop once; it's mutable state from here on, so
+  // untrack the initial read to make that intent explicit.
+  let remaining = $state(untrack(() => seconds));
   let running = $state(false);
   let handle: ReturnType<typeof setInterval> | undefined;
 

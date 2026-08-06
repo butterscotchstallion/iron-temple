@@ -9,7 +9,7 @@
   } from "../lib/api";
 
   let { params }: { params?: { id?: string } } = $props();
-  const programId = Number(params?.id);
+  let programId = $derived(Number(params?.id));
 
   // A day plus its progression-computed next-session prescription.
   type DayView = {
