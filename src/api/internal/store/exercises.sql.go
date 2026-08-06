@@ -7,6 +7,8 @@ package store
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const getExercise = `-- name: GetExercise :one
@@ -25,6 +27,54 @@ func (q *Queries) GetExercise(ctx context.Context, id int32) (GetExerciseRow, er
 	var i GetExerciseRow
 	err := row.Scan(&i.ID, &i.Name)
 	return i, err
+}
+
+const listExerciseHistory = `-- name: ListExerciseHistory :many
+SELECT s.performed_on,
+       MAX(ss.weight_lb)::numeric               AS weight_lb,
+       COALESCE(MAX(ss.actual_reps), 0)::int        AS reps,
+       COALESCE(BOOL_AND(ss.completed), false)::bool AS completed
+FROM session_sets ss
+JOIN sessions s ON s.id = ss.session_id
+WHERE ss.exercise_id = $1
+  AND ss.actual_reps > 0
+GROUP BY s.id, s.performed_on
+ORDER BY s.performed_on, s.id
+`
+
+type ListExerciseHistoryRow struct {
+	PerformedOn pgtype.Date    `json:"performed_on"`
+	WeightLb    pgtype.Numeric `json:"weight_lb"`
+	Reps        int32          `json:"reps"`
+	Completed   bool           `json:"completed"`
+}
+
+// ListExerciseHistory returns one point per performed session for a lift
+// (oldest first): the top weight worked, the best reps, and whether every set
+// hit target. Only logged sessions (a set with actual_reps > 0) are included.
+func (q *Queries) ListExerciseHistory(ctx context.Context, exerciseID int32) ([]ListExerciseHistoryRow, error) {
+	rows, err := q.db.Query(ctx, listExerciseHistory, exerciseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListExerciseHistoryRow
+	for rows.Next() {
+		var i ListExerciseHistoryRow
+		if err := rows.Scan(
+			&i.PerformedOn,
+			&i.WeightLb,
+			&i.Reps,
+			&i.Completed,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listExercises = `-- name: ListExercises :many

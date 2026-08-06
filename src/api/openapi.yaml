@@ -52,6 +52,28 @@ paths:
                 items:
                   $ref: "#/components/schemas/Exercise"
 
+  /exercises/{exerciseId}/history:
+    parameters:
+      - name: exerciseId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    get:
+      tags: [exercises]
+      operationId: getExerciseHistory
+      summary: Per-session weight history for a lift (oldest first)
+      responses:
+        "200":
+          description: History points
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ExerciseHistoryPoint"
+
   /programs:
     get:
       tags: [programs]
@@ -314,6 +336,22 @@ components:
         name:
           type: string
           example: Squat
+
+    ExerciseHistoryPoint:
+      description: One performed session's top set for a lift.
+      type: object
+      required: [performedOn, weightLb, reps, completed]
+      properties:
+        performedOn:
+          type: string
+          format: date
+        weightLb:
+          type: number
+          minimum: 0
+        reps:
+          type: integer
+        completed:
+          type: boolean
 
     ProgressionKind:
       type: string
