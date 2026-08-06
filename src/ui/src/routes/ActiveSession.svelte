@@ -26,6 +26,9 @@
   let savingNotes = $state(false);
   let notesSaved = $state(false);
 
+  // Bumped on each set completion to auto-restart the rest timer.
+  let restTimerKey = $state(0);
+
   async function load() {
     loading = true;
     failed = false;
@@ -65,6 +68,8 @@
     });
     if (data && session) {
       session.sets = session.sets.map((s) => (s.id === data.id ? data : s));
+      // Completing a set (re)starts the rest timer; un-completing doesn't.
+      if (completed) restTimerKey += 1;
     }
   }
 
@@ -92,7 +97,7 @@
     use:link
     class="text-sm text-muted-foreground transition hover:text-foreground"
   >
-    ← Programs
+    ← Workout
   </a>
 
   {#if loading}
@@ -140,7 +145,7 @@
       <h3 class="mb-4 text-xs uppercase tracking-[0.3em] text-muted-foreground">
         Rest Timer
       </h3>
-      <RestTimer seconds={180} />
+      <RestTimer seconds={180} autoStartKey={restTimerKey} />
     </Card>
 
     {#each groups as group (group.name)}
