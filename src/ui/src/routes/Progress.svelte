@@ -1,22 +1,28 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { link } from "svelte-spa-router";
-  import { listExercises, type Exercise } from "../lib/api";
+  import { listExercises, listSessions, type Exercise } from "../lib/api";
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
+  import CalendarHeatmap from "../lib/CalendarHeatmap.svelte";
 
   let exercises = $state<Exercise[]>([]);
+  let sessionDates = $state<string[]>([]);
   let loading = $state(true);
   let failed = $state(false);
 
   async function load() {
     loading = true;
     failed = false;
-    const { data, error } = await listExercises();
-    if (error || !data) {
+    const [exs, sessions] = await Promise.all([
+      listExercises(),
+      listSessions({ query: { limit: 100 } }),
+    ]);
+    if (exs.error || !exs.data) {
       failed = true;
     } else {
-      exercises = data;
+      exercises = exs.data;
+      sessionDates = sessions.data?.items.map((s) => s.performedOn) ?? [];
     }
     loading = false;
   }
@@ -36,6 +42,14 @@
       <Button variant="outline" class="mt-3" onclick={load}>Retry</Button>
     </Card>
   {:else}
+    <Card class="p-4">
+      <h3
+        class="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground"
+      >
+        Training days
+      </h3>
+      <CalendarHeatmap dates={sessionDates} />
+    </Card>
     <ul class="flex flex-col gap-3">
       {#each exercises as exercise (exercise.id)}
         <li>
