@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { push } from "svelte-spa-router";
+  import { push, link } from "svelte-spa-router";
   import {
     getProgram,
     previewNextSession,
@@ -75,7 +75,8 @@
 
 <div class="flex flex-col gap-6">
   <a
-    href="#/"
+    href="/"
+    use:link
     class="text-sm uppercase tracking-[0.3em] text-cyan/80 transition hover:text-cyan"
   >
     ← Programs
