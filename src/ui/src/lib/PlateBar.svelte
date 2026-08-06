@@ -12,6 +12,10 @@
   function plateHeight(plate: number): number {
     return Math.round(24 + (plate / 45) * 40);
   }
+
+  const barClass = "h-1.5 rounded-full bg-muted-foreground/50";
+  const plateClass =
+    "flex w-5 items-center justify-center rounded-[3px] bg-primary text-[9px] font-bold tabular-nums text-primary-foreground";
 </script>
 
 <div
@@ -19,27 +23,24 @@
   aria-label={`Barbell loaded to ${weightLb} lb`}
 >
   {#if perSide.length === 0}
-    <div class="h-1.5 w-24 rounded-full bg-muted-foreground/40"></div>
+    <div class="{barClass} w-40"></div>
     <span class="ml-2 text-xs text-muted-foreground">just the bar</span>
   {:else}
+    <!-- outer sleeve end -->
+    <div class="{barClass} w-4"></div>
     {#each leftSide as plate, i (i)}
-      <div
-        class="flex w-5 items-center justify-center rounded-[3px] bg-primary text-[9px] font-bold tabular-nums text-primary-foreground"
-        style="height: {plateHeight(plate)}px"
-        title={`${plate} lb`}
-      >
+      <div class={plateClass} style="height: {plateHeight(plate)}px" title={`${plate} lb`}>
         {plate}
       </div>
     {/each}
-    <div class="mx-1 h-1.5 w-8 rounded-full bg-muted-foreground/50"></div>
+    <!-- shaft -->
+    <div class="{barClass} mx-1 w-24"></div>
     {#each perSide as plate, i (i)}
-      <div
-        class="flex w-5 items-center justify-center rounded-[3px] bg-primary text-[9px] font-bold tabular-nums text-primary-foreground"
-        style="height: {plateHeight(plate)}px"
-        title={`${plate} lb`}
-      >
+      <div class={plateClass} style="height: {plateHeight(plate)}px" title={`${plate} lb`}>
         {plate}
       </div>
     {/each}
+    <!-- outer sleeve end -->
+    <div class="{barClass} w-4"></div>
   {/if}
 </div>
