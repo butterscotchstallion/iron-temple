@@ -2,12 +2,13 @@
   import Router from "svelte-spa-router";
   import Programs from "./routes/Programs.svelte";
   import ProgramDetail from "./routes/ProgramDetail.svelte";
+  import ActiveSession from "./routes/ActiveSession.svelte";
 
-  // Hash-based routes (svelte-spa-router). More screens (active session,
-  // history) will slot in here as they land.
+  // Hash-based routes (svelte-spa-router). History screen will slot in here.
   const routes = {
     "/": Programs,
     "/programs/:id": ProgramDetail,
+    "/sessions/:id": ActiveSession,
     // Fallback: unknown paths go back to the programs list.
     "*": Programs,
   };
