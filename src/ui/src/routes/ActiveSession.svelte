@@ -1,13 +1,19 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { link } from "svelte-spa-router";
+  import { push, link } from "svelte-spa-router";
   import {
     getSession,
+    updateSession,
     updateSessionSet,
+    deleteSession,
     type Session,
     type SessionSet,
   } from "../lib/api";
   import RestTimer from "../lib/RestTimer.svelte";
+  import { Card } from "$lib/components/ui/card";
+  import { Button, buttonVariants } from "$lib/components/ui/button";
+  import { Textarea } from "$lib/components/ui/textarea";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog";
 
   let { params }: { params?: { id?: string } } = $props();
   let sessionId = $derived(Number(params?.id));
@@ -15,6 +21,10 @@
   let session = $state<Session | null>(null);
   let loading = $state(true);
   let failed = $state(false);
+
+  let notes = $state("");
+  let savingNotes = $state(false);
+  let notesSaved = $state(false);
 
   async function load() {
     loading = true;
@@ -24,6 +34,7 @@
       failed = true;
     } else {
       session = data;
+      notes = data.notes;
     }
     loading = false;
   }
@@ -56,67 +67,111 @@
       session.sets = session.sets.map((s) => (s.id === data.id ? data : s));
     }
   }
+
+  async function saveNotes() {
+    if (!session) return;
+    savingNotes = true;
+    notesSaved = false;
+    const { data } = await updateSession({ path: { sessionId }, body: { notes } });
+    savingNotes = false;
+    if (data && session) {
+      session.notes = data.notes;
+      notesSaved = true;
+    }
+  }
+
+  async function remove() {
+    const { error } = await deleteSession({ path: { sessionId } });
+    if (!error) push("/history");
+  }
 </script>
 
 <div class="flex flex-col gap-6">
   <a
     href="/"
     use:link
-    class="text-sm uppercase tracking-[0.3em] text-cyan/80 transition hover:text-cyan"
+    class="text-sm text-muted-foreground transition hover:text-foreground"
   >
     ← Programs
   </a>
 
   {#if loading}
-    <div class="h-40 animate-pulse rounded-2xl border border-neon/20 bg-surface/50"></div>
+    <Card class="h-40 animate-pulse"></Card>
   {:else if failed}
-    <div
-      class="rounded-2xl border border-magenta/40 bg-surface/60 p-6 text-center"
-      role="alert"
-    >
-      <p class="text-sm text-ink/80">Couldn't load this session.</p>
-      <button
-        class="mt-3 rounded-full border border-cyan/60 bg-cyan/10 px-5 py-2 font-semibold text-ink transition hover:bg-cyan/25"
-        onclick={load}
-      >
-        Retry
-      </button>
-    </div>
+    <Card class="p-6 text-center" role="alert">
+      <p class="text-sm text-muted-foreground">Couldn't load this session.</p>
+      <Button variant="outline" class="mt-3" onclick={load}>Retry</Button>
+    </Card>
   {:else if session}
-    <header>
-      <h2 class="text-2xl font-black text-ink">{session.programName}</h2>
-      <p class="mt-1 text-sm text-ink/70">
-        {session.programDayName} · {session.performedOn}
-      </p>
-      <p class="mt-1 text-xs uppercase tracking-[0.3em] text-cyan/80">
-        {completedCount} / {session.sets.length} sets done
-      </p>
-    </header>
+    <div class="flex items-start justify-between gap-3">
+      <header>
+        <h2 class="text-2xl font-black text-foreground">{session.programName}</h2>
+        <p class="mt-1 text-sm text-muted-foreground">
+          {session.programDayName} · {session.performedOn}
+        </p>
+        <p class="mt-1 text-xs uppercase tracking-[0.3em] text-primary">
+          {completedCount} / {session.sets.length} sets done
+        </p>
+      </header>
 
-    <section class="rounded-2xl border border-cyan/30 bg-surface-2/60 p-6 backdrop-blur">
-      <h3 class="mb-4 text-center text-xs uppercase tracking-[0.3em] text-magenta">
+      <AlertDialog.Root>
+        <AlertDialog.Trigger class={buttonVariants({ variant: "destructive", size: "sm" })}>
+          Delete
+        </AlertDialog.Trigger>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>Delete this session?</AlertDialog.Title>
+            <AlertDialog.Description>
+              This permanently removes the session and its logged sets. This
+              can't be undone.
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
+            <AlertDialog.Action variant="destructive" onclick={remove}>
+              Delete
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
+    </div>
+
+    <Card class="p-6 text-center">
+      <h3 class="mb-4 text-xs uppercase tracking-[0.3em] text-muted-foreground">
         Rest Timer
       </h3>
       <RestTimer seconds={180} />
-    </section>
+    </Card>
 
     {#each groups as group (group.name)}
-      <section class="rounded-2xl border border-neon/30 bg-surface/70 p-5 backdrop-blur">
-        <h3 class="text-lg font-bold text-ink">{group.name}</h3>
+      <Card class="p-5">
+        <h3 class="text-lg font-bold text-card-foreground">{group.name}</h3>
         <div class="mt-3 flex flex-col gap-2">
           {#each group.sets as set (set.id)}
-            <button
-              class="flex items-center justify-between rounded-xl border px-4 py-2 text-left text-sm transition {set.completed
-                ? 'border-cyan/60 bg-cyan/15 text-ink'
-                : 'border-neon/20 bg-surface-2/40 text-ink/80 hover:border-neon/50'}"
+            <Button
+              variant={set.completed ? "default" : "outline"}
+              class="w-full justify-between"
               onclick={() => toggle(set)}
             >
               <span>Set {set.setNumber} · {set.targetReps} reps · {set.weightLb} lb</span>
               <span class="text-lg">{set.completed ? "✓" : "○"}</span>
-            </button>
+            </Button>
           {/each}
         </div>
-      </section>
+      </Card>
     {/each}
+
+    <Card class="p-5">
+      <h3 class="text-lg font-bold text-card-foreground">Notes</h3>
+      <Textarea bind:value={notes} placeholder="How did it feel?" class="mt-3" />
+      <div class="mt-3 flex items-center gap-3">
+        <Button variant="outline" size="sm" onclick={saveNotes} disabled={savingNotes}>
+          {savingNotes ? "Saving…" : "Save notes"}
+        </Button>
+        {#if notesSaved}
+          <span class="text-xs text-muted-foreground">Saved</span>
+        {/if}
+      </div>
+    </Card>
   {/if}
 </div>

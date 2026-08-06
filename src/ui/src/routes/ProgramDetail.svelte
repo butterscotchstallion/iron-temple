@@ -7,6 +7,8 @@
     createSession,
     type Program,
   } from "../lib/api";
+  import { Card } from "$lib/components/ui/card";
+  import { Button } from "$lib/components/ui/button";
 
   let { params }: { params?: { id?: string } } = $props();
   let programId = $derived(Number(params?.id));
@@ -77,35 +79,27 @@
   <a
     href="/"
     use:link
-    class="text-sm uppercase tracking-[0.3em] text-cyan/80 transition hover:text-cyan"
+    class="text-sm text-muted-foreground transition hover:text-foreground"
   >
     ← Programs
   </a>
 
   {#if loading}
-    <div class="h-40 animate-pulse rounded-2xl border border-neon/20 bg-surface/50"></div>
+    <Card class="h-40 animate-pulse"></Card>
   {:else if failed}
-    <div
-      class="rounded-2xl border border-magenta/40 bg-surface/60 p-6 text-center"
-      role="alert"
-    >
-      <p class="text-sm text-ink/80">Couldn't load this program.</p>
-      <button
-        class="mt-3 rounded-full border border-cyan/60 bg-cyan/10 px-5 py-2 font-semibold text-ink transition hover:bg-cyan/25"
-        onclick={load}
-      >
-        Retry
-      </button>
-    </div>
+    <Card class="p-6 text-center" role="alert">
+      <p class="text-sm text-muted-foreground">Couldn't load this program.</p>
+      <Button variant="outline" class="mt-3" onclick={load}>Retry</Button>
+    </Card>
   {:else if program}
     <div>
-      <h2 class="text-3xl font-black text-ink">{program.name}</h2>
-      <p class="mt-1 text-sm text-ink/70">{program.description}</p>
+      <h2 class="text-3xl font-black text-foreground">{program.name}</h2>
+      <p class="mt-1 text-sm text-muted-foreground">{program.description}</p>
     </div>
 
     {#if startFailed}
       <p
-        class="rounded-xl border border-magenta/40 bg-surface/60 p-3 text-center text-sm text-ink/80"
+        class="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-center text-sm text-destructive"
         role="alert"
       >
         Couldn't start the session. Try again.
@@ -113,28 +107,28 @@
     {/if}
 
     {#each days as day (day.id)}
-      <section class="rounded-2xl border border-neon/30 bg-surface/70 p-5 backdrop-blur">
+      <Card class="p-5">
         <div class="flex items-center justify-between gap-3">
-          <h3 class="text-lg font-bold text-ink">{day.name}</h3>
-          <button
-            class="rounded-full border border-neon/60 bg-neon/15 px-4 py-1.5 text-sm font-semibold text-ink transition hover:bg-neon/30 disabled:opacity-40"
+          <h3 class="text-lg font-bold text-card-foreground">{day.name}</h3>
+          <Button
+            size="sm"
             onclick={() => start(day.id)}
             disabled={startingDayId !== null}
           >
             {startingDayId === day.id ? "Starting…" : "Start"}
-          </button>
+          </Button>
         </div>
         <ul class="mt-3 flex flex-col gap-1.5">
           {#each day.exercises as ex (ex.exerciseId)}
             <li class="flex items-baseline justify-between text-sm">
-              <span class="text-ink">{ex.exerciseName}</span>
-              <span class="tabular-nums text-ink/70">
+              <span class="text-card-foreground">{ex.exerciseName}</span>
+              <span class="tabular-nums text-muted-foreground">
                 {ex.sets}×{ex.reps} · {ex.weightLb} lb
               </span>
             </li>
           {/each}
         </ul>
-      </section>
+      </Card>
     {/each}
   {/if}
 </div>
