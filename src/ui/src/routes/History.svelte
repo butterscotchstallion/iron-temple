@@ -2,9 +2,9 @@
   import { onMount } from "svelte";
   import { link } from "svelte-spa-router";
   import { listSessions, type SessionSummary } from "../lib/api";
+  import { formatLongDate } from "../lib/date";
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
-  import { Badge } from "$lib/components/ui/badge";
 
   const pageSize = 20;
 
@@ -15,10 +15,6 @@
   let loadingMore = $state(false);
 
   const hasMore = $derived(sessions.length < total);
-
-  function isComplete(s: SessionSummary): boolean {
-    return s.setCount > 0 && s.completedSetCount === s.setCount;
-  }
 
   async function loadInitial() {
     loading = true;
@@ -76,17 +72,12 @@
                 <div>
                   <p class="font-bold text-card-foreground">{session.programName}</p>
                   <p class="mt-0.5 text-sm text-muted-foreground">
-                    {session.programDayName} · {session.performedOn}
+                    {session.programDayName} · {formatLongDate(session.performedOn)}
                   </p>
                 </div>
-                <div class="flex flex-col items-end gap-1">
-                  <p class="text-sm tabular-nums text-muted-foreground">
-                    {session.completedSetCount}/{session.setCount} sets
-                  </p>
-                  {#if isComplete(session)}
-                    <Badge variant="secondary">✓ Complete</Badge>
-                  {/if}
-                </div>
+                <p class="text-sm tabular-nums text-muted-foreground">
+                  {session.completedSetCount}/{session.setCount} sets
+                </p>
               </div>
               {#if (session.exercises ?? []).length > 0}
                 <table class="mt-3 w-full text-sm">
