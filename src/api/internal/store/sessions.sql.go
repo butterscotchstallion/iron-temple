@@ -183,6 +183,49 @@ func (q *Queries) GetSessionSet(ctx context.Context, id int32) (GetSessionSetRow
 	return i, err
 }
 
+const listSessionExerciseWeights = `-- name: ListSessionExerciseWeights :many
+SELECT ss.session_id,
+       e.name                     AS exercise_name,
+       MAX(ss.weight_lb)::numeric AS weight_lb
+FROM session_sets ss
+JOIN exercises e ON e.id = ss.exercise_id
+JOIN sessions s ON s.id = ss.session_id
+JOIN program_day_exercises pde
+  ON pde.program_day_id = s.program_day_id AND pde.exercise_id = ss.exercise_id
+WHERE ss.session_id = ANY($1::int[])
+GROUP BY ss.session_id, e.name
+ORDER BY ss.session_id, MIN(pde.position)
+`
+
+type ListSessionExerciseWeightsRow struct {
+	SessionID    int32          `json:"session_id"`
+	ExerciseName string         `json:"exercise_name"`
+	WeightLb     pgtype.Numeric `json:"weight_lb"`
+}
+
+// ListSessionExerciseWeights returns each exercise's top working weight for the
+// given sessions, ordered by the day's exercise position — used to show a
+// per-lift weight line on each history row.
+func (q *Queries) ListSessionExerciseWeights(ctx context.Context, sessionIds []int32) ([]ListSessionExerciseWeightsRow, error) {
+	rows, err := q.db.Query(ctx, listSessionExerciseWeights, sessionIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSessionExerciseWeightsRow
+	for rows.Next() {
+		var i ListSessionExerciseWeightsRow
+		if err := rows.Scan(&i.SessionID, &i.ExerciseName, &i.WeightLb); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSessionSets = `-- name: ListSessionSets :many
 SELECT ss.id,
        ss.session_id,
