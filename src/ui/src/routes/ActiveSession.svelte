@@ -3,7 +3,6 @@
   import { push, link } from "svelte-spa-router";
   import {
     getSession,
-    updateSession,
     updateSessionSet,
     deleteSession,
     type Session,
@@ -13,7 +12,6 @@
   import RestTimer from "../lib/RestTimer.svelte";
   import { Card } from "$lib/components/ui/card";
   import { Button, buttonVariants } from "$lib/components/ui/button";
-  import { Textarea } from "$lib/components/ui/textarea";
   import * as AlertDialog from "$lib/components/ui/alert-dialog";
 
   let { params }: { params?: { id?: string } } = $props();
@@ -22,10 +20,6 @@
   let session = $state<Session | null>(null);
   let loading = $state(true);
   let failed = $state(false);
-
-  let notes = $state("");
-  let savingNotes = $state(false);
-  let notesSaved = $state(false);
 
   // Bumped on each set completion to auto-restart the rest timer.
   let restTimerKey = $state(0);
@@ -42,7 +36,6 @@
       failed = true;
     } else {
       session = data;
-      notes = data.notes;
     }
     loading = false;
   }
@@ -142,18 +135,6 @@
       if (data) {
         session.sets = session.sets.map((s) => (s.id === data.id ? data : s));
       }
-    }
-  }
-
-  async function saveNotes() {
-    if (!session) return;
-    savingNotes = true;
-    notesSaved = false;
-    const { data } = await updateSession({ path: { sessionId }, body: { notes } });
-    savingNotes = false;
-    if (data && session) {
-      session.notes = data.notes;
-      notesSaved = true;
     }
   }
 
@@ -278,19 +259,6 @@
         </div>
       </Card>
     {/each}
-
-    <Card class="p-5">
-      <h3 class="text-lg font-bold text-card-foreground">Notes</h3>
-      <Textarea bind:value={notes} placeholder="How did it feel?" class="mt-3" />
-      <div class="mt-3 flex items-center gap-3">
-        <Button variant="outline" size="sm" onclick={saveNotes} disabled={savingNotes}>
-          {savingNotes ? "Saving…" : "Save notes"}
-        </Button>
-        {#if notesSaved}
-          <span class="text-xs text-muted-foreground">Saved</span>
-        {/if}
-      </div>
-    </Card>
 
     <AlertDialog.Root bind:open={showComplete}>
       <AlertDialog.Content>
