@@ -60,13 +60,14 @@
     return [...byExercise.entries()].map(([name, sets]) => ({ name, sets }));
   });
 
-  const completedCount = $derived(
-    (session?.sets ?? []).filter((s) => s.completed).length,
+  // A set is "logged" once it has a rep count (success or a miss).
+  const loggedCount = $derived(
+    (session?.sets ?? []).filter((s) => s.actualReps != null).length,
   );
 
-  const allComplete = $derived(
+  const allLogged = $derived(
     (session?.sets.length ?? 0) > 0 &&
-      (session?.sets ?? []).every((s) => s.completed),
+      (session?.sets ?? []).every((s) => s.actualReps != null),
   );
 
   // Total weight moved this session (weight × reps over all logged sets).
@@ -77,27 +78,51 @@
     ),
   );
 
-  // Toggle a set complete/incomplete; on completion, log the target reps.
-  async function toggle(set: SessionSet) {
-    const completed = !set.completed;
-    const wasAllComplete = allComplete;
+  // The reps a set cycles to on the next tap (StrongLifts style):
+  // unlogged -> target (success), then decrement each tap, 1 -> cleared.
+  function nextReps(set: SessionSet): number | null {
+    if (set.actualReps == null) return set.targetReps;
+    if (set.actualReps <= 1) return null;
+    return set.actualReps - 1;
+  }
+
+  // Tailwind classes for a set's circular button by state.
+  function setStateClass(set: SessionSet): string {
+    if (set.actualReps == null) {
+      return "border-border bg-transparent text-muted-foreground";
+    }
+    if (set.completed) {
+      return "border-primary bg-primary text-primary-foreground"; // hit target
+    }
+    return "border-primary bg-primary/20 text-foreground"; // logged a miss
+  }
+
+  // Tap a set: cycle its reps. `completed` (hit target) drives progression; the
+  // first tap that logs a set (re)starts the rest timer, and finishing the last
+  // set celebrates.
+  async function cycle(set: SessionSet) {
+    const firstLog = set.actualReps == null;
+    const wasAllLogged = allLogged;
+    const reps = nextReps(set);
+    const completed = reps != null && reps >= set.targetReps;
+
     const { data } = await updateSessionSet({
       path: { sessionId, setId: set.id },
-      body: { completed, actualReps: completed ? set.targetReps : null },
+      body: { actualReps: reps, completed },
     });
     if (!data || !session) return;
-
     session.sets = session.sets.map((s) => (s.id === data.id ? data : s));
-    if (!completed) return;
 
-    const nowAllComplete = session.sets.every((s) => s.completed);
-    if (nowAllComplete && !wasAllComplete) {
-      // Session finished: stop the rest timer and celebrate.
+    // Only the first tap (finishing a set) affects the timer/celebration;
+    // subsequent taps just adjust the rep count.
+    if (!firstLog) return;
+
+    const nowAllLogged = session.sets.every((s) => s.actualReps != null);
+    if (nowAllLogged && !wasAllLogged) {
       restResetKey += 1;
       showComplete = true;
       confetti({ particleCount: 140, spread: 75, origin: { y: 0.6 } });
     } else {
-      // Otherwise a normal set completion (re)starts the rest countdown.
       restTimerKey += 1;
     }
   }
@@ -144,7 +169,7 @@
           {session.programDayName} · {session.performedOn}
         </p>
         <p class="mt-1 text-xs uppercase tracking-[0.3em] text-primary">
-          {completedCount} / {session.sets.length} sets done
+          {loggedCount} / {session.sets.length} sets logged
         </p>
       </header>
 
@@ -183,17 +208,29 @@
 
     {#each groups as group (group.name)}
       <Card class="p-5">
-        <h3 class="text-lg font-bold text-card-foreground">{group.name}</h3>
-        <div class="mt-3 flex flex-col gap-2">
+        <div class="flex items-baseline justify-between gap-3">
+          <h3 class="text-lg font-bold text-card-foreground">{group.name}</h3>
+          <span class="text-sm tabular-nums text-muted-foreground">
+            {group.sets[0].targetReps} reps · {group.sets[0].weightLb} lb
+          </span>
+        </div>
+        <p class="mt-1 text-xs text-muted-foreground">
+          Tap a set to log it; tap again to drop the reps if you missed.
+        </p>
+        <div class="mt-3 flex flex-wrap gap-3">
           {#each group.sets as set (set.id)}
-            <Button
-              variant={set.completed ? "default" : "outline"}
-              class="w-full justify-between"
-              onclick={() => toggle(set)}
+            <button
+              type="button"
+              class="flex size-12 items-center justify-center rounded-full border text-base font-bold tabular-nums transition {setStateClass(
+                set,
+              )}"
+              onclick={() => cycle(set)}
+              aria-label={`Set ${set.setNumber}: ${
+                set.actualReps == null ? "not logged" : `${set.actualReps} reps`
+              }`}
             >
-              <span>Set {set.setNumber} · {set.targetReps} reps · {set.weightLb} lb</span>
-              <span class="text-lg">{set.completed ? "✓" : "○"}</span>
-            </Button>
+              {set.actualReps ?? set.targetReps}
+            </button>
           {/each}
         </div>
       </Card>
