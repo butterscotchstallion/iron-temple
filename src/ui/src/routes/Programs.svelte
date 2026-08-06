@@ -4,7 +4,6 @@
   import { listPrograms, listSessions, type ProgramSummary } from "../lib/api";
   import { programSubtitle } from "../lib/programs";
   import { currentStreak, STREAK_DISPLAY_THRESHOLD } from "../lib/streak";
-  import RestTimer from "../lib/RestTimer.svelte";
 
   let programs = $state<ProgramSummary[]>([]);
   let streak = $state(0);
@@ -84,14 +83,5 @@
         </a>
       {/each}
     {/if}
-  </section>
-
-  <section
-    class="rounded-2xl border border-cyan/30 bg-surface-2/60 p-6 backdrop-blur"
-  >
-    <h2 class="mb-4 text-center text-xs uppercase tracking-[0.3em] text-magenta">
-      Rest Timer
-    </h2>
-    <RestTimer seconds={180} />
   </section>
 </div>
