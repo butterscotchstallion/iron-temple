@@ -7,6 +7,7 @@
     type ExerciseHistoryPoint,
   } from "../lib/api";
   import { estimateOneRepMax } from "../lib/oneRepMax";
+  import { formatLongDate } from "../lib/date";
   import ProgressChart from "../lib/ProgressChart.svelte";
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
@@ -19,13 +20,33 @@
   let loading = $state(true);
   let failed = $state(false);
 
+  // Heaviest top-set weight ever recorded.
   const pr = $derived(
     points.length ? Math.max(...points.map((p) => p.weightLb)) : 0,
   );
-  const latest = $derived(points.length ? points[points.length - 1] : null);
-  const oneRepMax = $derived(
-    latest ? estimateOneRepMax(latest.weightLb, latest.reps) : 0,
+  // Best estimated 1RM across every session, not just the latest.
+  const bestOneRepMax = $derived(
+    points.reduce(
+      (best, p) => Math.max(best, estimateOneRepMax(p.weightLb, p.reps)),
+      0,
+    ),
   );
+
+  // Per-session rows (most recent first) with est. 1RM and a flag for sessions
+  // that set a new heaviest-weight PR.
+  const rows = $derived.by(() => {
+    let max = 0;
+    const asc = points.map((p) => {
+      const isPr = p.weightLb > max;
+      if (isPr) max = p.weightLb;
+      return {
+        ...p,
+        e1rm: estimateOneRepMax(p.weightLb, p.reps),
+        isPr,
+      };
+    });
+    return asc.reverse();
+  });
 
   async function load() {
     loading = true;
@@ -82,16 +103,49 @@
         </Card>
         <Card class="p-4 text-center">
           <p class="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-            Est. 1RM
+            Best est. 1RM
           </p>
           <p class="mt-1 text-2xl font-black text-primary tabular-nums">
-            {oneRepMax} lb
+            {bestOneRepMax} lb
           </p>
         </Card>
       </div>
 
       <Card class="p-4">
         <ProgressChart {points} />
+      </Card>
+
+      <Card class="p-4">
+        <h3
+          class="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground"
+        >
+          {points.length} session{points.length === 1 ? "" : "s"}
+        </h3>
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left text-xs uppercase tracking-wide text-muted-foreground">
+              <th class="pb-2 font-medium">Date</th>
+              <th class="pb-2 font-medium">Top set</th>
+              <th class="pb-2 text-right font-medium">Est. 1RM</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each rows as r, i (i)}
+              <tr class="border-t border-border/50">
+                <td class="py-1.5 pr-4 text-card-foreground">
+                  {formatLongDate(r.performedOn)}
+                  {#if r.isPr}<span title="New heaviest weight">🏆</span>{/if}
+                </td>
+                <td class="py-1.5 pr-4 tabular-nums text-muted-foreground">
+                  {r.weightLb} lb × {r.reps}
+                </td>
+                <td class="py-1.5 text-right tabular-nums text-muted-foreground">
+                  {r.e1rm} lb
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
       </Card>
     {/if}
   {/if}

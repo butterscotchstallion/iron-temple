@@ -164,7 +164,13 @@
         <ul class="mt-3 flex flex-col gap-1.5">
           {#each day.exercises as ex (ex.exerciseId)}
             <li class="flex items-baseline justify-between text-sm">
-              <span class="text-card-foreground">{ex.exerciseName}</span>
+              <a
+                use:link
+                href="/exercises/{ex.exerciseId}"
+                class="text-card-foreground underline-offset-2 transition hover:text-primary hover:underline"
+              >
+                {ex.exerciseName}
+              </a>
               <span class="tabular-nums text-muted-foreground">
                 {ex.sets}×{ex.reps} · {ex.weightLb} lb
               </span>
