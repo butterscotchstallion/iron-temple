@@ -5,14 +5,16 @@ name: Go Lint & Test
 # set — go.mod tidy check, vet, golangci-lint, govulncheck, gosec, test+coverage —
 # adapted for this repo: a single vendored module, and `go test -short` because the
 # integration tests use Testcontainers (no container runtime on the host executor).
+#
+# Required-status-check safety: this workflow always triggers on every branch push
+# (NO `on.paths` filter) so its `result` gate always reports a commit status. Branch
+# protection can then require the "Go Lint & Test" context without deadlocking a PR
+# that doesn't touch src/api. Path filtering lives in the `changes` job, so the heavy
+# lint/test/integration jobs still only run when backend-relevant files change.
+# See docs/ci-branch-protection.md.
 on:
   push:
     branches: ["**"]
-    paths:
-      - "src/api/**"
-      - ".gitea/workflows/go.yml"
-      - ".gitea/scripts/**"
-      - ".gitea/ci/postgres.yaml" # the integration job's DB pod manifest
   # Weekly sweep: govulncheck re-checks the modules + toolchain stdlib against the
   # live vuln DB, so a CVE disclosed against UNCHANGED code is caught here instead
   # of waiting for the next edit. Fri 03:00 UTC (spreads load off the homelab-gitops
@@ -26,8 +28,46 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Cheap gate: did anything backend-relevant change on this push? Drives whether the
+  # heavy jobs run. Always runs so the workflow's status context is produced even when
+  # nothing relevant changed. Non-push events (schedule, dispatch) always run everything.
+  changes:
+    name: Detect API changes
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.detect.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect relevant changes
+        id: detect
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "push" ]; then
+            echo "event=${{ github.event_name }} → run everything"
+            echo "relevant=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          before="${{ github.event.before }}"
+          zero="0000000000000000000000000000000000000000"
+          if [ -z "$before" ] || [ "$before" = "$zero" ] || ! git cat-file -e "${before}^{commit}" 2>/dev/null; then
+            echo "no usable base ('$before') → run everything"
+            echo "relevant=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if git diff --name-only "$before" "${{ github.sha }}" \
+               | grep -qE '^(src/api/|\.gitea/workflows/go\.yml$|\.gitea/scripts/|\.gitea/ci/postgres\.yaml$)'; then
+            echo "backend-relevant files changed → run"
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "no backend-relevant changes → skip"
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
   go:
-    name: Go Lint & Test
+    name: Go Build & Test
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -163,11 +203,11 @@ jobs:
 
   # DB-backed API tests. `needs: go` gates them on the fast job above — no point
   # provisioning a Postgres pod and running the integration suite if lint/vet/gosec or
-  # the unit tests already failed. The tests use Testcontainers locally, but the
-  # host-executor runner has no container runtime, so this provisions a throwaway
-  # Postgres *pod*, points TEST_DATABASE_URL at it, runs the non-short suite, and always
-  # reaps the pod. Requires the companion homelab-gitops NetworkPolicy (runner <-> the
-  # CI Postgres pod on 5432).
+  # the unit tests already failed. (When `go` is skipped as irrelevant, this skips too.)
+  # The tests use Testcontainers locally, but the host-executor runner has no container
+  # runtime, so this provisions a throwaway Postgres *pod*, points TEST_DATABASE_URL at
+  # it, runs the non-short suite, and always reaps the pod. Requires the companion
+  # homelab-gitops NetworkPolicy (runner <-> the CI Postgres pod on 5432).
   integration:
     name: API Integration Tests
     needs: go
@@ -241,3 +281,28 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SHA: ${{ github.sha }}
         run: ./scripts/ci-notify.sh
+
+  # Required-check gate. Always runs so it always posts a "Go Lint & Test" commit status,
+  # even when the backend jobs were skipped (irrelevant paths) or cancelled. Passes when
+  # both real jobs succeeded or were legitimately skipped; fails if either failed. Make
+  # THIS the required status check in branch protection.
+  result:
+    name: Go Lint & Test
+    needs: [changes, go, integration]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require backend jobs to pass
+        run: |
+          set -euo pipefail
+          echo "changes=${{ needs.changes.result }} go=${{ needs.go.result }} integration=${{ needs.integration.result }}"
+          if [ "${{ needs.changes.result }}" != "success" ]; then
+            echo "::error::change-detection job did not succeed"; exit 1
+          fi
+          for r in "${{ needs.go.result }}" "${{ needs.integration.result }}"; do
+            case "$r" in
+              success|skipped) ;;
+              *) echo "::error::backend checks did not pass ($r)"; exit 1 ;;
+            esac
+          done
+          echo "backend checks OK"
