@@ -7,6 +7,7 @@
   import History from "./routes/History.svelte";
   import Progress from "./routes/Progress.svelte";
   import ExerciseProgress from "./routes/ExerciseProgress.svelte";
+  import NavBar from "./lib/NavBar.svelte";
 
   // Hash-based routes (svelte-spa-router). "/" lands on the current program's
   // workout; "/programs" is the picker for switching.
@@ -32,14 +33,7 @@
         Iron Temple
       </h1>
     </a>
-    <p class="mt-2 text-sm uppercase tracking-[0.35em] text-cyan/80">
-      Lift · Log · Progress
-    </p>
-    <nav class="mt-4 flex justify-center gap-6 text-xs font-semibold uppercase tracking-[0.3em]">
-      <a href="/" use:link class="text-muted-foreground transition hover:text-foreground">Workout</a>
-      <a href="/history" use:link class="text-muted-foreground transition hover:text-foreground">History</a>
-      <a href="/progress" use:link class="text-muted-foreground transition hover:text-foreground">Progress</a>
-    </nav>
+    <NavBar />
   </header>
 
   <Router {routes} />
