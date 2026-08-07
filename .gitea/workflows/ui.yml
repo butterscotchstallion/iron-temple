@@ -76,11 +76,9 @@ jobs:
       - name: Unit tests (Vitest)
         run: pnpm test:unit
 
-      # Verify the production bundle actually builds. svelte-check type-checks the
-      # source, but the vite production build can still fail on bundler/asset issues
-      # that `check` never exercises.
-      - name: Build (production bundle)
-        run: pnpm build
+      # NOTE: the production build (`pnpm build`) is exercised by the e2e job's
+      # webServer — playwright.config.ts serves `vite preview` over the built output, so
+      # a broken build fails e2e. No separate build step needed (avoids a double build).
 
       # Cache the Playwright browser binaries at Playwright's DEFAULT location
       # (~/.cache/ms-playwright). This path is stable across runs, so the browser also
