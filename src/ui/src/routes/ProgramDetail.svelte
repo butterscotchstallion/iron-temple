@@ -10,7 +10,7 @@
   } from "../lib/api";
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
-  import { WEEKDAYS, todayWeekday } from "../lib/weekday";
+  import { weekdayOptions, todayWeekday } from "../lib/weekday";
   import Calendar from "@lucide/svelte/icons/calendar";
 
   let { params }: { params?: { id?: string } } = $props();
@@ -32,6 +32,10 @@
 
   let program = $state<Program | null>(null);
   let days = $state<DayView[]>([]);
+
+  // Weekday choices labeled with each day's next upcoming date, e.g.
+  // "Friday, August 7". Computed once from today when the card mounts.
+  const dayChoices = weekdayOptions();
 
   // Float today's scheduled workout to the top so the highlighted day leads.
   // Stable sort keeps every other day in its original order.
@@ -157,8 +161,8 @@
                 onchange={(e) => setWeekday(day, e.currentTarget.value)}
               >
                 <option value="">Unscheduled</option>
-                {#each WEEKDAYS as name, i (i)}
-                  <option value={String(i)}>{name}</option>
+                {#each dayChoices as choice (choice.value)}
+                  <option value={String(choice.value)}>{choice.label}</option>
                 {/each}
               </select>
             </label>
