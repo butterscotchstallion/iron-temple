@@ -26,3 +26,8 @@ export function formatLongDate(iso: string): string {
   }
   return `${name} ${day} ${year}`;
 }
+
+/** Month name + day for a Date, e.g. "August 7". */
+export function formatMonthDay(date: Date): string {
+  return `${MONTHS[date.getMonth()]} ${date.getDate()}`;
+}
