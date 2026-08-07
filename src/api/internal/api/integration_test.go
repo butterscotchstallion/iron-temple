@@ -166,6 +166,18 @@ func TestSessionLifecycle(t *testing.T) {
 	e.GET("/sessions").Expect().Status(http.StatusOK).
 		JSON().Object().Value("total").Number().Gt(0)
 
+	// Pagination params are validated before the query runs. The offset-overflow
+	// case is a regression guard: an offset past int32 used to wrap negative
+	// instead of being rejected.
+	e.GET("/sessions").WithQuery("offset", "3000000000").
+		Expect().Status(http.StatusBadRequest)
+	e.GET("/sessions").WithQuery("offset", "-1").
+		Expect().Status(http.StatusBadRequest)
+	e.GET("/sessions").WithQuery("limit", "101").
+		Expect().Status(http.StatusBadRequest)
+	e.GET("/sessions").WithQuery("limit", "0").
+		Expect().Status(http.StatusBadRequest)
+
 	// Delete, then it's gone.
 	e.DELETE(fmt.Sprintf("/sessions/%d", sessionID)).Expect().Status(http.StatusNoContent)
 	e.GET(fmt.Sprintf("/sessions/%d", sessionID)).Expect().Status(http.StatusNotFound)
