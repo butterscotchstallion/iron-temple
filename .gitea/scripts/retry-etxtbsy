@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# retry-etxtbsy CMD [ARGS...]
+#
+# Run a command, retrying ONLY on exit 126 (ETXTBSY, "Text file busy").
+#
+# CI runs on a shared host-executor pod: concurrent jobs share ~/go/bin,
+# ~/.local/bin and /usr/local/bin. When one job's `actions/cache` restore rewrites
+# a cached tool binary while another job execs the same path, the kernel refuses
+# with ETXTBSY (the shell reports exit 126). That is transient — the restore
+# finishes within a moment — so a short retry clears it.
+#
+# 126 is a shell-level exec failure, never a tool's own status code (linters/scanners
+# exit 0/1/2/3), so retrying on 126 alone can never mask a real finding: any other
+# exit code is propagated immediately.
+set -u
+
+if [ "$#" -eq 0 ]; then
+  echo "retry-etxtbsy: no command given" >&2
+  exit 2
+fi
+
+for attempt in 1 2 3 4 5; do
+  "$@"
+  rc=$?
+  if [ "$rc" -ne 126 ]; then
+    exit "$rc"
+  fi
+  echo "retry-etxtbsy: '$*' hit ETXTBSY (attempt ${attempt}/5) — shared-binary race, waiting 5s" >&2
+  sleep 5
+done
+
+# Final attempt; its exit code (even if still 126) becomes ours.
+"$@"

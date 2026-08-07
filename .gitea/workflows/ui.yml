@@ -1,0 +1,110 @@
+---
+name: UI Check & Test
+
+# Frontend CI for src/ui (Svelte + Vite + pnpm). Type-check, unit tests (Vitest),
+# and e2e (Playwright/Firefox). Runs on the shared host-executor runner: Node 20 +
+# corepack ship in the base image; the Playwright Firefox *system libs* are baked
+# into the runner image (see homelab-gitops services/act-runner/Dockerfile), so this
+# job only downloads the Firefox *browser* — and that is cached across runs.
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "src/ui/**"
+      # The typed client is generated from the backend's OpenAPI contract, so a spec
+      # change must re-run check/tests even when nothing under src/ui changed.
+      - "src/api/openapi.yaml"
+      - ".gitea/workflows/ui.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ui:
+    name: UI Check & Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/ui
+    env:
+      # Keep Playwright's browser cache in the default location so the cache step below
+      # persists it; a cache hit makes `playwright install` a no-op (no download).
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/ms-playwright
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Activate the pinned pnpm via corepack. Install the shim into a user-writable
+      # dir (the runner runs non-root) rather than the root-owned Node bin, so this
+      # works without relying on a baked shim. --activate downloads pnmp@<pinned> once;
+      # corepack caches it, so later runs re-use it.
+      - name: Enable pnpm
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          corepack enable --install-directory "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          corepack prepare pnpm@9.15.0 --activate
+          pnpm --version
+
+      # Cache the pnpm content-addressable store so packages aren't re-fetched.
+      # Keyed on the lockfile → only changes when a dependency changes.
+      - name: Locate pnpm store
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('src/ui/pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
+
+      # --frozen-lockfile: reproducible install, fails if the lockfile is stale.
+      # --prefer-offline: use the cached store first, hit the (in-cluster) registry only for misses.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --prefer-offline
+
+      # The hey-api client (src/ui/src/lib/api/) is git-ignored; regenerate it from the
+      # backend OpenAPI spec before anything that imports it (check / dev server / e2e).
+      - name: Generate API client
+        run: pnpm generate:api
+
+      - name: Type-check (svelte-check)
+        run: pnpm check
+
+      - name: Unit tests (Vitest)
+        run: pnpm test:unit
+
+      # Cache the Playwright browser binaries. Keyed on the lockfile (which pins the
+      # @playwright/test version) → Firefox is downloaded only when that version bumps.
+      - name: Cache Playwright browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ env.PLAYWRIGHT_BROWSERS_PATH }}
+          key: playwright-${{ runner.os }}-${{ hashFiles('src/ui/pnpm-lock.yaml') }}
+          restore-keys: playwright-${{ runner.os }}-
+
+      # Firefox only (matches playwright.config.ts). No --with-deps: the system libs are
+      # baked into the runner image; --with-deps would try apt as non-root and fail.
+      # Idempotent — a warm cache makes this a no-op.
+      - name: Install Playwright Firefox
+        run: pnpm exec playwright install firefox
+
+      # CI=true → Playwright starts its own `pnpm dev` vite server (reuseExistingServer
+      # is false in CI). The suite mocks the API via page.route, so no backend/DB is needed.
+      - name: E2E tests (Playwright/Firefox)
+        env:
+          CI: "true"
+        run: pnpm test:e2e
+
+      - name: Notify on failure
+        if: failure()
+        working-directory: ${{ github.workspace }}
+        env:
+          WORKFLOW: "${{ github.workflow }} / ${{ github.job }}"
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: ./scripts/ci-notify.sh
