@@ -32,6 +32,16 @@
 
   let program = $state<Program | null>(null);
   let days = $state<DayView[]>([]);
+
+  // Float today's scheduled workout to the top so the highlighted day leads.
+  // Stable sort keeps every other day in its original order.
+  let orderedDays = $derived(
+    [...days].sort(
+      (a, b) =>
+        Number(b.weekday === todayWeekday()) -
+        Number(a.weekday === todayWeekday()),
+    ),
+  );
   let loading = $state(true);
   let failed = $state(false);
   let startingDayId = $state<number | null>(null);
@@ -123,7 +133,7 @@
       </p>
     {/if}
 
-    {#each days as day (day.id)}
+    {#each orderedDays as day (day.id)}
       <Card
         class="p-5 {day.weekday === todayWeekday() ? 'ring-2 ring-primary' : ''}"
       >
