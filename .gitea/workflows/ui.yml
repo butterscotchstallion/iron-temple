@@ -28,10 +28,6 @@ jobs:
     defaults:
       run:
         working-directory: src/ui
-    env:
-      # Keep Playwright's browser cache in the default location so the cache step below
-      # persists it; a cache hit makes `playwright install` a no-op (no download).
-      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/ms-playwright
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -80,12 +76,23 @@ jobs:
       - name: Unit tests (Vitest)
         run: pnpm test:unit
 
-      # Cache the Playwright browser binaries. Keyed on the lockfile (which pins the
-      # @playwright/test version) → Firefox is downloaded only when that version bumps.
+      # Verify the production bundle actually builds. svelte-check type-checks the
+      # source, but the vite production build can still fail on bundler/asset issues
+      # that `check` never exercises.
+      - name: Build (production bundle)
+        run: pnpm build
+
+      # Cache the Playwright browser binaries at Playwright's DEFAULT location
+      # (~/.cache/ms-playwright). This path is stable across runs, so the browser also
+      # persists on the host-executor pod's filesystem between runs — Firefox is reused,
+      # not re-downloaded. (An earlier version set PLAYWRIGHT_BROWSERS_PATH under
+      # ${{ github.workspace }}, whose act workdir hash changes every run, so Firefox was
+      # re-downloaded ~85 MB on every run.) Keyed on the lockfile → the actions/cache
+      # entry only rotates when the @playwright/test version bumps.
       - name: Cache Playwright browsers
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
-          path: ${{ env.PLAYWRIGHT_BROWSERS_PATH }}
+          path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('src/ui/pnpm-lock.yaml') }}
           restore-keys: playwright-${{ runner.os }}-
 
@@ -101,6 +108,21 @@ jobs:
         env:
           CI: "true"
         run: pnpm test:e2e
+
+      # On e2e failure, keep the Playwright HTML report + traces so a failure can be
+      # debugged from the artifact instead of re-running the job. Pinned to v3.2.2 —
+      # actions/upload-artifact@v4+ is unsupported on Gitea Actions (it reports itself
+      # as GHES). Paths are workspace-relative (not affected by defaults.working-directory).
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@c6a366c94c3e0affe28c06c8df20a878f24da3cf # v3.2.2
+        with:
+          name: playwright-report-${{ github.run_id }}
+          path: |
+            src/ui/playwright-report/
+            src/ui/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Notify on failure
         if: failure()
