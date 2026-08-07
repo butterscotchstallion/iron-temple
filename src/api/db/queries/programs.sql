@@ -9,15 +9,21 @@ FROM programs
 WHERE id = $1;
 
 -- name: GetProgramDay :one
-SELECT id, program_id, name, position
+SELECT id, program_id, name, position, weekday
 FROM program_days
 WHERE id = $1;
 
 -- name: ListProgramDays :many
-SELECT id, program_id, name, position
+SELECT id, program_id, name, position, weekday
 FROM program_days
 WHERE program_id = $1
 ORDER BY position;
+
+-- name: UpdateProgramDayWeekday :one
+UPDATE program_days
+SET weekday = sqlc.narg('weekday')
+WHERE id = sqlc.arg('id')
+RETURNING id, program_id, name, position, weekday;
 
 -- ListPrescriptionsByProgram returns every prescribed exercise across all of a
 -- program's days, joined to the exercise name, ordered for assembly in Go.

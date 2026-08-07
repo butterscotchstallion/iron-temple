@@ -5,10 +5,12 @@
     getProgram,
     previewNextSession,
     createSession,
+    updateProgramDayWeekday,
     type Program,
   } from "../lib/api";
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
+  import { WEEKDAYS, todayWeekday } from "../lib/weekday";
 
   let { params }: { params?: { id?: string } } = $props();
   let programId = $derived(Number(params?.id));
@@ -17,6 +19,7 @@
   type DayView = {
     id: number;
     name: string;
+    weekday: number | null;
     exercises: {
       exerciseId: number;
       exerciseName: string;
@@ -53,6 +56,7 @@
         return {
           id: day.id,
           name: day.name,
+          weekday: day.weekday ?? null,
           exercises: preview.data?.exercises ?? [],
         };
       }),
@@ -70,6 +74,18 @@
       return;
     }
     push(`/sessions/${res.data.id}`);
+  }
+
+  // Assign (or clear) the weekday this day is scheduled on.
+  async function setWeekday(day: DayView, value: string) {
+    const weekday = value === "" ? null : Number(value);
+    const { error } = await updateProgramDayWeekday({
+      path: { programId, dayId: day.id },
+      body: { weekday },
+    });
+    if (!error) {
+      days = days.map((d) => (d.id === day.id ? { ...d, weekday } : d));
+    }
   }
 
   onMount(load);
@@ -107,9 +123,32 @@
     {/if}
 
     {#each days as day (day.id)}
-      <Card class="p-5">
-        <div class="flex items-center justify-between gap-3">
-          <h3 class="text-lg font-bold text-card-foreground">{day.name}</h3>
+      <Card
+        class="p-5 {day.weekday === todayWeekday() ? 'ring-2 ring-primary' : ''}"
+      >
+        <div class="flex items-start justify-between gap-3">
+          <div class="flex flex-col gap-1.5">
+            <div class="flex items-center gap-2">
+              <h3 class="text-lg font-bold text-card-foreground">{day.name}</h3>
+              {#if day.weekday === todayWeekday()}
+                <span
+                  class="rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary-foreground"
+                >
+                  Today
+                </span>
+              {/if}
+            </div>
+            <select
+              class="w-fit rounded-md border border-input bg-transparent px-2 py-1 text-xs text-muted-foreground"
+              value={day.weekday === null ? "" : String(day.weekday)}
+              onchange={(e) => setWeekday(day, e.currentTarget.value)}
+            >
+              <option value="">Unscheduled</option>
+              {#each WEEKDAYS as name, i (i)}
+                <option value={String(i)}>{name}</option>
+              {/each}
+            </select>
+          </div>
           <Button
             size="sm"
             onclick={() => start(day.id)}
