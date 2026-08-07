@@ -33,17 +33,25 @@ jobs:
 
       - name: Scan UI dependencies
         # `trivy fs src/ui` reads pnpm-lock.yaml directly — no `pnpm install` needed.
-        #   --scanners vuln : CVEs only (gitleaks owns secret scanning).
-        #   --ignore-unfixed: only flag vulns that HAVE a fix, so a failure is always
-        #                     actionable (bump the dep — Renovate opens the PR).
+        #   --scanners vuln     : CVEs only (gitleaks owns secret scanning).
+        #   --include-dev-deps  : scan the WHOLE dependency tree. The UI's deps are
+        #                         mostly devDependencies (vite/svelte/playwright/vitest/…);
+        #                         without this, Trivy scans only the handful of runtime
+        #                         deps and silently skips the bulk of the tree.
+        #   --ignore-unfixed    : only flag vulns that HAVE a fix, so a failure is always
+        #                         actionable (bump the dep — Renovate opens the PR).
         #   --cache-dir on the PVC persists the DB across pod restarts (downloaded once,
-        #                     shared with the homelab Trivy runs on the same runner).
+        #                         shared with the homelab Trivy runs on the same runner).
         #   --skip-java-db-update: no JARs here; skips the ~200MB Java DB.
         #   --ignorefile: accepted CVEs (with reason + expiry) live in .trivyignore.yaml.
+        #   --format table + --exit-code 1: print findings straight to the log and fail on
+        #                     one. (The old json + `trivy convert` combo emitted a confusing
+        #                     "No enabled scanners found" warning on clean runs.)
         timeout-minutes: 15
         run: |
           trivy fs \
             --scanners vuln \
+            --include-dev-deps \
             --severity CRITICAL,HIGH \
             --exit-code 1 \
             --ignore-unfixed \
@@ -51,26 +59,9 @@ jobs:
             --cache-dir /data/.cache/trivy \
             --skip-java-db-update \
             --timeout 10m \
-            --format json \
-            --output /tmp/trivy-ui.json \
-            src/ui || TRIVY_RC=$?
-          TRIVY_RC=${TRIVY_RC:-0}
-          echo "Trivy exit code: ${TRIVY_RC}"
-          trivy convert --format table /tmp/trivy-ui.json || true
-          if [ "${TRIVY_RC}" -ne 0 ]; then
-            echo "FAIL: fixable CRITICAL/HIGH CVEs in UI dependencies — bump them (Renovate)"
-            echo "      or triage with a reason + expiry in .trivyignore.yaml"
-            exit 1
-          fi
+            --format table \
+            src/ui
           echo "UI dependencies clean — no fixable CRITICAL/HIGH CVEs"
-
-      - name: Upload scan results
-        if: always()
-        uses: actions/upload-artifact@c6a366c94c3e0affe28c06c8df20a878f24da3cf # v3.2.2
-        with:
-          name: trivy-ui-${{ github.sha }}
-          path: /tmp/trivy-ui.json
-          if-no-files-found: warn
 
       - name: Notify on failure
         if: failure()
