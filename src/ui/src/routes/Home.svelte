@@ -37,9 +37,7 @@
 
 <div class="flex flex-col gap-6">
   {#if sessions.length > 0}
-    <div
-      class="grid gap-4 {streak >= STREAK_DISPLAY_THRESHOLD ? 'sm:grid-cols-2' : ''}"
-    >
+    <div class="flex flex-col gap-4">
       {#if streak >= STREAK_DISPLAY_THRESHOLD}
         <Card
           class="flex flex-col justify-center border-primary/40 bg-primary/5 p-6 text-center ring-primary/30"
