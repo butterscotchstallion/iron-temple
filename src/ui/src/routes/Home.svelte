@@ -50,7 +50,7 @@
       {/if}
       <Card class="p-4">
         <h3
-          class="mb-1 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground"
+          class="mb-0.5 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground"
         >
           Training days
         </h3>

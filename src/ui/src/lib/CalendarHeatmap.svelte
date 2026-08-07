@@ -4,7 +4,7 @@
   let { sessions }: { sessions: { performedOn: string; day: string }[] } =
     $props();
 
-  const WEEKS = 52; // a year, like GitHub
+  const WEEKS = 44; // ~10 months; fewer columns = slightly larger cells
 
   const MONTHS = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun",
