@@ -1,0 +1,14 @@
+# Trivy ignore file for iron-temple (used by .gitea/workflows/trivy.yml).
+#
+# Accept a CVE here ONLY with a reason and an expiry (expired_at) so it resurfaces for
+# review instead of being silenced forever. Prefer FIXING — bump the dependency; Renovate
+# will open the PR — over ignoring. The scan already excludes unfixable CVEs
+# (--ignore-unfixed), so anything that fails has a fix available.
+#
+# Format: https://trivy.dev/latest/docs/configuration/filtering/#by-finding-ids
+# Example:
+#   vulnerabilities:
+#     - id: CVE-2025-12345
+#       statement: transitive via <pkg>; no exploit path in our usage; upstream fix pending
+#       expired_at: 2026-12-31
+vulnerabilities: []

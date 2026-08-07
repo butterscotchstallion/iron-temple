@@ -1,0 +1,83 @@
+---
+name: Trivy (dependency scan)
+
+# Scans the frontend's npm dependency tree (src/ui/pnpm-lock.yaml) for known CVEs.
+# govulncheck already covers Go (reachability-aware), so this closes the gap for the
+# UI's dependencies. Trivy is baked into the homelab-runner image (ARG TRIVY_VERSION) —
+# no per-run binary download; the vulnerability DB is cached on the runner PVC
+# (/data/.cache/trivy), so it's fetched once and reused (Trivy's 24h TTL refreshes it).
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "src/ui/pnpm-lock.yaml"
+      - "src/ui/package.json"
+      - ".trivyignore.yaml"
+      - ".gitea/workflows/trivy.yml"
+  # Weekly sweep so a CVE disclosed against UNCHANGED deps is caught here instead of
+  # waiting for the next lockfile edit. Tue 04:17 UTC — spread off go-lint (Fri 03:00).
+  schedule:
+    - cron: "17 4 * * 2"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  trivy-fs:
+    name: Trivy dependency scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Scan UI dependencies
+        # `trivy fs src/ui` reads pnpm-lock.yaml directly — no `pnpm install` needed.
+        #   --scanners vuln : CVEs only (gitleaks owns secret scanning).
+        #   --ignore-unfixed: only flag vulns that HAVE a fix, so a failure is always
+        #                     actionable (bump the dep — Renovate opens the PR).
+        #   --cache-dir on the PVC persists the DB across pod restarts (downloaded once,
+        #                     shared with the homelab Trivy runs on the same runner).
+        #   --skip-java-db-update: no JARs here; skips the ~200MB Java DB.
+        #   --ignorefile: accepted CVEs (with reason + expiry) live in .trivyignore.yaml.
+        timeout-minutes: 15
+        run: |
+          trivy fs \
+            --scanners vuln \
+            --severity CRITICAL,HIGH \
+            --exit-code 1 \
+            --ignore-unfixed \
+            --ignorefile .trivyignore.yaml \
+            --cache-dir /data/.cache/trivy \
+            --skip-java-db-update \
+            --timeout 10m \
+            --format json \
+            --output /tmp/trivy-ui.json \
+            src/ui || TRIVY_RC=$?
+          TRIVY_RC=${TRIVY_RC:-0}
+          echo "Trivy exit code: ${TRIVY_RC}"
+          trivy convert --format table /tmp/trivy-ui.json || true
+          if [ "${TRIVY_RC}" -ne 0 ]; then
+            echo "FAIL: fixable CRITICAL/HIGH CVEs in UI dependencies — bump them (Renovate)"
+            echo "      or triage with a reason + expiry in .trivyignore.yaml"
+            exit 1
+          fi
+          echo "UI dependencies clean — no fixable CRITICAL/HIGH CVEs"
+
+      - name: Upload scan results
+        if: always()
+        uses: actions/upload-artifact@c6a366c94c3e0affe28c06c8df20a878f24da3cf # v3.2.2
+        with:
+          name: trivy-ui-${{ github.sha }}
+          path: /tmp/trivy-ui.json
+          if-no-files-found: warn
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          WORKFLOW: "${{ github.workflow }} / ${{ github.job }}"
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: ./scripts/ci-notify.sh
