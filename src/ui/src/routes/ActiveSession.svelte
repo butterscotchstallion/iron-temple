@@ -11,8 +11,7 @@
   } from "../lib/api";
   import confetti from "canvas-confetti";
   import RestTimer from "../lib/RestTimer.svelte";
-  import PlateGuide from "../lib/PlateGuide.svelte";
-  import { warmupSets } from "../lib/warmup";
+  import ExerciseCard from "../lib/ExerciseCard.svelte";
   import { Card } from "$lib/components/ui/card";
   import { Button, buttonVariants } from "$lib/components/ui/button";
   import * as AlertDialog from "$lib/components/ui/alert-dialog";
@@ -81,12 +80,7 @@
       list.push(set);
       byExercise.set(set.exerciseName, list);
     }
-    return [...byExercise.entries()].map(([name, sets]) => ({
-      name,
-      sets,
-      // Warm-up ramp to this exercise's work weight (recomputes if it changes).
-      warmups: warmupSets(sets[0].weightLb),
-    }));
+    return [...byExercise.entries()].map(([name, sets]) => ({ name, sets }));
   });
 
   // A set is "logged" once it has a rep count (success or a miss).
@@ -113,17 +107,6 @@
     if (set.actualReps == null) return 1;
     if (set.actualReps >= set.targetReps) return null; // wrap after the target
     return set.actualReps + 1;
-  }
-
-  // Tailwind classes for a set's circular button by state.
-  function setStateClass(set: SessionSet): string {
-    if (set.actualReps == null || set.actualReps === 0) {
-      return "border-border bg-transparent text-muted-foreground";
-    }
-    if (set.completed) {
-      return "border-primary bg-primary text-primary-foreground"; // hit target
-    }
-    return "border-primary bg-primary/20 text-foreground"; // in progress
   }
 
   // Tap a set to add a rep (wrapping to cleared after the target). Each rep tap
@@ -259,66 +242,12 @@
     </Card>
 
     {#each groups as group (group.name)}
-      <Card class="p-5">
-        <div class="flex items-center justify-between gap-3">
-          <h3 class="text-lg font-bold text-card-foreground">{group.name}</h3>
-          <div class="flex items-center gap-3">
-            <span class="text-sm tabular-nums text-muted-foreground">
-              {group.sets[0].targetReps} reps
-            </span>
-            <div class="flex items-center gap-1.5">
-              <Button
-                variant="outline"
-                size="icon-sm"
-                onclick={() => changeWeight(group.sets, -5)}
-                aria-label="Decrease weight by 5 lb"
-              >
-                −
-              </Button>
-              <span
-                class="min-w-16 text-center text-sm font-bold tabular-nums text-card-foreground"
-              >
-                {group.sets[0].weightLb} lb
-              </span>
-              <Button
-                variant="outline"
-                size="icon-sm"
-                onclick={() => changeWeight(group.sets, 5)}
-                aria-label="Increase weight by 5 lb"
-              >
-                +
-              </Button>
-            </div>
-          </div>
-        </div>
-        <div class="mt-4">
-          <PlateGuide
-            warmups={group.warmups}
-            workWeightLb={group.sets[0].weightLb}
-            workReps={group.sets[0].targetReps}
-            workSets={group.sets.length}
-          />
-        </div>
-        <p class="mt-4 text-xs text-muted-foreground">
-          Tap a set to add a rep; it clears after the target.
-        </p>
-        <div class="mt-3 flex flex-wrap gap-3">
-          {#each group.sets as set (set.id)}
-            <button
-              type="button"
-              class="flex size-12 cursor-pointer items-center justify-center rounded-full border text-base font-bold tabular-nums transition {setStateClass(
-                set,
-              )}"
-              onclick={() => cycle(set)}
-              aria-label={`Set ${set.setNumber}: ${
-                set.actualReps == null ? "not logged" : `${set.actualReps} reps`
-              }`}
-            >
-              {set.actualReps ?? 0}
-            </button>
-          {/each}
-        </div>
-      </Card>
+      <ExerciseCard
+        name={group.name}
+        sets={group.sets}
+        onCycle={cycle}
+        onChangeWeight={(delta) => changeWeight(group.sets, delta)}
+      />
     {/each}
 
     <AlertDialog.Root bind:open={showComplete}>
