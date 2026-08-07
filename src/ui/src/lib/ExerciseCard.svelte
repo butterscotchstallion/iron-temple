@@ -140,7 +140,7 @@
     </p>
   </div>
 
-  <!-- Warm-up circles (orange) then work-set circles (neon), in sequence. -->
+  <!-- Warm-up circles (cyan) then work-set circles (neon), in sequence. -->
   <div class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3">
     {#if warmups.length > 0}
       <div class="flex flex-wrap items-center gap-2">
