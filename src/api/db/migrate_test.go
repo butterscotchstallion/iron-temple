@@ -3,6 +3,7 @@ package db_test
 import (
 	"context"
 	"database/sql"
+	"os"
 	"testing"
 	"time"
 
@@ -23,23 +24,29 @@ func TestMigrateAppliesSchemaAndSeed(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	pg, err := postgres.Run(ctx, "postgres:17-alpine",
-		postgres.WithDatabase("iron_temple"),
-		postgres.WithUsername("test"),
-		postgres.WithPassword("test"),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).
-				WithStartupTimeout(60*time.Second)),
-	)
-	if err != nil {
-		t.Fatalf("start postgres container: %v", err)
-	}
-	t.Cleanup(func() { _ = pg.Terminate(ctx) })
+	// In CI, TEST_DATABASE_URL points at an ephemeral Postgres pod (the host-executor
+	// runner has no container runtime for Testcontainers). Locally, with the var unset,
+	// boot a throwaway Testcontainers Postgres as before.
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		pg, err := postgres.Run(ctx, "postgres:17-alpine",
+			postgres.WithDatabase("iron_temple"),
+			postgres.WithUsername("test"),
+			postgres.WithPassword("test"),
+			testcontainers.WithWaitStrategy(
+				wait.ForLog("database system is ready to accept connections").
+					WithOccurrence(2).
+					WithStartupTimeout(60*time.Second)),
+		)
+		if err != nil {
+			t.Fatalf("start postgres container: %v", err)
+		}
+		t.Cleanup(func() { _ = pg.Terminate(ctx) })
 
-	dsn, err := pg.ConnectionString(ctx, "sslmode=disable")
-	if err != nil {
-		t.Fatalf("connection string: %v", err)
+		dsn, err = pg.ConnectionString(ctx, "sslmode=disable")
+		if err != nil {
+			t.Fatalf("connection string: %v", err)
+		}
 	}
 
 	sqlDB, err := sql.Open("postgres", dsn)

@@ -35,23 +35,7 @@ func TestMain(m *testing.M) {
 	}
 
 	ctx := context.Background()
-	pg, err := postgres.Run(ctx, "postgres:17-alpine",
-		postgres.WithDatabase("iron_temple"),
-		postgres.WithUsername("test"),
-		postgres.WithPassword("test"),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).
-				WithStartupTimeout(60*time.Second)),
-	)
-	if err != nil {
-		log.Fatalf("start postgres container: %v", err)
-	}
-
-	dsn, err := pg.ConnectionString(ctx, "sslmode=disable")
-	if err != nil {
-		log.Fatalf("connection string: %v", err)
-	}
+	dsn, stopDB := testDB(ctx)
 
 	// Apply schema + seed via the shared migrator.
 	sqlDB, err := sql.Open("postgres", dsn)
@@ -75,8 +59,36 @@ func TestMain(m *testing.M) {
 
 	srv.Close()
 	pool.Close()
-	_ = pg.Terminate(ctx)
+	stopDB()
 	os.Exit(code)
+}
+
+// testDB returns a Postgres DSN for the suite plus a teardown func. In CI the
+// host-executor runner has no container runtime for Testcontainers, so when
+// TEST_DATABASE_URL is set (an ephemeral Postgres pod provisioned by the CI job) it
+// is used directly. Locally, with the var unset, a throwaway Testcontainers Postgres
+// is booted as before. stop terminates that container (a no-op for the external DB).
+func testDB(ctx context.Context) (dsn string, stop func()) {
+	if url := os.Getenv("TEST_DATABASE_URL"); url != "" {
+		return url, func() {}
+	}
+	pg, err := postgres.Run(ctx, "postgres:17-alpine",
+		postgres.WithDatabase("iron_temple"),
+		postgres.WithUsername("test"),
+		postgres.WithPassword("test"),
+		testcontainers.WithWaitStrategy(
+			wait.ForLog("database system is ready to accept connections").
+				WithOccurrence(2).
+				WithStartupTimeout(60*time.Second)),
+	)
+	if err != nil {
+		log.Fatalf("start postgres container: %v", err)
+	}
+	dsn, err = pg.ConnectionString(ctx, "sslmode=disable")
+	if err != nil {
+		log.Fatalf("connection string: %v", err)
+	}
+	return dsn, func() { _ = pg.Terminate(ctx) }
 }
 
 func expect(t *testing.T) *httpexpect.Expect {
