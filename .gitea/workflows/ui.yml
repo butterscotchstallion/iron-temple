@@ -35,16 +35,20 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      # Activate the pinned pnpm via corepack. Jobs run as root on the host executor
-      # (HOME=/root), so corepack installs its shim into Node's bin dir — already on
-      # PATH — and pnpm is usable immediately, in this same step. (An earlier attempt
-      # used --install-directory + $GITHUB_PATH, but GITHUB_PATH only affects *later*
-      # steps, so pnpm was missing here → "pnpm: command not found".) --activate
-      # fetches pnpm@<pinned> once; corepack caches it for later runs.
+      # Activate the pinned pnpm via corepack. The job's Node comes from the act
+      # toolcache (/opt/acttoolcache/node/.../bin), whose dir the job can't write to —
+      # a plain `corepack enable` fails there with EACCES. Install the shim into a
+      # writable dir instead ($HOME/.local/bin), publish it via $GITHUB_PATH for the
+      # later steps, and also export it in-process so the verify below works (GITHUB_PATH
+      # only takes effect in *subsequent* steps). --activate fetches pnpm@<pinned> once;
+      # corepack caches it for later runs.
       - name: Enable pnpm
         run: |
-          corepack enable
+          mkdir -p "$HOME/.local/bin"
+          corepack enable --install-directory "$HOME/.local/bin"
           corepack prepare pnpm@9.15.0 --activate
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.local/bin:$PATH"
           pnpm --version
 
       # Cache the pnpm content-addressable store so packages aren't re-fetched.
