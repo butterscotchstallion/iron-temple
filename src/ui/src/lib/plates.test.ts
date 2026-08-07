@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { platesPerSide } from "./plates";
+import { platesPerSide, plateLabel } from "./plates";
 
 describe("platesPerSide", () => {
   it("is empty for the bar alone or lighter (80 lb bar)", () => {
@@ -20,5 +20,18 @@ describe("platesPerSide", () => {
 
   it("respects a custom bar weight", () => {
     expect(platesPerSide(95, 45)).toEqual([25]); // (95-45)/2 = 25
+  });
+});
+
+describe("plateLabel", () => {
+  it("says 'bar only' at or below the bar", () => {
+    expect(plateLabel(80)).toBe("bar only");
+    expect(plateLabel(60)).toBe("bar only");
+  });
+
+  it("joins the per-side plates largest-first", () => {
+    expect(plateLabel(90)).toBe("5 / side");
+    expect(plateLabel(140)).toBe("25 + 5 / side"); // (140-80)/2 = 30
+    expect(plateLabel(180)).toBe("45 + 5 / side"); // (180-80)/2 = 50
   });
 });
