@@ -43,3 +43,10 @@ pre-commit:
       root: "src/ui/"
       glob: "src/ui/**/*.{ts,svelte}"
       run: pnpm test:unit
+
+pre-push:
+  commands:
+    no-orphan-branch:
+      # Block pushing a branch whose remote was deleted (e.g. after its PR merged) —
+      # re-pushing would silently re-create it as an orphan. See dev/pre-push-guard.sh.
+      run: sh dev/pre-push-guard.sh
