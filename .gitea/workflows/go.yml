@@ -1,0 +1,161 @@
+---
+name: Go Lint & Test
+
+# Backend CI for src/api (Go + chi). Mirrors the homelab-gitops go-lint.yml job
+# set — go.mod tidy check, vet, golangci-lint, govulncheck, gosec, test+coverage —
+# adapted for this repo: a single vendored module, and `go test -short` because the
+# integration tests use Testcontainers (no container runtime on the host executor).
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "src/api/**"
+      - ".gitea/workflows/go.yml"
+      - ".gitea/scripts/**"
+  # Weekly sweep: govulncheck re-checks the modules + toolchain stdlib against the
+  # live vuln DB, so a CVE disclosed against UNCHANGED code is caught here instead
+  # of waiting for the next edit. Fri 03:00 UTC (spreads load off the homelab-gitops
+  # schedules: Kubescape Mon, Trivy Wed, DAST Thu).
+  schedule:
+    - cron: "0 3 * * 5"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go Lint & Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/api
+    env:
+      # Go toolchain + golangci-lint + govulncheck are baked into the homelab-runner
+      # image (/usr/local/go, /usr/local/bin) — no per-run downloads. gosec is the one
+      # exception: since v2.28.0 its graph pulls in the large openai-go SDK, which OOMs
+      # the runner if compiled, so we fetch its prebuilt (sha256-verified) binary and
+      # cache it. GOSEC_VERSION is its single source of truth.
+      GOSEC_VERSION: v2.28.0
+      # Pin the baked toolchain; never silently fetch a newer one. go.mod says `go 1.26`
+      # and the image bakes 1.26.x — a module needing newer Go fails loudly (rebuild the
+      # runner image) rather than downloading a toolchain at run time.
+      GOTOOLCHAIN: local
+      # Runner drops ALL caps (no CAP_CHOWN) → tar can't chown on a cache-cold restore.
+      # GNU tar honours TAR_OPTIONS; skip the chown.
+      TAR_OPTIONS: --no-same-owner
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Use the Go toolchain baked into the runner image instead of actions/setup-go
+      # (no download). GOTOOLCHAIN=local pins it.
+      - name: Use the baked Go toolchain
+        run: |
+          echo "/usr/local/go/bin" >> "$GITHUB_PATH"
+          # GOPATH/bin holds the cached gosec binary.
+          echo "$(/usr/local/go/bin/go env GOPATH)/bin" >> "$GITHUB_PATH"
+          /usr/local/go/bin/go version
+
+      # On a reused host-executor pod, module files from a previous job linger read-only
+      # (0444), so tar fails with "File exists" on cache restore. Make them writable.
+      - name: Prepare Go cache dirs
+        run: chmod -R u+w ~/go/pkg/mod ~/.cache/go-build 2>/dev/null || true
+
+      # Cache the module + build caches so deps aren't re-fetched/re-compiled each run.
+      # Keyed on this module's go.sum with a prefix restore-key fallback.
+      - name: Cache Go modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-${{ runner.os }}-${{ hashFiles('src/api/go.sum') }}
+          restore-keys: go-${{ runner.os }}-
+
+      # Cache gosec's prebuilt binary across runs — only re-downloaded when GOSEC_VERSION bumps.
+      - name: Cache gosec
+        id: cache-gosec
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/go/bin/gosec
+          key: gosec-${{ env.GOSEC_VERSION }}-${{ runner.os }}
+
+      # Download gosec's prebuilt release binary (sha256-verified against the published
+      # checksums) instead of `go install`, which would compile its whole dep graph
+      # (incl. the large openai-go SDK) and OOM the runner. Skipped entirely on cache hit.
+      - name: Install gosec
+        if: steps.cache-gosec.outputs.cache-hit != 'true'
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          ver="${GOSEC_VERSION#v}"
+          bindir="$(go env GOPATH)/bin"
+          base="https://github.com/securego/gosec/releases/download/${GOSEC_VERSION}"
+          asset="gosec_${ver}_linux_amd64.tar.gz"
+          mkdir -p "$bindir"
+          curl -sSfL --connect-timeout 30 --max-time 120 --retry 3 --retry-delay 5 \
+            -o /tmp/gosec.tar.gz "${base}/${asset}"
+          # goreleaser's checksum filename varies by config version — try the versioned
+          # name, then the generic one. Fail loudly if neither yields our asset's hash.
+          curl -sSfL --connect-timeout 30 --max-time 120 --retry 3 --retry-delay 5 \
+            -o /tmp/gosec_checksums.txt "${base}/gosec_${ver}_checksums.txt" \
+            || curl -sSfL --connect-timeout 30 --max-time 120 --retry 3 --retry-delay 5 \
+                 -o /tmp/gosec_checksums.txt "${base}/checksums.txt"
+          expected=$(grep "${asset}$" /tmp/gosec_checksums.txt | awk '{print $1}')
+          if [ -z "$expected" ]; then
+            echo "::error::no sha256 for ${asset} in gosec checksums file"; exit 1
+          fi
+          echo "${expected}  /tmp/gosec.tar.gz" | sha256sum --check
+          tar -xz --no-same-owner -C "$bindir" -f /tmp/gosec.tar.gz gosec
+          rm /tmp/gosec.tar.gz /tmp/gosec_checksums.txt
+
+      # Verify go.mod/go.sum are in sync with the imports. Runs `go mod tidy` then fails
+      # if it changed anything (a stray require, a missing sum entry) — mainly guards
+      # Renovate bumps. Deterministic because GOTOOLCHAIN=local pins the toolchain.
+      - name: Verify go.mod is tidy
+        run: |
+          go mod tidy
+          if [ -n "$(git status --porcelain -- go.mod go.sum)" ]; then
+            echo "::error::go.mod/go.sum not tidy — run 'go mod tidy' and commit the result"
+            git --no-pager diff -- go.mod go.sum
+            exit 1
+          fi
+
+      # vet uses the committed vendor/ tree automatically and fails on inconsistent vendoring.
+      - name: go vet
+        run: go vet ./...
+
+      # golangci-lint is baked on PATH; uses the committed src/api/.golangci.yml (v2).
+      # --allow-parallel-runners: the host executor may run two jobs in one pod, whose
+      # shared cache lock otherwise fails the second. retry-etxtbsy guards the shared-FS
+      # exec race.
+      - name: golangci-lint
+        run: bash "$GITHUB_WORKSPACE/.gitea/scripts/retry-etxtbsy" golangci-lint run --allow-parallel-runners
+
+      - name: govulncheck
+        run: bash "$GITHUB_WORKSPACE/.gitea/scripts/retry-etxtbsy" govulncheck ./...
+
+      # gosec (SAST). retry-gosec also retries the transient compile/SSA build fault
+      # (never a real finding — it keys on the fault signature).
+      - name: gosec
+        run: bash "$GITHUB_WORKSPACE/.gitea/scripts/retry-gosec" gosec -severity medium -confidence medium ./...
+
+      # -short skips the Testcontainers integration tests (they need a container runtime
+      # the host executor lacks); the pure unit tests still run with the race detector.
+      - name: go test
+        run: go test -short -count=1 -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: coverage report
+        run: go tool cover -func=coverage.out
+
+      - name: Notify on failure
+        if: failure()
+        working-directory: ${{ github.workspace }}
+        env:
+          WORKFLOW: "${{ github.workflow }} / ${{ github.job }}"
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: ./scripts/ci-notify.sh

@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# retry-gosec CMD [ARGS...]
+#
+# Run gosec (or any go-compiling command), retrying ONLY on two TRANSIENT,
+# runner-side failure classes — never on a real finding:
+#
+#   1. exit 126 (ETXTBSY) — a shared-pod exec race, same as retry-etxtbsy.
+#   2. a compile / SSA BUILD fault — gosec prints "Error building the SSA
+#      representation" and/or the Go compiler dies with "fatal error:" / a
+#      "signal SIGBUS|SIGSEGV" (a corrupted mmap'd build-cache object; seen once
+#      on run #5867 with every other check on the same commit green). Before
+#      retrying we `go clean -cache` so the recompile can't hit the same bad
+#      object.
+#
+# A genuine gosec finding exits non-zero WITHOUT that build-fault signature (it
+# prints an issue list, "Issues: N>0"), so it is propagated immediately and can
+# never be masked by a retry. This is why the retry keys on the build-fault
+# SIGNATURE, not merely on a non-zero exit.
+set -u
+
+if [ "$#" -eq 0 ]; then
+  echo "retry-gosec: no command given" >&2
+  exit 2
+fi
+
+fault_re='Error building the SSA representation|fatal error:|signal SIGBUS|signal SIGSEGV'
+out="$(mktemp)"
+trap 'rm -f "$out"' EXIT
+
+rc=0
+for attempt in 1 2 3; do
+  "$@" 2>&1 | tee "$out"
+  rc="${PIPESTATUS[0]}"
+  [ "$rc" -eq 0 ] && exit 0
+
+  if [ "$rc" -eq 126 ]; then
+    echo "retry-gosec: ETXTBSY exec race (attempt ${attempt}/3) — waiting 5s" >&2
+    sleep 5
+    continue
+  fi
+  if grep -qE "$fault_re" "$out"; then
+    echo "retry-gosec: transient compile/SSA build fault (attempt ${attempt}/3) — clearing Go build cache, retrying in 5s" >&2
+    go clean -cache 2>/dev/null || rm -rf "${GOCACHE:-$HOME/.cache/go-build}" 2>/dev/null || true
+    sleep 5
+    continue
+  fi
+
+  # Any other non-zero exit is a real result (findings / genuine error) — propagate.
+  exit "$rc"
+done
+
+echo "retry-gosec: still failing after 3 attempts — if this is the compile fault, the runner's Go build cache may be persistently corrupted; bust the go-lint cache key." >&2
+exit "$rc"
