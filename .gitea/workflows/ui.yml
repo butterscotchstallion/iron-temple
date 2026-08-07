@@ -107,6 +107,14 @@ jobs:
       - name: E2E tests (Playwright/Firefox)
         env:
           CI: "true"
+          # Disable Firefox's in-browser content sandbox. In the locked-down runner pod
+          # it can't create its unprivileged user namespace — the browser log shows
+          # "Sandbox: writing /proc/self/uid_map: EPERM", after which every content
+          # process exits on SIGSEGV, so no tab spawns ("remoteTab is null") and
+          # newPage() times out. The pod's own securityContext + seccomp already isolate
+          # the browser, so the in-browser sandbox is redundant here. CI-scoped — local
+          # runs keep the sandbox enabled.
+          MOZ_DISABLE_CONTENT_SANDBOX: "1"
         run: pnpm test:e2e
 
       # On e2e failure, keep the Playwright HTML report + traces so a failure can be
