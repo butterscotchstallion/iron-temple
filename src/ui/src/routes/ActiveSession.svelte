@@ -33,7 +33,6 @@
   // Personal-record tracking: best weight per exercise BEFORE this session.
   let prBest: Record<number, number> = {};
   let prReady = false;
-  const celebrated = new Set<number>();
   let prMessage = $state<string | null>(null);
   let prTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -43,11 +42,12 @@
     const { data, error } = await getSession({ path: { sessionId } });
     if (error || !data) {
       failed = true;
-    } else {
-      session = data;
+      loading = false;
+      return;
     }
+    session = data;
+    await loadPRs(); // resolve PRs before the session is interactive
     loading = false;
-    if (session) void loadPRs();
   }
 
   // Each lift's best weight before this session, used to detect a new PR.
@@ -137,15 +137,12 @@
     // Clearing a set (wrap back to 0) doesn't touch the timer.
     if (reps == null) return;
 
-    // New PR: first completed set above this lift's prior best.
-    if (completed && prReady && !celebrated.has(set.exerciseId)) {
-      if (set.weightLb > (prBest[set.exerciseId] ?? 0)) {
-        celebrated.add(set.exerciseId);
-        prMessage = `${set.exerciseName} · ${set.weightLb} lb`;
-        confetti({ particleCount: 120, spread: 70, origin: { y: 0.5 } });
-        if (prTimer) clearTimeout(prTimer);
-        prTimer = setTimeout(() => (prMessage = null), 4500);
-      }
+    // New PR: a completed set above this lift's prior best.
+    if (completed && prReady && set.weightLb > (prBest[set.exerciseId] ?? 0)) {
+      prMessage = `${set.exerciseName} · ${set.weightLb} lb`;
+      confetti({ particleCount: 120, spread: 70, origin: { y: 0.5 } });
+      if (prTimer) clearTimeout(prTimer);
+      prTimer = setTimeout(() => (prMessage = null), 6000);
     }
 
     const nowAllComplete = session.sets.every((s) => s.completed);
