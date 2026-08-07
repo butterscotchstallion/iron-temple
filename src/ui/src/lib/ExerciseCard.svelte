@@ -32,18 +32,30 @@
     return out;
   });
 
-  // Warm-ups aren't persisted (they're a guide), so their completion is local.
-  let warmupDone = $state<boolean[]>([]);
+  // Warm-ups aren't persisted (they're a guide), so reps are tracked locally.
+  // They count up from 0 to the target then clear, just like work sets.
+  let warmupReps = $state<(number | null)[]>([]);
   $effect(() => {
-    if (warmupDone.length !== warmups.length) {
-      warmupDone = warmups.map((_, i) => warmupDone[i] ?? false);
+    if (warmupReps.length !== warmups.length) {
+      warmupReps = warmups.map((_, i) => warmupReps[i] ?? null);
     }
   });
+
+  function warmDone(i: number): boolean {
+    const r = warmupReps[i];
+    return r != null && r >= warmups[i].reps;
+  }
+
+  function cycleWarmup(i: number) {
+    const cur = warmupReps[i];
+    const target = warmups[i].reps;
+    warmupReps[i] = cur == null ? 1 : cur >= target ? null : cur + 1;
+  }
 
   // The combined sequence is warm-ups (0..w-1) then work sets (w..).
   const total = $derived(warmups.length + sets.length);
   function isDone(i: number): boolean {
-    if (i < warmups.length) return warmupDone[i] ?? false;
+    if (i < warmups.length) return warmDone(i);
     return sets[i - warmups.length]?.completed ?? false;
   }
   // The active step drives the plate guide: the first set not yet done, so the
@@ -60,11 +72,16 @@
   );
 
   function warmClass(i: number): string {
-    const ring = active === i ? "ring-2 ring-orange-400 ring-offset-2 ring-offset-card " : "";
-    const done = warmupDone[i]
-      ? "border-orange-500 bg-orange-500 text-background"
-      : "border-orange-500/60 bg-orange-500/10 text-orange-500";
-    return ring + done;
+    const ring =
+      active === i ? "ring-2 ring-cyan ring-offset-2 ring-offset-card " : "";
+    const reps = warmupReps[i];
+    if (reps == null || reps === 0) {
+      return ring + "border-cyan/40 bg-transparent text-cyan/70";
+    }
+    if (reps >= warmups[i].reps) {
+      return ring + "border-cyan bg-cyan text-background"; // hit target
+    }
+    return ring + "border-cyan bg-cyan/20 text-foreground"; // in progress
   }
 
   function workClass(set: SessionSet, i: number): string {
@@ -133,11 +150,12 @@
             class="flex size-11 cursor-pointer items-center justify-center rounded-full border text-sm font-bold tabular-nums transition {warmClass(
               i,
             )}"
-            onclick={() => (warmupDone[i] = !warmupDone[i])}
-            aria-label={`Warm-up ${w.weightLb} lb × ${w.reps}`}
-            aria-pressed={warmupDone[i]}
+            onclick={() => cycleWarmup(i)}
+            aria-label={`Warm-up ${w.weightLb} lb × ${w.reps}: ${
+              warmupReps[i] ?? 0
+            } reps`}
           >
-            {w.reps}
+            {warmupReps[i] ?? 0}
           </button>
         {/each}
       </div>
@@ -162,7 +180,7 @@
   </div>
 
   <p class="mt-3 text-xs text-muted-foreground">
-    {#if warmups.length > 0}Orange = warm-up (tap to check off). {/if}Tap a work
-    set to add a rep; it clears after the target.
+    {#if warmups.length > 0}Cyan sets are warm-ups. {/if}Tap a set to add a rep;
+    it clears after the target.
   </p>
 </Card>
