@@ -1,0 +1,59 @@
+# Ephemeral Postgres for the API integration tests (see .gitea/workflows/integration.yml).
+#
+# The integration workflow substitutes __POD_NAME__ and `kubectl create`s this into the
+# gitea namespace (the act-runner ServiceAccount can create/delete pods there), waits for
+# readiness, points TEST_DATABASE_URL at the pod IP, runs the suite, then deletes it.
+#
+# The `app: iron-temple-ci-pg` label is what the NetworkPolicies key on (runner egress →
+# this pod:5432, and this pod's ingress ← runner), so the DB is reachable regardless of
+# its per-run pod IP. gitea namespace PSA is `privileged`, so no securityContext is needed.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: __POD_NAME__
+  namespace: gitea
+  labels:
+    app: iron-temple-ci-pg
+spec:
+  restartPolicy: Never
+  # Reaped by the workflow's always() cleanup; this is a backstop if that never runs.
+  activeDeadlineSeconds: 1800
+  containers:
+    - name: postgres
+      image: postgres:17-alpine
+      env:
+        - name: POSTGRES_USER
+          value: test
+        - name: POSTGRES_PASSWORD
+          value: test
+        - name: POSTGRES_DB
+          value: iron_temple
+        # Ephemeral data — skip fsync for a faster initdb / test run.
+        - name: POSTGRES_INITDB_ARGS
+          value: --no-sync
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+      ports:
+        - containerPort: 5432
+      readinessProbe:
+        # `ready` means Postgres actually accepts connections, so `kubectl wait
+        # --for=condition=ready` gates the test step correctly.
+        exec:
+          command: ["pg_isready", "-U", "test", "-d", "iron_temple"]
+        initialDelaySeconds: 2
+        periodSeconds: 2
+        timeoutSeconds: 3
+        failureThreshold: 30
+      volumeMounts:
+        - name: pgdata
+          mountPath: /var/lib/postgresql/data
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: "1"
+          memory: 512Mi
+  volumes:
+    - name: pgdata
+      emptyDir: {}
