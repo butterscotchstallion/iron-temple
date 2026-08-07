@@ -1,0 +1,51 @@
+---
+name: Validate Deploy Manifests
+
+# Renders and validates the deploy/ kustomize overlay so broken k8s YAML is caught
+# before it reaches a cluster. kubectl (with built-in kustomize) and kubeconform are
+# baked into the homelab-runner image — no per-run downloads.
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "deploy/**"
+      - ".gitea/workflows/validate-deploy.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate deploy manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: kustomize build
+        # Renders deploy/ (Job + generated ConfigMap). Fails on any kustomize error —
+        # missing file, bad reference, invalid kustomization. This step alone needs no
+        # network and catches the most common breakage.
+        run: |
+          kubectl kustomize deploy/ > /tmp/rendered.yaml
+          echo "Rendered resources:"
+          grep -E '^kind:|^  name:' /tmp/rendered.yaml || true
+
+      - name: kubeconform (schema validation)
+        # Validates the rendered manifests against the Kubernetes JSON schemas.
+        # -ignore-missing-schemas keeps it from hard-failing on any kind without a
+        # published schema; -strict rejects unknown/misspelled fields. Schemas are
+        # fetched online (the deploy/ set is tiny, so the concurrency-flake that made
+        # homelab-gitops vendor schemas isn't a concern here).
+        run: kubeconform -strict -summary -ignore-missing-schemas /tmp/rendered.yaml
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          WORKFLOW: "${{ github.workflow }} / ${{ github.job }}"
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: ./scripts/ci-notify.sh

@@ -1,0 +1,18 @@
+# gitleaks config for iron-temple.
+#
+# Extends the built-in ruleset (useDefault) and allowlists the only
+# credential-looking strings in the repo — local-dev and test-only values that are
+# never used outside `dev/` or the test suite. Real secrets are injected at runtime
+# via Kubernetes Secrets (see deploy/job.yaml secretKeyRef), never committed.
+
+title = "iron-temple gitleaks"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Dev- and test-only credentials (throwaway; not real secrets)"
+paths = [
+  '''dev/docker-compose\.yml''', # POSTGRES_PASSWORD: postgres — throwaway local DB
+  '''.*_test\.go''',             # Testcontainers postgres.WithPassword("test")
+]

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":semanticCommits"
+  ],
+  "postUpdateOptions": [
+    "gomodTidy",
+    "gomodVendor"
+  ],
+  "packageRules": [
+    {
+      "description": "Group non-major updates per ecosystem to keep PR noise low.",
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "groupName": "{{manager}} minor and patch"
+    }
+  ]
+}

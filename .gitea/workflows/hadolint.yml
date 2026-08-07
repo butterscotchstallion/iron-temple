@@ -1,0 +1,49 @@
+---
+name: Hadolint (Dockerfile lint)
+
+# Lints the repo's own Dockerfiles for best-practice / security issues. hadolint is
+# baked into the homelab-runner image (see homelab-gitops services/act-runner/
+# Dockerfile, ARG HADOLINT_VERSION) — no per-run download; called from PATH.
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "**/Dockerfile"
+      - ".hadolint.yaml"
+      - ".gitea/workflows/hadolint.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hadolint:
+    name: Hadolint scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Lint Dockerfiles
+        # Scan our Dockerfiles only — exclude src/api/vendor/ (third-party modules
+        # ship their own Dockerfiles we don't control). retry-etxtbsy guards the
+        # shared-pod exec race (helper copied from homelab-gitops in the CI setup PR).
+        run: |
+          mapfile -t dockerfiles < <(
+            find . -name Dockerfile \
+              -not -path './.git/*' \
+              -not -path './src/api/vendor/*' | sort
+          )
+          echo "Linting ${#dockerfiles[@]} Dockerfile(s):"
+          printf '  %s\n' "${dockerfiles[@]}"
+          bash "$GITHUB_WORKSPACE/.gitea/scripts/retry-etxtbsy" hadolint "${dockerfiles[@]}"
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          WORKFLOW: "${{ github.workflow }} / ${{ github.job }}"
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: ./scripts/ci-notify.sh
