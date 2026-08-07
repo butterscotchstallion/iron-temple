@@ -3,6 +3,7 @@
   import { push, link } from "svelte-spa-router";
   import {
     getSession,
+    getExerciseHistory,
     updateSessionSet,
     deleteSession,
     type Session,
@@ -29,6 +30,13 @@
   // Controls the "Sets complete" celebration dialog.
   let showComplete = $state(false);
 
+  // Personal-record tracking: best weight per exercise BEFORE this session.
+  let prBest: Record<number, number> = {};
+  let prReady = false;
+  const celebrated = new Set<number>();
+  let prMessage = $state<string | null>(null);
+  let prTimer: ReturnType<typeof setTimeout> | undefined;
+
   async function load() {
     loading = true;
     failed = false;
@@ -39,9 +47,30 @@
       session = data;
     }
     loading = false;
+    if (session) void loadPRs();
+  }
+
+  // Each lift's best weight before this session, used to detect a new PR.
+  async function loadPRs() {
+    if (!session) return;
+    const ids = [...new Set(session.sets.map((s) => s.exerciseId))];
+    const results = await Promise.all(
+      ids.map((id) => getExerciseHistory({ path: { exerciseId: id } })),
+    );
+    ids.forEach((id, i) => {
+      const points = results[i].data ?? [];
+      prBest[id] = points.length
+        ? Math.max(...points.map((p) => p.weightLb))
+        : 0;
+    });
+    prReady = true;
   }
 
   onMount(load);
+
+  $effect(() => () => {
+    if (prTimer) clearTimeout(prTimer);
+  });
 
   // Sets grouped by exercise, preserving prescription order.
   const groups = $derived.by(() => {
@@ -108,6 +137,17 @@
     // Clearing a set (wrap back to 0) doesn't touch the timer.
     if (reps == null) return;
 
+    // New PR: first completed set above this lift's prior best.
+    if (completed && prReady && !celebrated.has(set.exerciseId)) {
+      if (set.weightLb > (prBest[set.exerciseId] ?? 0)) {
+        celebrated.add(set.exerciseId);
+        prMessage = `${set.exerciseName} · ${set.weightLb} lb`;
+        confetti({ particleCount: 120, spread: 70, origin: { y: 0.5 } });
+        if (prTimer) clearTimeout(prTimer);
+        prTimer = setTimeout(() => (prMessage = null), 4500);
+      }
+    }
+
     const nowAllComplete = session.sets.every((s) => s.completed);
     if (nowAllComplete && !wasAllComplete) {
       restResetKey += 1;
@@ -153,6 +193,15 @@
   >
     ← Workout
   </a>
+
+  {#if prMessage}
+    <div
+      class="rounded-2xl border border-primary/60 bg-primary/15 p-3 text-center"
+      role="status"
+    >
+      <p class="font-black text-primary">🏆 New PR! {prMessage}</p>
+    </div>
+  {/if}
 
   {#if loading}
     <Card class="h-40 animate-pulse"></Card>
