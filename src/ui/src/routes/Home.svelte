@@ -47,7 +47,12 @@
           </p>
         </Card>
       {/if}
-      <Card class="flex items-center p-3">
+      <Card class="p-4">
+        <h3
+          class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground"
+        >
+          Training days
+        </h3>
         <CalendarHeatmap dates={sessionDates} />
       </Card>
     </div>

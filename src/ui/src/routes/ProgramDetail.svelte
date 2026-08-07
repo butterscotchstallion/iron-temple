@@ -11,6 +11,7 @@
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
   import { WEEKDAYS, todayWeekday } from "../lib/weekday";
+  import Calendar from "@lucide/svelte/icons/calendar";
 
   let { params }: { params?: { id?: string } } = $props();
   let programId = $derived(Number(params?.id));
@@ -126,28 +127,31 @@
       <Card
         class="p-5 {day.weekday === todayWeekday() ? 'ring-2 ring-primary' : ''}"
       >
-        <div class="flex items-start justify-between gap-3">
-          <div class="flex flex-col gap-1.5">
-            <div class="flex items-center gap-2">
-              <h3 class="text-lg font-bold text-card-foreground">{day.name}</h3>
-              {#if day.weekday === todayWeekday()}
-                <span
-                  class="rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary-foreground"
-                >
-                  Today
-                </span>
-              {/if}
-            </div>
-            <select
-              class="w-fit rounded-md border border-input bg-transparent px-2 py-1 text-xs text-muted-foreground"
-              value={day.weekday === null ? "" : String(day.weekday)}
-              onchange={(e) => setWeekday(day, e.currentTarget.value)}
+        <div class="flex items-center justify-between gap-3">
+          <div class="flex flex-wrap items-center gap-2">
+            <h3 class="text-lg font-bold text-card-foreground">{day.name}</h3>
+            {#if day.weekday === todayWeekday()}
+              <span
+                class="rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary-foreground"
+              >
+                Today
+              </span>
+            {/if}
+            <label
+              class="flex items-center gap-1 rounded-md border border-input px-2 py-1 text-xs text-muted-foreground"
             >
-              <option value="">Unscheduled</option>
-              {#each WEEKDAYS as name, i (i)}
-                <option value={String(i)}>{name}</option>
-              {/each}
-            </select>
+              <Calendar class="size-3.5" />
+              <select
+                class="bg-transparent outline-none"
+                value={day.weekday === null ? "" : String(day.weekday)}
+                onchange={(e) => setWeekday(day, e.currentTarget.value)}
+              >
+                <option value="">Unscheduled</option>
+                {#each WEEKDAYS as name, i (i)}
+                  <option value={String(i)}>{name}</option>
+                {/each}
+              </select>
+            </label>
           </div>
           <Button
             size="sm"
