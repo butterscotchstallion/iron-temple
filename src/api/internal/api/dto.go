@@ -46,6 +46,7 @@ type programDayDTO struct {
 	ID        int32                   `json:"id"`
 	Name      string                  `json:"name"`
 	Position  int32                   `json:"position"`
+	Weekday   *int32                  `json:"weekday"`
 	Exercises []programDayExerciseDTO `json:"exercises"`
 }
 

@@ -4,6 +4,7 @@ sql:
     # Point sqlc at the schema DDL only (not the seed DML or the down files).
     schema:
       - "db/migrations/0001_init.up.sql"
+      - "db/migrations/0003_program_day_weekday.up.sql"
     queries: "db/queries"
     gen:
       go:

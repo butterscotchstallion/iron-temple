@@ -37,7 +37,7 @@ func (q *Queries) GetProgram(ctx context.Context, id int32) (GetProgramRow, erro
 }
 
 const getProgramDay = `-- name: GetProgramDay :one
-SELECT id, program_id, name, position
+SELECT id, program_id, name, position, weekday
 FROM program_days
 WHERE id = $1
 `
@@ -50,6 +50,7 @@ func (q *Queries) GetProgramDay(ctx context.Context, id int32) (ProgramDay, erro
 		&i.ProgramID,
 		&i.Name,
 		&i.Position,
+		&i.Weekday,
 	)
 	return i, err
 }
@@ -219,7 +220,7 @@ func (q *Queries) ListPrescriptionsByProgram(ctx context.Context, programID int3
 }
 
 const listProgramDays = `-- name: ListProgramDays :many
-SELECT id, program_id, name, position
+SELECT id, program_id, name, position, weekday
 FROM program_days
 WHERE program_id = $1
 ORDER BY position
@@ -239,6 +240,7 @@ func (q *Queries) ListProgramDays(ctx context.Context, programID int32) ([]Progr
 			&i.ProgramID,
 			&i.Name,
 			&i.Position,
+			&i.Weekday,
 		); err != nil {
 			return nil, err
 		}
@@ -286,4 +288,29 @@ func (q *Queries) ListPrograms(ctx context.Context) ([]ListProgramsRow, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateProgramDayWeekday = `-- name: UpdateProgramDayWeekday :one
+UPDATE program_days
+SET weekday = $1
+WHERE id = $2
+RETURNING id, program_id, name, position, weekday
+`
+
+type UpdateProgramDayWeekdayParams struct {
+	Weekday *int32 `json:"weekday"`
+	ID      int32  `json:"id"`
+}
+
+func (q *Queries) UpdateProgramDayWeekday(ctx context.Context, arg UpdateProgramDayWeekdayParams) (ProgramDay, error) {
+	row := q.db.QueryRow(ctx, updateProgramDayWeekday, arg.Weekday, arg.ID)
+	var i ProgramDay
+	err := row.Scan(
+		&i.ID,
+		&i.ProgramID,
+		&i.Name,
+		&i.Position,
+		&i.Weekday,
+	)
+	return i, err
 }

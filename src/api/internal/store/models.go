@@ -27,6 +27,7 @@ type ProgramDay struct {
 	ProgramID int32  `json:"program_id"`
 	Name      string `json:"name"`
 	Position  int32  `json:"position"`
+	Weekday   *int32 `json:"weekday"`
 }
 
 type ProgramDayExercise struct {

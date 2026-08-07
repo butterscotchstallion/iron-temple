@@ -52,6 +52,7 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 			r.Get("/", s.listPrograms)
 			r.Get("/{programId}", s.getProgram)
 			r.Get("/{programId}/days/{dayId}/next-session", s.previewNextSession)
+			r.Patch("/{programId}/days/{dayId}", s.updateProgramDayWeekday)
 		})
 
 		r.Route("/sessions", func(r chi.Router) {

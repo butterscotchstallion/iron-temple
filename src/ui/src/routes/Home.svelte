@@ -11,7 +11,7 @@
   // program's workout. First-time users (no history) get the picker instead.
   let currentProgramId = $state<number | null>(null);
   let streak = $state(0);
-  let sessionDates = $state<string[]>([]);
+  let sessions = $state<{ performedOn: string; day: string }[]>([]);
   let loading = $state(true);
 
   async function load() {
@@ -20,11 +20,14 @@
     if (data && data.items.length > 0) {
       currentProgramId = data.items[0].programId;
       streak = currentStreak(data.items);
-      sessionDates = data.items.map((s) => s.performedOn);
+      sessions = data.items.map((s) => ({
+        performedOn: s.performedOn,
+        day: s.programDayName.replace(/^workout\s+/i, ""),
+      }));
     } else {
       currentProgramId = null;
       streak = 0;
-      sessionDates = [];
+      sessions = [];
     }
     loading = false;
   }
@@ -33,10 +36,8 @@
 </script>
 
 <div class="flex flex-col gap-6">
-  {#if sessionDates.length > 0}
-    <div
-      class="grid gap-4 {streak >= STREAK_DISPLAY_THRESHOLD ? 'sm:grid-cols-2' : ''}"
-    >
+  {#if sessions.length > 0}
+    <div class="flex flex-col gap-4">
       {#if streak >= STREAK_DISPLAY_THRESHOLD}
         <Card
           class="flex flex-col justify-center border-primary/40 bg-primary/5 p-6 text-center ring-primary/30"
@@ -47,8 +48,13 @@
           </p>
         </Card>
       {/if}
-      <Card class="flex items-center p-3">
-        <CalendarHeatmap dates={sessionDates} />
+      <Card class="p-4">
+        <h3
+          class="mb-0.5 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground"
+        >
+          Training days
+        </h3>
+        <CalendarHeatmap {sessions} />
       </Card>
     </div>
   {/if}
