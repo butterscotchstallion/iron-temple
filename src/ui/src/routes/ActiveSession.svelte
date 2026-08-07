@@ -11,9 +11,8 @@
   } from "../lib/api";
   import confetti from "canvas-confetti";
   import RestTimer from "../lib/RestTimer.svelte";
-  import PlateBar from "../lib/PlateBar.svelte";
+  import PlateGuide from "../lib/PlateGuide.svelte";
   import { warmupSets } from "../lib/warmup";
-  import { plateLabel } from "../lib/plates";
   import { Card } from "$lib/components/ui/card";
   import { Button, buttonVariants } from "$lib/components/ui/button";
   import * as AlertDialog from "$lib/components/ui/alert-dialog";
@@ -292,32 +291,15 @@
             </div>
           </div>
         </div>
-        <div class="mt-3 flex justify-center">
-          <PlateBar weightLb={group.sets[0].weightLb} />
+        <div class="mt-4">
+          <PlateGuide
+            warmups={group.warmups}
+            workWeightLb={group.sets[0].weightLb}
+            workReps={group.sets[0].targetReps}
+            workSets={group.sets.length}
+          />
         </div>
-        {#if group.warmups.length > 0}
-          <details class="mt-3 rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
-            <summary
-              class="cursor-pointer text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground"
-            >
-              Warm-up ramp
-            </summary>
-            <ul class="mt-2 flex flex-col gap-1.5">
-              {#each group.warmups as w, i (i)}
-                <li class="flex items-baseline justify-between gap-3 text-sm">
-                  <span class="tabular-nums text-card-foreground">
-                    {#if w.sets > 1}{w.sets} ×
-                    {/if}{w.weightLb} lb × {w.reps}
-                  </span>
-                  <span class="text-xs tabular-nums text-muted-foreground">
-                    {plateLabel(w.weightLb)}
-                  </span>
-                </li>
-              {/each}
-            </ul>
-          </details>
-        {/if}
-        <p class="mt-3 text-xs text-muted-foreground">
+        <p class="mt-4 text-xs text-muted-foreground">
           Tap a set to add a rep; it clears after the target.
         </p>
         <div class="mt-3 flex flex-wrap gap-3">
