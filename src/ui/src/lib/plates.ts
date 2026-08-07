@@ -28,3 +28,16 @@ export function platesPerSide(
   }
   return result;
 }
+
+/**
+ * Human-readable plate loadout for ONE side of the bar, e.g. "25 + 5 / side" —
+ * or "bar only" when the weight is at or below the bar.
+ */
+export function plateLabel(
+  weightLb: number,
+  bar = BAR_LB,
+  plates = PLATES_LB,
+): string {
+  const perSide = platesPerSide(weightLb, bar, plates);
+  return perSide.length ? `${perSide.join(" + ")} / side` : "bar only";
+}
