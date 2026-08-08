@@ -4,7 +4,7 @@
   import { listPrograms, type ProgramSummary } from "../lib/api";
   import { programSubtitle } from "../lib/programs";
   import { Card } from "$lib/components/ui/card";
-  import { Button } from "$lib/components/ui/button";
+  import ErrorCard from "../lib/ErrorCard.svelte";
 
   let programs = $state<ProgramSummary[]>([]);
   let loading = $state(true);
@@ -37,10 +37,11 @@
         <Card class="h-24 animate-pulse" aria-hidden="true"></Card>
       {/each}
     {:else if failed}
-      <Card class="col-span-full p-6 text-center" role="alert">
-        <p class="text-sm text-muted-foreground">Couldn't load programs.</p>
-        <Button variant="outline" class="mt-3" onclick={load}>Retry</Button>
-      </Card>
+      <ErrorCard
+        class="col-span-full"
+        message="Couldn't load programs."
+        onRetry={load}
+      />
     {:else if programs.length === 0}
       <p class="col-span-full text-center text-sm text-muted-foreground">
         No programs yet.

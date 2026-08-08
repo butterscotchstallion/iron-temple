@@ -5,7 +5,8 @@
   import { exerciseEmoji, topSet } from "../lib/exerciseIcon";
   import { formatLongDate } from "../lib/date";
   import { Card } from "$lib/components/ui/card";
-  import { Button } from "$lib/components/ui/button";
+  import ErrorCard from "../lib/ErrorCard.svelte";
+  import ErrorBanner from "../lib/ErrorBanner.svelte";
 
   type ExerciseCard = {
     id: number;
@@ -17,6 +18,9 @@
   let cards = $state<ExerciseCard[]>([]);
   let loading = $state(true);
   let failed = $state(false);
+  // At least one lift's history request failed, so some cards are missing their
+  // latest weight (and would otherwise read as "No sessions yet").
+  let partialFailed = $state(false);
 
   // Placeholder cards shown while requests are in flight.
   const skeletons = [0, 1, 2, 3, 4, 5];
@@ -24,6 +28,7 @@
   async function load() {
     loading = true;
     failed = false;
+    partialFailed = false;
     const { data: exercises, error } = await listExercises();
     if (error || !exercises) {
       failed = true;
@@ -31,12 +36,14 @@
       return;
     }
     // Fetch each exercise's history in parallel to compute its top set. A
-    // single failing history request just leaves that card without data.
+    // single failing history request leaves that card without data, so flag it
+    // rather than let the empty card read as "No sessions yet".
     cards = await Promise.all(
       exercises.map(async (exercise): Promise<ExerciseCard> => {
-        const { data } = await getExerciseHistory({
+        const { data, error: historyError } = await getExerciseHistory({
           path: { exerciseId: exercise.id },
         });
+        if (historyError) partialFailed = true;
         return {
           id: exercise.id,
           name: exercise.name,
@@ -55,16 +62,25 @@
   <h2 class="text-2xl font-black text-foreground">Progress</h2>
   <p class="text-sm text-muted-foreground">Pick a lift to see how it's trending.</p>
 
+  {#if partialFailed && !failed}
+    <ErrorBanner
+      message="Couldn't load some lifts' latest weight."
+      onRetry={load}
+      onDismiss={() => (partialFailed = false)}
+    />
+  {/if}
+
   <section class="grid gap-4 sm:grid-cols-3">
     {#if loading}
       {#each skeletons as n (n)}
         <Card class="h-40 animate-pulse" aria-hidden="true"></Card>
       {/each}
     {:else if failed}
-      <Card class="col-span-full p-6 text-center" role="alert">
-        <p class="text-sm text-muted-foreground">Couldn't load exercises.</p>
-        <Button variant="outline" class="mt-3" onclick={load}>Retry</Button>
-      </Card>
+      <ErrorCard
+        class="col-span-full"
+        message="Couldn't load exercises."
+        onRetry={load}
+      />
     {:else if cards.length === 0}
       <p class="col-span-full text-center text-sm text-muted-foreground">
         No exercises yet.

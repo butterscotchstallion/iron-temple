@@ -10,6 +10,8 @@
   } from "../lib/api";
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
+  import ErrorCard from "../lib/ErrorCard.svelte";
+  import ErrorBanner from "../lib/ErrorBanner.svelte";
   import { weekdayOptions, todayWeekday } from "../lib/weekday";
   import Calendar from "@lucide/svelte/icons/calendar";
 
@@ -50,10 +52,15 @@
   let failed = $state(false);
   let startingDayId = $state<number | null>(null);
   let startFailed = $state(false);
+  // One or more days' next-session preview couldn't be computed.
+  let previewFailed = $state(false);
+  // A weekday assignment couldn't be saved.
+  let weekdayFailed = $state(false);
 
   async function load() {
     loading = true;
     failed = false;
+    previewFailed = false;
     const prog = await getProgram({ path: { programId } });
     if (prog.error || !prog.data) {
       failed = true;
@@ -68,6 +75,7 @@
         const preview = await previewNextSession({
           path: { programId, dayId: day.id },
         });
+        if (preview.error) previewFailed = true;
         return {
           id: day.id,
           name: day.name,
@@ -93,12 +101,16 @@
 
   // Assign (or clear) the weekday this day is scheduled on.
   async function setWeekday(day: DayView, value: string) {
+    weekdayFailed = false;
     const weekday = value === "" ? null : Number(value);
     const { error } = await updateProgramDayWeekday({
       path: { programId, dayId: day.id },
       body: { weekday },
     });
-    if (!error) {
+    if (error) {
+      // Leaving `days` unchanged reverts the <select> to the saved weekday.
+      weekdayFailed = true;
+    } else {
       days = days.map((d) => (d.id === day.id ? { ...d, weekday } : d));
     }
   }
@@ -110,10 +122,7 @@
   {#if loading}
     <Card class="h-40 animate-pulse"></Card>
   {:else if failed}
-    <Card class="p-6 text-center" role="alert">
-      <p class="text-sm text-muted-foreground">Couldn't load this program.</p>
-      <Button variant="outline" class="mt-3" onclick={load}>Retry</Button>
-    </Card>
+    <ErrorCard message="Couldn't load this program." onRetry={load} />
   {:else if program}
     <div>
       <h2 class="text-3xl font-black text-foreground">{program.name}</h2>
@@ -121,12 +130,25 @@
     </div>
 
     {#if startFailed}
-      <p
-        class="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-center text-sm text-destructive"
-        role="alert"
-      >
-        Couldn't start the session. Try again.
-      </p>
+      <ErrorBanner
+        message="Couldn't start the session. Try again."
+        onDismiss={() => (startFailed = false)}
+      />
+    {/if}
+
+    {#if weekdayFailed}
+      <ErrorBanner
+        message="Couldn't update the schedule."
+        onDismiss={() => (weekdayFailed = false)}
+      />
+    {/if}
+
+    {#if previewFailed}
+      <ErrorBanner
+        message="Couldn't load some workout details."
+        onRetry={load}
+        onDismiss={() => (previewFailed = false)}
+      />
     {/if}
 
     {#each orderedDays as day (day.id)}

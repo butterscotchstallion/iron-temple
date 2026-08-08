@@ -5,6 +5,8 @@
   import { formatLongDate } from "../lib/date";
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
+  import ErrorCard from "../lib/ErrorCard.svelte";
+  import ErrorBanner from "../lib/ErrorBanner.svelte";
 
   const pageSize = 20;
 
@@ -13,6 +15,7 @@
   let loading = $state(true);
   let failed = $state(false);
   let loadingMore = $state(false);
+  let loadMoreFailed = $state(false);
 
   const hasMore = $derived(sessions.length < total);
 
@@ -33,10 +36,13 @@
 
   async function loadMore() {
     loadingMore = true;
-    const { data } = await listSessions({
+    loadMoreFailed = false;
+    const { data, error } = await listSessions({
       query: { limit: pageSize, offset: sessions.length },
     });
-    if (data) {
+    if (error || !data) {
+      loadMoreFailed = true;
+    } else {
       sessions = [...sessions, ...data.items];
       total = data.total;
     }
@@ -52,10 +58,7 @@
   {#if loading}
     <Card class="h-40 animate-pulse"></Card>
   {:else if failed}
-    <Card class="p-6 text-center" role="alert">
-      <p class="text-sm text-muted-foreground">Couldn't load your history.</p>
-      <Button variant="outline" class="mt-3" onclick={loadInitial}>Retry</Button>
-    </Card>
+    <ErrorCard message="Couldn't load your history." onRetry={loadInitial} />
   {:else if sessions.length === 0}
     <Card class="p-6 text-center">
       <p class="text-sm text-muted-foreground">
@@ -103,6 +106,14 @@
         </li>
       {/each}
     </ul>
+
+    {#if loadMoreFailed}
+      <ErrorBanner
+        message="Couldn't load more sessions."
+        onRetry={loadMore}
+        onDismiss={() => (loadMoreFailed = false)}
+      />
+    {/if}
 
     {#if hasMore}
       <Button

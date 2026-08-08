@@ -13,8 +13,10 @@
   import RestTimer from "../lib/RestTimer.svelte";
   import ExerciseCard from "../lib/ExerciseCard.svelte";
   import { Card } from "$lib/components/ui/card";
-  import { Button, buttonVariants } from "$lib/components/ui/button";
+  import { buttonVariants } from "$lib/components/ui/button";
   import * as AlertDialog from "$lib/components/ui/alert-dialog";
+  import ErrorCard from "../lib/ErrorCard.svelte";
+  import ErrorBanner from "../lib/ErrorBanner.svelte";
 
   let { params }: { params?: { id?: string } } = $props();
   let sessionId = $derived(Number(params?.id));
@@ -22,6 +24,8 @@
   let session = $state<Session | null>(null);
   let loading = $state(true);
   let failed = $state(false);
+  // Transient failure from a set/weight/delete action (the tap otherwise no-ops).
+  let actionError = $state<string | null>(null);
 
   // Bumped on each set completion to auto-restart the rest timer.
   let restTimerKey = $state(0);
@@ -50,7 +54,9 @@
     loading = false;
   }
 
-  // Each lift's best weight before this session, used to detect a new PR.
+  // Each lift's best weight before this session, used to detect a new PR. A
+  // failed history request only disables PR celebration (not core data), so it
+  // stays silent and simply won't flag a record for that lift.
   async function loadPRs() {
     if (!session) return;
     const ids = [...new Set(session.sets.map((s) => s.exerciseId))];
@@ -116,11 +122,13 @@
     const reps = nextReps(set);
     const completed = reps != null && reps >= set.targetReps;
 
-    const { data } = await updateSessionSet({
+    const { data, error } = await updateSessionSet({
       path: { sessionId, setId: set.id },
       body: { actualReps: reps, completed },
     });
+    if (error) actionError = "Couldn't save that set.";
     if (!data || !session) return;
+    actionError = null;
     session.sets = session.sets.map((s) => (s.id === data.id ? data : s));
 
     // Clearing a set (wrap back to 0) doesn't touch the timer.
@@ -158,6 +166,7 @@
       ),
     );
     if (!session) return;
+    if (results.some((r) => r.error)) actionError = "Couldn't update the weight.";
     for (const { data } of results) {
       if (data) {
         session.sets = session.sets.map((s) => (s.id === data.id ? data : s));
@@ -167,7 +176,11 @@
 
   async function remove() {
     const { error } = await deleteSession({ path: { sessionId } });
-    if (!error) push("/history");
+    if (error) {
+      actionError = "Couldn't delete the session.";
+      return;
+    }
+    push("/history");
   }
 </script>
 
@@ -192,10 +205,7 @@
   {#if loading}
     <Card class="h-40 animate-pulse"></Card>
   {:else if failed}
-    <Card class="p-6 text-center" role="alert">
-      <p class="text-sm text-muted-foreground">Couldn't load this session.</p>
-      <Button variant="outline" class="mt-3" onclick={load}>Retry</Button>
-    </Card>
+    <ErrorCard message="Couldn't load this session." onRetry={load} />
   {:else if session}
     <div class="flex items-start justify-between gap-3">
       <header>
@@ -229,6 +239,13 @@
         </AlertDialog.Content>
       </AlertDialog.Root>
     </div>
+
+    {#if actionError}
+      <ErrorBanner
+        message={actionError}
+        onDismiss={() => (actionError = null)}
+      />
+    {/if}
 
     <Card class="p-6 text-center">
       <h3 class="mb-4 text-xs uppercase tracking-[0.3em] text-muted-foreground">

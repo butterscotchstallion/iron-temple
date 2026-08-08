@@ -5,6 +5,7 @@
   import ProgramDetail from "./ProgramDetail.svelte";
   import Programs from "./Programs.svelte";
   import { Card } from "$lib/components/ui/card";
+  import ErrorCard from "../lib/ErrorCard.svelte";
   import CalendarHeatmap from "../lib/CalendarHeatmap.svelte";
 
   // The "normal flow" skips choosing a program: land on the most recently used
@@ -13,10 +14,17 @@
   let streak = $state(0);
   let sessions = $state<{ performedOn: string; day: string }[]>([]);
   let loading = $state(true);
+  let failed = $state(false);
 
   async function load() {
     loading = true;
-    const { data } = await listSessions({ query: { limit: 100 } });
+    failed = false;
+    const { data, error } = await listSessions({ query: { limit: 100 } });
+    if (error) {
+      failed = true;
+      loading = false;
+      return;
+    }
     if (data && data.items.length > 0) {
       currentProgramId = data.items[0].programId;
       streak = currentStreak(data.items);
@@ -61,6 +69,8 @@
 
   {#if loading}
     <Card class="h-40 animate-pulse"></Card>
+  {:else if failed}
+    <ErrorCard message="Couldn't load your workout." onRetry={load} />
   {:else if currentProgramId != null}
     <ProgramDetail params={{ id: String(currentProgramId) }} />
   {:else}
