@@ -1,0 +1,4 @@
+[submodule "ai-review"]
+	path = ai-review
+	url = https://gitea.homelab/gitadmin/ai-pr-review.git
+	ignore = dirty
