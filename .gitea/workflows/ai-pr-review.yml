@@ -23,6 +23,14 @@ jobs:
   review:
     name: Review with Claude
     runs-on: ubuntu-latest
+    # Trust model (recorded assumption): this is a PRIVATE Gitea instance where only
+    # trusted collaborators (gitadmin + the sandbox bots) can open PRs — there are no
+    # public/fork contributors. So running the review (which has CLAUDE_CODE_OAUTH_TOKEN
+    # + PR_REVIEW_COMMENT_TOKEN in scope, and for pull_request runs the PR-head workflow
+    # definition) on every non-draft, non-renovate PR is acceptable: the author is
+    # already trusted. The notify-step credential scrubbing (env + git config) is
+    # defense-in-depth, not the primary boundary. If untrusted/fork PRs ever become
+    # possible here, add an author/label allowlist analogous to the apply gitadmin gate.
     if: >-
       github.event.pull_request.draft == false &&
       github.event.pull_request.user.login != 'renovate-bot'
