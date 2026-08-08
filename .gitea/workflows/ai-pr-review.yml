@@ -1,0 +1,105 @@
+---
+name: AI PR Review
+
+# Half one of the "close the loop" AI-review flow. On PRs that touch code
+# directories, post a single numbered code review as a PR comment. Read-only: the
+# Claude invocation gets no write tools and the Gitea token only needs issue/PR-
+# comment write. The review/apply scripts live in the ai-review/ submodule
+# (gitadmin/ai-pr-review); see homelab-gitops docs/ai-review-shared-repo.md.
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+    paths:
+      - "src/**"
+      - "deploy/**"
+      - "scripts/**"
+      - ".gitea/**"
+
+concurrency:
+  group: ai-pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: Review with Claude
+    runs-on: ubuntu-latest
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.user.login != 'renovate-bot'
+    env:
+      TAR_OPTIONS: --no-same-owner
+      UV_PYTHON_INSTALL_DIR: /data/uv/python
+      UV_CACHE_DIR: /data/uv/cache
+      CLAUDE_CODE_VERSION: "2.1.223"
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      GITEA_TOKEN: ${{ secrets.PR_REVIEW_COMMENT_TOKEN }}
+      GITEA_REPO: ${{ github.repository }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      PR_TITLE: ${{ github.event.pull_request.title }}
+      PR_BODY: ${{ github.event.pull_request.body }}
+      # Config knobs. Diff sent to the reviewer is scoped to these dirs, minus the
+      # noise pathspecs (vendored Go, the pnpm lockfile, UI build output). Keep
+      # REVIEW_CODE_DIRS aligned with paths: above.
+      REVIEW_CODE_DIRS: "src deploy scripts .gitea"
+      REVIEW_NOISE_EXCLUDES: ":(exclude)src/api/vendor/** :(exclude)src/ui/pnpm-lock.yaml :(exclude)src/ui/dist/**"
+      # Stack-agnostic prompt from the submodule; iron-temple's AGENTS.md is injected
+      # inline by the reviewer, so repo conventions live there. Absolute path because
+      # the script runs with working-directory: ai-review.
+      REVIEW_PROMPT: ${{ github.workspace }}/ai-review/prompts/pr-review.generic.md
+      REVIEW_MIN_SEVERITY: "warning"
+      REVIEW_MAX_INLINE: "10"
+    steps:
+      - name: Check secrets configured
+        id: secrets
+        run: |
+          if [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] && [ -n "$GITEA_TOKEN" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "WARNING: CLAUDE_CODE_OAUTH_TOKEN / PR_REVIEW_COMMENT_TOKEN not set -- skipping review."
+          fi
+
+      - name: Checkout
+        if: steps.secrets.outputs.configured == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          filter: blob:none
+          # Pull the ai-review/ submodule (the review script + CLI installer).
+          submodules: true
+
+      - name: Prefer IPv4 (no IPv6 on this network)
+        if: steps.secrets.outputs.configured == 'true'
+        run: |
+          grep -q '^precedence ::ffff:0:0/96 100$' /etc/gai.conf 2>/dev/null \
+            || echo 'precedence ::ffff:0:0/96 100' >> /etc/gai.conf
+
+      - name: Set up uv
+        if: steps.secrets.outputs.configured == 'true'
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.2"
+
+      - name: Install Claude Code CLI (cached on PVC)
+        if: steps.secrets.outputs.configured == 'true'
+        run: ./ai-review/install-claude-cli.sh
+
+      - name: Review PR
+        if: steps.secrets.outputs.configured == 'true'
+        working-directory: ai-review
+        run: |
+          unset SSL_CERT_FILE
+          uv sync --frozen
+          uv run python ai_pr_review.py
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          WORKFLOW: ${{ github.workflow }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: ./scripts/ci-notify.sh
