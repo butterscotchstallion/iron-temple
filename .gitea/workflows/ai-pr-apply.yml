@@ -1,20 +1,32 @@
 ---
 name: AI PR Apply
 
-# Half two of the "close the loop" AI-review flow. When a TRUSTED operator comments
-# `@sandbox-bot apply S2, S5` (or `@sandbox-bot apply all`) on a PR, apply only those
-# numbered review suggestions and push them to the PR branch.
+# Half two of the "close the loop" AI-review flow (docs/ai-pr-review.md). When a
+# TRUSTED operator comments `@sandbox-bot apply S2, S5` (or `@sandbox-bot apply
+# all`) on a PR, apply only those numbered review suggestions and push them to the
+# PR branch.
 #
-# NOTE: issue_comment workflows always run the copy on the DEFAULT branch, so changes
-# here only take effect once merged.
+# NOTE: issue_comment workflows always run the copy on the DEFAULT branch (main),
+# so changes here only take effect once merged — a comment can't be applied by a
+# version of this file that only exists on a feature branch.
 #
 # The `if:` guard below IS the security boundary: authority comes from the typed
 # comment of an allowlisted user, never from the untrusted PR diff or review text.
+# To allow more users, extend the `comment.user.login ==` check into an OR chain.
+#
+# Tooling layout: the review/apply scripts + install-claude-cli.sh + ci-notify.sh
+# live in the shared repo gitadmin/ai-pr-review. This workflow checks them out to a
+# SEPARATE path (ai-review-tool/), NOT a submodule inside the PR tree, and tells
+# ai_pr_apply.py where the PR working tree is via AI_REVIEW_REPO_ROOT. Consequences:
+# apply works on any PR branch (even one that never carried the ai-review submodule),
+# the tooling it runs is trusted (pinned by AI_REVIEW_REF, not whatever the PR branch
+# points a submodule at), and the tooling never pollutes the PR working tree.
 on:
   issue_comment:
     types: [created]
 
 concurrency:
+  # Serialise applies per PR so two mention comments can't race on the branch.
   group: ai-pr-apply-${{ github.event.issue.number }}
   cancel-in-progress: false
 
@@ -30,7 +42,7 @@ jobs:
       TAR_OPTIONS: --no-same-owner
       UV_PYTHON_INSTALL_DIR: /data/uv/python
       UV_CACHE_DIR: /data/uv/cache
-      CLAUDE_CODE_VERSION: "2.1.223"
+      CLAUDE_CODE_VERSION: "2.1.225"
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       GITEA_TOKEN: ${{ secrets.PR_APPLY_TOKEN }}
       GITEA_REPO: ${{ github.repository }}
@@ -38,9 +50,13 @@ jobs:
       COMMENT_BODY: ${{ github.event.comment.body }}
       COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
       GITEA_API: http://gitea-http.gitea.svc.cluster.local:3000
-      # Stack-agnostic prompt from the submodule (see ai-pr-review.yml). Absolute path
-      # because the script runs with working-directory: ai-review.
-      APPLY_PROMPT: ${{ github.workspace }}/ai-review/prompts/pr-apply.generic.md
+      # Which commit of the shared tooling repo to run. Defaults to its main; set to a
+      # SHA or tag to freeze. Replaces the old ai-review/ submodule pin for apply — the
+      # tooling must include resolve_repo_root() / AI_REVIEW_REPO_ROOT support.
+      AI_REVIEW_REF: main
+      # Stack-agnostic apply prompt, from the shared tooling checkout (trusted), not the
+      # PR branch. Absolute so it resolves regardless of the apply step's working-directory.
+      APPLY_PROMPT: ${{ github.workspace }}/ai-review-tool/prompts/pr-apply.generic.md
       # iron-temple has no YAML validator to run pre-push — skip (empty = skip).
       APPLY_VALIDATE_CMD: ""
       # Paths the apply bot refuses to modify (defense in depth): CI, vendored Go,
@@ -57,22 +73,81 @@ jobs:
             echo "WARNING: CLAUDE_CODE_OAUTH_TOKEN / PR_APPLY_TOKEN not set -- skipping apply."
           fi
 
-      # Check out the default branch first so scripts/ci-notify.sh exists for the
-      # "Notify on failure" step even if a later step fails before the PR checkout.
-      - name: Checkout for tooling (default branch)
+      # Check out the shared tooling FIRST, to its own path outside any PR tree, so the
+      # trusted ci-notify.sh exists for the "Notify on failure" step even if a later
+      # step fails. Anonymously readable, so no token is needed. Pinned by AI_REVIEW_REF.
+      - name: Checkout ai-review tooling (shared repo)
         if: steps.secrets.outputs.configured == 'true'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
+        run: |
+          git clone --quiet "${GITEA_API}/gitadmin/ai-pr-review.git" ai-review-tool
+          git -C ai-review-tool checkout --quiet "${AI_REVIEW_REF}"
+          # Assert every file this workflow later invokes is present, so a rename/move
+          # in the shared repo fails LOUDLY here instead of as a silent exit-127 later:
+          # install-claude-cli.sh (install step), ai_pr_apply.py (apply step), and
+          # ci-notify.sh (the "Notify on failure" step — whose whole reason for the
+          # early checkout is that this file exists).
+          for f in install-claude-cli.sh ai_pr_apply.py ci-notify.sh; do
+            test -f "ai-review-tool/$f" \
+              || { echo "::error::shared tooling missing ai-review-tool/$f — renamed/moved in gitadmin/ai-pr-review?" >&2; exit 1; }
+          done
+          # The apply step passes AI_REVIEW_REPO_ROOT so the tooling operates on the PR
+          # working tree (repo/), not its own checkout. That env var is a no-op unless the
+          # tooling implements resolve_repo_root() (gitadmin/ai-pr-review#1). AI_REVIEW_REF
+          # tracks main, so assert support HERE — otherwise a ref predating #1 would run
+          # apply against the wrong tree and fail opaquely (this is finding S1 on PR #285).
+          grep -q "AI_REVIEW_REPO_ROOT" ai-review-tool/ai_pr_review.py \
+            || { echo "::error::ai-review tooling at ${AI_REVIEW_REF} predates AI_REVIEW_REPO_ROOT support (ai-pr-review#1) — bump AI_REVIEW_REF." >&2; exit 1; }
+
+      # Fail fast (and legibly) if PR_APPLY_TOKEN is present but Gitea won't accept it.
+      # "Check secrets configured" only tests non-empty, so an expired/revoked/placeholder
+      # token — or one pasted with a trailing newline — otherwise dies later as an opaque
+      # 401. A cheap authenticated GET of the repo separates the causes: 401 = the token
+      # is rejected (regenerate it); 403 = authenticated but lacks scope/collaborator
+      # access. (Validates auth + read; the later push also needs write:repository.)
+      - name: Validate apply token
+        if: steps.secrets.outputs.configured == 'true'
+        run: |
+          url="${GITEA_API}/api/v1/repos/${GITEA_REPO}"
+          code=$(curl -sS -o /tmp/tok.json -w '%{http_code}' \
+            -H "Authorization: token ${GITEA_TOKEN}" "${url}")
+          echo "token check: GET ${url} -> HTTP ${code}"
+          case "$code" in
+            200) echo "PR_APPLY_TOKEN accepted (can read ${GITEA_REPO})." ;;
+            401)
+              echo "::error::PR_APPLY_TOKEN rejected — HTTP 401 (invalid/expired token)." >&2
+              echo "  Regenerate a write:repository token on the sandbox-bot account and" >&2
+              echo "  update the PR_APPLY_TOKEN secret — paste with no trailing newline/space." >&2
+              cat /tmp/tok.json >&2 || true
+              exit 1 ;;
+            403)
+              echo "::error::PR_APPLY_TOKEN authenticated but forbidden — HTTP 403." >&2
+              echo "  It needs write:repository scope and Write collaborator access on ${GITEA_REPO}." >&2
+              cat /tmp/tok.json >&2 || true
+              exit 1 ;;
+            *)
+              echo "::error::PR_APPLY_TOKEN check returned unexpected HTTP ${code} for ${url}." >&2
+              cat /tmp/tok.json >&2 || true
+              exit 1 ;;
+          esac
 
       # issue_comment carries no PR head ref, so resolve it from the pulls API.
+      # This is the SAME GET /pulls/{n} that ai-pr-review.yml runs successfully.
+      # Echo the resolved number + URL + HTTP body so a failure is self-explaining.
+      # Do NOT use `curl -f` — it discards the status/body and turns this into an
+      # opaque "exit code 22" with nothing to go on.
       - name: Resolve PR head branch
         if: steps.secrets.outputs.configured == 'true'
         id: pr
         run: |
           echo "PR_NUMBER='${PR_NUMBER}'  GITEA_REPO='${GITEA_REPO}'"
+          echo "ctx issue.id='${{ github.event.issue.id }}'"
+          echo "ctx issue.html_url='${{ github.event.issue.html_url }}'"
+          echo "ctx issue.pull_request.url='${{ github.event.issue.pull_request.url }}'"
+          echo "ctx comment.html_url='${{ github.event.comment.html_url }}'"
           if ! printf '%s' "${PR_NUMBER}" | grep -qE '^[1-9][0-9]*$'; then
-            echo "::error::PR_NUMBER='${PR_NUMBER}' is not a positive integer." >&2
+            echo "::error::PR_NUMBER='${PR_NUMBER}' is not a positive integer —" >&2
+            echo "  github.event.issue.number did not resolve to a PR index in this" >&2
+            echo "  Gitea issue_comment context. The pulls lookup cannot proceed." >&2
             exit 1
           fi
           url="${GITEA_API}/api/v1/repos/${GITEA_REPO}/pulls/${PR_NUMBER}"
@@ -80,8 +155,18 @@ jobs:
           code=$(curl -sS -o /tmp/pr.json -w '%{http_code}' \
             -H "Authorization: token ${GITEA_TOKEN}" "${url}")
           echo "HTTP ${code}"
-          if [ "$code" -ge 400 ]; then
+          if [ "$code" = "401" ]; then
+            # Should be caught earlier by "Validate apply token"; kept as a backstop.
+            echo "::error::pulls API returned HTTP 401 (invalid/expired token) for PR #${PR_NUMBER}." >&2
+            echo "  Gitea rejected PR_APPLY_TOKEN — regenerate it (see 'Validate apply token')." >&2
+            cat /tmp/pr.json >&2 || true
+            exit 1
+          elif [ "$code" -ge 400 ]; then
             echo "::error::pulls API returned HTTP ${code} for PR #${PR_NUMBER}." >&2
+            echo "  - 403 → token authenticated but lacks repository scope/collaborator access" >&2
+            echo "  - 404 → PR not visible to this token, or the number is wrong" >&2
+            echo "  - empty/0/wrong number → github.event.issue.number context gap" >&2
+            echo "  Response body:" >&2
             cat /tmp/pr.json >&2 || true
             exit 1
           fi
@@ -94,24 +179,28 @@ jobs:
           echo "resolved head branch: ${branch}"
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
 
+      # The PR working tree to edit + push, checked out to its own path. No submodules:
+      # the tooling comes from the shared checkout above, not this branch.
+      # persist-credentials: false so checkout leaves no runner auth header on origin —
+      # the push step sets the apply token as the sole Authorization header below.
       - name: Checkout PR branch
         if: steps.secrets.outputs.configured == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ steps.pr.outputs.branch }}
+          path: repo
           fetch-depth: 0
           persist-credentials: false
-          # Pull the ai-review/ submodule (the apply script + CLI installer). The
-          # shared repo is anonymously readable, so no token is needed for the fetch.
-          submodules: true
 
+      # Push over internal plain HTTP with the apply token. Feature branches are not
+      # covered by main's push whitelist, so this is allowed; merge to main is by hand.
       - name: Configure git for push
         if: steps.secrets.outputs.configured == 'true'
         run: |
-          git config user.name "claude-apply[bot]"
-          git config user.email "claude-apply@homelab.local"
-          git remote set-url origin "${GITEA_API}/${GITEA_REPO}.git"
-          git config http.extraHeader "Authorization: token ${GITEA_TOKEN}"
+          git -C repo config user.name "claude-apply[bot]"
+          git -C repo config user.email "claude-apply@homelab.local"
+          git -C repo remote set-url origin "${GITEA_API}/${GITEA_REPO}.git"
+          git -C repo config http.extraHeader "Authorization: token ${GITEA_TOKEN}"
 
       - name: Prefer IPv4 (no IPv6 on this network)
         if: steps.secrets.outputs.configured == 'true'
@@ -123,40 +212,36 @@ jobs:
         if: steps.secrets.outputs.configured == 'true'
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
-          version: "0.12.2"
+          version: "0.12.3"
 
       - name: Install Claude Code CLI (cached on PVC)
         if: steps.secrets.outputs.configured == 'true'
-        run: ./ai-review/install-claude-cli.sh
+        run: ./ai-review-tool/install-claude-cli.sh
 
       - name: Apply suggestions
         if: steps.secrets.outputs.configured == 'true'
-        working-directory: ai-review
+        working-directory: ai-review-tool
         env:
           PR_HEAD_BRANCH: ${{ steps.pr.outputs.branch }}
+          # The tooling lives outside the PR tree now, so tell it which working tree to
+          # read/edit/commit/push (resolve_repo_root reads this).
+          AI_REVIEW_REPO_ROOT: ${{ github.workspace }}/repo
         run: |
           unset SSL_CERT_FILE
           uv sync --frozen
           uv run python ai_pr_apply.py
 
-      # The notify step below runs the PR-branch (untrusted) scripts/ci-notify.sh.
-      # Scrubbing the env is not enough: "Configure git for push" wrote the push token
-      # into .git/config as http.extraHeader, which that script could read via
-      # `git config --get http.extraHeader`. Remove it here — always(), so it runs even
-      # after a failing step — before the untrusted notifier runs. The push already
-      # happened in "Apply suggestions", so nothing downstream needs the credential.
+      # Drop the push token from repo/.git/config before the notifier runs. The notifier
+      # is now the trusted shared ci-notify.sh (not an untrusted PR-branch script), but
+      # unsetting the credential the moment the push is done is cheap defense in depth.
       - name: Remove push credential before notifier
         if: always()
-        run: git config --unset-all http.extraHeader 2>/dev/null || true
+        run: git -C repo config --unset-all http.extraHeader 2>/dev/null || true
 
       - name: Notify on failure
         if: failure()
         env:
-          # Scrub the job-level secrets from this step. By the time it runs, the
-          # "Checkout PR branch" step has replaced the tree with the PR-branch copy of
-          # scripts/ci-notify.sh, and the push-capable PR_APPLY_TOKEN is in job env — a
-          # malicious PR that edits that script + forces a failure could exfiltrate it.
-          # The notifier only needs the fields below.
+          # Scrub the job-level secrets from the notifier's env (defense in depth).
           CLAUDE_CODE_OAUTH_TOKEN: ""
           GITEA_TOKEN: ""
           WORKFLOW: ${{ github.workflow }}
@@ -164,4 +249,4 @@ jobs:
           BRANCH: ${{ github.ref_name }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SHA: ${{ github.sha }}
-        run: ./scripts/ci-notify.sh
+        run: ./ai-review-tool/ci-notify.sh
