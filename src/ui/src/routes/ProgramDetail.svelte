@@ -107,14 +107,6 @@
 </script>
 
 <div class="flex flex-col gap-6">
-  <a
-    href="/programs"
-    use:link
-    class="text-sm text-muted-foreground transition hover:text-foreground"
-  >
-    Change program
-  </a>
-
   {#if loading}
     <Card class="h-40 animate-pulse"></Card>
   {:else if failed}

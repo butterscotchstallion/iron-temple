@@ -4,6 +4,7 @@
 
   const items = [
     { href: "/", label: "Workout" },
+    { href: "/programs", label: "Programs" },
     { href: "/history", label: "History" },
     { href: "/progress", label: "Progress" },
   ];
@@ -25,12 +26,11 @@
   });
 
   // A tab owns its section, including nested detail routes. "Workout" covers
-  // the program/session flows that hang off the home tab.
+  // the home tab and the active-session flow; the "Programs" tab owns the
+  // picker and program detail (/programs, /programs/:id).
   function isActive(href: string, p: string): boolean {
     if (href === "/") {
-      return (
-        p === "/" || p.startsWith("/programs") || p.startsWith("/sessions")
-      );
+      return p === "/" || p.startsWith("/sessions");
     }
     return p === href || p.startsWith(href + "/");
   }
