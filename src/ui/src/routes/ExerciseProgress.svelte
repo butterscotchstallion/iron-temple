@@ -10,7 +10,7 @@
   import { formatLongDate } from "../lib/date";
   import ProgressChart from "../lib/ProgressChart.svelte";
   import { Card } from "$lib/components/ui/card";
-  import { Button } from "$lib/components/ui/button";
+  import ErrorCard from "../lib/ErrorCard.svelte";
 
   let { params }: { params?: { id?: string } } = $props();
   let exerciseId = $derived(Number(params?.id));
@@ -80,10 +80,7 @@
   {#if loading}
     <Card class="h-40 animate-pulse"></Card>
   {:else if failed}
-    <Card class="p-6 text-center" role="alert">
-      <p class="text-sm text-muted-foreground">Couldn't load this lift's history.</p>
-      <Button variant="outline" class="mt-3" onclick={load}>Retry</Button>
-    </Card>
+    <ErrorCard message="Couldn't load this lift's history." onRetry={load} />
   {:else}
     <h2 class="text-2xl font-black text-foreground">{name}</h2>
 
