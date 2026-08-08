@@ -99,16 +99,20 @@
     push(`/sessions/${res.data.id}`);
   }
 
-  // Assign (or clear) the weekday this day is scheduled on.
-  async function setWeekday(day: DayView, value: string) {
+  // Assign (or clear) the weekday this day is scheduled on. Takes the <select>
+  // element so a failed save can roll the control back to the saved value.
+  async function setWeekday(day: DayView, select: HTMLSelectElement) {
     weekdayFailed = false;
+    const value = select.value;
     const weekday = value === "" ? null : Number(value);
     const { error } = await updateProgramDayWeekday({
       path: { programId, dayId: day.id },
       body: { weekday },
     });
     if (error) {
-      // Leaving `days` unchanged reverts the <select> to the saved weekday.
+      // The one-way `value={...}` binding won't re-assert the old value when
+      // `day.weekday` is unchanged, so reset the DOM control explicitly.
+      select.value = day.weekday === null ? "" : String(day.weekday);
       weekdayFailed = true;
     } else {
       days = days.map((d) => (d.id === day.id ? { ...d, weekday } : d));
@@ -172,7 +176,7 @@
               <select
                 class="bg-transparent outline-none"
                 value={day.weekday === null ? "" : String(day.weekday)}
-                onchange={(e) => setWeekday(day, e.currentTarget.value)}
+                onchange={(e) => setWeekday(day, e.currentTarget)}
               >
                 <option value="">Unscheduled</option>
                 {#each dayChoices as choice (choice.value)}
