@@ -69,6 +69,11 @@ jobs:
           filter: blob:none
           # Pull the ai-review/ submodule (the review script + CLI installer).
           submodules: true
+          # This is the PR-head checkout (pull_request trigger). Don't leave the
+          # checkout token in .git/config — the untrusted PR-branch scripts/ci-notify.sh
+          # runs in the notify step and could read it. The review is read-only and the
+          # submodule is anonymously readable, so no persisted credential is needed.
+          persist-credentials: false
 
       - name: Prefer IPv4 (no IPv6 on this network)
         if: steps.secrets.outputs.configured == 'true'

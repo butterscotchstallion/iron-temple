@@ -139,6 +139,16 @@ jobs:
           uv sync --frozen
           uv run python ai_pr_apply.py
 
+      # The notify step below runs the PR-branch (untrusted) scripts/ci-notify.sh.
+      # Scrubbing the env is not enough: "Configure git for push" wrote the push token
+      # into .git/config as http.extraHeader, which that script could read via
+      # `git config --get http.extraHeader`. Remove it here — always(), so it runs even
+      # after a failing step — before the untrusted notifier runs. The push already
+      # happened in "Apply suggestions", so nothing downstream needs the credential.
+      - name: Remove push credential before notifier
+        if: always()
+        run: git config --unset-all http.extraHeader 2>/dev/null || true
+
       - name: Notify on failure
         if: failure()
         env:
