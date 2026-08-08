@@ -1,12 +1,15 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { link } from "svelte-spa-router";
-  import { listPrograms, type ProgramSummary } from "../lib/api";
+  import { listPrograms, listSessions, type ProgramSummary } from "../lib/api";
   import { programSubtitle } from "../lib/programs";
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
 
   let programs = $state<ProgramSummary[]>([]);
+  // The most recently used program, highlighted so the user can see which one
+  // they're currently on. Null for first-time users with no history.
+  let currentProgramId = $state<number | null>(null);
   let loading = $state(true);
   let failed = $state(false);
 
@@ -16,12 +19,16 @@
   async function load() {
     loading = true;
     failed = false;
-    const { data, error } = await listPrograms();
+    const [{ data, error }, sessions] = await Promise.all([
+      listPrograms(),
+      listSessions({ query: { limit: 1 } }),
+    ]);
     if (error || !data) {
       failed = true;
     } else {
       programs = data;
     }
+    currentProgramId = sessions.data?.items[0]?.programId ?? null;
     loading = false;
   }
 
@@ -47,8 +54,13 @@
       </p>
     {:else}
       {#each programs as program (program.id)}
+        {@const isCurrent = program.id === currentProgramId}
         <a use:link href="/programs/{program.id}" class="group block">
-          <Card class="h-full p-5 transition group-hover:ring-primary/60">
+          <Card
+            class="h-full p-5 transition group-hover:ring-primary/60 {isCurrent
+              ? 'ring-2 ring-primary'
+              : ''}"
+          >
             <h2 class="text-lg font-bold text-card-foreground">{program.name}</h2>
             <p class="mt-1 text-sm text-muted-foreground">
               {programSubtitle(program)}
