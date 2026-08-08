@@ -28,9 +28,13 @@ jobs:
     # public/fork contributors. So running the review (which has CLAUDE_CODE_OAUTH_TOKEN
     # + PR_REVIEW_COMMENT_TOKEN in scope, and for pull_request runs the PR-head workflow
     # definition) on every non-draft, non-renovate PR is acceptable: the author is
-    # already trusted. The notify-step credential scrubbing (env + git config) is
-    # defense-in-depth, not the primary boundary. If untrusted/fork PRs ever become
-    # possible here, add an author/label allowlist analogous to the apply gitadmin gate.
+    # already trusted. Note the PR controls not just this YAML but also the ai-review
+    # submodule pointer (.gitmodules / the gitlink) — the "Review PR" step runs
+    # ai-review/ai_pr_review.py with the tokens in scope, so a PR that bumps ai-review/
+    # to attacker code would run it with those tokens. The notify-step credential
+    # scrubbing (env + git config) is defense-in-depth, not the primary boundary. If
+    # untrusted/fork PRs ever become possible here, gate this job on an author/label
+    # allowlist AND treat .gitmodules/gitlink edits as privileged (like the apply gate).
     if: >-
       github.event.pull_request.draft == false &&
       github.event.pull_request.user.login != 'renovate-bot'
@@ -77,10 +81,19 @@ jobs:
           filter: blob:none
           # Pull the ai-review/ submodule (the review script + CLI installer).
           submodules: true
-          # This is the PR-head checkout (pull_request trigger). Don't leave the
-          # checkout token in .git/config — the untrusted PR-branch scripts/ci-notify.sh
-          # runs in the notify step and could read it. The review is read-only and the
-          # submodule is anonymously readable, so no persisted credential is needed.
+          # PR-head checkout (pull_request). Don't leave the checkout token in
+          # .git/config — the untrusted PR-branch scripts/ci-notify.sh runs in the
+          # notify step and could read it. The review is read-only, so no persisted
+          # credential is needed.
+          #
+          # Interaction with filter: blob:none above — the three-dot `git diff
+          # base...head` in ai_pr_review.py triggers a LAZY blob fetch from origin at
+          # diff time. With the credential stripped that fetch is unauthenticated, which
+          # is fine ONLY because this internal Gitea serves anonymous reads (verified:
+          # anon clone + lazy blob fetch of iron-temple and the ai-review submodule both
+          # succeed). If the instance is ever locked to authenticated reads, drop
+          # `filter: blob:none` so all blobs materialize during the authenticated
+          # checkout and the diff no longer needs a lazy fetch.
           persist-credentials: false
 
       - name: Prefer IPv4 (no IPv6 on this network)
