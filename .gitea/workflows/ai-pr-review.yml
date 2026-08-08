@@ -97,6 +97,12 @@ jobs:
       - name: Notify on failure
         if: failure()
         env:
+          # Scrub the job-level secrets from this step. It runs the PR-branch copy of
+          # scripts/ci-notify.sh (this workflow triggers on pull_request), so a PR that
+          # edits that script and forces an earlier failure must NOT find the tokens in
+          # env to exfiltrate. The notifier only needs the fields below.
+          CLAUDE_CODE_OAUTH_TOKEN: ""
+          GITEA_TOKEN: ""
           WORKFLOW: ${{ github.workflow }}
           REPO: ${{ github.repository }}
           BRANCH: ${{ github.ref_name }}

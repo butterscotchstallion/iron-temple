@@ -142,6 +142,13 @@ jobs:
       - name: Notify on failure
         if: failure()
         env:
+          # Scrub the job-level secrets from this step. By the time it runs, the
+          # "Checkout PR branch" step has replaced the tree with the PR-branch copy of
+          # scripts/ci-notify.sh, and the push-capable PR_APPLY_TOKEN is in job env — a
+          # malicious PR that edits that script + forces a failure could exfiltrate it.
+          # The notifier only needs the fields below.
+          CLAUDE_CODE_OAUTH_TOKEN: ""
+          GITEA_TOKEN: ""
           WORKFLOW: ${{ github.workflow }}
           REPO: ${{ github.repository }}
           BRANCH: ${{ github.ref_name }}
