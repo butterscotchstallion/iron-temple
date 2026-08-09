@@ -3,7 +3,7 @@
   import { getHealth } from "./api";
 
   // Version + environment come from the API's /health (single source of truth),
-  // so the footer always reflects the running backend, not a build-time constant.
+  // so the footer reflects the running backend, not a build-time constant.
   let version = $state("");
   let environment = $state("");
 
@@ -18,12 +18,10 @@
   });
 </script>
 
-{#if version || environment}
+{#if version}
   <footer
     class="mt-4 text-center text-xs uppercase tracking-[0.2em] text-muted-foreground/60"
   >
-    iron-temple{#if version}
-      {version}{/if}{#if environment}
-      · {environment}{/if}
+    iron-temple {version}{#if environment}-{environment}{/if}
   </footer>
 {/if}
