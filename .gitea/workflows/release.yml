@@ -44,8 +44,12 @@ jobs:
 
       - name: Compute version
         id: ver
+        # INPUT_VERSION via env, never inlined into the script — a dispatch value
+        # is untrusted input (command-injection surface).
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
-          V="${{ github.event.inputs.version }}"
+          V="$INPUT_VERSION"
           [ -z "$V" ] && V="$(scripts/next-version.sh)"
           if [ -z "$V" ]; then
             echo "No releasable commits since the last stable tag — skipping."

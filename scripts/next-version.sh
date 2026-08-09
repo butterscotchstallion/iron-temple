@@ -13,18 +13,24 @@ else
   range="HEAD"   # no stable tag yet → consider all history
 fi
 
+# Highest bump. Per Conventional Commits the type lives in the SUBJECT only, so
+# read feat/fix/`!` from subjects (%s). BREAKING CHANGE is a body footer — scan
+# full messages (%B) for it separately. (Scanning bodies for feat/fix would
+# false-trigger on squash-merge commit lists that quote other commits' subjects.)
 # 0 none, 1 patch (fix), 2 minor (feat), 3 major (breaking).
 level=0
-while IFS= read -r line; do
-  if printf '%s' "$line" | grep -qE '^[a-z]+(\([^)]*\))?!:' \
-     || printf '%s' "$line" | grep -qE '^BREAKING CHANGE:'; then
+while IFS= read -r subj; do
+  if printf '%s' "$subj" | grep -qE '^[a-z]+(\([^)]*\))?!:'; then
     level=3
-  elif printf '%s' "$line" | grep -qE '^feat(\([^)]*\))?:'; then
+  elif printf '%s' "$subj" | grep -qE '^feat(\([^)]*\))?:'; then
     [ "$level" -lt 2 ] && level=2
-  elif printf '%s' "$line" | grep -qE '^fix(\([^)]*\))?:'; then
+  elif printf '%s' "$subj" | grep -qE '^fix(\([^)]*\))?:'; then
     [ "$level" -lt 1 ] && level=1
   fi
-done < <(git log --format='%s%n%b' "$range")
+done < <(git log --format='%s' "$range")
+if git log --format='%B' "$range" | grep -qE '^BREAKING CHANGE:'; then
+  level=3
+fi
 
 [ "$level" -eq 0 ] && { echo ""; exit 0; }
 
