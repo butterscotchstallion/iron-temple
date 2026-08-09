@@ -17,13 +17,23 @@ WORKDIR /app/ui
 COPY src/ui/package.json src/ui/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY src/ui/ ./
-RUN pnpm generate:api   # openapi-ts → src/lib/api (generated; gitignored)
-RUN pnpm build          # vite build → /app/ui/dist
+# Generate the typed client (openapi-ts → src/lib/api, gitignored) then build.
+# One RUN: keeps hadolint happy (DL3059) and drops a layer.
+RUN pnpm generate:api && pnpm build
 
 # Serve the static build with a non-root nginx (uid 101, listens on :8080).
 # The UI calls the API at the RELATIVE path /api/v1, so /api/* never reaches this
 # container — Traefik path-routes it to the API service.
 FROM nginxinc/nginx-unprivileged:1.27-alpine
+# Patch Alpine base packages (openssl/libcrypto3, c-ares, libexpat, libpng, …) so
+# the Trivy CRITICAL/HIGH gate passes — the pinned nginx base tag lags Alpine's
+# security releases. Runs as root at build time, then drops back to the non-root
+# nginx user. DL3017 (no apk upgrade) is intentionally overridden: freshening the
+# base for security is exactly the goal of a Trivy-gated image.
+USER root
+# hadolint ignore=DL3017
+RUN apk --no-cache upgrade
+USER 101
 COPY src/ui/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/ui/dist /usr/share/nginx/html
 EXPOSE 8080
