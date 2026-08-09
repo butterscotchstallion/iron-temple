@@ -1,0 +1,16 @@
+# Applies to repo-root-context image builds (the UI image). Keeps the context
+# lean — no VCS metadata, submodules, vendored Go deps (not needed for the UI),
+# node_modules, or prior build output.
+.git
+ai-review
+docs
+scripts
+deploy
+dev
+**/node_modules
+**/dist
+src/api/vendor
+src/ui/e2e
+src/ui/playwright-report
+src/ui/coverage
+**/*.log

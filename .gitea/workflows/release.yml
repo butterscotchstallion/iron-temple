@@ -4,17 +4,18 @@ name: Release — build & push images
 # Tagging a release (vX.Y.Z) builds + pushes the API and UI container images to
 # the Gitea registry, then Trivy-scans each (fail on CRITICAL/HIGH). The resulting
 # <tag>@<digest> refs are printed to the job summary for pinning in homelab-gitops
-# (services/iron-temple/*). Automated repin (repository_dispatch → a GitOps-side
-# receiver) is added on the homelab-gitops side; the first deploy pins by hand
-# from this job's output.
+# (services/iron-temple/*).
 #
-# No stored registry secret to manage: this authenticates with Gitea's built-in
-# per-run Actions token, referenced by its GitHub-compatible name
-# `secrets.GITHUB_TOKEN`. Despite the name it is a *Gitea* token — issued for this
-# one workflow run and revoked when the job ends, so there's nothing to leak or
-# rotate. The job requests `packages: write` below so it can push under the repo
-# owner's namespace (gitadmin). Only prerequisite: buildkitd egress to an npm
-# registry for the UI stage — the API stage is vendored and builds offline.
+# AUTH — pushes with a stored REGISTRY_TOKEN secret. We tried Gitea's built-in
+# per-run token (secrets.GITHUB_TOKEN); this instance's registry rejects it
+# ("failed to fetch oauth token: unauthorized"), so a stored credential is
+# required. Prefer a dedicated NON-ADMIN package bot's token over an admin token.
+# Configure per repo:
+#   secret REGISTRY_TOKEN — the bot's (or reused) write:package token   [required]
+#   var    REGISTRY_USER  — the token owner's username (defaults to the tagger)   [bot only]
+#   var    IMAGE_OWNER    — registry namespace to push under (defaults to the repo owner) [bot only]
+# Also needs buildkitd egress to an npm registry for the UI stage — the API stage
+# is vendored and builds offline.
 
 on:
   push:
@@ -30,28 +31,30 @@ jobs:
   build:
     name: Build, push, scan (${{ matrix.app }})
     runs-on: ubuntu-latest
-    # Scope the per-run token to the minimum: read this repo, write packages.
-    permissions:
-      contents: read
-      packages: write
     strategy:
       fail-fast: false
       matrix:
         include:
           - app: api
             context: src/api
+            dockerfile: src/api
+          # The UI build context is the repo ROOT: the typed API client is
+          # generated from ../api/openapi.yaml at build time, so the spec must be
+          # in context. Its Dockerfile lives in src/ui.
           - app: ui
-            context: src/ui
+            context: .
+            dockerfile: src/ui
+    env:
+      IMAGE_OWNER: ${{ vars.IMAGE_OWNER || github.repository_owner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 1
 
       - name: Log in to Gitea registry
-        # secrets.GITHUB_TOKEN is Gitea's ephemeral per-run token (see header note).
         env:
-          REGISTRY_USER: ${{ github.actor }}
-          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY_USER: ${{ vars.REGISTRY_USER || github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
         run: |
           mkdir -p ~/.docker
           printf '{"auths":{"gitea-http.gitea.svc.cluster.local:3000":{"auth":"%s"}}}\n' \
@@ -64,7 +67,7 @@ jobs:
         # silently no-ops on the first run when the tag doesn't exist yet.
         run: |
           TAG="${{ github.ref_name }}"
-          REPO="gitea-http.gitea.svc.cluster.local:3000/${{ github.repository_owner }}/iron-temple-${{ matrix.app }}"
+          REPO="gitea-http.gitea.svc.cluster.local:3000/${IMAGE_OWNER}/iron-temple-${{ matrix.app }}"
           IMAGE="${REPO}:${TAG}"
           CACHE_REF="${REPO}:buildcache"
           buildctl \
@@ -72,7 +75,7 @@ jobs:
             build \
             --frontend dockerfile.v0 \
             --local context=${{ matrix.context }} \
-            --local dockerfile=${{ matrix.context }} \
+            --local dockerfile=${{ matrix.dockerfile }} \
             --import-cache type=registry,ref=${CACHE_REF},registry.insecure=true \
             --export-cache type=registry,ref=${CACHE_REF},mode=max,registry.insecure=true \
             --output "type=image,name=${IMAGE},push=true,registry.insecure=true" \
@@ -88,7 +91,7 @@ jobs:
       - name: Scan (Trivy — fail on CRITICAL/HIGH)
         timeout-minutes: 20
         run: |
-          IMAGE="gitea-http.gitea.svc.cluster.local:3000/${{ github.repository_owner }}/iron-temple-${{ matrix.app }}:${{ github.ref_name }}"
+          IMAGE="gitea-http.gitea.svc.cluster.local:3000/${IMAGE_OWNER}/iron-temple-${{ matrix.app }}:${{ github.ref_name }}"
           trivy image \
             --insecure \
             --scanners vuln \
@@ -101,7 +104,7 @@ jobs:
 
       - name: Pin ref (job summary)
         run: |
-          PIN="192.168.3.10:3000/${{ github.repository_owner }}/iron-temple-${{ matrix.app }}:${{ github.ref_name }}@${{ steps.build.outputs.digest }}"
+          PIN="192.168.3.10:3000/${IMAGE_OWNER}/iron-temple-${{ matrix.app }}:${{ github.ref_name }}@${{ steps.build.outputs.digest }}"
           {
             echo "### iron-temple-${{ matrix.app }}"
             echo "Pin this in homelab-gitops (services/iron-temple/):"
