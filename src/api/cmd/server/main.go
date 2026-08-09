@@ -49,7 +49,7 @@ func run() error {
 		environment = "development"
 	}
 
-	if err := migrate(dsn); err != nil {
+	if err := migrateWithRetry(dsn); err != nil {
 		return err
 	}
 	log.Println("migrations applied")
@@ -94,6 +94,22 @@ func run() error {
 
 // migrate applies the embedded schema via database/sql (lib/pq), reusing the
 // same migrator as cmd/migrate so startup and the standalone tool stay in sync.
+// migrateWithRetry runs the boot migration, retrying on transient failures. A new
+// pod's egress NetworkPolicy is applied a moment after start (kube-router race,
+// k8s-networking-gotchas §5), so the first DB dial can be refused — retry with
+// backoff (~36s) instead of crash-looping.
+func migrateWithRetry(dsn string) error {
+	var err error
+	for i := 1; i <= 12; i++ {
+		if err = migrate(dsn); err == nil {
+			return nil
+		}
+		log.Printf("db not ready (attempt %d/12): %v", i, err)
+		time.Sleep(3 * time.Second)
+	}
+	return err
+}
+
 func migrate(dsn string) error {
 	sqlDB, err := sql.Open("postgres", dsn)
 	if err != nil {
