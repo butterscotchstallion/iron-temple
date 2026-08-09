@@ -108,11 +108,38 @@ jobs:
             --ignore-unfixed --ignorefile .trivyignore.yaml --timeout 15m "${IMG}:${TAG}"
           echo "ref=192.168.3.10:3000/${IMAGE_OWNER}/iron-temple-ui:${TAG}@${D}" >> "$GITHUB_OUTPUT"
 
+      - name: Compute changelog
+        if: steps.ver.outputs.release == 'true'
+        # BEFORE the tag is created, so changelog.sh's "last stable tag" is the
+        # PREVIOUS release and the range (prev..HEAD) captures this release's commits.
+        # Best-effort like the notes step — a changelog hiccup must not block the release.
+        continue-on-error: true
+        run: scripts/changelog.sh > /tmp/notes.md || true
+
       - name: Tag the release
         if: steps.ver.outputs.release == 'true'
         run: |
           git tag "v${{ steps.ver.outputs.version }}"
           git push origin "v${{ steps.ver.outputs.version }}"
+
+      - name: Release notes (Gitea Release)
+        if: steps.ver.outputs.release == 'true'
+        # Truly best-effort: never fail the release (or skip the deploy PR below)
+        # over release notes — even on a curl transport error.
+        continue-on-error: true
+        env:
+          RELEASE_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v${{ steps.ver.outputs.version }}"
+          [ -s /tmp/notes.md ] || echo "- (no notable changes)" > /tmp/notes.md
+          code="$(jq -n --arg t "$TAG" --rawfile b /tmp/notes.md \
+                    '{tag_name:$t, target_commitish:"main", name:$t, body:$b}' \
+                  | curl -sS -o /dev/null -w '%{http_code}' -X POST \
+                      -H "Authorization: token ${RELEASE_TOKEN}" \
+                      -H "Content-Type: application/json" --data @- \
+                      "http://gitea-http.gitea.svc.cluster.local:3000/api/v1/repos/${{ github.repository }}/releases" || echo 000)"
+          echo "Release API -> HTTP ${code}"
+          [ "${code}" -ge 400 ] && echo "warning: could not create Release (continuing)" || true
 
       - name: Open deploy PR on homelab-gitops
         if: steps.ver.outputs.release == 'true'
@@ -123,3 +150,13 @@ jobs:
             "${{ steps.ver.outputs.version }}" \
             "${{ steps.api.outputs.ref }}" \
             "${{ steps.ui.outputs.ref }}"
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          WORKFLOW: "${{ github.workflow }} / ${{ github.job }}"
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: ./scripts/ci-notify.sh

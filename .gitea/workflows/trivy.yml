@@ -72,3 +72,57 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SHA: ${{ github.sha }}
         run: ./scripts/ci-notify.sh
+
+  scan-images:
+    name: Trivy scan release images
+    # Post-build CVE drift: release.yml scans images at BUILD time (CVEs known then).
+    # This re-scans the latest released images weekly, so a newly-disclosed CVE against
+    # an already-shipped image surfaces here. Schedule/dispatch only — needs the images
+    # to already exist in the registry.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_OWNER: ${{ vars.IMAGE_OWNER || github.repository_owner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0 # tags — to find the latest release
+
+      - name: Log in to Gitea registry
+        env:
+          REGISTRY_USER: ${{ vars.REGISTRY_USER || github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+        run: |
+          mkdir -p ~/.docker
+          printf '{"auths":{"gitea-http.gitea.svc.cluster.local:3000":{"auth":"%s"}}}\n' \
+            "$(printf '%s:%s' "$REGISTRY_USER" "$REGISTRY_TOKEN" | base64 -w 0)" \
+            > ~/.docker/config.json
+
+      - name: Scan latest release images
+        timeout-minutes: 30
+        run: |
+          TAG="$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)"
+          if [ -z "$TAG" ]; then echo "no stable release tag yet — nothing to scan"; exit 0; fi
+          REG="gitea-http.gitea.svc.cluster.local:3000"
+          echo "Scanning release ${TAG}"
+          FAILED=0
+          for app in api ui; do
+            IMG="${REG}/${IMAGE_OWNER}/iron-temple-${app}:${TAG}"
+            echo ""; echo "=== ${IMG} ==="
+            trivy image --insecure --scanners vuln --severity CRITICAL,HIGH --exit-code 1 \
+              --ignore-unfixed --ignorefile .trivyignore.yaml \
+              --cache-dir /data/.cache/trivy --skip-java-db-update --timeout 15m \
+              --format table "${IMG}" || FAILED=1
+          done
+          [ "$FAILED" -ne 0 ] && { echo "FAIL: CRITICAL/HIGH CVEs in a release image (${TAG})"; exit 1; }
+          echo "Release ${TAG} images clean — no fixable CRITICAL/HIGH CVEs"
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          WORKFLOW: "${{ github.workflow }} / ${{ github.job }}"
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: ./scripts/ci-notify.sh
