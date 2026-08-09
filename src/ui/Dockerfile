@@ -17,8 +17,9 @@ WORKDIR /app/ui
 COPY src/ui/package.json src/ui/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY src/ui/ ./
-RUN pnpm generate:api   # openapi-ts → src/lib/api (generated; gitignored)
-RUN pnpm build          # vite build → /app/ui/dist
+# Generate the typed client (openapi-ts → src/lib/api, gitignored) then build.
+# One RUN: keeps hadolint happy (DL3059) and drops a layer.
+RUN pnpm generate:api && pnpm build
 
 # Serve the static build with a non-root nginx (uid 101, listens on :8080).
 # The UI calls the API at the RELATIVE path /api/v1, so /api/* never reaches this
