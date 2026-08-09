@@ -50,12 +50,24 @@ jq -n --arg m "deploy(iron-temple): v${VERSION}" --arg c "$newcontent" \
    '{message:$m, content:$c, sha:$s, branch:"main", new_branch:$nb}' > /tmp/put.json
 req PUT "${API}/contents/${FILE}" /tmp/put.json >/dev/null
 
-# 4. open the PR
-jq -n --arg h "$BRANCH" --arg t "deploy(iron-temple): v${VERSION}" \
-      --arg b "Automated repin from the iron-temple release workflow.
+# 4. open the PR — body = changelog (from the release job) + the pinned image refs.
+NOTES_FILE="${NOTES_FILE:-/tmp/notes.md}"
+if [ -s "${NOTES_FILE}" ]; then
+  notes="$(cat "${NOTES_FILE}")"
+else
+  notes="- (no notable changes)"
+fi
+{
+  echo "Automated repin from the iron-temple release workflow."
+  echo
+  echo "## Changes"
+  echo "${notes}"
+  echo
+  echo "- api: ${API_REF}"
+  echo "- ui: ${UI_REF}"
+} > /tmp/pr-body.md
 
-- api: ${API_REF}
-- ui: ${UI_REF}" \
+jq -n --arg h "$BRANCH" --arg t "deploy(iron-temple): v${VERSION}" --rawfile b /tmp/pr-body.md \
    '{head:$h, base:"main", title:$t, body:$b}' > /tmp/pr.json
 req POST "${API}/pulls" /tmp/pr.json >/dev/null
 echo "Opened deploy PR: ${BRANCH}"
