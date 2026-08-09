@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 	"time"
 
@@ -34,6 +35,38 @@ func main() {
 // version is set at build time via -ldflags "-X main.version=vX.Y.Z"; "dev" for
 // local builds. Surfaced (with ENVIRONMENT) by the health endpoint + UI footer.
 var version = "dev"
+
+// resolvedVersion returns the release version stamped via -ldflags (main.version),
+// or for local/dev builds falls back to the embedded VCS revision — "dev-<sha>"
+// (plus "-dirty" for uncommitted changes). Degrades to plain "dev" if the build
+// carries no VCS info.
+func resolvedVersion() string {
+	if version != "dev" {
+		return version
+	}
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return version
+	}
+	var rev, dirty string
+	for _, s := range bi.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+			if len(rev) > 7 {
+				rev = rev[:7]
+			}
+		case "vcs.modified":
+			if s.Value == "true" {
+				dirty = "-dirty"
+			}
+		}
+	}
+	if rev == "" {
+		return version
+	}
+	return "dev-" + rev + dirty
+}
 
 func run() error {
 	dsn := os.Getenv("DATABASE_URL")
@@ -63,7 +96,7 @@ func run() error {
 
 	srv := &http.Server{
 		Addr:              ":" + port,
-		Handler:           api.NewServer(pool, version, environment).Router(os.Getenv("CORS_ORIGIN")),
+		Handler:           api.NewServer(pool, resolvedVersion(), environment).Router(os.Getenv("CORS_ORIGIN")),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
