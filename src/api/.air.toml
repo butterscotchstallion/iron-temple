@@ -9,9 +9,11 @@ tmp_dir = "tmp"
   # Rebuild on Go changes and on migration SQL (embedded via go:embed).
   include_ext = ["go", "sql"]
   exclude_dir = ["tmp", "vendor"]
-  # Debounce rapid saves; keep the last good binary running if a build fails.
+  # Debounce rapid saves. stop_on_error=false: on a broken build, keep the last
+  # good binary serving instead of killing it (air's flag means "stop the old
+  # binary WHEN a build errors" — false = don't).
   delay = 300
-  stop_on_error = true
+  stop_on_error = false
 
 [misc]
   clean_on_exit = true
