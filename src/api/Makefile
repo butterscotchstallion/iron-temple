@@ -1,6 +1,6 @@
 GO ?= go
 
-.PHONY: tidy vet lint test build migrate run sqlc
+.PHONY: tidy vet lint test build migrate run dev sqlc
 
 ## tidy: resolve and pin dependencies (needs GOPROXY reachable)
 tidy:
@@ -29,6 +29,10 @@ migrate:
 ## run: apply migrations on startup and serve the API (needs DATABASE_URL)
 run:
 	$(GO) run ./cmd/server
+
+## dev: like run, but live-reloads — rebuild + restart on .go/.sql changes (needs DATABASE_URL)
+dev:
+	$(GO) run github.com/air-verse/air@latest
 
 ## sqlc: regenerate the typed data layer (needs sqlc on PATH; Phase 3)
 sqlc:
