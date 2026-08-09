@@ -6,13 +6,14 @@ name: Release — build & push images
 # <tag>@<digest> refs are printed to the job summary for pinning in homelab-gitops
 # (services/iron-temple/*).
 #
-# AUTH — uses Gitea's built-in per-run token (secrets.GITHUB_TOKEN); no stored
-# credential or bot account. The job requests `packages: write` below. Gitea CLAMPS
-# that request to the repo's maximum token permission, so this only works once the
-# iron-temple repo's Actions settings allow Packages = Write (repo → Settings →
-# Actions → token permissions). Without that, the push fails with
-# "failed to fetch oauth token: unauthorized".
-#
+# AUTH — pushes with a stored REGISTRY_TOKEN secret. We tried Gitea's built-in
+# per-run token (secrets.GITHUB_TOKEN); this instance's registry rejects it
+# ("failed to fetch oauth token: unauthorized"), so a stored credential is
+# required. Prefer a dedicated NON-ADMIN package bot's token over an admin token.
+# Configure per repo:
+#   secret REGISTRY_TOKEN — the bot's (or reused) write:package token   [required]
+#   var    REGISTRY_USER  — the token owner's username (defaults to the tagger)   [bot only]
+#   var    IMAGE_OWNER    — registry namespace to push under (defaults to the repo owner) [bot only]
 # Also needs buildkitd egress to an npm registry for the UI stage — the API stage
 # is vendored and builds offline.
 
@@ -30,11 +31,6 @@ jobs:
   build:
     name: Build, push, scan (${{ matrix.app }})
     runs-on: ubuntu-latest
-    # Built-in token scope: read this repo, write packages. Effective grant is the
-    # min of this and the repo's configured max token permission (see header note).
-    permissions:
-      contents: read
-      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -48,17 +44,17 @@ jobs:
           - app: ui
             context: .
             dockerfile: src/ui
+    env:
+      IMAGE_OWNER: ${{ vars.IMAGE_OWNER || github.repository_owner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 1
 
       - name: Log in to Gitea registry
-        # secrets.GITHUB_TOKEN is Gitea's ephemeral per-run token (a Gitea token,
-        # GitHub-compatible name). The username is the tagging actor.
         env:
-          REGISTRY_USER: ${{ github.actor }}
-          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY_USER: ${{ vars.REGISTRY_USER || github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
         run: |
           mkdir -p ~/.docker
           printf '{"auths":{"gitea-http.gitea.svc.cluster.local:3000":{"auth":"%s"}}}\n' \
@@ -71,7 +67,7 @@ jobs:
         # silently no-ops on the first run when the tag doesn't exist yet.
         run: |
           TAG="${{ github.ref_name }}"
-          REPO="gitea-http.gitea.svc.cluster.local:3000/${{ github.repository_owner }}/iron-temple-${{ matrix.app }}"
+          REPO="gitea-http.gitea.svc.cluster.local:3000/${IMAGE_OWNER}/iron-temple-${{ matrix.app }}"
           IMAGE="${REPO}:${TAG}"
           CACHE_REF="${REPO}:buildcache"
           buildctl \
@@ -95,7 +91,7 @@ jobs:
       - name: Scan (Trivy — fail on CRITICAL/HIGH)
         timeout-minutes: 20
         run: |
-          IMAGE="gitea-http.gitea.svc.cluster.local:3000/${{ github.repository_owner }}/iron-temple-${{ matrix.app }}:${{ github.ref_name }}"
+          IMAGE="gitea-http.gitea.svc.cluster.local:3000/${IMAGE_OWNER}/iron-temple-${{ matrix.app }}:${{ github.ref_name }}"
           trivy image \
             --insecure \
             --scanners vuln \
@@ -108,7 +104,7 @@ jobs:
 
       - name: Pin ref (job summary)
         run: |
-          PIN="192.168.3.10:3000/${{ github.repository_owner }}/iron-temple-${{ matrix.app }}:${{ github.ref_name }}@${{ steps.build.outputs.digest }}"
+          PIN="192.168.3.10:3000/${IMAGE_OWNER}/iron-temple-${{ matrix.app }}:${{ github.ref_name }}@${{ steps.build.outputs.digest }}"
           {
             echo "### iron-temple-${{ matrix.app }}"
             echo "Pin this in homelab-gitops (services/iron-temple/):"
