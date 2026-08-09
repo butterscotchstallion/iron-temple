@@ -112,7 +112,9 @@ jobs:
         if: steps.ver.outputs.release == 'true'
         # BEFORE the tag is created, so changelog.sh's "last stable tag" is the
         # PREVIOUS release and the range (prev..HEAD) captures this release's commits.
-        run: scripts/changelog.sh > /tmp/notes.md
+        # Best-effort like the notes step — a changelog hiccup must not block the release.
+        continue-on-error: true
+        run: scripts/changelog.sh > /tmp/notes.md || true
 
       - name: Tag the release
         if: steps.ver.outputs.release == 'true'
@@ -129,6 +131,7 @@ jobs:
           RELEASE_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="v${{ steps.ver.outputs.version }}"
+          [ -s /tmp/notes.md ] || echo "- (no notable changes)" > /tmp/notes.md
           code="$(jq -n --arg t "$TAG" --rawfile b /tmp/notes.md \
                     '{tag_name:$t, target_commitish:"main", name:$t, body:$b}' \
                   | curl -sS -o /dev/null -w '%{http_code}' -X POST \
