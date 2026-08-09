@@ -74,6 +74,7 @@ jobs:
           TAG="v${{ steps.ver.outputs.version }}"
           IMG="$REG/${IMAGE_OWNER}/iron-temple-api"
           buildctl --addr tcp://buildkitd.gitea.svc.cluster.local:1234 build \
+            --opt build-arg:VERSION="${TAG}" \
             --frontend dockerfile.v0 --local context=src/api --local dockerfile=src/api \
             --import-cache type=registry,ref=${IMG}:buildcache,registry.insecure=true \
             --export-cache type=registry,ref=${IMG}:buildcache,mode=max,registry.insecure=true \

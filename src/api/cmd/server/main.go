@@ -31,6 +31,10 @@ func main() {
 	}
 }
 
+// version is set at build time via -ldflags "-X main.version=vX.Y.Z"; "dev" for
+// local builds. Surfaced (with ENVIRONMENT) by the health endpoint + UI footer.
+var version = "dev"
+
 func run() error {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
@@ -39,6 +43,10 @@ func run() error {
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
+	}
+	environment := os.Getenv("ENVIRONMENT")
+	if environment == "" {
+		environment = "development"
 	}
 
 	if err := migrate(dsn); err != nil {
@@ -55,7 +63,7 @@ func run() error {
 
 	srv := &http.Server{
 		Addr:              ":" + port,
-		Handler:           api.NewServer(pool).Router(os.Getenv("CORS_ORIGIN")),
+		Handler:           api.NewServer(pool, version, environment).Router(os.Getenv("CORS_ORIGIN")),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

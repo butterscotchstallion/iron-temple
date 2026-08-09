@@ -14,7 +14,9 @@ type errorDTO struct {
 }
 
 type healthDTO struct {
-	Status string `json:"status"`
+	Status      string `json:"status"`
+	Version     string `json:"version,omitempty"`
+	Environment string `json:"environment,omitempty"`
 }
 
 type exerciseDTO struct {
