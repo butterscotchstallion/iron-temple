@@ -8,10 +8,13 @@ name: Release — build & push images
 # receiver) is added on the homelab-gitops side; the first deploy pins by hand
 # from this job's output.
 #
-# Prerequisites in this repo's Actions secrets:
-#   REGISTRY_TOKEN — a Gitea token that can push to the container registry.
-# And buildkitd egress to the npm registry (or the in-cluster package-proxy) for
-# the UI stage — the API stage is vendored and builds offline.
+# No stored registry secret to manage: this authenticates with Gitea's built-in
+# per-run Actions token, referenced by its GitHub-compatible name
+# `secrets.GITHUB_TOKEN`. Despite the name it is a *Gitea* token — issued for this
+# one workflow run and revoked when the job ends, so there's nothing to leak or
+# rotate. The job requests `packages: write` below so it can push under the repo
+# owner's namespace (gitadmin). Only prerequisite: buildkitd egress to an npm
+# registry for the UI stage — the API stage is vendored and builds offline.
 
 on:
   push:
@@ -27,6 +30,10 @@ jobs:
   build:
     name: Build, push, scan (${{ matrix.app }})
     runs-on: ubuntu-latest
+    # Scope the per-run token to the minimum: read this repo, write packages.
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -41,9 +48,10 @@ jobs:
           fetch-depth: 1
 
       - name: Log in to Gitea registry
+        # secrets.GITHUB_TOKEN is Gitea's ephemeral per-run token (see header note).
         env:
           REGISTRY_USER: ${{ github.actor }}
-          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p ~/.docker
           printf '{"auths":{"gitea-http.gitea.svc.cluster.local:3000":{"auth":"%s"}}}\n' \
