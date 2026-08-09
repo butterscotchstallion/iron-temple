@@ -8,6 +8,7 @@
     "gomodTidy",
     "gomodVendor"
   ],
+  "pinDigests": true,
   "packageRules": [
     {
       "description": "Group non-major updates per ecosystem to keep PR noise low.",

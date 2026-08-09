@@ -114,6 +114,24 @@ jobs:
           git tag "v${{ steps.ver.outputs.version }}"
           git push origin "v${{ steps.ver.outputs.version }}"
 
+      - name: Release notes (Gitea Release)
+        if: steps.ver.outputs.release == 'true'
+        # Attach a changelog (feat/fix since the last stable tag) to the tag as a
+        # Gitea Release. Best-effort — never fail the release over release notes.
+        env:
+          RELEASE_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v${{ steps.ver.outputs.version }}"
+          NOTES="$(scripts/changelog.sh)"
+          code="$(jq -n --arg t "$TAG" --arg b "$NOTES" \
+                    '{tag_name:$t, target_commitish:"main", name:$t, body:$b}' \
+                  | curl -sS -o /dev/null -w '%{http_code}' -X POST \
+                      -H "Authorization: token ${RELEASE_TOKEN}" \
+                      -H "Content-Type: application/json" --data @- \
+                      "http://gitea-http.gitea.svc.cluster.local:3000/api/v1/repos/${{ github.repository }}/releases")"
+          echo "Release API -> HTTP ${code}"
+          [ "${code}" -ge 400 ] && echo "warning: could not create Release (continuing)" || true
+
       - name: Open deploy PR on homelab-gitops
         if: steps.ver.outputs.release == 'true'
         env:
@@ -123,3 +141,13 @@ jobs:
             "${{ steps.ver.outputs.version }}" \
             "${{ steps.api.outputs.ref }}" \
             "${{ steps.ui.outputs.ref }}"
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          WORKFLOW: "${{ github.workflow }} / ${{ github.job }}"
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: ./scripts/ci-notify.sh
