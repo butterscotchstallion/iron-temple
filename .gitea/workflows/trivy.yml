@@ -101,7 +101,7 @@ jobs:
       - name: Scan latest release images
         timeout-minutes: 30
         run: |
-          TAG="$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)"
+          TAG="$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)"
           if [ -z "$TAG" ]; then echo "no stable release tag yet — nothing to scan"; exit 0; fi
           REG="gitea-http.gitea.svc.cluster.local:3000"
           echo "Scanning release ${TAG}"
