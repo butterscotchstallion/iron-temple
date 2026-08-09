@@ -1,0 +1,9 @@
+# Keep the UI build context lean and reproducible.
+node_modules
+dist
+.svelte-kit
+coverage
+e2e
+playwright-report
+test-results
+*.log

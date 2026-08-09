@@ -1,0 +1,111 @@
+---
+name: Release — build & push images
+
+# Tagging a release (vX.Y.Z) builds + pushes the API and UI container images to
+# the Gitea registry, then Trivy-scans each (fail on CRITICAL/HIGH). The resulting
+# <tag>@<digest> refs are printed to the job summary for pinning in homelab-gitops
+# (services/iron-temple/*). Automated repin (repository_dispatch → a GitOps-side
+# receiver) is added on the homelab-gitops side; the first deploy pins by hand
+# from this job's output.
+#
+# No stored registry secret to manage: this authenticates with Gitea's built-in
+# per-run Actions token, referenced by its GitHub-compatible name
+# `secrets.GITHUB_TOKEN`. Despite the name it is a *Gitea* token — issued for this
+# one workflow run and revoked when the job ends, so there's nothing to leak or
+# rotate. The job requests `packages: write` below so it can push under the repo
+# owner's namespace (gitadmin). Only prerequisite: buildkitd egress to an npm
+# registry for the UI stage — the API stage is vendored and builds offline.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build, push, scan (${{ matrix.app }})
+    runs-on: ubuntu-latest
+    # Scope the per-run token to the minimum: read this repo, write packages.
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: api
+            context: src/api
+          - app: ui
+            context: src/ui
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+
+      - name: Log in to Gitea registry
+        # secrets.GITHUB_TOKEN is Gitea's ephemeral per-run token (see header note).
+        env:
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p ~/.docker
+          printf '{"auths":{"gitea-http.gitea.svc.cluster.local:3000":{"auth":"%s"}}}\n' \
+            "$(printf '%s:%s' "${REGISTRY_USER}" "${REGISTRY_TOKEN}" | base64 -w 0)" \
+            > ~/.docker/config.json
+
+      - name: Build and push
+        id: build
+        # BuildKit registry cache (buildcache tag) survives pod restarts; --import-cache
+        # silently no-ops on the first run when the tag doesn't exist yet.
+        run: |
+          TAG="${{ github.ref_name }}"
+          REPO="gitea-http.gitea.svc.cluster.local:3000/${{ github.repository_owner }}/iron-temple-${{ matrix.app }}"
+          IMAGE="${REPO}:${TAG}"
+          CACHE_REF="${REPO}:buildcache"
+          buildctl \
+            --addr tcp://buildkitd.gitea.svc.cluster.local:1234 \
+            build \
+            --frontend dockerfile.v0 \
+            --local context=${{ matrix.context }} \
+            --local dockerfile=${{ matrix.context }} \
+            --import-cache type=registry,ref=${CACHE_REF},registry.insecure=true \
+            --export-cache type=registry,ref=${CACHE_REF},mode=max,registry.insecure=true \
+            --output "type=image,name=${IMAGE},push=true,registry.insecure=true" \
+            --metadata-file /tmp/meta-${{ matrix.app }}.json
+          DIGEST="$(jq -r '."containerimage.digest"' /tmp/meta-${{ matrix.app }}.json)"
+          if [ -z "${DIGEST}" ] || [ "${DIGEST}" = "null" ]; then
+            echo "error: buildctl produced no digest" >&2
+            exit 1
+          fi
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "Pushed ${IMAGE}@${DIGEST}"
+
+      - name: Scan (Trivy — fail on CRITICAL/HIGH)
+        timeout-minutes: 20
+        run: |
+          IMAGE="gitea-http.gitea.svc.cluster.local:3000/${{ github.repository_owner }}/iron-temple-${{ matrix.app }}:${{ github.ref_name }}"
+          trivy image \
+            --insecure \
+            --scanners vuln \
+            --severity CRITICAL,HIGH \
+            --exit-code 1 \
+            --ignore-unfixed \
+            --ignorefile .trivyignore.yaml \
+            --timeout 15m \
+            "${IMAGE}"
+
+      - name: Pin ref (job summary)
+        run: |
+          PIN="192.168.3.10:3000/${{ github.repository_owner }}/iron-temple-${{ matrix.app }}:${{ github.ref_name }}@${{ steps.build.outputs.digest }}"
+          {
+            echo "### iron-temple-${{ matrix.app }}"
+            echo "Pin this in homelab-gitops (services/iron-temple/):"
+            echo '```'
+            echo "${PIN}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
