@@ -1,114 +1,125 @@
 ---
-name: Release — build & push images
+name: Release — auto-version, build, deploy
 
-# Tagging a release (vX.Y.Z) builds + pushes the API and UI container images to
-# the Gitea registry, then Trivy-scans each (fail on CRITICAL/HIGH). The resulting
-# <tag>@<digest> refs are printed to the job summary for pinning in homelab-gitops
-# (services/iron-temple/*).
+# On every push to main: compute the next SemVer from Conventional Commits since
+# the last stable tag (scripts/next-version.sh). If something releasable landed
+# (feat/fix/breaking), build+scan+push the API and UI images at that version, tag
+# it, and open a repin PR on homelab-gitops. Only chore/docs/etc. → no release.
+# workflow_dispatch with a `version` input forces a specific release.
 #
-# AUTH — pushes with a stored REGISTRY_TOKEN secret. We tried Gitea's built-in
-# per-run token (secrets.GITHUB_TOKEN); this instance's registry rejects it
-# ("failed to fetch oauth token: unauthorized"), so a stored credential is
-# required. Prefer a dedicated NON-ADMIN package bot's token over an admin token.
-# Configure per repo:
-#   secret REGISTRY_TOKEN — the bot's (or reused) write:package token   [required]
-#   var    REGISTRY_USER  — the token owner's username (defaults to the tagger)   [bot only]
-#   var    IMAGE_OWNER    — registry namespace to push under (defaults to the repo owner) [bot only]
-# Also needs buildkitd egress to an npm registry for the UI stage — the API stage
-# is vendored and builds offline.
+# Secrets / vars:
+#   REGISTRY_TOKEN (secret) + REGISTRY_USER / IMAGE_OWNER (vars)
+#       — push images to the Gitea registry (iron-temple-ci bot, write:package).
+#   GITOPS_TOKEN   (secret) — write:repository on homelab-gitops
+#       (non-admin iron-temple-deployer bot) — opens the deploy PR. PR-gated.
+# Also needs buildkitd egress to an npm registry for the UI stage.
 
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Force a version (e.g. 0.1.0); blank = auto-compute"
+        required: false
+        default: ""
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: Build, push, scan (${{ matrix.app }})
+  release:
+    name: Release
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - app: api
-            context: src/api
-            dockerfile: src/api
-          # The UI build context is the repo ROOT: the typed API client is
-          # generated from ../api/openapi.yaml at build time, so the spec must be
-          # in context. Its Dockerfile lives in src/ui.
-          - app: ui
-            context: .
-            dockerfile: src/ui
+    permissions:
+      contents: write # push the git tag
     env:
       IMAGE_OWNER: ${{ vars.IMAGE_OWNER || github.repository_owner }}
+      REG: gitea-http.gitea.svc.cluster.local:3000
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          fetch-depth: 1
+          fetch-depth: 0 # tags + full history for the version compute
+
+      - name: Compute version
+        id: ver
+        # INPUT_VERSION via env, never inlined into the script — a dispatch value
+        # is untrusted input (command-injection surface).
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          V="$INPUT_VERSION"
+          [ -z "$V" ] && V="$(scripts/next-version.sh)"
+          if [ -z "$V" ]; then
+            echo "No releasable commits since the last stable tag — skipping."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=true"  >> "$GITHUB_OUTPUT"
+            echo "version=$V"     >> "$GITHUB_OUTPUT"
+            echo "Releasing v$V"
+          fi
 
       - name: Log in to Gitea registry
+        if: steps.ver.outputs.release == 'true'
         env:
           REGISTRY_USER: ${{ vars.REGISTRY_USER || github.actor }}
           REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
         run: |
           mkdir -p ~/.docker
-          printf '{"auths":{"gitea-http.gitea.svc.cluster.local:3000":{"auth":"%s"}}}\n' \
-            "$(printf '%s:%s' "${REGISTRY_USER}" "${REGISTRY_TOKEN}" | base64 -w 0)" \
+          printf '{"auths":{"%s":{"auth":"%s"}}}\n' "$REG" \
+            "$(printf '%s:%s' "$REGISTRY_USER" "$REGISTRY_TOKEN" | base64 -w 0)" \
             > ~/.docker/config.json
 
-      - name: Build and push
-        id: build
-        # BuildKit registry cache (buildcache tag) survives pod restarts; --import-cache
-        # silently no-ops on the first run when the tag doesn't exist yet.
+      - name: Build, push, scan — API
+        if: steps.ver.outputs.release == 'true'
+        id: api
         run: |
-          TAG="${{ github.ref_name }}"
-          REPO="gitea-http.gitea.svc.cluster.local:3000/${IMAGE_OWNER}/iron-temple-${{ matrix.app }}"
-          IMAGE="${REPO}:${TAG}"
-          CACHE_REF="${REPO}:buildcache"
-          buildctl \
-            --addr tcp://buildkitd.gitea.svc.cluster.local:1234 \
-            build \
-            --frontend dockerfile.v0 \
-            --local context=${{ matrix.context }} \
-            --local dockerfile=${{ matrix.dockerfile }} \
-            --import-cache type=registry,ref=${CACHE_REF},registry.insecure=true \
-            --export-cache type=registry,ref=${CACHE_REF},mode=max,registry.insecure=true \
-            --output "type=image,name=${IMAGE},push=true,registry.insecure=true" \
-            --metadata-file /tmp/meta-${{ matrix.app }}.json
-          DIGEST="$(jq -r '."containerimage.digest"' /tmp/meta-${{ matrix.app }}.json)"
-          if [ -z "${DIGEST}" ] || [ "${DIGEST}" = "null" ]; then
-            echo "error: buildctl produced no digest" >&2
-            exit 1
-          fi
-          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
-          echo "Pushed ${IMAGE}@${DIGEST}"
+          TAG="v${{ steps.ver.outputs.version }}"
+          IMG="$REG/${IMAGE_OWNER}/iron-temple-api"
+          buildctl --addr tcp://buildkitd.gitea.svc.cluster.local:1234 build \
+            --opt build-arg:VERSION="${TAG}" \
+            --frontend dockerfile.v0 --local context=src/api --local dockerfile=src/api \
+            --import-cache type=registry,ref=${IMG}:buildcache,registry.insecure=true \
+            --export-cache type=registry,ref=${IMG}:buildcache,mode=max,registry.insecure=true \
+            --output "type=image,name=${IMG}:${TAG},push=true,registry.insecure=true" \
+            --metadata-file /tmp/api.json
+          D="$(jq -r '."containerimage.digest"' /tmp/api.json)"
+          [ -n "$D" ] && [ "$D" != null ] || { echo "no digest"; exit 1; }
+          trivy image --insecure --scanners vuln --severity CRITICAL,HIGH --exit-code 1 \
+            --ignore-unfixed --ignorefile .trivyignore.yaml --timeout 15m "${IMG}:${TAG}"
+          echo "ref=192.168.3.10:3000/${IMAGE_OWNER}/iron-temple-api:${TAG}@${D}" >> "$GITHUB_OUTPUT"
 
-      - name: Scan (Trivy — fail on CRITICAL/HIGH)
-        timeout-minutes: 20
+      - name: Build, push, scan — UI
+        if: steps.ver.outputs.release == 'true'
+        id: ui
         run: |
-          IMAGE="gitea-http.gitea.svc.cluster.local:3000/${IMAGE_OWNER}/iron-temple-${{ matrix.app }}:${{ github.ref_name }}"
-          trivy image \
-            --insecure \
-            --scanners vuln \
-            --severity CRITICAL,HIGH \
-            --exit-code 1 \
-            --ignore-unfixed \
-            --ignorefile .trivyignore.yaml \
-            --timeout 15m \
-            "${IMAGE}"
+          TAG="v${{ steps.ver.outputs.version }}"
+          IMG="$REG/${IMAGE_OWNER}/iron-temple-ui"
+          buildctl --addr tcp://buildkitd.gitea.svc.cluster.local:1234 build \
+            --frontend dockerfile.v0 --local context=. --local dockerfile=src/ui \
+            --import-cache type=registry,ref=${IMG}:buildcache,registry.insecure=true \
+            --export-cache type=registry,ref=${IMG}:buildcache,mode=max,registry.insecure=true \
+            --output "type=image,name=${IMG}:${TAG},push=true,registry.insecure=true" \
+            --metadata-file /tmp/ui.json
+          D="$(jq -r '."containerimage.digest"' /tmp/ui.json)"
+          [ -n "$D" ] && [ "$D" != null ] || { echo "no digest"; exit 1; }
+          trivy image --insecure --scanners vuln --severity CRITICAL,HIGH --exit-code 1 \
+            --ignore-unfixed --ignorefile .trivyignore.yaml --timeout 15m "${IMG}:${TAG}"
+          echo "ref=192.168.3.10:3000/${IMAGE_OWNER}/iron-temple-ui:${TAG}@${D}" >> "$GITHUB_OUTPUT"
 
-      - name: Pin ref (job summary)
+      - name: Tag the release
+        if: steps.ver.outputs.release == 'true'
         run: |
-          PIN="192.168.3.10:3000/${IMAGE_OWNER}/iron-temple-${{ matrix.app }}:${{ github.ref_name }}@${{ steps.build.outputs.digest }}"
-          {
-            echo "### iron-temple-${{ matrix.app }}"
-            echo "Pin this in homelab-gitops (services/iron-temple/):"
-            echo '```'
-            echo "${PIN}"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          git tag "v${{ steps.ver.outputs.version }}"
+          git push origin "v${{ steps.ver.outputs.version }}"
+
+      - name: Open deploy PR on homelab-gitops
+        if: steps.ver.outputs.release == 'true'
+        env:
+          GITOPS_TOKEN: ${{ secrets.GITOPS_TOKEN }}
+        run: |
+          scripts/open-deploy-pr.sh \
+            "${{ steps.ver.outputs.version }}" \
+            "${{ steps.api.outputs.ref }}" \
+            "${{ steps.ui.outputs.ref }}"

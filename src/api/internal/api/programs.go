@@ -13,7 +13,7 @@ import (
 )
 
 func (s *Server) getHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, healthDTO{Status: "ok"})
+	writeJSON(w, http.StatusOK, healthDTO{Status: "ok", Version: s.version, Environment: s.environment})
 }
 
 func (s *Server) listExercises(w http.ResponseWriter, r *http.Request) {

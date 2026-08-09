@@ -52,7 +52,7 @@ func TestMain(m *testing.M) {
 		log.Fatalf("pgxpool: %v", err)
 	}
 
-	srv := httptest.NewServer(api.NewServer(pool).Router(""))
+	srv := httptest.NewServer(api.NewServer(pool, "", "").Router(""))
 	baseURL = srv.URL + "/api/v1"
 
 	code := m.Run()

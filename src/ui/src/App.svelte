@@ -8,6 +8,7 @@
   import Progress from "./routes/Progress.svelte";
   import ExerciseProgress from "./routes/ExerciseProgress.svelte";
   import NavBar from "./lib/NavBar.svelte";
+  import Footer from "./lib/Footer.svelte";
 
   // Hash-based routes (svelte-spa-router). "/" lands on the current program's
   // workout; "/programs" is the picker for switching.
@@ -37,4 +38,6 @@
   </header>
 
   <Router {routes} />
+
+  <Footer />
 </main>

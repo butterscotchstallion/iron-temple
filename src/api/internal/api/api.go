@@ -20,13 +20,16 @@ import (
 
 // Server holds the dependencies shared by every handler.
 type Server struct {
-	pool *pgxpool.Pool
-	q    *store.Queries
+	pool        *pgxpool.Pool
+	q           *store.Queries
+	version     string
+	environment string
 }
 
-// NewServer builds a Server over a pgx connection pool.
-func NewServer(pool *pgxpool.Pool) *Server {
-	return &Server{pool: pool, q: store.New(pool)}
+// NewServer builds a Server over a pgx connection pool. version and environment
+// are surfaced by the health endpoint (and the UI footer).
+func NewServer(pool *pgxpool.Pool, version, environment string) *Server {
+	return &Server{pool: pool, q: store.New(pool), version: version, environment: environment}
 }
 
 // Router returns the fully-wired HTTP handler. corsOrigin is a comma-separated

@@ -335,6 +335,14 @@ components:
         status:
           type: string
           example: ok
+        version:
+          type: string
+          description: Release version of the running API (ldflags at build).
+          example: v0.1.0
+        environment:
+          type: string
+          description: Deployment environment (development or production).
+          example: production
 
     Error:
       type: object
