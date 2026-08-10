@@ -22,17 +22,23 @@ connect. (Compose V1 users: `docker-compose up -d --build`, without `--wait`.)
 First start builds the image and provisions the tenant. Data persists in the
 `pgdata` volume across restarts.
 
-## Apply migrations
-The API server isn't built yet — `src/api` currently ships only the migrate
-command. Point it at the local database and apply the schema:
+## Point the API at this database
+Every API target that touches Postgres (`make migrate`, `make run`, `make dev`)
+reads `DATABASE_URL` from the environment. The Makefile auto-loads `src/api/.env`
+(gitignored) and exports it, so the one-time setup is a copy:
+```sh
+cd src/api && cp .env.example .env   # DSN already points at the local compose DB
+```
+With that in place, `make dev` live-reloads the server, `make run` serves once,
+and `make migrate` applies the embedded schema and exits — no manual `export`
+needed. All three connect as the `iron_temple` tenant role, never the superuser.
+
+Prefer not to keep a `.env`? Export the DSN into your shell instead — the
+auto-load is skipped when the file is absent:
 ```sh
 export DATABASE_URL="postgres://iron_temple:iron_temple@localhost:5432/iron_temple?sslmode=disable"
 cd src/api && make migrate
 ```
-
-`make migrate` applies the embedded migrations and exits. It connects as the
-`iron_temple` tenant role — never the superuser. (Once the server lands, a
-`make run` target will apply migrations on startup and serve the API.)
 
 ## Reset
 ```sh
