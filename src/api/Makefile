@@ -1,5 +1,18 @@
 GO ?= go
 
+# Local dev config lives in .env (gitignored — see .env.example). Load it and
+# `export` so every recipe, and the live-reloader's grandchild process
+# (`make dev` → air → ./tmp/server), inherits DATABASE_URL and friends. air
+# forwards its own environment to the binary it builds, but only what it was
+# given — so without this include `make dev`/`make run` abort with
+# "DATABASE_URL is required" unless the var was already exported into the
+# calling shell. Missing .env is a silent no-op: CI and the cluster inject
+# these as real environment variables, not via a file.
+ifneq (,$(wildcard .env))
+include .env
+export
+endif
+
 .PHONY: tidy vet lint test build migrate run dev sqlc
 
 ## tidy: resolve and pin dependencies (needs GOPROXY reachable)
