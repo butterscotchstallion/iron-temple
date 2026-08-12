@@ -21,7 +21,8 @@ pnpm dev            # http://localhost:5173 (proxies /api -> localhost:8080)
 | `pnpm build` | Production build |
 | `pnpm check` | `svelte-check` type checking |
 | `pnpm generate:api` | Regenerate the hey-api client from the OpenAPI spec |
-| `pnpm test:unit` | Vitest unit tests |
+| `pnpm test:unit` | Vitest unit + component tests (jsdom) |
+| `pnpm test:coverage` | Vitest with a V8 coverage report (text + `coverage/` html/lcov) |
 | `pnpm test:e2e` | Playwright end-to-end tests |
 
 ## Layout
@@ -31,6 +32,18 @@ pnpm dev            # http://localhost:5173 (proxies /api -> localhost:8080)
 - `src/lib/time.ts` — pure helpers (unit-tested in `time.test.ts`).
 - `src/lib/api/` — **generated** hey-api client (git-ignored; run `generate:api`).
 - `src/app.css` — Tailwind import + synthwave `@theme` palette.
+
+## Testing
+- **Unit + component** (`pnpm test:unit`): Vitest in a jsdom environment.
+  `*.test.ts` files live next to their subject. Pure helpers are tested directly;
+  components render via [`@testing-library/svelte`](https://testing-library.com/docs/svelte-testing-library/intro).
+  `vitest-setup.ts` wires up jest-dom matchers.
+- **Coverage** (`pnpm test:coverage`): V8 provider. The denominator is first-party
+  code only — the generated API client (`src/lib/api/`) and the vendored
+  shadcn-svelte primitives (`src/lib/components/ui/`) are excluded (see the
+  `coverage` block in `vite.config.ts`).
+- **e2e** (`pnpm test:e2e`): Playwright on Firefox against the production build.
+  The API is mocked with `page.route`, so no backend or DB is needed.
 
 ## Notes
 - The generated client is git-ignored and produced from `../api/openapi.yaml`;
