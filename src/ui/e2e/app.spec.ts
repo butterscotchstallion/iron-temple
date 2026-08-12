@@ -39,7 +39,36 @@ const nextSession = {
   programDayId: 10,
   programDayName: "Workout A",
   exercises: [
-    { exerciseId: 1, exerciseName: "Squat", sets: 5, reps: 5, weightLb: 45, restSeconds: 180 },
+    // A fresh lift (no history) — carries a "start" status, so no badge shows.
+    {
+      exerciseId: 1,
+      exerciseName: "Squat",
+      sets: 5,
+      reps: 5,
+      weightLb: 45,
+      restSeconds: 180,
+      progression: {
+        status: "start",
+        failureCount: 0,
+        failuresBeforeDeload: 3,
+        previousWeightLb: 0,
+      },
+    },
+    // A stalled lift that hit the deload threshold — drives the "Deload" badge.
+    {
+      exerciseId: 2,
+      exerciseName: "Bench Press",
+      sets: 5,
+      reps: 5,
+      weightLb: 65,
+      restSeconds: 180,
+      progression: {
+        status: "deload",
+        failureCount: 3,
+        failuresBeforeDeload: 3,
+        previousWeightLb: 72.5,
+      },
+    },
   ],
 };
 
@@ -68,4 +97,8 @@ test("navigates into a program's detail", async ({ page }) => {
   // exact: the program description also contains "Squat"; match only the set line.
   await expect(page.getByText("Squat", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Start" })).toBeVisible();
+
+  // The stalled Bench Press surfaces its deload reasoning; the fresh Squat does not.
+  await expect(page.getByText("Deload", { exact: true })).toBeVisible();
+  await expect(page.getByText("stalled 3× at 72.5 → 65 lb")).toBeVisible();
 });

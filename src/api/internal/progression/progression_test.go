@@ -100,3 +100,58 @@ func TestNext(t *testing.T) {
 		})
 	}
 }
+
+// TestNextPlan pins the reasoning NextPlan reports alongside the weight — the
+// status, the trailing failure count, and the weight it came from. Next() is a
+// wrapper, so its weight math is covered by TestNext above.
+func TestNextPlan(t *testing.T) {
+	tests := []struct {
+		name      string
+		start     float64
+		increment float64
+		history   []SessionResult
+		want      Plan
+	}{
+		{
+			name:    "no history is a start with no counts",
+			start:   45,
+			history: nil,
+			want:    Plan{WeightLb: 45, Status: StatusStart},
+		},
+		{
+			name:      "success advances and records the prior weight",
+			increment: IncrementDefault,
+			history:   []SessionResult{ok(100)},
+			want:      Plan{WeightLb: 105, Status: StatusAdvance, PreviousLb: 100},
+		},
+		{
+			name:      "one failure holds with a single-fail count",
+			increment: IncrementDefault,
+			history:   []SessionResult{ok(95), fail(100)},
+			want:      Plan{WeightLb: 100, Status: StatusHold, FailureCount: 1, PreviousLb: 100},
+		},
+		{
+			name:      "two failures still hold",
+			increment: IncrementDefault,
+			history:   []SessionResult{fail(100), fail(100)},
+			want:      Plan{WeightLb: 100, Status: StatusHold, FailureCount: 2, PreviousLb: 100},
+		},
+		{
+			name:      "three failures deload from the stalled weight",
+			increment: IncrementDefault,
+			// 100 * 0.90 = 90.
+			history: []SessionResult{fail(100), fail(100), fail(100)},
+			want:    Plan{WeightLb: 90, Status: StatusDeload, FailureCount: 3, PreviousLb: 100},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := NextPlan(tt.start, tt.increment, tt.history)
+			if got != tt.want {
+				t.Errorf("NextPlan(%v, %v, %v) = %+v, want %+v",
+					tt.start, tt.increment, tt.history, got, tt.want)
+			}
+		})
+	}
+}

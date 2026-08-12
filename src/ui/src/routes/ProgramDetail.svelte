@@ -10,6 +10,7 @@
   } from "../lib/api";
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
+  import { Badge } from "$lib/components/ui/badge";
   import ErrorCard from "../lib/ErrorCard.svelte";
   import ErrorBanner from "../lib/ErrorBanner.svelte";
   import { weekdayOptions, todayWeekday } from "../lib/weekday";
@@ -29,6 +30,12 @@
       sets: number;
       reps: number;
       weightLb: number;
+      progression: {
+        status: "start" | "advance" | "hold" | "deload";
+        failureCount: number;
+        failuresBeforeDeload: number;
+        previousWeightLb: number;
+      };
     }[];
   };
 
@@ -119,6 +126,37 @@
     }
   }
 
+  // The badge + hint shown for a lift's progression state. Only the interesting
+  // states (an impending stall, a deload) get a badge; advancing/first-time lifts
+  // stay clean. Returns null when nothing should be shown.
+  type ProgressionView = {
+    label: string;
+    variant: "secondary" | "destructive";
+    hint: string;
+  };
+  function progressionView(
+    p: DayView["exercises"][number]["progression"] | undefined,
+    weightLb: number,
+  ): ProgressionView | null {
+    if (!p) return null;
+    if (p.status === "deload") {
+      return {
+        label: "Deload",
+        variant: "destructive",
+        hint: `stalled ${p.failureCount}× at ${p.previousWeightLb} → ${weightLb} lb`,
+      };
+    }
+    if (p.status === "hold") {
+      const left = p.failuresBeforeDeload - p.failureCount;
+      return {
+        label: `Stalled ${p.failureCount}×`,
+        variant: "secondary",
+        hint: `${left} more before deload`,
+      };
+    }
+    return null;
+  }
+
   onMount(load);
 </script>
 
@@ -195,17 +233,30 @@
         </div>
         <ul class="mt-3 flex flex-col gap-1.5">
           {#each day.exercises as ex (ex.exerciseId)}
-            <li class="flex items-baseline justify-between text-sm">
-              <a
-                use:link
-                href="/exercises/{ex.exerciseId}"
-                class="text-card-foreground underline-offset-2 transition hover:text-primary hover:underline"
-              >
-                {ex.exerciseName}
-              </a>
-              <span class="tabular-nums text-muted-foreground">
-                {ex.sets}×{ex.reps} · {ex.weightLb} lb
-              </span>
+            {@const prog = progressionView(ex.progression, ex.weightLb)}
+            <li class="flex flex-col gap-0.5 text-sm">
+              <div class="flex items-baseline justify-between gap-2">
+                <a
+                  use:link
+                  href="/exercises/{ex.exerciseId}"
+                  class="text-card-foreground underline-offset-2 transition hover:text-primary hover:underline"
+                >
+                  {ex.exerciseName}
+                </a>
+                <span class="flex items-center gap-2">
+                  {#if prog}
+                    <Badge variant={prog.variant}>{prog.label}</Badge>
+                  {/if}
+                  <span class="tabular-nums text-muted-foreground">
+                    {ex.sets}×{ex.reps} · {ex.weightLb} lb
+                  </span>
+                </span>
+              </div>
+              {#if prog}
+                <span class="text-right text-xs text-muted-foreground">
+                  {prog.hint}
+                </span>
+              {/if}
             </li>
           {/each}
         </ul>

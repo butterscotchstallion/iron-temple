@@ -501,7 +501,7 @@ components:
 
     PrescribedExercise:
       type: object
-      required: [exerciseId, exerciseName, sets, reps, weightLb, restSeconds]
+      required: [exerciseId, exerciseName, sets, reps, weightLb, restSeconds, progression]
       properties:
         exerciseId:
           type: integer
@@ -522,6 +522,41 @@ components:
         restSeconds:
           type: integer
           example: 180
+        progression:
+          $ref: "#/components/schemas/ProgressionInfo"
+
+    ProgressionInfo:
+      description: >-
+        Why the engine chose this lift's weight, so the UI can surface an
+        impending stall or a deload instead of a bare number.
+      type: object
+      required: [status, failureCount, failuresBeforeDeload, previousWeightLb]
+      properties:
+        status:
+          type: string
+          enum: [start, advance, hold, deload]
+          description: >-
+            start (no history), advance (last session passed), hold (recent
+            failure, repeating the weight), deload (stall hit the threshold, weight
+            dropped).
+          example: hold
+        failureCount:
+          type: integer
+          minimum: 0
+          description: Consecutive failed sessions at the current working weight.
+          example: 2
+        failuresBeforeDeload:
+          type: integer
+          minimum: 1
+          description: Failures at a weight that trigger a deload.
+          example: 3
+        previousWeightLb:
+          type: number
+          minimum: 0
+          description: >-
+            The weight just worked — advanced past, repeated, or deloaded from;
+            0 when there is no history.
+          example: 185
 
     CreateSessionRequest:
       type: object
