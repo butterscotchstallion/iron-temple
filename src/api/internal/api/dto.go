@@ -71,12 +71,27 @@ type prescribedSessionDTO struct {
 }
 
 type prescribedExerciseDTO struct {
-	ExerciseID   int32   `json:"exerciseId"`
-	ExerciseName string  `json:"exerciseName"`
-	Sets         int32   `json:"sets"`
-	Reps         int32   `json:"reps"`
-	WeightLb     float64 `json:"weightLb"`
-	RestSeconds  int32   `json:"restSeconds"`
+	ExerciseID   int32              `json:"exerciseId"`
+	ExerciseName string             `json:"exerciseName"`
+	Sets         int32              `json:"sets"`
+	Reps         int32              `json:"reps"`
+	WeightLb     float64            `json:"weightLb"`
+	RestSeconds  int32              `json:"restSeconds"`
+	Progression  progressionInfoDTO `json:"progression"`
+}
+
+// progressionInfoDTO explains why the engine chose a lift's weight, so the UI
+// can surface an impending stall or a deload instead of a bare number.
+type progressionInfoDTO struct {
+	// Status is one of the progression.Status values (start|advance|hold|deload).
+	Status string `json:"status"`
+	// FailureCount is the consecutive trailing failures at the working weight.
+	FailureCount int32 `json:"failureCount"`
+	// FailuresBeforeDeload is the threshold at which a stall triggers a deload.
+	FailuresBeforeDeload int32 `json:"failuresBeforeDeload"`
+	// PreviousWeightLb is the weight just worked (advanced past, repeated, or
+	// deloaded from); 0 when there is no history.
+	PreviousWeightLb float64 `json:"previousWeightLb"`
 }
 
 type sessionSetDTO struct {

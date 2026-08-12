@@ -55,7 +55,45 @@ type SessionResult struct {
 	Success bool
 }
 
-// Next returns the target weight for the upcoming session of a lift.
+// Status labels why the engine chose the next weight, so callers can explain a
+// deload or an impending stall instead of showing a bare number.
+type Status string
+
+const (
+	// StatusStart means there is no history yet; the starting weight is used.
+	StatusStart Status = "start"
+	// StatusAdvance means the last session succeeded and the weight went up.
+	StatusAdvance Status = "advance"
+	// StatusHold means a recent failure is repeating the same weight (short of
+	// the deload threshold).
+	StatusHold Status = "hold"
+	// StatusDeload means the failure streak hit the threshold and the weight
+	// dropped to a fraction of the stalled working weight.
+	StatusDeload Status = "deload"
+)
+
+// Plan is the engine's decision for the next session: the target weight plus the
+// reasoning behind it.
+type Plan struct {
+	// WeightLb is the target weight for the upcoming session.
+	WeightLb float64
+	// Status is why this weight was chosen.
+	Status Status
+	// FailureCount is the number of consecutive trailing failures at the working
+	// weight (0 on StatusStart and StatusAdvance).
+	FailureCount int
+	// PreviousLb is the weight just worked — the weight advanced past, repeated,
+	// or deloaded from (0 on StatusStart).
+	PreviousLb float64
+}
+
+// Next returns the target weight for the upcoming session of a lift. It is a
+// thin wrapper over NextPlan for callers that only need the number.
+func Next(startingWeight, increment float64, history []SessionResult) float64 {
+	return NextPlan(startingWeight, increment, history).WeightLb
+}
+
+// NextPlan computes the next session's weight and the reasoning behind it.
 //
 // startingWeight is the program's prescribed starting weight, returned when
 // there is no history. increment is the per-session jump for this lift (see
@@ -64,14 +102,18 @@ type SessionResult struct {
 // A failure streak is only counted at the most recent weight: a deload lowers
 // the weight, so failures before the drop belong to the old weight and do not
 // re-trigger a deload on the next attempt.
-func Next(startingWeight, increment float64, history []SessionResult) float64 {
+func NextPlan(startingWeight, increment float64, history []SessionResult) Plan {
 	if len(history) == 0 {
-		return startingWeight
+		return Plan{WeightLb: startingWeight, Status: StatusStart}
 	}
 
 	last := history[len(history)-1]
 	if last.Success {
-		return last.WeightLb + increment
+		return Plan{
+			WeightLb:   last.WeightLb + increment,
+			Status:     StatusAdvance,
+			PreviousLb: last.WeightLb,
+		}
 	}
 
 	// Count consecutive trailing failures at the current working weight.
@@ -85,9 +127,19 @@ func Next(startingWeight, increment float64, history []SessionResult) float64 {
 	}
 
 	if fails >= FailuresBeforeDeload {
-		return roundToBar(last.WeightLb * DeloadFactor)
+		return Plan{
+			WeightLb:     roundToBar(last.WeightLb * DeloadFactor),
+			Status:       StatusDeload,
+			FailureCount: fails,
+			PreviousLb:   last.WeightLb,
+		}
 	}
-	return last.WeightLb
+	return Plan{
+		WeightLb:     last.WeightLb,
+		Status:       StatusHold,
+		FailureCount: fails,
+		PreviousLb:   last.WeightLb,
+	}
 }
 
 // roundToBar snaps a weight to the nearest loadable barbell increment.

@@ -224,7 +224,7 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID int32) ([]presc
 				WeightLb: numericToFloat(h.WeightLb), Success: h.Success,
 			})
 		}
-		weight := progression.Next(
+		plan := progression.NextPlan(
 			numericToFloat(p.StartingWeightLb),
 			progression.IncrementFor(p.ExerciseName),
 			history,
@@ -234,8 +234,14 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID int32) ([]presc
 			ExerciseName: p.ExerciseName,
 			Sets:         p.Sets,
 			Reps:         p.Reps,
-			WeightLb:     weight,
+			WeightLb:     plan.WeightLb,
 			RestSeconds:  restSecondsDefault,
+			Progression: progressionInfoDTO{
+				Status:               string(plan.Status),
+				FailureCount:         int32(plan.FailureCount),
+				FailuresBeforeDeload: progression.FailuresBeforeDeload,
+				PreviousWeightLb:     plan.PreviousLb,
+			},
 		})
 	}
 	return out, nil
