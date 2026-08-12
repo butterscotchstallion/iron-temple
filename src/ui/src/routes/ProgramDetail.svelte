@@ -135,9 +135,10 @@
     hint: string;
   };
   function progressionView(
-    p: DayView["exercises"][number]["progression"],
+    p: DayView["exercises"][number]["progression"] | undefined,
     weightLb: number,
   ): ProgressionView | null {
+    if (!p) return null;
     if (p.status === "deload") {
       return {
         label: "Deload",
