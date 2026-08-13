@@ -30,3 +30,24 @@ pre-push:
       # Block pushing a branch whose remote was deleted (e.g. after its PR merged) —
       # re-pushing would silently re-create it as an orphan. See dev/pre-push-guard.sh.
       run: sh dev/pre-push-guard.sh
+
+# Keep the git-ignored hey-api client in step with src/api/openapi.yaml whenever the
+# working tree moves, so the editor's language server doesn't lint against a stale
+# contract. The npm scripts already chain generate:api for command-line entry points;
+# these hooks are what reach the editor. All three matter: `git pull` fires post-merge,
+# `git pull --rebase` fires post-rewrite, and branch switches plus `git worktree add`
+# fire post-checkout. Non-blocking by design — see dev/regen-api.sh.
+post-merge:
+  commands:
+    regen-api:
+      run: sh dev/regen-api.sh
+
+post-checkout:
+  commands:
+    regen-api:
+      run: sh dev/regen-api.sh
+
+post-rewrite:
+  commands:
+    regen-api:
+      run: sh dev/regen-api.sh
