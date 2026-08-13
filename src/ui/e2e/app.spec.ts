@@ -83,7 +83,49 @@ function sessionSummary(id: number, programName: string) {
     performedOn: "2026-08-01",
     setCount: 5,
     completedSetCount: 5,
+    isOver: true,
     exercises: [{ exerciseName: "Squat", sets: 5, reps: 5, weightLb: 100 }],
+  };
+}
+
+// A Session as returned by GET /sessions/{id} (the ActiveSession screen).
+// Two sets on the bar weight, so no warm-up ramp is rendered.
+function sessionDetail(
+  overrides: {
+    isOver?: boolean;
+    finishedAt?: string | null;
+    actualReps?: number | null;
+    completed?: boolean;
+  } = {},
+) {
+  const {
+    isOver = false,
+    finishedAt = null,
+    actualReps = null,
+    completed = false,
+  } = overrides;
+  return {
+    id: 1,
+    programId: 1,
+    programName: "StrongLifts 5x5",
+    programDayId: 10,
+    programDayName: "Workout A",
+    performedOn: "2026-08-01",
+    notes: "",
+    createdAt: "2026-08-01T18:00:00Z",
+    finishedAt,
+    isOver,
+    sets: [1, 2].map((n) => ({
+      id: n,
+      exerciseId: 1,
+      exerciseName: "Squat",
+      setNumber: n,
+      targetReps: 5,
+      actualReps,
+      weightLb: 80,
+      completed,
+      restSeconds: 180,
+    })),
   };
 }
 
@@ -190,4 +232,94 @@ test("shows each lift's top set on the progress page", async ({ page }) => {
   await expect(page.getByText("135 lb")).toBeVisible();
   // A lift with no history reads as "No sessions yet".
   await expect(page.getByText("No sessions yet")).toBeVisible();
+});
+
+test("finishes a session with sets still unlogged, after confirming", async ({ page }) => {
+  let finishCalls = 0;
+  await page.route("**/api/v1/sessions/1/finish", (route) => {
+    finishCalls += 1;
+    route.fulfill({
+      json: sessionDetail({ isOver: true, finishedAt: "2026-08-01T19:30:00Z" }),
+    });
+  });
+  await page.route("**/api/v1/sessions/1", (route) =>
+    route.fulfill({ json: sessionDetail() }),
+  );
+  await page.route("**/api/v1/exercises/1/history", (route) => route.fulfill({ json: [] }));
+
+  await page.goto("/#/sessions/1");
+  await expect(page.getByText("0 / 2 sets logged")).toBeVisible();
+
+  // Both sets are unlogged, so finishing routes through the confirmation.
+  await page.getByRole("button", { name: "Finish workout" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Finish with sets unlogged?" }),
+  ).toBeVisible();
+  await expect(page.getByText("2 of 2 sets have no reps logged")).toBeVisible();
+
+  await page.getByRole("button", { name: "Finish anyway" }).click();
+  await expect(page.getByRole("heading", { name: /Workout finished/ })).toBeVisible();
+  expect(finishCalls).toBe(1);
+
+  await page.getByRole("button", { name: "See history" }).click();
+  await expect(page.getByRole("heading", { name: "History", exact: true })).toBeVisible();
+});
+
+test("finishes without confirming once every set is logged", async ({ page }) => {
+  await page.route("**/api/v1/sessions/1/finish", (route) =>
+    route.fulfill({
+      json: sessionDetail({
+        isOver: true,
+        finishedAt: "2026-08-01T19:30:00Z",
+        actualReps: 5,
+        completed: true,
+      }),
+    }),
+  );
+  await page.route("**/api/v1/sessions/1", (route) =>
+    route.fulfill({ json: sessionDetail({ actualReps: 5, completed: true }) }),
+  );
+  await page.route("**/api/v1/exercises/1/history", (route) => route.fulfill({ json: [] }));
+
+  await page.goto("/#/sessions/1");
+  await page.getByRole("button", { name: "Finish workout" }).click();
+
+  // No confirmation step — straight to the celebration.
+  await expect(page.getByRole("heading", { name: /Workout complete/ })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Finish with sets unlogged?" }),
+  ).toHaveCount(0);
+});
+
+test("renders an already-finished session read-only", async ({ page }) => {
+  await page.route("**/api/v1/sessions/1", (route) =>
+    route.fulfill({
+      json: sessionDetail({
+        isOver: true,
+        finishedAt: "2026-08-01T19:30:00Z",
+        actualReps: 5,
+        completed: true,
+      }),
+    }),
+  );
+  await page.route("**/api/v1/exercises/1/history", (route) => route.fulfill({ json: [] }));
+
+  await page.goto("/#/sessions/1");
+  await expect(page.getByText(/^Finished ·/)).toBeVisible();
+  await expect(page.getByText("This workout is finished — sets are locked.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Finish workout" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Set 1: 5 reps" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Increase weight by 5 lb" })).toBeDisabled();
+});
+
+test("marks a session aged past the 12h cutoff as closed automatically", async ({ page }) => {
+  await page.route("**/api/v1/sessions/1", (route) =>
+    route.fulfill({ json: sessionDetail({ isOver: true, actualReps: 5, completed: true }) }),
+  );
+  await page.route("**/api/v1/exercises/1/history", (route) => route.fulfill({ json: [] }));
+
+  await page.goto("/#/sessions/1");
+  // No finishedAt, so the banner explains it aged out rather than being finished.
+  await expect(page.getByText("Closed automatically · 12h+ old")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Finish workout" })).toHaveCount(0);
 });

@@ -61,3 +61,13 @@ func timestamptzToString(t pgtype.Timestamptz) string {
 	}
 	return t.Time.UTC().Format(time.RFC3339)
 }
+
+// optionalTimestamptz formats a nullable timestamp for a nullable JSON field,
+// where SQL NULL must serialize as null rather than the empty string.
+func optionalTimestamptz(t pgtype.Timestamptz) *string {
+	if !t.Valid {
+		return nil
+	}
+	s := t.Time.UTC().Format(time.RFC3339)
+	return &s
+}

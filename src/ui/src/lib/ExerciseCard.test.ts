@@ -97,4 +97,60 @@ describe("ExerciseCard", () => {
     await fireEvent.click(first);
     expect(first).toHaveTextContent("1"); // reps count up locally
   });
+
+  describe("when readonly (the session is over)", () => {
+    it("ignores taps on work sets and the weight steppers", async () => {
+      const onCycle = vi.fn();
+      const onChangeWeight = vi.fn();
+      render(ExerciseCard, {
+        name: "Squat",
+        sets: workSets(80, 3),
+        onCycle,
+        onChangeWeight,
+        readonly: true,
+      });
+
+      await fireEvent.click(screen.getByRole("button", { name: "Set 1: not logged" }));
+      await fireEvent.click(
+        screen.getByRole("button", { name: "Increase weight by 5 lb" }),
+      );
+      await fireEvent.click(
+        screen.getByRole("button", { name: "Decrease weight by 5 lb" }),
+      );
+
+      expect(onCycle).not.toHaveBeenCalled();
+      expect(onChangeWeight).not.toHaveBeenCalled();
+    });
+
+    it("disables the warm-up circles so their local reps can't move", async () => {
+      const { container } = render(ExerciseCard, {
+        name: "Squat",
+        sets: workSets(200, 1),
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+        readonly: true,
+      });
+
+      const first = container.querySelector<HTMLButtonElement>(
+        'button[aria-label^="Warm-up"]',
+      )!;
+      expect(first).toBeDisabled();
+      await fireEvent.click(first);
+      expect(first).toHaveTextContent("0");
+    });
+
+    it("explains that the sets are locked instead of how to tap them", () => {
+      render(ExerciseCard, {
+        name: "Squat",
+        sets: workSets(80, 3),
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+        readonly: true,
+      });
+      expect(
+        screen.getByText(/This workout is finished — sets are locked\./),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/Tap a set to add a rep/)).not.toBeInTheDocument();
+    });
+  });
 });

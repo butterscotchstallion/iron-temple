@@ -6,6 +6,7 @@
     getExerciseHistory,
     updateSessionSet,
     deleteSession,
+    finishSession,
     type Session,
     type SessionSet,
   } from "../lib/api";
@@ -13,7 +14,7 @@
   import RestTimer from "../lib/RestTimer.svelte";
   import ExerciseCard from "../lib/ExerciseCard.svelte";
   import { Card } from "$lib/components/ui/card";
-  import { buttonVariants } from "$lib/components/ui/button";
+  import { Button, buttonVariants } from "$lib/components/ui/button";
   import * as AlertDialog from "$lib/components/ui/alert-dialog";
   import ErrorCard from "../lib/ErrorCard.svelte";
   import ErrorBanner from "../lib/ErrorBanner.svelte";
@@ -31,8 +32,12 @@
   let restTimerKey = $state(0);
   // Bumped to reset (stop) the rest timer once the whole session is done.
   let restResetKey = $state(0);
-  // Controls the "Sets complete" celebration dialog.
+  // Controls the end-of-workout celebration dialog.
   let showComplete = $state(false);
+  // Controls the "some sets aren't logged" confirmation before finishing.
+  let confirmFinish = $state(false);
+  // A finish request is in flight (guards a double-tap).
+  let finishing = $state(false);
 
   // Personal-record tracking: best weight per exercise BEFORE this session.
   let prBest: Record<number, number> = {};
@@ -100,6 +105,15 @@
       (session?.sets ?? []).every((s) => s.completed),
   );
 
+  // The server decides whether a session is over: finished by hand, or started
+  // more than 12 hours ago. An over session is a record and can't be edited.
+  const isOver = $derived(session?.isOver ?? false);
+
+  // Sets with no rep count at all — what the confirm prompt warns about.
+  const unloggedCount = $derived(
+    (session?.sets ?? []).filter((s) => s.actualReps == null).length,
+  );
+
   // Total weight moved this session (weight × reps over all logged sets).
   const totalVolume = $derived(
     (session?.sets ?? []).reduce(
@@ -118,6 +132,7 @@
   // Tap a set to add a rep (wrapping to cleared after the target). Each rep tap
   // (re)starts the rest timer; hitting the target on the final set celebrates.
   async function cycle(set: SessionSet) {
+    if (isOver) return;
     const wasAllComplete = allComplete;
     const reps = nextReps(set);
     const completed = reps != null && reps >= set.targetReps;
@@ -142,18 +157,47 @@
       prTimer = setTimeout(() => (prMessage = null), 6000);
     }
 
+    // Hitting every target ends the workout outright — no need to also press
+    // Finish. A miss anywhere leaves it running until the lifter says so.
     const nowAllComplete = session.sets.every((s) => s.completed);
     if (nowAllComplete && !wasAllComplete) {
-      restResetKey += 1;
-      showComplete = true;
-      confetti({ particleCount: 140, spread: 75, origin: { y: 0.6 } });
+      await finish(); // stops the rest timer as part of finishing
     } else {
       restTimerKey += 1;
     }
   }
 
+  // Ask first if anything is unlogged, otherwise end it straight away.
+  function requestFinish() {
+    if (unloggedCount > 0) {
+      confirmFinish = true;
+      return;
+    }
+    void finish();
+  }
+
+  // End the session for good. The server stamps finishedAt and returns the
+  // session with isOver set, which is what locks the screen.
+  async function finish() {
+    if (finishing) return;
+    finishing = true;
+    const { data, error } = await finishSession({ path: { sessionId } });
+    finishing = false;
+    confirmFinish = false;
+    if (error || !data) {
+      actionError = "Couldn't finish the session.";
+      return;
+    }
+    actionError = null;
+    session = data;
+    restResetKey += 1;
+    showComplete = true;
+    confetti({ particleCount: 140, spread: 75, origin: { y: 0.6 } });
+  }
+
   // Adjust the working weight for every set of an exercise by delta lb.
   async function changeWeight(sets: SessionSet[], delta: number) {
+    if (isOver) return;
     const current = sets[0]?.weightLb ?? 0;
     const weightLb = Math.max(0, current + delta);
     if (weightLb === current) return;
@@ -216,6 +260,13 @@
         <p class="mt-1 text-xs uppercase tracking-[0.3em] text-primary">
           {loggedCount} / {session.sets.length} sets logged
         </p>
+        {#if isOver}
+          <p class="mt-2 text-xs uppercase tracking-[0.3em] text-muted-foreground">
+            {session.finishedAt
+              ? `Finished · ${new Date(session.finishedAt).toLocaleDateString()}`
+              : "Closed automatically · 12h+ old"}
+          </p>
+        {/if}
       </header>
 
       <AlertDialog.Root>
@@ -264,23 +315,49 @@
         sets={group.sets}
         onCycle={cycle}
         onChangeWeight={(delta) => changeWeight(group.sets, delta)}
+        readonly={isOver}
       />
     {/each}
+
+    {#if !isOver}
+      <Button size="lg" onclick={requestFinish} disabled={finishing}>
+        {finishing ? "Finishing…" : "Finish workout"}
+      </Button>
+    {/if}
+
+    <!-- Finishing with sets still unlogged is allowed, but worth confirming. -->
+    <AlertDialog.Root bind:open={confirmFinish}>
+      <AlertDialog.Content>
+        <AlertDialog.Header>
+          <AlertDialog.Title>Finish with sets unlogged?</AlertDialog.Title>
+          <AlertDialog.Description>
+            {unloggedCount} of {session.sets.length} sets have no reps logged. Finishing
+            closes the workout for good — you won't be able to log them later.
+          </AlertDialog.Description>
+        </AlertDialog.Header>
+        <AlertDialog.Footer>
+          <AlertDialog.Cancel>Keep going</AlertDialog.Cancel>
+          <AlertDialog.Action onclick={finish}>Finish anyway</AlertDialog.Action>
+        </AlertDialog.Footer>
+      </AlertDialog.Content>
+    </AlertDialog.Root>
 
     <AlertDialog.Root bind:open={showComplete}>
       <AlertDialog.Content>
         <AlertDialog.Header>
-          <AlertDialog.Title>Sets complete 🎉</AlertDialog.Title>
+          <AlertDialog.Title>
+            {allComplete ? "Workout complete 🎉" : "Workout finished 💪"}
+          </AlertDialog.Title>
           <AlertDialog.Description>
             {session.programName} · {session.programDayName}
           </AlertDialog.Description>
         </AlertDialog.Header>
         <p class="text-center text-sm text-muted-foreground">
-          {session.sets.length} sets · {totalVolume} lb total volume
+          {loggedCount} / {session.sets.length} sets · {totalVolume} lb total volume
         </p>
         <AlertDialog.Footer>
-          <AlertDialog.Action onclick={() => (showComplete = false)}>
-            Nice!
+          <AlertDialog.Action onclick={() => push("/history")}>
+            See history
           </AlertDialog.Action>
         </AlertDialog.Footer>
       </AlertDialog.Content>

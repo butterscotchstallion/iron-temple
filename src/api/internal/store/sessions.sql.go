@@ -32,7 +32,7 @@ func (q *Queries) CountSessions(ctx context.Context, programID *int64) (int64, e
 const createSession = `-- name: CreateSession :one
 INSERT INTO sessions (program_day_id, performed_on)
 VALUES ($1, $2)
-RETURNING id, program_day_id, performed_on, notes, created_at
+RETURNING id, program_day_id, performed_on, notes, created_at, finished_at
 `
 
 type CreateSessionParams struct {
@@ -49,6 +49,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		&i.PerformedOn,
 		&i.Notes,
 		&i.CreatedAt,
+		&i.FinishedAt,
 	)
 	return i, err
 }
@@ -101,6 +102,30 @@ func (q *Queries) DeleteSession(ctx context.Context, id int32) (int64, error) {
 	return result.RowsAffected(), nil
 }
 
+const finishSession = `-- name: FinishSession :one
+UPDATE sessions
+SET finished_at = COALESCE(finished_at, now())
+WHERE id = $1
+RETURNING id, program_day_id, performed_on, notes, created_at, finished_at
+`
+
+// FinishSession stamps the explicit end of a session. COALESCE makes it
+// idempotent: finishing an already-finished session keeps the original time
+// rather than sliding it forward on a double-tap.
+func (q *Queries) FinishSession(ctx context.Context, id int32) (Session, error) {
+	row := q.db.QueryRow(ctx, finishSession, id)
+	var i Session
+	err := row.Scan(
+		&i.ID,
+		&i.ProgramDayID,
+		&i.PerformedOn,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
 const getSession = `-- name: GetSession :one
 SELECT s.id,
        s.program_day_id,
@@ -109,7 +134,10 @@ SELECT s.id,
        p.name  AS program_name,
        s.performed_on,
        s.notes,
-       s.created_at
+       s.created_at,
+       s.finished_at,
+       (s.finished_at IS NOT NULL
+        OR s.created_at < now() - INTERVAL '12 hours')::bool AS is_over
 FROM sessions s
 JOIN program_days pd ON pd.id = s.program_day_id
 JOIN programs p ON p.id = pd.program_id
@@ -125,6 +153,8 @@ type GetSessionRow struct {
 	PerformedOn    pgtype.Date        `json:"performed_on"`
 	Notes          string             `json:"notes"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	FinishedAt     pgtype.Timestamptz `json:"finished_at"`
+	IsOver         bool               `json:"is_over"`
 }
 
 func (q *Queries) GetSession(ctx context.Context, id int32) (GetSessionRow, error) {
@@ -139,6 +169,8 @@ func (q *Queries) GetSession(ctx context.Context, id int32) (GetSessionRow, erro
 		&i.PerformedOn,
 		&i.Notes,
 		&i.CreatedAt,
+		&i.FinishedAt,
+		&i.IsOver,
 	)
 	return i, err
 }
@@ -311,7 +343,9 @@ SELECT s.id,
        p.name  AS program_name,
        s.performed_on,
        COUNT(ss.id)                              AS set_count,
-       COUNT(ss.id) FILTER (WHERE ss.completed)  AS completed_set_count
+       COUNT(ss.id) FILTER (WHERE ss.completed)  AS completed_set_count,
+       (s.finished_at IS NOT NULL
+        OR s.created_at < now() - INTERVAL '12 hours')::bool AS is_over
 FROM sessions s
 JOIN program_days pd ON pd.id = s.program_day_id
 JOIN programs p ON p.id = pd.program_id
@@ -338,10 +372,14 @@ type ListSessionsRow struct {
 	PerformedOn       pgtype.Date `json:"performed_on"`
 	SetCount          int64       `json:"set_count"`
 	CompletedSetCount int64       `json:"completed_set_count"`
+	IsOver            bool        `json:"is_over"`
 }
 
 // ListSessions returns paginated session summaries, most recent first,
 // optionally filtered to one program. Pass NULL program_id for all programs.
+// is_over reads s.finished_at/s.created_at under a GROUP BY: legal because the
+// grouping includes s.id, the primary key, which makes every other sessions
+// column functionally dependent on it.
 // Only sessions with at least one logged rep count as "started".
 func (q *Queries) ListSessions(ctx context.Context, arg ListSessionsParams) ([]ListSessionsRow, error) {
 	rows, err := q.db.Query(ctx, listSessions, arg.ProgramID, arg.Off, arg.Lim)
@@ -361,6 +399,7 @@ func (q *Queries) ListSessions(ctx context.Context, arg ListSessionsParams) ([]L
 			&i.PerformedOn,
 			&i.SetCount,
 			&i.CompletedSetCount,
+			&i.IsOver,
 		); err != nil {
 			return nil, err
 		}
@@ -377,7 +416,7 @@ UPDATE sessions
 SET performed_on = COALESCE($1, performed_on),
     notes        = COALESCE($2, notes)
 WHERE id = $3
-RETURNING id, program_day_id, performed_on, notes, created_at
+RETURNING id, program_day_id, performed_on, notes, created_at, finished_at
 `
 
 type UpdateSessionParams struct {
@@ -396,6 +435,7 @@ func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) (S
 		&i.PerformedOn,
 		&i.Notes,
 		&i.CreatedAt,
+		&i.FinishedAt,
 	)
 	return i, err
 }

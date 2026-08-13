@@ -11,11 +11,14 @@
     sets,
     onCycle,
     onChangeWeight,
+    readonly = false,
   }: {
     name: string;
     sets: SessionSet[];
     onCycle: (set: SessionSet) => void;
     onChangeWeight: (delta: number) => void;
+    // An over session is a record, not a worksheet: sets and weights lock.
+    readonly?: boolean;
   } = $props();
 
   const workWeight = $derived(sets[0]?.weightLb ?? 0);
@@ -47,6 +50,7 @@
   }
 
   function cycleWarmup(i: number) {
+    if (readonly) return;
     const cur = warmupReps[i];
     const target = warmups[i].reps;
     warmupReps[i] = cur == null ? 1 : cur >= target ? null : cur + 1;
@@ -84,6 +88,18 @@
     return ring + "border-cyan bg-cyan/20 text-foreground"; // in progress
   }
 
+  // The disabled attribute already blocks these in a browser; the explicit
+  // guards keep the component correct for any click that arrives anyway.
+  function cycleSet(set: SessionSet) {
+    if (readonly) return;
+    onCycle(set);
+  }
+
+  function stepWeight(delta: number) {
+    if (readonly) return;
+    onChangeWeight(delta);
+  }
+
   function workClass(set: SessionSet, i: number): string {
     const ring =
       active === warmups.length + i
@@ -110,7 +126,8 @@
         <Button
           variant="outline"
           size="icon-sm"
-          onclick={() => onChangeWeight(-5)}
+          onclick={() => stepWeight(-5)}
+          disabled={readonly}
           aria-label="Decrease weight by 5 lb"
         >
           −
@@ -123,7 +140,8 @@
         <Button
           variant="outline"
           size="icon-sm"
-          onclick={() => onChangeWeight(5)}
+          onclick={() => stepWeight(5)}
+          disabled={readonly}
           aria-label="Increase weight by 5 lb"
         >
           +
@@ -147,10 +165,11 @@
         {#each warmups as w, i (i)}
           <button
             type="button"
-            class="flex size-11 cursor-pointer items-center justify-center rounded-full border text-sm font-bold tabular-nums transition {warmClass(
-              i,
-            )}"
+            class="flex size-11 items-center justify-center rounded-full border text-sm font-bold tabular-nums transition {readonly
+              ? 'cursor-default'
+              : 'cursor-pointer'} {warmClass(i)}"
             onclick={() => cycleWarmup(i)}
+            disabled={readonly}
             aria-label={`Warm-up ${w.weightLb} lb × ${w.reps}: ${
               warmupReps[i] ?? 0
             } reps`}
@@ -164,11 +183,11 @@
       {#each sets as set, i (set.id)}
         <button
           type="button"
-          class="flex size-12 cursor-pointer items-center justify-center rounded-full border text-base font-bold tabular-nums transition {workClass(
-            set,
-            i,
-          )}"
-          onclick={() => onCycle(set)}
+          class="flex size-12 items-center justify-center rounded-full border text-base font-bold tabular-nums transition {readonly
+            ? 'cursor-default'
+            : 'cursor-pointer'} {workClass(set, i)}"
+          onclick={() => cycleSet(set)}
+          disabled={readonly}
           aria-label={`Set ${set.setNumber}: ${
             set.actualReps == null ? "not logged" : `${set.actualReps} reps`
           }`}
@@ -180,7 +199,11 @@
   </div>
 
   <p class="mt-3 text-xs text-muted-foreground">
-    {#if warmups.length > 0}Cyan sets are warm-ups. {/if}Tap a set to add a rep;
-    it clears after the target.
+    {#if readonly}
+      This workout is finished — sets are locked.
+    {:else}
+      {#if warmups.length > 0}Cyan sets are warm-ups. {/if}Tap a set to add a
+      rep; it clears after the target.
+    {/if}
   </p>
 </Card>
