@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# Decide whether a push contains changes relevant to a workflow's path set.
+# Prints "true" or "false" on stdout; diagnostics go to stderr.
+#
+#   detect-relevant-changes <event> <ref_name> <sha> <before> <path_regex>
+#
+# WHY THIS COMPARES AGAINST THE BASE BRANCH, NOT THE PUSHED RANGE
+#
+# The result gates in go.yml/ui.yml count a SKIPPED build as a pass, so branch
+# protection doesn't deadlock on a PR that never touches that tree (see
+# docs/ci-branch-protection.md). That is sound on its own. It stops being sound
+# when relevance is computed from the newest push alone:
+#
+#   push 1  touches src/api, backend job runs, gosec FAILS   → check red
+#   push 2  touches only src/ui, backend job is skipped       → gate reports pass
+#
+# The branch is now green on a head whose backend was never linted, and that head
+# is what merges. This is not hypothetical: it is how a gosec G115 finding reached
+# main (branch sandbox/deload-stall-surfacing, run #321 caught it, PR #70 merged
+# anyway, fixed later in PR #73).
+#
+# Diffing the whole branch against its base makes relevance a property of the
+# BRANCH rather than of the last push: once a branch touches src/api, every later
+# push re-runs the backend job, so the head that merges is always a head that was
+# actually checked. The cost is that a docs-only follow-up commit on a backend
+# branch now re-runs the backend job. That is the intended trade — a few extra
+# minutes of runner time to close a hole that merges unlinted code.
+set -euo pipefail
+
+event=${1:?event}
+ref_name=${2:?ref_name}
+sha=${3:?sha}
+before=${4-}
+regex=${5:?path regex}
+
+base_branch=${BASE_BRANCH:-main}
+zero=0000000000000000000000000000000000000000
+
+run_everything() { echo "$1" >&2; echo true; exit 0; }
+
+# Non-push events (schedule, workflow_dispatch) have no range to compare.
+[ "$event" = push ] || run_everything "event=$event → run everything"
+
+if [ "$ref_name" = "$base_branch" ]; then
+  # On the base branch there is no branch-vs-base comparison to make: the
+  # merge-base with itself is HEAD, which would diff nothing and skip every job.
+  # Fall back to the pushed range, which is what "changed on main" means anyway.
+  if [ -z "$before" ] || [ "$before" = "$zero" ] ||
+    ! git cat-file -e "${before}^{commit}" 2>/dev/null; then
+    run_everything "no usable base ('$before') → run everything"
+  fi
+  base=$before
+else
+  # The runner checks out the pushed branch; the base branch may not be present
+  # as a local ref, so fetch it. Best-effort: if the fetch or the merge-base
+  # fails we run everything rather than silently skipping a gate.
+  git fetch --quiet origin "$base_branch" 2>/dev/null || true
+  base=$(git merge-base FETCH_HEAD "$sha" 2>/dev/null || true)
+  [ -n "$base" ] || run_everything "no merge-base with $base_branch → run everything"
+fi
+
+# Capture first, then match against the variable. `git diff | grep -q` is a
+# SIGPIPE race: grep exits at the first match and can kill git mid-write, and
+# under `set -o pipefail` that failure becomes the pipeline's status — reporting
+# "no relevant changes" for a diff that in fact matched.
+changed=$(git diff --name-only "$base" "$sha")
+
+if grep -qE "$regex" <<<"$changed"; then
+  echo "relevant files changed in $base..$sha → run" >&2
+  echo true
+else
+  echo "no relevant changes in $base..$sha → skip" >&2
+  echo false
+fi

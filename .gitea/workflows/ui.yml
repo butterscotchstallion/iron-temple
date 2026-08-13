@@ -32,35 +32,25 @@ jobs:
     outputs:
       relevant: ${{ steps.detect.outputs.relevant }}
     steps:
-      # Full history so `git diff <before>..<sha>` can resolve the pushed range.
+      # Full history so the detector can resolve the merge-base with main (and, on
+      # main itself, the pushed range).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
+      # Relevance is computed BRANCH-vs-main, not push-vs-previous-push. A per-push
+      # diff plus a gate that counts `skipped` as a pass lets a path-irrelevant
+      # follow-up commit wash out an earlier failure — see the script's header for
+      # the incident this prevents.
       - name: Detect relevant changes
         id: detect
         run: |
           set -euo pipefail
-          # Anything that isn't a normal push (manual dispatch, etc.) → run everything.
-          if [ "${{ github.event_name }}" != "push" ]; then
-            echo "event=${{ github.event_name }} → run everything"
-            echo "relevant=true" >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          before="${{ github.event.before }}"
-          zero="0000000000000000000000000000000000000000"
-          # New branch (before = zeros) or a base commit we don't have → run everything.
-          if [ -z "$before" ] || [ "$before" = "$zero" ] || ! git cat-file -e "${before}^{commit}" 2>/dev/null; then
-            echo "no usable base ('$before') → run everything"
-            echo "relevant=true" >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          if git diff --name-only "$before" "${{ github.sha }}" \
-               | grep -qE '^(src/ui/|src/api/openapi\.yaml$|\.gitea/workflows/ui\.yml$)'; then
-            echo "UI-relevant files changed → run"
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "no UI-relevant changes → skip build"
-            echo "relevant=false" >> "$GITHUB_OUTPUT"
-          fi
+          relevant=$(bash "$GITHUB_WORKSPACE/.gitea/scripts/detect-relevant-changes" \
+            "${{ github.event_name }}" "${{ github.ref_name }}" "${{ github.sha }}" \
+            "${{ github.event.before }}" \
+            '^(src/ui/|src/api/openapi\.yaml$|\.gitea/workflows/ui\.yml$|\.gitea/scripts/)')
+          echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
 
   build:
     name: UI Build & Test

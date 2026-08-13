@@ -41,28 +41,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Relevance is computed BRANCH-vs-main, not push-vs-previous-push. A per-push
+      # diff plus a gate that counts `skipped` as a pass lets a path-irrelevant
+      # follow-up commit wash out an earlier failure — see the script's header for
+      # the incident this prevents.
       - name: Detect relevant changes
         id: detect
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" != "push" ]; then
-            echo "event=${{ github.event_name }} → run everything"
-            echo "relevant=true" >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          before="${{ github.event.before }}"
-          zero="0000000000000000000000000000000000000000"
-          if [ -z "$before" ] || [ "$before" = "$zero" ] || ! git cat-file -e "${before}^{commit}" 2>/dev/null; then
-            echo "no usable base ('$before') → run everything"
-            echo "relevant=true" >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          if git diff --name-only "$before" "${{ github.sha }}" \
-               | grep -qE '^(src/api/|\.gitea/workflows/go\.yml$|\.gitea/scripts/|\.gitea/ci/postgres\.yaml$)'; then
-            echo "backend-relevant files changed → run"
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "no backend-relevant changes → skip"
-            echo "relevant=false" >> "$GITHUB_OUTPUT"
-          fi
+          relevant=$(bash "$GITHUB_WORKSPACE/.gitea/scripts/detect-relevant-changes" \
+            "${{ github.event_name }}" "${{ github.ref_name }}" "${{ github.sha }}" \
+            "${{ github.event.before }}" \
+            '^(src/api/|\.gitea/workflows/go\.yml$|\.gitea/scripts/|\.gitea/ci/postgres\.yaml$)')
+          echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
 
   go:
     name: Go Build & Test
