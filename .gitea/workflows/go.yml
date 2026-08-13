@@ -87,6 +87,20 @@ jobs:
       TAR_OPTIONS: --no-same-owner
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Merging the base branch needs its commits present.
+          fetch-depth: 0
+
+      # Run the gates against the tree that will exist on main once this branch
+      # merges, not the branch in isolation — two individually-green branches can
+      # still merge into a tree that doesn't compile. See the script header for
+      # the incident (#72 x #73) this prevents.
+      # Context goes through env, not ${{ }} — see the note in the changes job.
+      - name: Merge main into the head under test
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: bash "$GITHUB_WORKSPACE/.gitea/scripts/merge-base-branch" "$EVENT_NAME" "$REF_NAME"
 
       # Use the Go toolchain baked into the runner image instead of actions/setup-go
       # (no download). GOTOOLCHAIN=local pins it.
@@ -218,6 +232,16 @@ jobs:
       IT_PG_NAME: itpg-${{ github.run_id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      # Same merge preview as the `go` job — the integration suite has to run
+      # against the merge result too, or it certifies a tree that never ships.
+      - name: Merge main into the head under test
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: bash "$GITHUB_WORKSPACE/.gitea/scripts/merge-base-branch" "$EVENT_NAME" "$REF_NAME"
 
       - name: Use the baked Go toolchain
         run: |

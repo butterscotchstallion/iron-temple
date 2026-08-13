@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# Merge the base branch into the checked-out head, so the gates run against the
+# tree that WILL exist on the base branch — not the tree this branch happens to
+# have in isolation.
+#
+#   merge-base-branch <event> <ref_name>
+#
+# WHY THIS EXISTS
+#
+# Every gate in this repo triggers on `push: branches: ["**"]`. Nothing runs on
+# the pull_request event except the AI reviewer, and this Gitea publishes only
+# refs/pull/N/head — there are no refs/pull/N/merge refs to check out. So the
+# merge result was never built by anything, on any event, until it landed on
+# main and release.yml tried to ship it.
+#
+# Two green branches can still produce a broken merge. git resolves a merge
+# TEXTUALLY; it has no idea whether the result type-checks. The incident this
+# was written for:
+#
+#   PR #73  dto.go:            FailureCount int32 -> int   (widen the DTO)
+#   PR #72  progression.go:    FailureCount int   -> int32 (narrow the engine)
+#
+# Both deleted the same `int32(plan.FailureCount)` conversion in programs.go and
+# both wrote the replacement line identically — same before and after blob
+# hashes — so git saw one change, not two, and merged without a conflict. Each
+# side had then adjusted a DIFFERENT file to make the types line up, and those
+# never overlapped either. Clean merge, uncompilable tree:
+#
+#   internal/api/programs.go:241:27: cannot use plan.FailureCount
+#     (variable of type int32) as int value in struct literal
+#
+# That broke Go Build & Test (run #398, at `go vet` — so no test ran and the
+# integration job was skipped) and the v0.4.0 Release image build (run #399).
+# No pre-commit hook could have caught it: the breakage exists only in the merge
+# result, and neither branch ever had that tree on disk.
+#
+# WHY IT FAILS LOUD RATHER THAN SKIPPING
+#
+# If the base branch can't be fetched, this exits non-zero instead of quietly
+# testing the branch alone. Silently degrading to a weaker check while still
+# reporting green is the exact failure mode detect-relevant-changes was written
+# to close (a skipped build counting as a pass); don't reintroduce it here.
+#
+# The merge is local to the runner's working tree and is never pushed.
+set -euo pipefail
+
+event=${1:?event}
+ref_name=${2:?ref_name}
+
+base_branch=${BASE_BRANCH:-main}
+
+skip() {
+  echo "$1" >&2
+  exit 0
+}
+
+# Non-push events (schedule, workflow_dispatch) aren't testing a branch headed
+# for the base branch, so there's no merge to preview.
+[ "$event" = push ] || skip "event=$event → nothing to merge"
+[ "$ref_name" != "$base_branch" ] || skip "on $base_branch → nothing to merge"
+
+# Fetch into an EXPLICIT ref with a CHECKED status, not FETCH_HEAD — same two
+# reasons detect-relevant-changes spells out: actions/checkout has already
+# written FETCH_HEAD, and the host executor reuses pods, so stale refs are the
+# norm. + forces the update; the base branch can move non-fast-forward.
+if ! git fetch --quiet --no-tags origin \
+  "+refs/heads/$base_branch:refs/merge-base-branch" 2>/dev/null; then
+  echo "::error::could not fetch $base_branch — cannot verify the merge result" >&2
+  exit 1
+fi
+
+base_sha=$(git rev-parse refs/merge-base-branch)
+
+if git merge-base --is-ancestor refs/merge-base-branch HEAD; then
+  skip "branch already contains $base_branch ($base_sha) → nothing to merge"
+fi
+
+# --no-ff: a branch with no unique commits would otherwise fast-forward, leaving
+# the gates testing the base branch instead of this change.
+# -c user.*: git refuses to write a merge commit without an identity. The commit
+# is discarded with the runner.
+if ! git -c user.name='gitea-actions' -c user.email='gitea-actions@local' \
+  merge --no-edit --no-ff refs/merge-base-branch; then
+  git merge --abort 2>/dev/null || true
+  echo "::error::cannot merge $base_branch into this branch — merge or rebase onto $base_branch locally, resolve the conflict, and push again" >&2
+  exit 1
+fi
+
+echo "merged $base_branch ($base_sha) → gates run against the merge result" >&2
