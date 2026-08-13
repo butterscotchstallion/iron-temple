@@ -1,5 +1,18 @@
 # Making the UI gates runnable in the sandbox
 
+> **STATUS (2026-08-13): solved — Fix B shipped.** The sandbox image now bakes
+> `pnpm`, `node`, corepack and a warm offline pnpm store, and proves
+> `pnpm install --offline` at build time. `scripts/preflight.sh --ui` runs green in
+> the sandbox in a few seconds. The launcher rehydrates `node_modules` per session,
+> so nothing below needs doing by hand.
+>
+> The text that follows is the original proposal, kept for the reasoning. Where it
+> says "`pnpm` isn't installed" or "the UI gates simply cannot run", that is no
+> longer true. What remains accurate is the air gap itself: there is still no route
+> to any package registry, which is why `go mod tidy`, `govulncheck` and `trivy`
+> stay CI-only.
+
+
 This documents *why* `scripts/preflight.sh` can't run the frontend gates in the
 homelab devcontainer sandbox, and the two ways to fix it. The fix lives in the
 **homelab image**, not in this repo — so this is a proposal for the operator to

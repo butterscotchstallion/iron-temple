@@ -3,46 +3,26 @@
 #   Install the binary: https://github.com/evilmartians/lefthook
 #   Enable the hooks:   lefthook install
 #
-# Each command only runs when matching files are staged, so a docs-only commit
-# skips the Go and UI gates entirely.
+# (In the devcontainer sandbox both are done for you — the image bakes lefthook and
+# hl-devcontainer.sh runs `lefthook install` per session.)
+#
+# ONE pre-commit command on purpose. The gate logic — which checks are relevant to
+# the staged paths, and in what order — lives in dev/precommit.sh, which delegates to
+# scripts/preflight.sh. That keeps a single definition of "the gates" shared by the
+# hook and by a manual `scripts/preflight.sh` run, and keeps this file free of globs
+# subtle enough to fail silently. dev/precommit.sh exits immediately when nothing
+# relevant is staged, so a docs-only commit costs one shell invocation.
+#
+# What runs, and what CI keeps to itself, is documented at the top of preflight.sh.
+# Two gates are deliberately NOT here because they cannot work air-gapped:
+# `go mod tidy` (dead Go proxy) and `govulncheck` (fetches vuln.go.dev) — both were
+# measured failing, and CI enforces them.
 
 pre-commit:
   parallel: false
   commands:
-    # ---- Backend (src/api, Go) ----
-    api-mod-tidy:
-      root: "src/api/"
-      glob: "src/api/**/*.go"
-      run: go mod tidy && git diff --exit-code -- go.mod go.sum
-    api-vet:
-      root: "src/api/"
-      glob: "src/api/**/*.go"
-      run: go vet ./...
-    api-lint:
-      root: "src/api/"
-      glob: "src/api/**/*.go"
-      run: golangci-lint run
-    api-test:
-      root: "src/api/"
-      glob: "src/api/**/*.go"
-      # -short skips the Testcontainers integration tests (which need Docker);
-      # the pure unit tests still run on every commit.
-      run: go test -short ./...
-
-    # ---- Frontend (src/ui, Svelte) ----
-    ui-generate-api:
-      root: "src/ui/"
-      glob: "src/api/openapi.yaml"
-      # Regenerate the typed client when the OpenAPI contract changes.
-      run: pnpm generate:api
-    ui-typecheck:
-      root: "src/ui/"
-      glob: "src/ui/**/*.{ts,svelte}"
-      run: pnpm check
-    ui-test:
-      root: "src/ui/"
-      glob: "src/ui/**/*.{ts,svelte}"
-      run: pnpm test:unit
+    gates:
+      run: sh dev/precommit.sh
 
 pre-push:
   commands:
