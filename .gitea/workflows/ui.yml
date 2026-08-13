@@ -44,11 +44,19 @@ jobs:
       # the incident this prevents.
       - name: Detect relevant changes
         id: detect
+        # Context values go through env, NOT ${{ }} interpolation into the script.
+        # ${{ }} is substituted textually before the shell parses the line, and git
+        # permits $ ` ( ) ; in ref names — a branch named `$(cmd)` would execute on
+        # the runner. Via env the value is just a string in a variable.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          HEAD_SHA: ${{ github.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
           relevant=$(bash "$GITHUB_WORKSPACE/.gitea/scripts/detect-relevant-changes" \
-            "${{ github.event_name }}" "${{ github.ref_name }}" "${{ github.sha }}" \
-            "${{ github.event.before }}" \
+            "$EVENT_NAME" "$REF_NAME" "$HEAD_SHA" "$BEFORE_SHA" \
             '^(src/ui/|src/api/openapi\.yaml$|\.gitea/workflows/ui\.yml$|\.gitea/scripts/)')
           echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
 
