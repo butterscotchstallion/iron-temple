@@ -86,9 +86,15 @@ type progressionInfoDTO struct {
 	// Status is one of the progression.Status values (start|advance|hold|deload).
 	Status string `json:"status"`
 	// FailureCount is the consecutive trailing failures at the working weight.
-	FailureCount int32 `json:"failureCount"`
+	//
+	// int, not int32, to match progression.Plan.FailureCount — these two and
+	// FailuresBeforeDeload are engine-domain counts, not database SERIAL ids like
+	// the int32 fields above. Converting to int32 here bought nothing (openapi.yaml
+	// declares plain `type: integer`, no int32 format, and the wire bytes are
+	// identical) while costing a gosec G115 int -> int32 overflow finding.
+	FailureCount int `json:"failureCount"`
 	// FailuresBeforeDeload is the threshold at which a stall triggers a deload.
-	FailuresBeforeDeload int32 `json:"failuresBeforeDeload"`
+	FailuresBeforeDeload int `json:"failuresBeforeDeload"`
 	// PreviousWeightLb is the weight just worked (advanced past, repeated, or
 	// deloaded from); 0 when there is no history.
 	PreviousWeightLb float64 `json:"previousWeightLb"`

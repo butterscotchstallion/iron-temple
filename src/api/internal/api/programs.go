@@ -238,7 +238,7 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID int32) ([]presc
 			RestSeconds:  restSecondsDefault,
 			Progression: progressionInfoDTO{
 				Status:               string(plan.Status),
-				FailureCount:         int32(plan.FailureCount),
+				FailureCount:         plan.FailureCount,
 				FailuresBeforeDeload: progression.FailuresBeforeDeload,
 				PreviousWeightLb:     plan.PreviousLb,
 			},
