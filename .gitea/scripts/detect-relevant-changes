@@ -52,10 +52,27 @@ if [ "$ref_name" = "$base_branch" ]; then
   base=$before
 else
   # The runner checks out the pushed branch; the base branch may not be present
-  # as a local ref, so fetch it. Best-effort: if the fetch or the merge-base
-  # fails we run everything rather than silently skipping a gate.
-  git fetch --quiet origin "$base_branch" 2>/dev/null || true
-  base=$(git merge-base FETCH_HEAD "$sha" 2>/dev/null || true)
+  # as a local ref, so fetch it into a ref of our own.
+  #
+  # Two things here are deliberate, and a `git fetch … || true` + `merge-base
+  # FETCH_HEAD` gets both wrong:
+  #
+  #   1. The fetch status is CHECKED. Swallowing it leaves whatever FETCH_HEAD the
+  #      previous fetch wrote — and actions/checkout has already fetched the pushed
+  #      ref, so FETCH_HEAD is ~$sha. merge-base then returns a commit on this very
+  #      branch, the -n guard passes, the diff comes back empty, and the job is
+  #      SKIPPED. That is precisely the silent skip this script exists to prevent.
+  #   2. The fetch writes an EXPLICIT ref, not FETCH_HEAD, so a stale FETCH_HEAD
+  #      from any earlier command can't be mistaken for the base branch. The host
+  #      executor reuses pods, so stale state is the norm, not the exception.
+  #
+  # + forces the update: refs/detect-base may linger from an earlier run, and the
+  # base branch can move non-fast-forward.
+  if ! git fetch --quiet --no-tags origin \
+    "+refs/heads/$base_branch:refs/detect-base" 2>/dev/null; then
+    run_everything "could not fetch $base_branch → run everything"
+  fi
+  base=$(git merge-base refs/detect-base "$sha" 2>/dev/null || true)
   [ -n "$base" ] || run_everything "no merge-base with $base_branch → run everything"
 fi
 
