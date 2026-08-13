@@ -147,11 +147,21 @@ if [ "$run_ui" -eq 1 ]; then
   else
     # --frozen-lockfile is the lockfile-freshness gate ui.yml runs: it fails when
     # package.json and pnpm-lock.yaml disagree, so a dependency edit without a
-    # lockfile refresh is caught here instead of in CI. --offline forbids network,
-    # so it rehydrates from the image's baked pnpm store or fails loudly — it can
-    # never quietly reach for the unreachable registry. Doubles as the guarantee
+    # lockfile refresh is caught here instead of in CI. Doubles as the guarantee
     # that node_modules exists before the gates that need it. ~1s warm, ~4s cold.
-    gate "pnpm install --frozen-lockfile" \
+    #
+    # --offline is a DELIBERATE DEVIATION: ui.yml runs --prefer-offline, which uses
+    # the store first and falls back to the registry. That fallback does not exist
+    # here — the configured registry (pnpm config get registry) refuses the
+    # connection from the sandbox, so --prefer-offline would reach for it, fail
+    # anyway, and report a registry error instead of the real cause. --offline
+    # fails fast and says plainly that the package is not in the baked store.
+    #
+    # The cost: this gate is stricter than CI, the only one that is. If a
+    # dependency lands on main and the sandbox image is not rebuilt, the stale
+    # baked store fails this gate on EVERY UI commit while CI stays green. The fix
+    # is to rebuild the image — not --no-verify, which costs you every other gate.
+    gate "pnpm install --frozen-lockfile --offline" \
       sh -c "cd '$root/src/ui' && pnpm install --frozen-lockfile --offline"
     # generate:api first — svelte-check imports the git-ignored hey-api client.
     gate "pnpm generate:api" sh -c "cd '$root/src/ui' && pnpm generate:api"
