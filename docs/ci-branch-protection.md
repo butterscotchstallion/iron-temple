@@ -47,10 +47,11 @@ check that will never arrive.
 
 1. **No `on.paths` filter** — the workflow triggers on every branch push, so its
    status context is always produced.
-2. **A `changes` job** does the path filtering instead (a `git diff` over the
-   pushed range), so the expensive build/lint/test jobs still only run when
-   relevant files changed. Non-push events (schedule, manual dispatch) and new
-   branches run everything.
+2. **A `changes` job** does the path filtering instead (a `git diff` of the
+   branch against `main`), so the expensive build/lint/test jobs still only run
+   when relevant files changed. Non-push events (schedule, manual dispatch) and
+   new branches run everything. Both workflows share
+   `.gitea/scripts/detect-relevant-changes`.
 3. **A `result` gate job** with `if: always()` always runs and posts the required
    context. It **passes** when the real job succeeded *or* was legitimately
    skipped, and **fails** when the real job failed. This is the job you require.
@@ -58,6 +59,33 @@ check that will never arrive.
 Net effect: an api-only PR gets a green `UI Check & Test` (build skipped, gate
 passes) without running the UI suite, and a genuinely broken UI PR gets a red
 `UI Check & Test`. No deadlock, no wasted e2e runs.
+
+### Why the diff is branch-vs-`main` and not push-vs-push
+
+Point 3 — skipped counts as a pass — is what keeps the gate from deadlocking, and
+it is safe **only** if relevance is a property of the branch. It was originally
+computed from the pushed range (`github.event.before..github.sha`), and that
+combination is exploitable by accident:
+
+| push | touches | backend job | required check |
+|------|---------|-------------|----------------|
+| 1 | `src/api` | runs, **fails** | red |
+| 2 | `src/ui` only | **skipped** (irrelevant to this push) | **green** |
+
+After push 2 the branch is green on a head whose backend was never linted, and
+that head is what merges. This is not hypothetical — it is how a gosec **G115**
+finding reached `main`: run #321 on `sandbox/deload-stall-surfacing` caught it, a
+UI-only follow-up commit skipped the backend job, PR #70 merged clean, and the
+failure only resurfaced when the next backend PR ran gosec again (fixed in #73).
+
+Diffing the whole branch against `main` makes the answer stable across pushes:
+once a branch touches `src/api`, every later push re-runs the backend job, so the
+head that merges is always a head that was checked. The cost is that a docs-only
+follow-up on a backend branch re-runs the backend job — cheap next to merging
+unlinted code.
+
+On `main` itself there is no branch-vs-`main` comparison to make (the merge-base
+with itself is `HEAD`), so pushes to `main` still use the pushed range.
 
 ## Enable it (operator, needs repo admin)
 
