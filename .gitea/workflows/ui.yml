@@ -70,6 +70,20 @@ jobs:
         working-directory: src/ui
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Merging the base branch needs its commits present.
+          fetch-depth: 0
+
+      # Run the gates against the tree that will exist on main once this branch
+      # merges, not the branch in isolation. The backend hit this first (#72 x
+      # #73, see the script header), but a clean merge of two green branches can
+      # just as easily break a type or a lockfile here.
+      # Context goes through env, not ${{ }} — see the note in the changes job.
+      - name: Merge main into the head under test
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: bash "$GITHUB_WORKSPACE/.gitea/scripts/merge-base-branch" "$EVENT_NAME" "$REF_NAME"
 
       # Activate the pinned pnpm via corepack. The job's Node comes from the act
       # toolcache (/opt/acttoolcache/node/.../bin), whose dir the job can't write to —
