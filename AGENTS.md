@@ -27,7 +27,14 @@ Conventions for agents (and humans) working in this repository.
 - **Git hooks refresh it when the tree moves**, via `dev/regen-api.sh` on `post-merge`,
   `post-checkout` and `post-rewrite`. That's what keeps your editor's language server
   from linting against the previous contract after a pull.
-- **`pnpm dev` regenerates on every save of the spec**, via the `iron-temple:regenerate-api`
+- **`pnpm dev` regenerates when you save the spec**, via the `iron-temple:regenerate-api`
   plugin in `vite.config.ts`. Editing `src/api/openapi.yaml` rewrites the client, and Vite
-  hot-reloads the routes that import it — no dev-server restart. A spec that doesn't parse
-  is logged and skipped, leaving the last good client in place.
+  reloads the routes that import it — no dev-server restart. A spec that doesn't parse is
+  logged and skipped, leaving the last good client in place.
+- **Both of those fire only when the spec's bytes actually changed.** They sha256 the spec
+  and compare against `src/ui/node_modules/.cache/iron-temple/openapi-spec.sha256`, written
+  only just after a successful generation. The generated client is plain `.ts` with no HMR
+  handler, so every rewrite costs a full page reload — a no-op save shouldn't. The stamp can
+  read stale (a bare `pnpm generate:api` doesn't update it) and cost a redundant run, but it
+  can never read current while the client is stale. The npm-script chain above stays
+  unconditional; it's the guarantee, and these are the optimisation.
