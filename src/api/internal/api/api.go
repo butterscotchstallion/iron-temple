@@ -64,6 +64,7 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 			r.Get("/{sessionId}", s.getSession)
 			r.Patch("/{sessionId}", s.updateSession)
 			r.Delete("/{sessionId}", s.deleteSession)
+			r.Post("/{sessionId}/finish", s.finishSession)
 			r.Patch("/{sessionId}/sets/{setId}", s.updateSessionSet)
 		})
 	})

@@ -256,6 +256,28 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /sessions/{sessionId}/finish:
+    parameters:
+      - $ref: "#/components/parameters/SessionId"
+    post:
+      tags: [sessions]
+      operationId: finishSession
+      summary: End a session
+      description: >
+        Stamps finishedAt and marks the session over, whether or not every set
+        hit its target. Idempotent: finishing an already-finished session leaves
+        the original timestamp in place. A session also becomes over on its own
+        12 hours after it was started.
+      responses:
+        "200":
+          description: The finished session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /sessions/{sessionId}/sets/{setId}:
     parameters:
       - $ref: "#/components/parameters/SessionId"
@@ -598,7 +620,7 @@ components:
     Session:
       type: object
       required:
-        [id, programId, programName, programDayId, programDayName, performedOn, notes, createdAt, sets]
+        [id, programId, programName, programDayId, programDayName, performedOn, notes, createdAt, isOver, sets]
       properties:
         id:
           type: integer
@@ -622,6 +644,19 @@ components:
         createdAt:
           type: string
           format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: >
+            When the lifter pressed Finish. Null if they never did — the session
+            may still be over, having aged past the 12-hour cutoff.
+        isOver:
+          type: boolean
+          description: >
+            True once the session was finished by hand or was started more than
+            12 hours ago. An over session is read-only and is what the
+            progression engine counts.
         sets:
           type: array
           items:
@@ -680,7 +715,7 @@ components:
     SessionSummary:
       type: object
       required:
-        [id, programId, programName, programDayId, programDayName, performedOn, setCount, completedSetCount, exercises]
+        [id, programId, programName, programDayId, programDayName, performedOn, setCount, completedSetCount, isOver, exercises]
       properties:
         id:
           type: integer
@@ -702,6 +737,11 @@ components:
           type: integer
         completedSetCount:
           type: integer
+        isOver:
+          type: boolean
+          description: >
+            True once the session was finished by hand or was started more than
+            12 hours ago.
         exercises:
           type: array
           description: Per-exercise top weights, in prescription order.

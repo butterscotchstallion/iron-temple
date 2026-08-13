@@ -80,8 +80,10 @@ type Plan struct {
 	// Status is why this weight was chosen.
 	Status Status
 	// FailureCount is the number of consecutive trailing failures at the working
-	// weight (0 on StatusStart and StatusAdvance).
-	FailureCount int
+	// weight (0 on StatusStart and StatusAdvance). Held as int32 to match the
+	// width the API serialises it at, so the value never needs a narrowing
+	// conversion on the way out (which gosec flags as G115).
+	FailureCount int32
 	// PreviousLb is the weight just worked — the weight advanced past, repeated,
 	// or deloaded from (0 on StatusStart).
 	PreviousLb float64
@@ -117,7 +119,7 @@ func NextPlan(startingWeight, increment float64, history []SessionResult) Plan {
 	}
 
 	// Count consecutive trailing failures at the current working weight.
-	fails := 0
+	var fails int32
 	for i := len(history) - 1; i >= 0; i-- {
 		h := history[i]
 		if h.Success || h.WeightLb != last.WeightLb {

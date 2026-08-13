@@ -64,7 +64,10 @@ JOIN session_sets ss ON ss.session_id = s.id
 JOIN program_days pd ON pd.id = s.program_day_id
 WHERE pd.program_id = $1
   AND ss.exercise_id = $2
+  AND (s.finished_at IS NOT NULL
+       OR s.created_at < now() - INTERVAL '12 hours')
 GROUP BY s.id, s.performed_on
+HAVING COUNT(ss.id) FILTER (WHERE ss.actual_reps > 0) > 0
 ORDER BY s.performed_on, s.id
 `
 
@@ -85,6 +88,12 @@ type ListLiftHistoryRow struct {
 // progresses continuously across Workout A and B. A session "succeeds" for the
 // lift only if every logged set for it was completed; weight_lb is the top
 // weight worked that session.
+//
+// Only sessions that are over and carry real logged work count. Sets are
+// materialized up front with completed = false, so without both guards a
+// session you merely started — or are still in the middle of — would score as
+// BOOL_AND(completed) = false and be recorded as a failed session, pushing the
+// engine toward an unearned deload. See the is_over note in sessions.sql.
 func (q *Queries) ListLiftHistory(ctx context.Context, arg ListLiftHistoryParams) ([]ListLiftHistoryRow, error) {
 	rows, err := q.db.Query(ctx, listLiftHistory, arg.ProgramID, arg.ExerciseID)
 	if err != nil {

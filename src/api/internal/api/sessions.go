@@ -107,6 +107,7 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 			PerformedOn:       dateToString(row.PerformedOn),
 			SetCount:          row.SetCount,
 			CompletedSetCount: row.CompletedSetCount,
+			IsOver:            row.IsOver,
 			Exercises:         exercises,
 		})
 	}
@@ -267,6 +268,32 @@ func (s *Server) updateSession(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, full)
 }
 
+// finishSession marks a session as ended by hand. It is idempotent — the store
+// keeps the first timestamp — so a double-tap on Finish is harmless.
+func (s *Server) finishSession(w http.ResponseWriter, r *http.Request) {
+	id, ok := idParam(r, "sessionId")
+	if !ok {
+		notFound(w, "session not found")
+		return
+	}
+	ctx := r.Context()
+
+	if _, err := s.q.FinishSession(ctx, id); errors.Is(err, pgx.ErrNoRows) {
+		notFound(w, "session not found")
+		return
+	} else if err != nil {
+		internalError(w)
+		return
+	}
+
+	full, err := s.buildSession(ctx, id)
+	if err != nil {
+		internalError(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, full)
+}
+
 func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {
 	id, ok := idParam(r, "sessionId")
 	if !ok {
@@ -407,6 +434,8 @@ func (s *Server) buildSession(ctx context.Context, id int32) (sessionDTO, error)
 		PerformedOn:    dateToString(g.PerformedOn),
 		Notes:          g.Notes,
 		CreatedAt:      timestamptzToString(g.CreatedAt),
+		FinishedAt:     optionalTimestamptz(g.FinishedAt),
+		IsOver:         g.IsOver,
 		Sets:           setDTOs,
 	}, nil
 }

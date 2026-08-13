@@ -113,15 +113,19 @@ type sessionSetDTO struct {
 }
 
 type sessionDTO struct {
-	ID             int32           `json:"id"`
-	ProgramID      int32           `json:"programId"`
-	ProgramName    string          `json:"programName"`
-	ProgramDayID   int32           `json:"programDayId"`
-	ProgramDayName string          `json:"programDayName"`
-	PerformedOn    string          `json:"performedOn"`
-	Notes          string          `json:"notes"`
-	CreatedAt      string          `json:"createdAt"`
-	Sets           []sessionSetDTO `json:"sets"`
+	ID             int32  `json:"id"`
+	ProgramID      int32  `json:"programId"`
+	ProgramName    string `json:"programName"`
+	ProgramDayID   int32  `json:"programDayId"`
+	ProgramDayName string `json:"programDayName"`
+	PerformedOn    string `json:"performedOn"`
+	Notes          string `json:"notes"`
+	CreatedAt      string `json:"createdAt"`
+	// FinishedAt is nil until the session is finished by hand; a session can be
+	// over (IsOver) without one, having simply aged out.
+	FinishedAt *string         `json:"finishedAt"`
+	IsOver     bool            `json:"isOver"`
+	Sets       []sessionSetDTO `json:"sets"`
 }
 
 type sessionExerciseWeightDTO struct {
@@ -140,6 +144,7 @@ type sessionSummaryDTO struct {
 	PerformedOn       string                     `json:"performedOn"`
 	SetCount          int64                      `json:"setCount"`
 	CompletedSetCount int64                      `json:"completedSetCount"`
+	IsOver            bool                       `json:"isOver"`
 	Exercises         []sessionExerciseWeightDTO `json:"exercises"`
 }
 

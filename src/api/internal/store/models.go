@@ -46,6 +46,7 @@ type Session struct {
 	PerformedOn  pgtype.Date        `json:"performed_on"`
 	Notes        string             `json:"notes"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	FinishedAt   pgtype.Timestamptz `json:"finished_at"`
 }
 
 type SessionSet struct {
