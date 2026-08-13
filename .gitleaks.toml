@@ -15,4 +15,6 @@ description = "Dev- and test-only credentials (throwaway; not real secrets)"
 paths = [
   '''dev/docker-compose\.yml''', # POSTGRES_PASSWORD: postgres — throwaway local DB
   '''.*_test\.go''',             # Testcontainers postgres.WithPassword("test")
+  '''(^|/)node_modules/''',      # local-only: CI scans a fresh checkout with none,
+                                 # so excluding it MATCHES CI rather than diverging
 ]

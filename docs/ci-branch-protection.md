@@ -13,7 +13,7 @@ layers. We already have the first. This doc sets up the second.
 
 | Layer | Where it runs | Reliable here? |
 |-------|---------------|----------------|
-| Author-time hooks (`lefthook`) | the committer's machine | **No.** The devcontainer/agent sandbox has no JS toolchain and no network, so `pnpm check` can't run and lefthook isn't even installed. Best-effort only. |
+| Author-time hooks (`lefthook`) | the committer's machine | **Partly.** The sandbox image now bakes lefthook + a warm offline pnpm store, and the launcher installs the hooks per session, so the gates genuinely run here. Still bypassable with `--no-verify`, and `go mod tidy` / `govulncheck` / `trivy` can't run air-gapped — so it catches most things early, but it is not the enforcement. |
 | CI (Gitea Actions) | the runner | **Yes.** `go.yml` and `ui.yml` run lint/type-check/tests on every branch push. |
 | Required status checks (branch protection) | Gitea server, at merge | **This is the enforcement.** A PR cannot merge until the required checks are green — and the server can't be bypassed by a committer lacking the toolchain. |
 
