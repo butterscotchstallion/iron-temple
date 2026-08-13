@@ -27,3 +27,7 @@ Conventions for agents (and humans) working in this repository.
 - **Git hooks refresh it when the tree moves**, via `dev/regen-api.sh` on `post-merge`,
   `post-checkout` and `post-rewrite`. That's what keeps your editor's language server
   from linting against the previous contract after a pull.
+- **`pnpm dev` regenerates on every save of the spec**, via the `iron-temple:regenerate-api`
+  plugin in `vite.config.ts`. Editing `src/api/openapi.yaml` rewrites the client, and Vite
+  hot-reloads the routes that import it — no dev-server restart. A spec that doesn't parse
+  is logged and skipped, leaving the last good client in place.
