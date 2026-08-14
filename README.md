@@ -19,7 +19,7 @@ staged paths and runs the matching gates from `scripts/preflight.sh`:
 
 | staged | gates |
 |--------|-------|
-| `src/api/**`, `.gitea/workflows/go.yml` | `go vet`, `golangci-lint`, `gosec`, `go test -short -race` |
+| `src/api/**`, `.gitea/workflows/go.yml` | `go vet`, `golangci-lint`, `gosec`, `go test -short -race`, the integration suite |
 | `src/ui/**`, `src/api/openapi.yaml` | frozen-lockfile install, `generate:api`, `svelte-check`, Vitest |
 | anything | `hadolint`, `gitleaks` |
 
@@ -60,3 +60,21 @@ never fail it. `--strict` flips that for *missing tooling* specifically: a gate 
 can't run becomes a failure instead of a skip. The pre-commit hook always passes
 `--strict`; interactive runs stay lenient, so a box missing one tool can still check
 the rest. ("Nothing to check here" — no `src/ui`, no `go.mod` — stays a skip either way.)
+
+### Integration tests
+
+The backend's DB-backed suite runs against a **real Postgres**, so it needs one — which
+is why `go test -short` skips it and why the `--api` gate above runs it separately. In
+the sandbox that database is `it-testdb` (baked into the image); in CI it's a throwaway
+pod. Either way the invocation itself lives in one place, `dev/integration-test.sh`, so
+the two can't drift:
+
+```sh
+scripts/preflight.sh --api                    # the gate, integration suite included
+it-testdb run -- sh dev/integration-test.sh   # just the suite
+```
+
+Don't hand-roll a `go test` line or your own Postgres for these — the flags and the
+database's encoding/collation are both pinned, and a private copy of either is how a
+green local run starts lying about CI. Details, and what the failures look like:
+[`docs/api-integration-tests.md`](docs/api-integration-tests.md).

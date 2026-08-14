@@ -27,7 +27,11 @@ vet:
 lint:
 	golangci-lint run
 
-## test: run all tests (integration tests need a Docker-compatible daemon)
+# test: all tests. The DB-backed ones need a database, and how to give them one is
+# NOT duplicated here — dev/integration-test.sh is the single definition both CI and
+# scripts/preflight.sh call. See ../../docs/api-integration-tests.md. With no database
+# in reach they fall back to Testcontainers, and without a container runtime for that
+# they self-skip, so a green `make test` alone does not mean the suite ran.
 test:
 	$(GO) test ./...
 

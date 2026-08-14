@@ -27,6 +27,13 @@ Two separate concerns:
 - **Runtime** connects to the **cluster Postgres** via a `DATABASE_URL` env var (from a Kubernetes Secret in production).
 
 ### Open item — container runtime for tests
+> **STATUS (2026-08-14): resolved — no container runtime was needed in the end.** The
+> suite honours `TEST_DATABASE_URL` and only falls back to Testcontainers when it is
+> unset, so CI points it at a throwaway Postgres pod and the sandbox at the loopback
+> server `it-testdb` manages. Neither gate uses Testcontainers; the air gap this item
+> describes is still real, it just no longer blocks these tests. See
+> [`api-integration-tests.md`](api-integration-tests.md). Original item below.
+
 Testcontainers needs a Docker-compatible daemon. This sandbox currently has **none** (no `docker`/`podman`, no socket, no `DOCKER_HOST`). Tests can be written now but won't execute until one of:
 1. A Docker socket is mounted into the devcontainer (`/var/run/docker.sock`), **or**
 2. `DOCKER_HOST` points at a remote Docker daemon reachable from the sandbox, **or**

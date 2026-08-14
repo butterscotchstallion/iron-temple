@@ -62,3 +62,7 @@ re-run provisioning, `down -v` then `up` again.
 - Passwords here (`postgres` / `iron_temple`) are local-dev only. The cluster
   uses a Kubernetes Secret; never reuse these there.
 - `postgres:17-alpine` matches the Testcontainers image in the API tests.
+- This stack is for **running** the app locally; the integration tests don't use it.
+  They bring their own database — `it-testdb` in the sandbox, a pod in CI, and only
+  Testcontainers when neither is set. See
+  [`../docs/api-integration-tests.md`](../docs/api-integration-tests.md).
