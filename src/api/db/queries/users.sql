@@ -7,6 +7,19 @@
 -- name: CountUsers :one
 SELECT COUNT(*) AS total FROM users;
 
+-- LockRegistration serializes the first-user check against concurrent
+-- registrations. It must be taken *before* CountUsers, inside the same
+-- transaction: the check asks whether any row exists, and a COUNT over rows
+-- that do not exist yet takes no lock that a second transaction would block on.
+-- Two racing registrations with different usernames would otherwise both see an
+-- empty table and both commit.
+--
+-- pg_advisory_xact_lock releases at commit or rollback, so a crashed request
+-- cannot wedge registration. The key is arbitrary but fixed — see
+-- registrationLockKey in the api package.
+-- name: LockRegistration :exec
+SELECT pg_advisory_xact_lock(sqlc.arg('key')::bigint);
+
 -- name: CreateUser :one
 INSERT INTO users (username, display_name, password_hash, is_admin)
 VALUES (sqlc.arg('username'), sqlc.arg('display_name'), sqlc.arg('password_hash'), sqlc.arg('is_admin'))

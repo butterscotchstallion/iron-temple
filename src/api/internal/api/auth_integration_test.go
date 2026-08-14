@@ -3,15 +3,18 @@ package api_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
 	"image/png"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/gavv/httpexpect/v2"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"gitea.homelab/gitadmin/iron-temple/api/internal/auth"
 )
@@ -30,6 +33,81 @@ func TestRegistrationClosesAfterTheFirstAccount(t *testing.T) {
 		WithJSON(map[string]any{"username": "interloper", "password": "another-password"}).
 		Expect().Status(http.StatusForbidden).
 		JSON().Object().HasValue("code", "registration_closed")
+}
+
+// The first-user guard cannot rest on the application's count check alone.
+// "Is the table empty?" asks about rows that do not exist, and COUNT takes no
+// predicate lock on them, so two concurrent registrations with different
+// usernames could both see an empty table and both commit. register() holds an
+// advisory lock to serialize that, and users_single_admin_idx is the backstop
+// underneath it — this asserts the backstop directly, by going around the API
+// and trying to write a second owner.
+func TestDatabaseRefusesASecondAdmin(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test requires a Docker daemon")
+	}
+
+	_, err := testPool.Exec(context.Background(),
+		`INSERT INTO users (username, display_name, password_hash, is_admin)
+		 VALUES ('second-owner', 'Second Owner', 'x', true)`)
+	if err == nil {
+		// Undo it, or every later test runs against a two-owner install.
+		_, _ = testPool.Exec(context.Background(),
+			`DELETE FROM users WHERE username = 'second-owner'`)
+		t.Fatal("the database accepted a second admin — users_single_admin_idx is missing or not partial")
+	}
+
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23505" {
+		t.Fatalf("insert failed, but not with a unique violation: %v", err)
+	}
+	if pgErr.ConstraintName != "users_single_admin_idx" {
+		t.Errorf("rejected by %q, want users_single_admin_idx", pgErr.ConstraintName)
+	}
+
+	// A non-admin account is still allowed: the index is partial, so it
+	// constrains owners without freezing the table.
+	if _, err := testPool.Exec(context.Background(),
+		`INSERT INTO users (username, display_name, password_hash, is_admin)
+		 VALUES ('ordinary', 'Ordinary', 'x', false)`); err != nil {
+		t.Fatalf("the index also blocks ordinary accounts: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(),
+			`DELETE FROM users WHERE username = 'ordinary'`)
+	})
+}
+
+// Concurrent registrations must produce exactly one account. Registration is
+// already closed by TestMain, so every one of these must be refused — and
+// refused cleanly, with a 403, rather than surfacing a constraint violation as
+// a 500.
+func TestConcurrentRegistrationsAreAllRefusedCleanly(t *testing.T) {
+	e := expectAnon(t)
+
+	const attempts = 8
+	var wg sync.WaitGroup
+	codes := make([]int, attempts)
+	for i := range attempts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			resp := e.POST("/auth/register").
+				WithJSON(map[string]any{
+					"username": fmt.Sprintf("racer%d", i),
+					"password": "a-long-enough-password",
+				}).
+				Expect()
+			codes[i] = resp.Raw().StatusCode
+		}()
+	}
+	wg.Wait()
+
+	for i, code := range codes {
+		if code != http.StatusForbidden {
+			t.Errorf("attempt %d returned %d, want 403", i, code)
+		}
+	}
 }
 
 func TestRegisterValidatesCredentials(t *testing.T) {

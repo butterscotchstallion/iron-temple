@@ -40,6 +40,25 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 	return total, err
 }
 
+const lockRegistration = `-- name: LockRegistration :exec
+SELECT pg_advisory_xact_lock($1::bigint)
+`
+
+// LockRegistration serializes the first-user check against concurrent
+// registrations. It must be taken *before* CountUsers, inside the same
+// transaction: the check asks whether any row exists, and a COUNT over rows
+// that do not exist yet takes no lock that a second transaction would block on.
+// Two racing registrations with different usernames would otherwise both see an
+// empty table and both commit.
+//
+// pg_advisory_xact_lock releases at commit or rollback, so a crashed request
+// cannot wedge registration. The key is arbitrary but fixed — see
+// registrationLockKey in the api package.
+func (q *Queries) LockRegistration(ctx context.Context, key int64) error {
+	_, err := q.db.Exec(ctx, lockRegistration, key)
+	return err
+}
+
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (username, display_name, password_hash, is_admin)
 VALUES ($1, $2, $3, $4)

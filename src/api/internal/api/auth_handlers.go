@@ -12,11 +12,16 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"gitea.homelab/gitadmin/iron-temple/api/internal/auth"
 	"gitea.homelab/gitadmin/iron-temple/api/internal/store"
 )
+
+// pgerrcodeUniqueViolation is SQLSTATE 23505. Spelled out rather than pulled
+// from a constants package so the module keeps its current dependency set.
+const pgerrcodeUniqueViolation = "23505"
 
 // Credential limits.
 const (
@@ -70,13 +75,26 @@ func (s *Server) registrationOpen(ctx context.Context) (bool, error) {
 	return n == 0, nil
 }
 
+// registrationLockKey is the advisory-lock key register() serializes on. The
+// value only has to be stable and not collide with another advisory lock in
+// this database, and this is the only one the app takes. ASCII "IRON", so it is
+// recognisable in pg_locks when someone is wondering what holds it.
+const registrationLockKey int64 = 0x49524F4E
+
 // register creates the first account and signs it in.
 //
 // Registration closes as soon as one account exists. This is a homelab install
 // reachable from the internet: an open signup form is an open door, and an
 // invite-code scheme would be one more secret to manage for an app that expects
-// exactly one lifter. The empty-table check and the insert share a transaction,
-// so two simultaneous requests cannot both find the table empty.
+// exactly one lifter.
+//
+// Closing it properly takes more than a transaction. "Is the table empty?" is a
+// question about rows that do not exist, and a COUNT over them takes no lock a
+// second transaction would block on — so under READ COMMITTED two racing
+// registrations with different usernames would both see an empty table and both
+// commit, leaving two owners. A transaction makes the check and the insert
+// atomic, not mutually exclusive. The advisory lock below is what actually
+// serializes them; users_single_admin_idx is the database-level backstop.
 func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -118,6 +136,14 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := s.q.WithTx(tx)
 
+	// Before the check, not after: this is what makes the check meaningful.
+	// A concurrent registration blocks here until this transaction ends, then
+	// sees the row this one wrote and is refused.
+	if err := qtx.LockRegistration(ctx, registrationLockKey); err != nil {
+		internalError(w)
+		return
+	}
+
 	n, err := qtx.CountUsers(ctx)
 	if err != nil {
 		internalError(w)
@@ -136,6 +162,16 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		IsAdmin: true,
 	})
 	if err != nil {
+		// users_single_admin_idx rejecting a second owner, or the username
+		// index rejecting a duplicate. Either way somebody got here first, and
+		// the honest answer is the same one the count check gives. Unreachable
+		// while the advisory lock above is held — this is the backstop
+		// answering rather than a 500.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgerrcodeUniqueViolation {
+			forbidden(w, "registration_closed", "registration is closed")
+			return
+		}
 		internalError(w)
 		return
 	}

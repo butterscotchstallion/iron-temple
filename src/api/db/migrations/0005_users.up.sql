@@ -25,6 +25,25 @@ CREATE TABLE users (
 -- lookup becomes ambiguous. The plain UNIQUE above stays for the exact form.
 CREATE UNIQUE INDEX users_username_lower_idx ON users (lower(username));
 
+-- At most one admin, enforced by the database.
+--
+-- Self-registration is first-user-only, and that guard cannot live in
+-- application code alone. "Is the table empty?" is a question about rows that
+-- do not exist, and COUNT(*) takes no predicate lock on them: under READ
+-- COMMITTED two concurrent registrations with *different* usernames both see an
+-- empty table, both insert, and both commit. Wrapping the check and the insert
+-- in one transaction makes them atomic, not mutually exclusive.
+-- users_username_lower_idx does not help, because the usernames differ.
+--
+-- The index is partial, so it constrains only admins: every row it covers has
+-- is_admin = true, so uniqueness on that column admits exactly one. Ordinary
+-- accounts an owner creates later are unaffected.
+--
+-- register() also takes an advisory lock, which is what turns the losing
+-- request into a clean 403 rather than a constraint violation. This index is
+-- the backstop for anything that forgets to.
+CREATE UNIQUE INDEX users_single_admin_idx ON users (is_admin) WHERE is_admin;
+
 -- Login sessions, keyed by the SHA-256 of the cookie value rather than the
 -- value itself: a dump of this table yields no usable cookies. Opaque random
 -- tokens (not signed/self-describing ones) mean logout and password change can
