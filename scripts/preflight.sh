@@ -131,8 +131,28 @@ if [ "$run_api" -eq 1 ]; then
       unavailable "gosec" "  gosec is not on PATH (bake it into the devcontainer image)."
     fi
 
-    # -short skips the Testcontainers integration tests (they need a container runtime).
+    # -short skips the integration tests (no TEST_DATABASE_URL, no container runtime).
     gate "go test -short" sh -c "cd '$root/src/api' && go test -short $race -count=1 ./..."
+
+    # Integration suite against a real Postgres. `it-testdb` is baked into the iron-temple-cc
+    # devcontainer image: it starts a loopback server (initdb'd at image build time), takes a
+    # lock, recreates the database, exports TEST_DATABASE_URL, then runs the command. CI does
+    # the equivalent with a throwaway pod — the host-executor runner has no container runtime
+    # for Testcontainers, so neither side uses it.
+    #
+    # Both sides run dev/integration-test.sh, so the flags cannot drift; db/parity_test.go
+    # then asserts the server itself matches. Until this gate existed, a DB-layer break was
+    # first seen in CI. See homelab-gitops docs/sandbox/iron-temple-postgres-plan.md.
+    #
+    # The two integration packages' unit tests run twice (once above under -short). CI does
+    # the same; keeping the flags identical to CI's is worth the seconds.
+    if command -v it-testdb >/dev/null 2>&1; then
+      gate "go test (integration)" it-testdb run -- sh "$root/dev/integration-test.sh"
+    else
+      unavailable "go test (integration)" \
+        "  it-testdb is not on PATH — it ships in the iron-temple-cc devcontainer image.
+  Outside that sandbox, CI runs this gate."
+    fi
   else
     skip "backend (src/api)" "  no src/api/go.mod — nothing to check."
   fi
