@@ -20,7 +20,14 @@ spec:
   activeDeadlineSeconds: 1800
   containers:
     - name: postgres
-      image: postgres:17-alpine
+      # bookworm, NOT alpine. The sandbox runs this suite against a Debian/glibc Postgres
+      # (homelab-gitops iron-temple-cc), and db/parity_test.go pins the collation both sides
+      # must agree on. Alpine reports `en_US.utf8` but musl implements no linguistic
+      # collation, so it BEHAVES like C — matching that string from a glibc box would be
+      # false parity: a green assertion over a real behavioural difference. Same libc on
+      # both sides removes the axis instead of papering over it, and it matches prod
+      # (services/postgres runs the Debian postgres:17 too).
+      image: postgres:17-bookworm
       env:
         - name: POSTGRES_USER
           value: test

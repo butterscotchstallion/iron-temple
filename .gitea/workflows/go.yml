@@ -322,23 +322,23 @@ jobs:
           echo "Postgres ${IT_PG_NAME} ready at ${POD_IP}:5432"
 
       - name: Run integration tests
-        working-directory: src/api
         env:
           TEST_DATABASE_URL: postgres://test:test@${{ env.POD_IP }}:5432/iron_temple?sslmode=disable
         run: |
           # kube-router can install the new pod's ACCEPT rules a moment after it's ready
           # (k8s-networking-gotchas §10); retry a TCP connect before the suite so the
-          # first query doesn't race the netpol.
+          # first query doesn't race the netpol. CI-specific plumbing — deliberately NOT in
+          # the shared script, which defines the test invocation and nothing else.
           for i in $(seq 1 20); do
             if timeout 3 bash -c "cat < /dev/null > /dev/tcp/${POD_IP}/5432" 2>/dev/null; then
               echo "Postgres reachable"; break
             fi
             echo "not reachable yet ($i/20), retrying in 3s"; sleep 3
           done
-          # -p 1: the db and api packages share the one database, so serialize the package
-          # test binaries (no concurrent migrate/mutate). Not -short → the integration
-          # tests run against the pod above instead of self-skipping.
-          go test -p 1 -count=1 ./db/ ./internal/api/
+          # The flags (-p 1, -count=1, no -race, not -short) live in the shared script so
+          # this job and scripts/preflight.sh's local gate cannot drift apart. The sandbox
+          # runs the SAME script against a loopback Postgres.
+          sh "$GITHUB_WORKSPACE/dev/integration-test.sh"
 
       - name: Delete Postgres pod
         if: always()
