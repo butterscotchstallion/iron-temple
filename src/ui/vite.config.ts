@@ -162,6 +162,8 @@ export default defineConfig({
       include: ["src/**/*.{ts,svelte}"],
       exclude: [
         "src/**/*.{test,spec}.ts",
+        // Throwaway components that exist only to drive a test.
+        "src/**/*Fixture.svelte",
         "src/lib/api/**",
         "src/lib/components/ui/**",
         "src/main.ts",

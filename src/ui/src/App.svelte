@@ -9,6 +9,7 @@
   import ExerciseProgress from "./routes/ExerciseProgress.svelte";
   import NavBar from "./lib/NavBar.svelte";
   import Footer from "./lib/Footer.svelte";
+  import ErrorBoundary from "./lib/ErrorBoundary.svelte";
 
   // Hash-based routes (svelte-spa-router). "/" lands on the current program's
   // workout; "/programs" is the picker for switching.
@@ -37,7 +38,11 @@
     <NavBar />
   </header>
 
-  <Router {routes} />
+  <!-- Wraps the router rather than the whole shell: a route that throws is
+       contained, but the header and nav stay mounted so there's still a way out. -->
+  <ErrorBoundary>
+    <Router {routes} />
+  </ErrorBoundary>
 
   <Footer />
 </main>
