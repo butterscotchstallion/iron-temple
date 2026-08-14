@@ -9,7 +9,7 @@ import (
 )
 
 // The database the integration suite runs against is built two different ways: CI creates a
-// throwaway `postgres:17-alpine` pod (.gitea/ci/postgres.yaml), and the sandbox devcontainer
+// throwaway `postgres:17-bookworm` pod (.gitea/ci/postgres.yaml), and the sandbox devcontainer
 // starts a loopback server that was initdb'd at image build time. Two mechanisms, two repos,
 // no shared declaration — so nothing stops them drifting apart, and a drift is precisely the
 // thing that makes a green local gate lie about CI.
