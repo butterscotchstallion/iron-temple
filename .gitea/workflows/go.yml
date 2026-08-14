@@ -82,6 +82,21 @@ jobs:
       # and the image bakes 1.26.x — a module needing newer Go fails loudly (rebuild the
       # runner image) rather than downloading a toolchain at run time.
       GOTOOLCHAIN: local
+      # Per-job module cache, outside the shared home directory.
+      #
+      # The host-executor pod reuses ~/go/pkg/mod between jobs, and a run of broken
+      # cache restores left that tree with modules present at the right version but no
+      # source in them. `go mod tidy` reported "module …@latest found (v5.3.1), but
+      # does not contain package …" and rewrote go.mod — and kept doing it after the
+      # restore was removed, because the damage was already on disk.
+      #
+      # A fresh path per job cannot inherit that, and unlike deleting the shared cache
+      # it cannot pull the tree out from under a job running concurrently on the same
+      # pod. RUNNER_TEMP is job-scoped, so it is also cleaned up for us.
+      #
+      # Cheap here: this module is vendored, so only the `go mod tidy` check reads the
+      # module cache at all — everything else builds from vendor/.
+      GOMODCACHE: ${{ runner.temp }}/gomodcache
       # Runner drops ALL caps (no CAP_CHOWN) → tar can't chown on a cache-cold restore.
       # GNU tar honours TAR_OPTIONS; skip the chown.
       TAR_OPTIONS: --no-same-owner
@@ -111,21 +126,39 @@ jobs:
           echo "$(/usr/local/go/bin/go env GOPATH)/bin" >> "$GITHUB_PATH"
           /usr/local/go/bin/go version
 
-      # On a reused host-executor pod, module files from a previous job linger read-only
-      # (0444), so tar fails with "File exists" on cache restore. Make them writable.
+      # On a reused host-executor pod, files from a previous job linger read-only, so
+      # tar fails on cache restore. Make them writable. Now only covers the build
+      # cache: the module cache is no longer restored at all (see below).
       - name: Prepare Go cache dirs
-        run: chmod -R u+w ~/go/pkg/mod ~/.cache/go-build 2>/dev/null || true
+        run: chmod -R u+w ~/.cache/go-build 2>/dev/null || true
 
-      # Cache the module + build caches so deps aren't re-fetched/re-compiled each run.
-      # Keyed on this module's go.sum with a prefix restore-key fallback.
-      - name: Cache Go modules
+      # Cache the BUILD cache only — not ~/go/pkg/mod.
+      #
+      # This module is vendored, so go vet, golangci-lint, gosec and go test all read
+      # vendor/ and never consult the module cache. The only step that wants it is the
+      # `go mod tidy` check, which re-resolves over the network by definition. So
+      # ~/go/pkg/mod was ~2.4 GB of archive bought almost nothing — and it was the one
+      # thing breaking these jobs.
+      #
+      # How it broke: on a reused host-executor pod the module cache from a previous
+      # job is still on disk, and Go writes it read-only. Restoring the archive over
+      # that tree failed ~15,700 times with "Cannot open/mkdir: Permission denied", so
+      # modules ended up present at the right version with no source inside them.
+      # `go mod tidy` then reported "module …@latest found (v5.3.1), but does not
+      # contain package …", re-resolved everything, rewrote go.mod, and failed the
+      # tidiness check — on a go.mod byte-identical to main's. The "Prepare Go cache
+      # dirs" chmod above did not help, because it targets the job container's HOME
+      # while the archive lands in the host executor's tree.
+      #
+      # go2- prefix: the old entries hold ~/go/pkg/mod and would still be restored
+      # through the restore-keys fallback. Both key and restore-keys have to move, or
+      # the poisoned archive is still reachable. They age out on their own.
+      - name: Cache Go build cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: go-${{ runner.os }}-${{ hashFiles('src/api/go.sum') }}
-          restore-keys: go-${{ runner.os }}-
+          path: ~/.cache/go-build
+          key: go2-${{ runner.os }}-${{ hashFiles('src/api/go.sum') }}
+          restore-keys: go2-${{ runner.os }}-
 
       # Cache gosec's prebuilt binary across runs — only re-downloaded when GOSEC_VERSION bumps.
       - name: Cache gosec
@@ -227,6 +260,21 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GOTOOLCHAIN: local
+      # Per-job module cache, outside the shared home directory.
+      #
+      # The host-executor pod reuses ~/go/pkg/mod between jobs, and a run of broken
+      # cache restores left that tree with modules present at the right version but no
+      # source in them. `go mod tidy` reported "module …@latest found (v5.3.1), but
+      # does not contain package …" and rewrote go.mod — and kept doing it after the
+      # restore was removed, because the damage was already on disk.
+      #
+      # A fresh path per job cannot inherit that, and unlike deleting the shared cache
+      # it cannot pull the tree out from under a job running concurrently on the same
+      # pod. RUNNER_TEMP is job-scoped, so it is also cleaned up for us.
+      #
+      # Cheap here: this module is vendored, so only the `go mod tidy` check reads the
+      # module cache at all — everything else builds from vendor/.
+      GOMODCACHE: ${{ runner.temp }}/gomodcache
       TAR_OPTIONS: --no-same-owner
       # Unique per run so concurrent branches don't collide; DNS-1123 safe (run_id is numeric).
       IT_PG_NAME: itpg-${{ github.run_id }}
@@ -249,16 +297,17 @@ jobs:
           /usr/local/go/bin/go version
 
       - name: Prepare Go cache dirs
-        run: chmod -R u+w ~/go/pkg/mod ~/.cache/go-build 2>/dev/null || true
+        run: chmod -R u+w ~/.cache/go-build 2>/dev/null || true
 
-      - name: Cache Go modules
+      # Build cache only, and the go2- prefix — same reasoning as the `go` job above.
+      # This job shares the cache key, so leaving it on the old prefix would keep the
+      # poisoned ~/go/pkg/mod archive alive and restore it here instead.
+      - name: Cache Go build cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: go-${{ runner.os }}-${{ hashFiles('src/api/go.sum') }}
-          restore-keys: go-${{ runner.os }}-
+          path: ~/.cache/go-build
+          key: go2-${{ runner.os }}-${{ hashFiles('src/api/go.sum') }}
+          restore-keys: go2-${{ runner.os }}-
 
       # Provision the throwaway Postgres. kubectl uses the act-runner ServiceAccount
       # (in-cluster), which can create/delete pods in the gitea namespace.
