@@ -144,7 +144,14 @@ export default defineConfig({
     proxy: {
       "/api": {
         target: "http://localhost:8080",
-        changeOrigin: true,
+        // changeOrigin would rewrite Host to localhost:8080 while the browser
+        // still sends Origin: http://localhost:5173, and the API's CSRF check
+        // rejects a mutation whose Origin and Host disagree — so every POST in
+        // development would 403. Leaving it off makes dev genuinely same-origin
+        // from the API's point of view, which is what production is too
+        // (Traefik path-routes /api and preserves Host). The target is a plain
+        // Go server that ignores Host, so nothing needs the rewrite.
+        changeOrigin: false,
       },
     },
   },

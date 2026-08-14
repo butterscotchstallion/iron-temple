@@ -64,6 +64,7 @@ JOIN session_sets ss ON ss.session_id = s.id
 JOIN program_days pd ON pd.id = s.program_day_id
 WHERE pd.program_id = $1
   AND ss.exercise_id = $2
+  AND s.user_id = $3::int
   AND (s.finished_at IS NOT NULL
        OR s.created_at < now() - INTERVAL '12 hours')
 GROUP BY s.id, s.performed_on
@@ -74,6 +75,7 @@ ORDER BY s.performed_on, s.id
 type ListLiftHistoryParams struct {
 	ProgramID  int32 `json:"program_id"`
 	ExerciseID int32 `json:"exercise_id"`
+	UserID     int32 `json:"user_id"`
 }
 
 type ListLiftHistoryRow struct {
@@ -94,8 +96,13 @@ type ListLiftHistoryRow struct {
 // session you merely started — or are still in the middle of — would score as
 // BOOL_AND(completed) = false and be recorded as a failed session, pushing the
 // engine toward an unearned deload. See the is_over note in sessions.sql.
+//
+// The user_id filter matters more here than anywhere else: this feeds the
+// progression engine, so an unscoped history would compute one lifter's next
+// working weight from another's performance — a wrong number on the bar, not
+// merely a privacy leak.
 func (q *Queries) ListLiftHistory(ctx context.Context, arg ListLiftHistoryParams) ([]ListLiftHistoryRow, error) {
-	rows, err := q.db.Query(ctx, listLiftHistory, arg.ProgramID, arg.ExerciseID)
+	rows, err := q.db.Query(ctx, listLiftHistory, arg.ProgramID, arg.ExerciseID, arg.UserID)
 	if err != nil {
 		return nil, err
 	}

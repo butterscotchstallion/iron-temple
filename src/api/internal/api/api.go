@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"gitea.homelab/gitadmin/iron-temple/api/internal/auth"
 	"gitea.homelab/gitadmin/iron-temple/api/internal/store"
 )
 
@@ -24,12 +25,23 @@ type Server struct {
 	q           *store.Queries
 	version     string
 	environment string
+	hasher      auth.PBKDF2Hasher
+	// logins brakes password guessing. In-process state, so it is per-replica —
+	// see the type's doc for why that is the right trade here.
+	logins *auth.RateLimiter
 }
 
 // NewServer builds a Server over a pgx connection pool. version and environment
-// are surfaced by the health endpoint (and the UI footer).
+// are surfaced by the health endpoint (and the UI header bar); environment also
+// decides whether session cookies are marked Secure.
 func NewServer(pool *pgxpool.Pool, version, environment string) *Server {
-	return &Server{pool: pool, q: store.New(pool), version: version, environment: environment}
+	return &Server{
+		pool:        pool,
+		q:           store.New(pool),
+		version:     version,
+		environment: environment,
+		logins:      auth.NewRateLimiter(auth.DefaultAttempts, auth.DefaultWindow),
+	}
 }
 
 // Router returns the fully-wired HTTP handler. corsOrigin is a comma-separated
@@ -38,34 +50,69 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Recoverer)
+	// AllowCredentials is deliberately absent. The UI is same-origin with the
+	// API in both development (the Vite proxy) and production (Traefik path
+	// routing), so the session cookie is sent without any CORS involvement.
+	// Turning credentials on here — especially alongside the "*" default below
+	// — would let any site read authenticated responses.
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: corsOrigins(corsOrigin),
-		AllowedMethods: []string{http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodDelete, http.MethodOptions},
+		AllowedMethods: []string{http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodPut, http.MethodDelete, http.MethodOptions},
 		AllowedHeaders: []string{"Accept", "Content-Type"},
 		MaxAge:         300,
 	}))
+	r.Use(sameOrigin)
 
 	// All paths live under the OpenAPI server base path.
 	r.Route("/api/v1", func(r chi.Router) {
+		// ---- public ----
+		// /health is a Kubernetes probe target and must not need a session.
 		r.Get("/health", s.getHealth)
-		r.Get("/exercises", s.listExercises)
-		r.Get("/exercises/{exerciseId}/history", s.getExerciseHistory)
+		// Avatars are <img> sources; see getUserAvatar for why they are public.
+		r.Get("/users/{userId}/avatar", s.getUserAvatar)
 
-		r.Route("/programs", func(r chi.Router) {
-			r.Get("/", s.listPrograms)
-			r.Get("/{programId}", s.getProgram)
-			r.Get("/{programId}/days/{dayId}/next-session", s.previewNextSession)
-			r.Patch("/{programId}/days/{dayId}", s.updateProgramDayWeekday)
+		r.Route("/auth", func(r chi.Router) {
+			r.Get("/registration-status", s.getRegistrationStatus)
+			r.Post("/register", s.register)
+			r.Post("/login", s.login)
+			// Logout needs the session it is revoking.
+			r.With(s.requireUser).Post("/logout", s.logout)
 		})
 
-		r.Route("/sessions", func(r chi.Router) {
-			r.Get("/", s.listSessions)
-			r.Post("/", s.createSession)
-			r.Get("/{sessionId}", s.getSession)
-			r.Patch("/{sessionId}", s.updateSession)
-			r.Delete("/{sessionId}", s.deleteSession)
-			r.Post("/{sessionId}/finish", s.finishSession)
-			r.Patch("/{sessionId}/sets/{setId}", s.updateSessionSet)
+		// ---- authenticated ----
+		// Everything below is per-user or reads per-user history. Mounting it
+		// in one Group means a new route is private by default: the mistake to
+		// avoid is a handler that quietly sits outside the middleware.
+		r.Group(func(r chi.Router) {
+			r.Use(s.requireUser)
+
+			r.Route("/me", func(r chi.Router) {
+				r.Get("/", s.getMe)
+				r.Patch("/", s.updateMe)
+				r.Put("/password", s.changePassword)
+				r.Post("/avatar", s.uploadAvatar)
+				r.Delete("/avatar", s.deleteAvatar)
+			})
+
+			r.Get("/exercises", s.listExercises)
+			r.Get("/exercises/{exerciseId}/history", s.getExerciseHistory)
+
+			r.Route("/programs", func(r chi.Router) {
+				r.Get("/", s.listPrograms)
+				r.Get("/{programId}", s.getProgram)
+				r.Get("/{programId}/days/{dayId}/next-session", s.previewNextSession)
+				r.Patch("/{programId}/days/{dayId}", s.updateProgramDayWeekday)
+			})
+
+			r.Route("/sessions", func(r chi.Router) {
+				r.Get("/", s.listSessions)
+				r.Post("/", s.createSession)
+				r.Get("/{sessionId}", s.getSession)
+				r.Patch("/{sessionId}", s.updateSession)
+				r.Delete("/{sessionId}", s.deleteSession)
+				r.Post("/{sessionId}/finish", s.finishSession)
+				r.Patch("/{sessionId}/sets/{setId}", s.updateSessionSet)
+			})
 		})
 	})
 
@@ -102,6 +149,14 @@ func badRequest(w http.ResponseWriter, message string) {
 
 func notFound(w http.ResponseWriter, message string) {
 	writeError(w, http.StatusNotFound, "not_found", message)
+}
+
+func unauthorized(w http.ResponseWriter, message string) {
+	writeError(w, http.StatusUnauthorized, "unauthenticated", message)
+}
+
+func forbidden(w http.ResponseWriter, code, message string) {
+	writeError(w, http.StatusForbidden, code, message)
 }
 
 func internalError(w http.ResponseWriter) {

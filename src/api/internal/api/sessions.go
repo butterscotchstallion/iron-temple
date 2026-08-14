@@ -57,14 +57,17 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 		programID = &n
 	}
 
+	userID := userFrom(ctx).ID
 	rows, err := s.q.ListSessions(ctx, store.ListSessionsParams{
-		ProgramID: programID, Off: offset, Lim: limit,
+		UserID: userID, ProgramID: programID, Off: offset, Lim: limit,
 	})
 	if err != nil {
 		internalError(w)
 		return
 	}
-	total, err := s.q.CountSessions(ctx, programID)
+	total, err := s.q.CountSessions(ctx, store.CountSessionsParams{
+		UserID: userID, ProgramID: programID,
+	})
 	if err != nil {
 		internalError(w)
 		return
@@ -77,7 +80,9 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	weightsBySession := make(map[int32][]sessionExerciseWeightDTO, len(rows))
 	if len(ids) > 0 {
-		weights, err := s.q.ListSessionExerciseWeights(ctx, ids)
+		weights, err := s.q.ListSessionExerciseWeights(ctx, store.ListSessionExerciseWeightsParams{
+			SessionIds: ids, UserID: userID,
+		})
 		if err != nil {
 			internalError(w)
 			return
@@ -155,7 +160,8 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	prescription, err := s.prescribe(ctx, day.ProgramID, day.ID)
+	userID := userFrom(ctx).ID
+	prescription, err := s.prescribe(ctx, day.ProgramID, day.ID, userID)
 	if err != nil {
 		internalError(w)
 		return
@@ -171,7 +177,7 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 	qtx := s.q.WithTx(tx)
 
 	session, err := qtx.CreateSession(ctx, store.CreateSessionParams{
-		ProgramDayID: day.ID, PerformedOn: performedOn,
+		ProgramDayID: day.ID, PerformedOn: performedOn, UserID: userID,
 	})
 	if err != nil {
 		internalError(w)
@@ -197,7 +203,7 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	full, err := s.buildSession(ctx, session.ID)
+	full, err := s.buildSession(ctx, session.ID, userID)
 	if err != nil {
 		internalError(w)
 		return
@@ -211,7 +217,8 @@ func (s *Server) getSession(w http.ResponseWriter, r *http.Request) {
 		notFound(w, "session not found")
 		return
 	}
-	full, err := s.buildSession(r.Context(), id)
+	ctx := r.Context()
+	full, err := s.buildSession(ctx, id, userFrom(ctx).ID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		notFound(w, "session not found")
 		return
@@ -242,7 +249,8 @@ func (s *Server) updateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	params := store.UpdateSessionParams{ID: id, Notes: req.Notes}
+	userID := userFrom(ctx).ID
+	params := store.UpdateSessionParams{ID: id, UserID: userID, Notes: req.Notes}
 	if req.PerformedOn != nil {
 		d, err := parseDate(*req.PerformedOn)
 		if err != nil {
@@ -260,7 +268,7 @@ func (s *Server) updateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	full, err := s.buildSession(ctx, id)
+	full, err := s.buildSession(ctx, id, userID)
 	if err != nil {
 		internalError(w)
 		return
@@ -278,7 +286,10 @@ func (s *Server) finishSession(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 
-	if _, err := s.q.FinishSession(ctx, id); errors.Is(err, pgx.ErrNoRows) {
+	userID := userFrom(ctx).ID
+	if _, err := s.q.FinishSession(ctx, store.FinishSessionParams{
+		ID: id, UserID: userID,
+	}); errors.Is(err, pgx.ErrNoRows) {
 		notFound(w, "session not found")
 		return
 	} else if err != nil {
@@ -286,7 +297,7 @@ func (s *Server) finishSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	full, err := s.buildSession(ctx, id)
+	full, err := s.buildSession(ctx, id, userID)
 	if err != nil {
 		internalError(w)
 		return
@@ -300,7 +311,9 @@ func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {
 		notFound(w, "session not found")
 		return
 	}
-	n, err := s.q.DeleteSession(r.Context(), id)
+	n, err := s.q.DeleteSession(r.Context(), store.DeleteSessionParams{
+		ID: id, UserID: userFrom(r.Context()).ID,
+	})
 	if err != nil {
 		internalError(w)
 		return
@@ -325,7 +338,8 @@ func (s *Server) updateSessionSet(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 
-	current, err := s.q.GetSessionSet(ctx, setID)
+	userID := userFrom(ctx).ID
+	current, err := s.q.GetSessionSet(ctx, store.GetSessionSetParams{ID: setID, UserID: userID})
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && current.SessionID != sessionID) {
 		notFound(w, "set not found")
 		return
@@ -345,6 +359,7 @@ func (s *Server) updateSessionSet(w http.ResponseWriter, r *http.Request) {
 
 	params := store.UpdateSessionSetParams{
 		ID:         setID,
+		UserID:     userID,
 		ActualReps: current.ActualReps,
 		WeightLb:   current.WeightLb,
 		Completed:  current.Completed,
@@ -399,13 +414,17 @@ func (s *Server) updateSessionSet(w http.ResponseWriter, r *http.Request) {
 }
 
 // buildSession assembles the full session response (metadata + ordered sets).
-// Returns pgx.ErrNoRows when the session does not exist.
-func (s *Server) buildSession(ctx context.Context, id int32) (sessionDTO, error) {
-	g, err := s.q.GetSession(ctx, id)
+// Returns pgx.ErrNoRows when the session does not exist *or* belongs to someone
+// else — the caller turns that into a 404 either way, so a probe cannot tell a
+// missing id from another user's.
+func (s *Server) buildSession(ctx context.Context, id, userID int32) (sessionDTO, error) {
+	g, err := s.q.GetSession(ctx, store.GetSessionParams{ID: id, UserID: userID})
 	if err != nil {
 		return sessionDTO{}, err
 	}
-	sets, err := s.q.ListSessionSets(ctx, id)
+	sets, err := s.q.ListSessionSets(ctx, store.ListSessionSetsParams{
+		SessionID: id, UserID: userID,
+	})
 	if err != nil {
 		return sessionDTO{}, err
 	}

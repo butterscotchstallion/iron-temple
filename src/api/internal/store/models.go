@@ -47,6 +47,7 @@ type Session struct {
 	Notes        string             `json:"notes"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	FinishedAt   pgtype.Timestamptz `json:"finished_at"`
+	UserID       *int32             `json:"user_id"`
 }
 
 type SessionSet struct {
@@ -58,4 +59,32 @@ type SessionSet struct {
 	ActualReps *int32         `json:"actual_reps"`
 	WeightLb   pgtype.Numeric `json:"weight_lb"`
 	Completed  bool           `json:"completed"`
+}
+
+type User struct {
+	ID           int32              `json:"id"`
+	Username     string             `json:"username"`
+	DisplayName  string             `json:"display_name"`
+	AvatarColor  string             `json:"avatar_color"`
+	PasswordHash string             `json:"password_hash"`
+	IsAdmin      bool               `json:"is_admin"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+type UserAvatar struct {
+	UserID    int32              `json:"user_id"`
+	Mime      string             `json:"mime"`
+	Bytes     []byte             `json:"bytes"`
+	Etag      string             `json:"etag"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type UserSession struct {
+	TokenHash  []byte             `json:"token_hash"`
+	UserID     int32              `json:"user_id"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	LastSeen   pgtype.Timestamptz `json:"last_seen"`
+	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
+	Persistent bool               `json:"persistent"`
 }

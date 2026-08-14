@@ -7,11 +7,19 @@
 -- sync — GetSession, ListSessions and ListLiftHistory all depend on it.
 --
 --     s.finished_at IS NOT NULL OR s.created_at < now() - INTERVAL '12 hours'
+--
+-- Every query here is scoped to one owner (s.user_id = user_id). That filter is
+-- the whole of the isolation model, so it is not optional on any read or write:
+-- programs and exercises are shared, but performances are not. A session the
+-- caller does not own must be indistinguishable from one that does not exist,
+-- which is why the set-level queries below reach the owner through a JOIN back
+-- to sessions rather than trusting the set id alone — a caller learning that
+-- someone else's set id is valid is already a leak.
 
 -- name: CreateSession :one
-INSERT INTO sessions (program_day_id, performed_on)
-VALUES ($1, $2)
-RETURNING id, program_day_id, performed_on, notes, created_at, finished_at;
+INSERT INTO sessions (program_day_id, performed_on, user_id)
+VALUES (sqlc.arg('program_day_id'), sqlc.arg('performed_on'), sqlc.arg('user_id')::int)
+RETURNING id, program_day_id, performed_on, notes, created_at, finished_at, user_id;
 
 -- name: CreateSessionSet :one
 INSERT INTO session_sets (session_id, exercise_id, set_number, target_reps, weight_lb)
@@ -33,7 +41,8 @@ SELECT s.id,
 FROM sessions s
 JOIN program_days pd ON pd.id = s.program_day_id
 JOIN programs p ON p.id = pd.program_id
-WHERE s.id = $1;
+WHERE s.id = sqlc.arg('id')
+  AND s.user_id = sqlc.arg('user_id')::int;
 
 -- ListSessions returns paginated session summaries, most recent first,
 -- optionally filtered to one program. Pass NULL program_id for all programs.
@@ -55,7 +64,8 @@ FROM sessions s
 JOIN program_days pd ON pd.id = s.program_day_id
 JOIN programs p ON p.id = pd.program_id
 LEFT JOIN session_sets ss ON ss.session_id = s.id
-WHERE (sqlc.narg('program_id')::bigint IS NULL OR p.id = sqlc.narg('program_id'))
+WHERE s.user_id = sqlc.arg('user_id')::int
+  AND (sqlc.narg('program_id')::bigint IS NULL OR p.id = sqlc.narg('program_id'))
 GROUP BY s.id, pd.name, p.id, p.name
 -- Only sessions with at least one logged rep count as "started".
 HAVING COUNT(ss.id) FILTER (WHERE ss.actual_reps > 0) > 0
@@ -66,7 +76,8 @@ LIMIT sqlc.arg('lim') OFFSET sqlc.arg('off');
 SELECT COUNT(*) AS total
 FROM sessions s
 JOIN program_days pd ON pd.id = s.program_day_id
-WHERE (sqlc.narg('program_id')::bigint IS NULL OR pd.program_id = sqlc.narg('program_id'))
+WHERE s.user_id = sqlc.arg('user_id')::int
+  AND (sqlc.narg('program_id')::bigint IS NULL OR pd.program_id = sqlc.narg('program_id'))
   AND EXISTS (
     SELECT 1 FROM session_sets ls
     WHERE ls.session_id = s.id AND ls.actual_reps > 0
@@ -78,7 +89,8 @@ UPDATE sessions
 SET performed_on = COALESCE(sqlc.narg('performed_on'), performed_on),
     notes        = COALESCE(sqlc.narg('notes'), notes)
 WHERE id = sqlc.arg('id')
-RETURNING id, program_day_id, performed_on, notes, created_at, finished_at;
+  AND user_id = sqlc.arg('user_id')::int
+RETURNING id, program_day_id, performed_on, notes, created_at, finished_at, user_id;
 
 -- FinishSession stamps the explicit end of a session. COALESCE makes it
 -- idempotent: finishing an already-finished session keeps the original time
@@ -86,11 +98,14 @@ RETURNING id, program_day_id, performed_on, notes, created_at, finished_at;
 -- name: FinishSession :one
 UPDATE sessions
 SET finished_at = COALESCE(finished_at, now())
-WHERE id = $1
-RETURNING id, program_day_id, performed_on, notes, created_at, finished_at;
+WHERE id = sqlc.arg('id')
+  AND user_id = sqlc.arg('user_id')::int
+RETURNING id, program_day_id, performed_on, notes, created_at, finished_at, user_id;
 
 -- name: DeleteSession :execrows
-DELETE FROM sessions WHERE id = $1;
+DELETE FROM sessions
+WHERE id = sqlc.arg('id')
+  AND user_id = sqlc.arg('user_id')::int;
 
 -- ListSessionSets returns a session's logged sets in prescription order
 -- (by the day's exercise position, then set number), joined to exercise names.
@@ -109,9 +124,12 @@ JOIN exercises e ON e.id = ss.exercise_id
 JOIN sessions s ON s.id = ss.session_id
 JOIN program_day_exercises pde
   ON pde.program_day_id = s.program_day_id AND pde.exercise_id = ss.exercise_id
-WHERE ss.session_id = $1
+WHERE ss.session_id = sqlc.arg('session_id')
+  AND s.user_id = sqlc.arg('user_id')::int
 ORDER BY pde.position, ss.set_number;
 
+-- GetSessionSet reaches the owner through session_sets -> sessions, so a set id
+-- belonging to someone else simply does not resolve.
 -- name: GetSessionSet :one
 SELECT ss.id,
        ss.session_id,
@@ -124,18 +142,25 @@ SELECT ss.id,
        ss.completed
 FROM session_sets ss
 JOIN exercises e ON e.id = ss.exercise_id
-WHERE ss.id = $1;
+JOIN sessions s ON s.id = ss.session_id
+WHERE ss.id = sqlc.arg('id')
+  AND s.user_id = sqlc.arg('user_id')::int;
 
 -- UpdateSessionSet writes all three mutable columns; the handler merges the
 -- PATCH body with current values first, so actual_reps can be set to NULL to
--- clear a prior entry (COALESCE could not express that).
+-- clear a prior entry (COALESCE could not express that). The owner check is
+-- repeated here rather than inferred from the preceding GetSessionSet: an
+-- UPDATE that trusts a prior read is one refactor away from trusting nothing.
 -- name: UpdateSessionSet :one
-UPDATE session_sets
+UPDATE session_sets ss
 SET actual_reps = sqlc.narg('actual_reps'),
     weight_lb   = sqlc.arg('weight_lb'),
     completed   = sqlc.arg('completed')
-WHERE id = sqlc.arg('id')
-RETURNING id, session_id, exercise_id, set_number, target_reps, actual_reps, weight_lb, completed;
+FROM sessions s
+WHERE ss.id = sqlc.arg('id')
+  AND s.id = ss.session_id
+  AND s.user_id = sqlc.arg('user_id')::int
+RETURNING ss.id, ss.session_id, ss.exercise_id, ss.set_number, ss.target_reps, ss.actual_reps, ss.weight_lb, ss.completed;
 
 -- ListSessionExerciseWeights returns each exercise's top working weight for the
 -- given sessions, ordered by the day's exercise position — used to show a
@@ -152,5 +177,6 @@ JOIN sessions s ON s.id = ss.session_id
 JOIN program_day_exercises pde
   ON pde.program_day_id = s.program_day_id AND pde.exercise_id = ss.exercise_id
 WHERE ss.session_id = ANY(@session_ids::int[])
+  AND s.user_id = sqlc.arg('user_id')::int
 GROUP BY ss.session_id, e.name
 ORDER BY ss.session_id, MIN(pde.position);

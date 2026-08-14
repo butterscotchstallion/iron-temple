@@ -19,6 +19,33 @@ type healthDTO struct {
 	Environment string `json:"environment,omitempty"`
 }
 
+// userDTO is the profile shape. It has no password field of any kind, so a
+// hash cannot reach the wire by a careless edit — the type simply has nowhere
+// to put one.
+type userDTO struct {
+	ID          int32  `json:"id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"displayName"`
+	// AvatarColor is a hex colour for the initials chip, or "" to let the UI
+	// derive one from the id.
+	AvatarColor string `json:"avatarColor"`
+	IsAdmin     bool   `json:"isAdmin"`
+	// HasAvatar tells the UI whether to render an <img> or the initials chip,
+	// so it needn't request an image that may 404.
+	HasAvatar bool `json:"hasAvatar"`
+	// AvatarEtag is appended to the avatar URL as a cache-buster, so a new
+	// upload appears immediately instead of after the cache expires.
+	AvatarEtag string `json:"avatarEtag,omitempty"`
+}
+
+type registrationStatusDTO struct {
+	Open bool `json:"open"`
+}
+
+type avatarDTO struct {
+	Etag string `json:"etag"`
+}
+
 type exerciseDTO struct {
 	ID   int32  `json:"id"`
 	Name string `json:"name"`

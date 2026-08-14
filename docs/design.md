@@ -3,6 +3,8 @@
 This is a fitness tracking web app intended to track weight lifting sessions over time.
 
 - No authentication required at this time
+  - Superseded: the app now has accounts and a session cookie. See the Users and
+    Auth rows in [`implementation-plan.md`](./implementation-plan.md).
 
 ## Back end
 

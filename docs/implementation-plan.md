@@ -10,8 +10,8 @@ Derived from [`design.md`](./design.md), with decisions locked in below.
 | Folder layout | `src/api` (Go) and `src/ui` (Svelte). The design doc's "api folder / ui folder" wording refers to these. |
 | Weight units | **Pounds only.** No unit column, no conversion. |
 | Program scope | StrongLifts 5×5 + variants: Advanced 3×5, and StrongLifts 5×5 Lite. All linear. |
-| Users | **Single implicit user.** No `users` table, no `user_id` foreign keys. |
-| Auth | None, per design doc. |
+| Users | **Per-user sessions.** ~~Single implicit user.~~ A `users` table, with `sessions.user_id` scoping every performance. Programs, days and exercises stay shared — the prescription is the same for everyone; only what you lifted is yours. |
+| Auth | **Session cookie.** ~~None, per design doc.~~ Password login (PBKDF2-SHA256, PHC-encoded so the algorithm can be upgraded per-user on login), an opaque `it_session` cookie stored as a SHA-256 digest, and an optional 60-day "remember me" whose expiry slides forward as it is used. Registration is first-user-only: the install is reachable from the internet, so an open signup form is an open door. |
 | Database | **Runtime:** existing PostgreSQL in the cluster (via `DATABASE_URL`). **Tests:** ephemeral Postgres via Testcontainers. No local docker-compose. |
 
 ### Progression rules (lb)

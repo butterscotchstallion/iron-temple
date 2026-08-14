@@ -94,9 +94,17 @@ func run() error {
 	}
 	defer pool.Close()
 
+	apiSrv := api.NewServer(pool, resolvedVersion(), environment)
+
+	// Expired login sessions are already ignored by every query; this reaps the
+	// dead rows so the table doesn't grow for the life of the deployment.
+	sweepCtx, stopSweeper := context.WithCancel(ctx)
+	defer stopSweeper()
+	apiSrv.StartSessionSweeper(sweepCtx, time.Hour)
+
 	srv := &http.Server{
 		Addr:              ":" + port,
-		Handler:           api.NewServer(pool, resolvedVersion(), environment).Router(os.Getenv("CORS_ORIGIN")),
+		Handler:           apiSrv.Router(os.Getenv("CORS_ORIGIN")),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

@@ -37,10 +37,16 @@ SELECT s.performed_on,
 FROM session_sets ss
 JOIN sessions s ON s.id = ss.session_id
 WHERE ss.exercise_id = $1
+  AND s.user_id = $2::int
   AND ss.actual_reps > 0
 GROUP BY s.id, s.performed_on
 ORDER BY s.performed_on, s.id
 `
+
+type ListExerciseHistoryParams struct {
+	ExerciseID int32 `json:"exercise_id"`
+	UserID     int32 `json:"user_id"`
+}
 
 type ListExerciseHistoryRow struct {
 	PerformedOn pgtype.Date    `json:"performed_on"`
@@ -52,8 +58,8 @@ type ListExerciseHistoryRow struct {
 // ListExerciseHistory returns one point per performed session for a lift
 // (oldest first): the top weight worked, the best reps, and whether every set
 // hit target. Only logged sessions (a set with actual_reps > 0) are included.
-func (q *Queries) ListExerciseHistory(ctx context.Context, exerciseID int32) ([]ListExerciseHistoryRow, error) {
-	rows, err := q.db.Query(ctx, listExerciseHistory, exerciseID)
+func (q *Queries) ListExerciseHistory(ctx context.Context, arg ListExerciseHistoryParams) ([]ListExerciseHistoryRow, error) {
+	rows, err := q.db.Query(ctx, listExerciseHistory, arg.ExerciseID, arg.UserID)
 	if err != nil {
 		return nil, err
 	}

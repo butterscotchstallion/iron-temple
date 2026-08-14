@@ -11,6 +11,18 @@ const programs = [
 
 const emptySessions = { items: [], total: 0, limit: 100, offset: 0 };
 
+// Every route below the header requires a session, so the app renders the
+// sign-in form until /me resolves. Mock a signed-in user for these tests; the
+// signed-out path has its own spec (auth.spec.ts).
+const signedInUser = {
+  id: 1,
+  username: "ada",
+  displayName: "Ada Lovelace",
+  avatarColor: "",
+  isAdmin: true,
+  hasAvatar: false,
+};
+
 const program1 = {
   ...programs[0],
   days: [
@@ -130,6 +142,7 @@ function sessionDetail(
 }
 
 test.beforeEach(async ({ page }) => {
+  await page.route("**/api/v1/me", (route) => route.fulfill({ json: signedInUser }));
   await page.route("**/api/v1/programs", (route) => route.fulfill({ json: programs }));
   await page.route("**/api/v1/sessions**", (route) => route.fulfill({ json: emptySessions }));
   await page.route("**/api/v1/programs/1", (route) => route.fulfill({ json: program1 }));

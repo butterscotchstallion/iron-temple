@@ -15,33 +15,40 @@ const countSessions = `-- name: CountSessions :one
 SELECT COUNT(*) AS total
 FROM sessions s
 JOIN program_days pd ON pd.id = s.program_day_id
-WHERE ($1::bigint IS NULL OR pd.program_id = $1)
+WHERE s.user_id = $1::int
+  AND ($2::bigint IS NULL OR pd.program_id = $2)
   AND EXISTS (
     SELECT 1 FROM session_sets ls
     WHERE ls.session_id = s.id AND ls.actual_reps > 0
   )
 `
 
-func (q *Queries) CountSessions(ctx context.Context, programID *int64) (int64, error) {
-	row := q.db.QueryRow(ctx, countSessions, programID)
+type CountSessionsParams struct {
+	UserID    int32  `json:"user_id"`
+	ProgramID *int64 `json:"program_id"`
+}
+
+func (q *Queries) CountSessions(ctx context.Context, arg CountSessionsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countSessions, arg.UserID, arg.ProgramID)
 	var total int64
 	err := row.Scan(&total)
 	return total, err
 }
 
 const createSession = `-- name: CreateSession :one
-INSERT INTO sessions (program_day_id, performed_on)
-VALUES ($1, $2)
-RETURNING id, program_day_id, performed_on, notes, created_at, finished_at
+INSERT INTO sessions (program_day_id, performed_on, user_id)
+VALUES ($1, $2, $3::int)
+RETURNING id, program_day_id, performed_on, notes, created_at, finished_at, user_id
 `
 
 type CreateSessionParams struct {
 	ProgramDayID int32       `json:"program_day_id"`
 	PerformedOn  pgtype.Date `json:"performed_on"`
+	UserID       int32       `json:"user_id"`
 }
 
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error) {
-	row := q.db.QueryRow(ctx, createSession, arg.ProgramDayID, arg.PerformedOn)
+	row := q.db.QueryRow(ctx, createSession, arg.ProgramDayID, arg.PerformedOn, arg.UserID)
 	var i Session
 	err := row.Scan(
 		&i.ID,
@@ -50,6 +57,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		&i.Notes,
 		&i.CreatedAt,
 		&i.FinishedAt,
+		&i.UserID,
 	)
 	return i, err
 }
@@ -91,11 +99,18 @@ func (q *Queries) CreateSessionSet(ctx context.Context, arg CreateSessionSetPara
 }
 
 const deleteSession = `-- name: DeleteSession :execrows
-DELETE FROM sessions WHERE id = $1
+DELETE FROM sessions
+WHERE id = $1
+  AND user_id = $2::int
 `
 
-func (q *Queries) DeleteSession(ctx context.Context, id int32) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteSession, id)
+type DeleteSessionParams struct {
+	ID     int32 `json:"id"`
+	UserID int32 `json:"user_id"`
+}
+
+func (q *Queries) DeleteSession(ctx context.Context, arg DeleteSessionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteSession, arg.ID, arg.UserID)
 	if err != nil {
 		return 0, err
 	}
@@ -106,14 +121,20 @@ const finishSession = `-- name: FinishSession :one
 UPDATE sessions
 SET finished_at = COALESCE(finished_at, now())
 WHERE id = $1
-RETURNING id, program_day_id, performed_on, notes, created_at, finished_at
+  AND user_id = $2::int
+RETURNING id, program_day_id, performed_on, notes, created_at, finished_at, user_id
 `
+
+type FinishSessionParams struct {
+	ID     int32 `json:"id"`
+	UserID int32 `json:"user_id"`
+}
 
 // FinishSession stamps the explicit end of a session. COALESCE makes it
 // idempotent: finishing an already-finished session keeps the original time
 // rather than sliding it forward on a double-tap.
-func (q *Queries) FinishSession(ctx context.Context, id int32) (Session, error) {
-	row := q.db.QueryRow(ctx, finishSession, id)
+func (q *Queries) FinishSession(ctx context.Context, arg FinishSessionParams) (Session, error) {
+	row := q.db.QueryRow(ctx, finishSession, arg.ID, arg.UserID)
 	var i Session
 	err := row.Scan(
 		&i.ID,
@@ -122,6 +143,7 @@ func (q *Queries) FinishSession(ctx context.Context, id int32) (Session, error) 
 		&i.Notes,
 		&i.CreatedAt,
 		&i.FinishedAt,
+		&i.UserID,
 	)
 	return i, err
 }
@@ -142,7 +164,13 @@ FROM sessions s
 JOIN program_days pd ON pd.id = s.program_day_id
 JOIN programs p ON p.id = pd.program_id
 WHERE s.id = $1
+  AND s.user_id = $2::int
 `
+
+type GetSessionParams struct {
+	ID     int32 `json:"id"`
+	UserID int32 `json:"user_id"`
+}
 
 type GetSessionRow struct {
 	ID             int32              `json:"id"`
@@ -157,8 +185,8 @@ type GetSessionRow struct {
 	IsOver         bool               `json:"is_over"`
 }
 
-func (q *Queries) GetSession(ctx context.Context, id int32) (GetSessionRow, error) {
-	row := q.db.QueryRow(ctx, getSession, id)
+func (q *Queries) GetSession(ctx context.Context, arg GetSessionParams) (GetSessionRow, error) {
+	row := q.db.QueryRow(ctx, getSession, arg.ID, arg.UserID)
 	var i GetSessionRow
 	err := row.Scan(
 		&i.ID,
@@ -187,8 +215,15 @@ SELECT ss.id,
        ss.completed
 FROM session_sets ss
 JOIN exercises e ON e.id = ss.exercise_id
+JOIN sessions s ON s.id = ss.session_id
 WHERE ss.id = $1
+  AND s.user_id = $2::int
 `
+
+type GetSessionSetParams struct {
+	ID     int32 `json:"id"`
+	UserID int32 `json:"user_id"`
+}
 
 type GetSessionSetRow struct {
 	ID           int32          `json:"id"`
@@ -202,8 +237,10 @@ type GetSessionSetRow struct {
 	Completed    bool           `json:"completed"`
 }
 
-func (q *Queries) GetSessionSet(ctx context.Context, id int32) (GetSessionSetRow, error) {
-	row := q.db.QueryRow(ctx, getSessionSet, id)
+// GetSessionSet reaches the owner through session_sets -> sessions, so a set id
+// belonging to someone else simply does not resolve.
+func (q *Queries) GetSessionSet(ctx context.Context, arg GetSessionSetParams) (GetSessionSetRow, error) {
+	row := q.db.QueryRow(ctx, getSessionSet, arg.ID, arg.UserID)
 	var i GetSessionSetRow
 	err := row.Scan(
 		&i.ID,
@@ -231,9 +268,15 @@ JOIN sessions s ON s.id = ss.session_id
 JOIN program_day_exercises pde
   ON pde.program_day_id = s.program_day_id AND pde.exercise_id = ss.exercise_id
 WHERE ss.session_id = ANY($1::int[])
+  AND s.user_id = $2::int
 GROUP BY ss.session_id, e.name
 ORDER BY ss.session_id, MIN(pde.position)
 `
+
+type ListSessionExerciseWeightsParams struct {
+	SessionIds []int32 `json:"session_ids"`
+	UserID     int32   `json:"user_id"`
+}
 
 type ListSessionExerciseWeightsRow struct {
 	SessionID    int32          `json:"session_id"`
@@ -246,8 +289,8 @@ type ListSessionExerciseWeightsRow struct {
 // ListSessionExerciseWeights returns each exercise's top working weight for the
 // given sessions, ordered by the day's exercise position — used to show a
 // per-lift weight line on each history row.
-func (q *Queries) ListSessionExerciseWeights(ctx context.Context, sessionIds []int32) ([]ListSessionExerciseWeightsRow, error) {
-	rows, err := q.db.Query(ctx, listSessionExerciseWeights, sessionIds)
+func (q *Queries) ListSessionExerciseWeights(ctx context.Context, arg ListSessionExerciseWeightsParams) ([]ListSessionExerciseWeightsRow, error) {
+	rows, err := q.db.Query(ctx, listSessionExerciseWeights, arg.SessionIds, arg.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -288,8 +331,14 @@ JOIN sessions s ON s.id = ss.session_id
 JOIN program_day_exercises pde
   ON pde.program_day_id = s.program_day_id AND pde.exercise_id = ss.exercise_id
 WHERE ss.session_id = $1
+  AND s.user_id = $2::int
 ORDER BY pde.position, ss.set_number
 `
+
+type ListSessionSetsParams struct {
+	SessionID int32 `json:"session_id"`
+	UserID    int32 `json:"user_id"`
+}
 
 type ListSessionSetsRow struct {
 	ID           int32          `json:"id"`
@@ -305,8 +354,8 @@ type ListSessionSetsRow struct {
 
 // ListSessionSets returns a session's logged sets in prescription order
 // (by the day's exercise position, then set number), joined to exercise names.
-func (q *Queries) ListSessionSets(ctx context.Context, sessionID int32) ([]ListSessionSetsRow, error) {
-	rows, err := q.db.Query(ctx, listSessionSets, sessionID)
+func (q *Queries) ListSessionSets(ctx context.Context, arg ListSessionSetsParams) ([]ListSessionSetsRow, error) {
+	rows, err := q.db.Query(ctx, listSessionSets, arg.SessionID, arg.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -350,14 +399,16 @@ FROM sessions s
 JOIN program_days pd ON pd.id = s.program_day_id
 JOIN programs p ON p.id = pd.program_id
 LEFT JOIN session_sets ss ON ss.session_id = s.id
-WHERE ($1::bigint IS NULL OR p.id = $1)
+WHERE s.user_id = $1::int
+  AND ($2::bigint IS NULL OR p.id = $2)
 GROUP BY s.id, pd.name, p.id, p.name
 HAVING COUNT(ss.id) FILTER (WHERE ss.actual_reps > 0) > 0
 ORDER BY s.performed_on DESC, s.id DESC
-LIMIT $3 OFFSET $2
+LIMIT $4 OFFSET $3
 `
 
 type ListSessionsParams struct {
+	UserID    int32  `json:"user_id"`
 	ProgramID *int64 `json:"program_id"`
 	Off       int32  `json:"off"`
 	Lim       int32  `json:"lim"`
@@ -382,7 +433,12 @@ type ListSessionsRow struct {
 // column functionally dependent on it.
 // Only sessions with at least one logged rep count as "started".
 func (q *Queries) ListSessions(ctx context.Context, arg ListSessionsParams) ([]ListSessionsRow, error) {
-	rows, err := q.db.Query(ctx, listSessions, arg.ProgramID, arg.Off, arg.Lim)
+	rows, err := q.db.Query(ctx, listSessions,
+		arg.UserID,
+		arg.ProgramID,
+		arg.Off,
+		arg.Lim,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -416,18 +472,25 @@ UPDATE sessions
 SET performed_on = COALESCE($1, performed_on),
     notes        = COALESCE($2, notes)
 WHERE id = $3
-RETURNING id, program_day_id, performed_on, notes, created_at, finished_at
+  AND user_id = $4::int
+RETURNING id, program_day_id, performed_on, notes, created_at, finished_at, user_id
 `
 
 type UpdateSessionParams struct {
 	PerformedOn pgtype.Date `json:"performed_on"`
 	Notes       *string     `json:"notes"`
 	ID          int32       `json:"id"`
+	UserID      int32       `json:"user_id"`
 }
 
 // UpdateSession patches metadata; NULL args leave a column unchanged.
 func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error) {
-	row := q.db.QueryRow(ctx, updateSession, arg.PerformedOn, arg.Notes, arg.ID)
+	row := q.db.QueryRow(ctx, updateSession,
+		arg.PerformedOn,
+		arg.Notes,
+		arg.ID,
+		arg.UserID,
+	)
 	var i Session
 	err := row.Scan(
 		&i.ID,
@@ -436,17 +499,21 @@ func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) (S
 		&i.Notes,
 		&i.CreatedAt,
 		&i.FinishedAt,
+		&i.UserID,
 	)
 	return i, err
 }
 
 const updateSessionSet = `-- name: UpdateSessionSet :one
-UPDATE session_sets
+UPDATE session_sets ss
 SET actual_reps = $1,
     weight_lb   = $2,
     completed   = $3
-WHERE id = $4
-RETURNING id, session_id, exercise_id, set_number, target_reps, actual_reps, weight_lb, completed
+FROM sessions s
+WHERE ss.id = $4
+  AND s.id = ss.session_id
+  AND s.user_id = $5::int
+RETURNING ss.id, ss.session_id, ss.exercise_id, ss.set_number, ss.target_reps, ss.actual_reps, ss.weight_lb, ss.completed
 `
 
 type UpdateSessionSetParams struct {
@@ -454,17 +521,21 @@ type UpdateSessionSetParams struct {
 	WeightLb   pgtype.Numeric `json:"weight_lb"`
 	Completed  bool           `json:"completed"`
 	ID         int32          `json:"id"`
+	UserID     int32          `json:"user_id"`
 }
 
 // UpdateSessionSet writes all three mutable columns; the handler merges the
 // PATCH body with current values first, so actual_reps can be set to NULL to
-// clear a prior entry (COALESCE could not express that).
+// clear a prior entry (COALESCE could not express that). The owner check is
+// repeated here rather than inferred from the preceding GetSessionSet: an
+// UPDATE that trusts a prior read is one refactor away from trusting nothing.
 func (q *Queries) UpdateSessionSet(ctx context.Context, arg UpdateSessionSetParams) (SessionSet, error) {
 	row := q.db.QueryRow(ctx, updateSessionSet,
 		arg.ActualReps,
 		arg.WeightLb,
 		arg.Completed,
 		arg.ID,
+		arg.UserID,
 	)
 	var i SessionSet
 	err := row.Scan(
