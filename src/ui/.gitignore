@@ -13,3 +13,8 @@ dist
 
 # hey-api generated client (regenerated from ../api/openapi.yaml)
 src/lib/api/
+
+# openapi-ts drops a crash log here when generation fails. The dev server
+# regenerates on every save of the spec, so a half-typed edit produces one
+# routinely — they are noise, not artifacts worth keeping.
+openapi-ts-error-*.log
