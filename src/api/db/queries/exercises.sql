@@ -18,7 +18,8 @@ SELECT s.performed_on,
        COALESCE(BOOL_AND(ss.completed), false)::bool AS completed
 FROM session_sets ss
 JOIN sessions s ON s.id = ss.session_id
-WHERE ss.exercise_id = $1
+WHERE ss.exercise_id = sqlc.arg('exercise_id')
+  AND s.user_id = sqlc.arg('user_id')::int
   AND ss.actual_reps > 0
 GROUP BY s.id, s.performed_on
 ORDER BY s.performed_on, s.id;

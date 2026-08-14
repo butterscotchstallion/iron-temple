@@ -69,6 +69,11 @@ ORDER BY pde.position;
 -- session you merely started — or are still in the middle of — would score as
 -- BOOL_AND(completed) = false and be recorded as a failed session, pushing the
 -- engine toward an unearned deload. See the is_over note in sessions.sql.
+--
+-- The user_id filter matters more here than anywhere else: this feeds the
+-- progression engine, so an unscoped history would compute one lifter's next
+-- working weight from another's performance — a wrong number on the bar, not
+-- merely a privacy leak.
 -- name: ListLiftHistory :many
 SELECT s.performed_on,
        MAX(ss.weight_lb)::numeric  AS weight_lb,
@@ -76,8 +81,9 @@ SELECT s.performed_on,
 FROM sessions s
 JOIN session_sets ss ON ss.session_id = s.id
 JOIN program_days pd ON pd.id = s.program_day_id
-WHERE pd.program_id = $1
-  AND ss.exercise_id = $2
+WHERE pd.program_id = sqlc.arg('program_id')
+  AND ss.exercise_id = sqlc.arg('exercise_id')
+  AND s.user_id = sqlc.arg('user_id')::int
   AND (s.finished_at IS NOT NULL
        OR s.created_at < now() - INTERVAL '12 hours')
 GROUP BY s.id, s.performed_on

@@ -6,6 +6,7 @@ sql:
       - "db/migrations/0001_init.up.sql"
       - "db/migrations/0003_program_day_weekday.up.sql"
       - "db/migrations/0004_session_finished_at.up.sql"
+      - "db/migrations/0005_users.up.sql"
     queries: "db/queries"
     gen:
       go:

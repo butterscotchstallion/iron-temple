@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,8 +31,19 @@ var baseURL string
 
 // testPool is the same pool the server runs on, kept package-level so tests can
 // reach past the API for setup the API deliberately does not expose — namely
-// backdating a session's created_at to exercise the 12-hour cutoff.
+// backdating a session's created_at to exercise the 12-hour cutoff, and minting
+// a second account once registration has closed itself.
 var testPool *pgxpool.Pool
+
+// primaryToken is the session cookie for the account registered in TestMain.
+// Every endpoint except /health and /auth/* now requires one, so expect()
+// attaches it by default and the tests below read as they did before.
+var primaryToken string
+
+const (
+	primaryUsername = "primary"
+	primaryPassword = "integration-test-pw"
+)
 
 func TestMain(m *testing.M) {
 	flag.Parse()
@@ -60,6 +72,10 @@ func TestMain(m *testing.M) {
 	testPool = pool
 	srv := httptest.NewServer(api.NewServer(pool, "", "").Router(""))
 	baseURL = srv.URL + "/api/v1"
+
+	// Claim the install. Registration closes behind this call, which is itself
+	// asserted in TestRegistrationClosesAfterTheFirstAccount.
+	primaryToken = registerPrimary()
 
 	code := m.Run()
 
@@ -97,7 +113,44 @@ func testDB(ctx context.Context) (dsn string, stop func()) {
 	return dsn, func() { _ = pg.Terminate(ctx) }
 }
 
+// registerPrimary creates the first account and returns its session token.
+// Runs before the suite, so it uses net/http directly rather than httpexpect,
+// which needs a *testing.T.
+func registerPrimary() string {
+	body := fmt.Sprintf(`{"username":%q,"password":%q,"displayName":"Primary Lifter"}`,
+		primaryUsername, primaryPassword)
+	resp, err := http.Post(baseURL+"/auth/register", "application/json", strings.NewReader(body))
+	if err != nil {
+		log.Fatalf("register primary user: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusCreated {
+		log.Fatalf("register primary user: status %d", resp.StatusCode)
+	}
+	for _, c := range resp.Cookies() {
+		if c.Name == sessionCookie {
+			return c.Value
+		}
+	}
+	log.Fatalf("register primary user: no %s cookie in the response", sessionCookie)
+	return ""
+}
+
+// sessionCookie mirrors auth.CookieName. Named here as a literal on purpose:
+// the cookie name is part of the wire contract with the browser, so a test that
+// merely echoes the constant would not notice it changing.
+const sessionCookie = "it_session"
+
+// expect returns a client signed in as the primary user — the default, since
+// nearly every endpoint requires a session.
 func expect(t *testing.T) *httpexpect.Expect {
+	t.Helper()
+	return expectAs(t, primaryToken)
+}
+
+// expectAnon returns a client with no session, for testing the public
+// endpoints and the 401s.
+func expectAnon(t *testing.T) *httpexpect.Expect {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("integration test requires a Docker daemon")
@@ -105,8 +158,25 @@ func expect(t *testing.T) *httpexpect.Expect {
 	return httpexpect.Default(t, baseURL)
 }
 
+// expectAs returns a client carrying the given session token.
+func expectAs(t *testing.T, token string) *httpexpect.Expect {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("integration test requires a Docker daemon")
+	}
+	return httpexpect.WithConfig(httpexpect.Config{
+		BaseURL:  baseURL,
+		Reporter: httpexpect.NewAssertReporter(t),
+		Client:   http.DefaultClient,
+	}).Builder(func(req *httpexpect.Request) {
+		req.WithCookie(sessionCookie, token)
+	})
+}
+
 func TestHealth(t *testing.T) {
-	e := expect(t)
+	// Explicitly anonymous: /health is a Kubernetes probe target, and a probe
+	// has no cookie to present.
+	e := expectAnon(t)
 	e.GET("/health").Expect().
 		Status(http.StatusOK).
 		JSON().Object().HasValue("status", "ok")

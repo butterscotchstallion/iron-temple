@@ -35,7 +35,9 @@ func (s *Server) getExerciseHistory(w http.ResponseWriter, r *http.Request) {
 		notFound(w, "exercise not found")
 		return
 	}
-	rows, err := s.q.ListExerciseHistory(r.Context(), id)
+	rows, err := s.q.ListExerciseHistory(r.Context(), store.ListExerciseHistoryParams{
+		ExerciseID: id, UserID: userFrom(r.Context()).ID,
+	})
 	if err != nil {
 		internalError(w)
 		return
@@ -187,7 +189,7 @@ func (s *Server) previewNextSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	exercises, err := s.prescribe(ctx, programID, day.ID)
+	exercises, err := s.prescribe(ctx, programID, day.ID, userFrom(ctx).ID)
 	if err != nil {
 		internalError(w)
 		return
@@ -204,7 +206,12 @@ func (s *Server) previewNextSession(w http.ResponseWriter, r *http.Request) {
 // prescribe computes the next-session prescription for a day: each prescribed
 // exercise with a target weight from the progression engine, applied over the
 // lift's history within the program. Shared by preview and session creation.
-func (s *Server) prescribe(ctx context.Context, programID, dayID int32) ([]prescribedExerciseDTO, error) {
+//
+// userID scopes the history. The prescription itself is shared — everyone on
+// StrongLifts squats 5x5 — but the weight on the bar comes from what *this*
+// lifter has done, so an unscoped history here would put someone else's numbers
+// in front of them.
+func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32) ([]prescribedExerciseDTO, error) {
 	pres, err := s.q.ListPrescriptionsByDay(ctx, dayID)
 	if err != nil {
 		return nil, err
@@ -213,7 +220,7 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID int32) ([]presc
 	out := make([]prescribedExerciseDTO, 0, len(pres))
 	for _, p := range pres {
 		hist, err := s.q.ListLiftHistory(ctx, store.ListLiftHistoryParams{
-			ProgramID: programID, ExerciseID: p.ExerciseID,
+			ProgramID: programID, ExerciseID: p.ExerciseID, UserID: userID,
 		})
 		if err != nil {
 			return nil, err
