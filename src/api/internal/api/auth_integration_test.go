@@ -406,23 +406,38 @@ func TestChangePasswordRequiresTheCurrentOne(t *testing.T) {
 		Expect().Status(http.StatusUnauthorized)
 }
 
+// Runs against its own account, deliberately.
+//
+// Changing a password revokes every *other* session for that user — that is the
+// feature. Pointed at the primary account it also revokes primaryToken, the
+// session TestMain mints and expect() hands to every other test in the package,
+// so each test that ran afterwards failed with a 401 that had nothing to do
+// with what it was testing. A dedicated user keeps the blast radius inside the
+// test that causes it.
 func TestChangePasswordRevokesOtherSessions(t *testing.T) {
-	const newPassword = "a-brand-new-password"
+	const (
+		username    = "rotator"
+		oldPassword = "the-original-password"
+		newPassword = "a-brand-new-password"
+	)
+	createUser(t, username, "Password Rotator", oldPassword)
 
-	// Two independent logins for the same user.
-	keep := expectAs(t, login(t, primaryUsername, primaryPassword))
-	revoked := expectAs(t, login(t, primaryUsername, primaryPassword))
+	// Two independent logins for that user.
+	keep := expectAs(t, login(t, username, oldPassword))
+	revoked := expectAs(t, login(t, username, oldPassword))
 	revoked.GET("/me").Expect().Status(http.StatusOK)
 
 	keep.PUT("/me/password").
 		WithJSON(map[string]any{
-			"currentPassword": primaryPassword, "newPassword": newPassword,
+			"currentPassword": oldPassword, "newPassword": newPassword,
 		}).
 		Expect().Status(http.StatusNoContent)
+	// Restore it, so a re-run (go test -count=2) finds the password createUser
+	// expects rather than an account it can no longer log into.
 	t.Cleanup(func() {
 		keep.PUT("/me/password").
 			WithJSON(map[string]any{
-				"currentPassword": newPassword, "newPassword": primaryPassword,
+				"currentPassword": newPassword, "newPassword": oldPassword,
 			}).
 			Expect().Status(http.StatusNoContent)
 	})
@@ -436,11 +451,16 @@ func TestChangePasswordRevokesOtherSessions(t *testing.T) {
 
 	// The new password works and the old one does not.
 	expectAnon(t).POST("/auth/login").
-		WithJSON(map[string]any{"username": primaryUsername, "password": primaryPassword}).
+		WithJSON(map[string]any{"username": username, "password": oldPassword}).
 		Expect().Status(http.StatusUnauthorized)
 	expectAnon(t).POST("/auth/login").
-		WithJSON(map[string]any{"username": primaryUsername, "password": newPassword}).
+		WithJSON(map[string]any{"username": username, "password": newPassword}).
 		Expect().Status(http.StatusOK)
+
+	// The primary session is untouched. Without this, an edit that points the
+	// test back at the primary account would break fifteen unrelated tests and
+	// give no clue why — which is what happened the first time this ran.
+	expect(t).GET("/me").Expect().Status(http.StatusOK)
 }
 
 // ---- avatars ----
@@ -548,19 +568,34 @@ func login(t *testing.T, username, password string) string {
 // API deliberately does not expose.
 func secondUserToken(t *testing.T) string {
 	t.Helper()
-	const username, password = "secondary", "second-user-password"
+	return createUser(t, "secondary", "Secondary Lifter", "second-user-password")
+}
+
+// createUser inserts an account directly and returns a session token for it.
+// Registration is first-user-only and TestMain already claimed the install, so
+// extra accounts are written straight to the database — the same reaching past
+// the API that backdateSession does. Idempotent, so callers need not care
+// whether an earlier test already made it.
+func createUser(t *testing.T, username, displayName, password string) string {
+	t.Helper()
+	// Skip before touching testPool: under -short, TestMain returns without
+	// booting a database and the pool is nil. expectAnon does the same, but a
+	// caller may reach this helper first.
+	if testing.Short() {
+		t.Skip("integration test requires a Docker daemon")
+	}
 
 	hash, err := auth.PBKDF2Hasher{}.Hash(password)
 	if err != nil {
-		t.Fatalf("hash second user's password: %v", err)
+		t.Fatalf("hash password for %s: %v", username, err)
 	}
 	_, err = testPool.Exec(context.Background(),
 		`INSERT INTO users (username, display_name, password_hash)
 		 VALUES ($1, $2, $3)
 		 ON CONFLICT (username) DO NOTHING`,
-		username, "Secondary Lifter", hash)
+		username, displayName, hash)
 	if err != nil {
-		t.Fatalf("create second user: %v", err)
+		t.Fatalf("create user %s: %v", username, err)
 	}
 	return login(t, username, password)
 }
