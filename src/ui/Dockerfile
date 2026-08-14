@@ -30,7 +30,12 @@ FROM nginxinc/nginx-unprivileged:1.27-alpine
 # security releases. Runs as root at build time, then drops back to the non-root
 # nginx user. DL3017 (no apk upgrade) is intentionally overridden: freshening the
 # base for security is exactly the goal of a Trivy-gated image.
-USER root
+#
+# Numeric UIDs throughout (0, not "root"), matching USER 101 below and
+# src/api/Dockerfile's 65532: a name has to be resolved against the image's
+# /etc/passwd, which a runtime enforcing runAsNonRoot or a rootless engine's
+# user namespace may not read the way the image expects. 0 is unambiguous.
+USER 0
 # hadolint ignore=DL3017
 RUN apk --no-cache upgrade
 USER 101
