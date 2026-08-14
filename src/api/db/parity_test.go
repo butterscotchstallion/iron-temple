@@ -26,16 +26,17 @@ const (
 	wantPGMajor  = 17
 	wantEncoding = "UTF8"
 
-	// "C" is a deliberate choice, not a default. The only collation-sensitive ORDER BY in the
-	// codebase is db/queries/exercises.sql (`ORDER BY name`), and it sorts a closed set of five
-	// seed rows — exercises are written once by 0002_seed.up.sql and have no API write path —
-	// which order identically under C and under a linguistic locale. So C is safe here, and it
-	// lets the sandbox image skip locales/locale-gen entirely.
+	// Measured, not assumed: the first CI run of this test reported en_US.utf8 (the official
+	// postgres image initdb's with LANG=en_US.utf8), so that is what both sides pin. The
+	// sandbox image installs `locales` and initdb's with the same locale to match.
 	//
-	// If THIS is what failed and the actual value came from CI, CI's image is the source of
-	// truth: change this constant to match and re-run. See homelab-gitops
-	// docs/sandbox/iron-temple-postgres-plan.md §8.1.
-	wantCollate = "C"
+	// This is also why .gitea/ci/postgres.yaml moved from alpine to bookworm. Alpine reports
+	// en_US.utf8 but musl implements no linguistic collation, so it behaves like C; a glibc
+	// sandbox matching only the STRING would pass this assertion while actually sorting
+	// differently. Same libc on both sides is what makes the pin mean something.
+	//
+	// Background: homelab-gitops docs/sandbox/iron-temple-postgres-plan.md §8.1.
+	wantCollate = "en_US.utf8"
 )
 
 // TestDatabaseParity pins the properties of the test database that could silently change
