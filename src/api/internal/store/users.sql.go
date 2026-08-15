@@ -30,33 +30,20 @@ func (q *Queries) AdoptOrphanSessions(ctx context.Context, userID int32) (int64,
 }
 
 const countUsers = `-- name: CountUsers :one
+
 SELECT COUNT(*) AS total FROM users
 `
 
+// Accounts, login sessions, and avatars.
+//
+// password_hash is selected by exactly one query (GetUserForLogin). Every other
+// query lists columns explicitly and omits it, so a hash cannot reach a DTO by
+// accident — the compiler stops it, because the row struct has no such field.
 func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 	row := q.db.QueryRow(ctx, countUsers)
 	var total int64
 	err := row.Scan(&total)
 	return total, err
-}
-
-const lockRegistration = `-- name: LockRegistration :exec
-SELECT pg_advisory_xact_lock($1::bigint)
-`
-
-// LockRegistration serializes the first-user check against concurrent
-// registrations. It must be taken *before* CountUsers, inside the same
-// transaction: the check asks whether any row exists, and a COUNT over rows
-// that do not exist yet takes no lock that a second transaction would block on.
-// Two racing registrations with different usernames would otherwise both see an
-// empty table and both commit.
-//
-// pg_advisory_xact_lock releases at commit or rollback, so a crashed request
-// cannot wedge registration. The key is arbitrary but fixed — see
-// registrationLockKey in the api package.
-func (q *Queries) LockRegistration(ctx context.Context, key int64) error {
-	_, err := q.db.Exec(ctx, lockRegistration, key)
-	return err
 }
 
 const createUser = `-- name: CreateUser :one
@@ -105,6 +92,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateU
 }
 
 const createUserSession = `-- name: CreateUserSession :exec
+
 INSERT INTO user_sessions (token_hash, user_id, expires_at, persistent)
 VALUES ($1, $2::int, $3, $4)
 `
@@ -116,6 +104,7 @@ type CreateUserSessionParams struct {
 	Persistent bool               `json:"persistent"`
 }
 
+// ---- login sessions ----
 func (q *Queries) CreateUserSession(ctx context.Context, arg CreateUserSessionParams) error {
 	_, err := q.db.Exec(ctx, createUserSession,
 		arg.TokenHash,
@@ -329,6 +318,25 @@ func (q *Queries) GetUserSession(ctx context.Context, tokenHash []byte) (GetUser
 	return i, err
 }
 
+const lockRegistration = `-- name: LockRegistration :exec
+SELECT pg_advisory_xact_lock($1::bigint)
+`
+
+// LockRegistration serializes the first-user check against concurrent
+// registrations. It must be taken *before* CountUsers, inside the same
+// transaction: the check asks whether any row exists, and a COUNT over rows
+// that do not exist yet takes no lock that a second transaction would block on.
+// Two racing registrations with different usernames would otherwise both see an
+// empty table and both commit.
+//
+// pg_advisory_xact_lock releases at commit or rollback, so a crashed request
+// cannot wedge registration. The key is arbitrary but fixed — see
+// registrationLockKey in the api package.
+func (q *Queries) LockRegistration(ctx context.Context, key int64) error {
+	_, err := q.db.Exec(ctx, lockRegistration, key)
+	return err
+}
+
 const touchUserSession = `-- name: TouchUserSession :exec
 UPDATE user_sessions
 SET last_seen  = now(),
@@ -341,13 +349,13 @@ type TouchUserSessionParams struct {
 	TokenHash  []byte `json:"token_hash"`
 }
 
+// TouchUserSession slides a persistent session forward so an active user is
+// never signed out by the clock. Called only when last_seen is already stale,
+// so a busy client does not write a row per request.
 // Expiry is computed from the database's now(), not the application's clock, so
 // a skewed app pod cannot hand out sessions that outlive their intended window.
 // make_interval takes a plain integer, which keeps the parameter an int rather
 // than an interval type the driver would have to encode.
-// TouchUserSession slides a persistent session forward so an active user is
-// never signed out by the clock. Called only when last_seen is already stale,
-// so a busy client does not write a row per request.
 func (q *Queries) TouchUserSession(ctx context.Context, arg TouchUserSessionParams) error {
 	_, err := q.db.Exec(ctx, touchUserSession, arg.TtlSeconds, arg.TokenHash)
 	return err
@@ -430,6 +438,7 @@ func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfilePa
 }
 
 const upsertUserAvatar = `-- name: UpsertUserAvatar :exec
+
 INSERT INTO user_avatars (user_id, mime, bytes, etag, updated_at)
 VALUES ($1::int, $2, $3, $4, now())
 ON CONFLICT (user_id) DO UPDATE
@@ -446,6 +455,7 @@ type UpsertUserAvatarParams struct {
 	Etag   string `json:"etag"`
 }
 
+// ---- avatars ----
 func (q *Queries) UpsertUserAvatar(ctx context.Context, arg UpsertUserAvatarParams) error {
 	_, err := q.db.Exec(ctx, upsertUserAvatar,
 		arg.UserID,

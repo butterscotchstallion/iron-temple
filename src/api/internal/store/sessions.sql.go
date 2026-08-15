@@ -36,6 +36,7 @@ func (q *Queries) CountSessions(ctx context.Context, arg CountSessionsParams) (i
 }
 
 const createSession = `-- name: CreateSession :one
+
 INSERT INTO sessions (program_day_id, performed_on, user_id)
 VALUES ($1, $2, $3::int)
 RETURNING id, program_day_id, performed_on, notes, created_at, finished_at, user_id
@@ -47,6 +48,23 @@ type CreateSessionParams struct {
 	UserID       int32       `json:"user_id"`
 }
 
+// A session is "over" when the lifter finished it by hand, or when it was
+// started more than 12 hours ago and so cannot still be in progress. This is
+// derived at read time rather than materialized: no background job has to run,
+// and there is no window in which a stale row disagrees with the clock. The
+// expression is repeated in the queries below because a generated column cannot
+// use now(), which Postgres does not consider immutable. Keep the copies in
+// sync — GetSession, ListSessions and ListLiftHistory all depend on it.
+//
+//	s.finished_at IS NOT NULL OR s.created_at < now() - INTERVAL '12 hours'
+//
+// Every query here is scoped to one owner (s.user_id = user_id). That filter is
+// the whole of the isolation model, so it is not optional on any read or write:
+// programs and exercises are shared, but performances are not. A session the
+// caller does not own must be indistinguishable from one that does not exist,
+// which is why the set-level queries below reach the owner through a JOIN back
+// to sessions rather than trusting the set id alone — a caller learning that
+// someone else's set id is valid is already a leak.
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error) {
 	row := q.db.QueryRow(ctx, createSession, arg.ProgramDayID, arg.PerformedOn, arg.UserID)
 	var i Session
