@@ -54,25 +54,23 @@ it, the Go proxy). Then nothing needs baking — `pnpm install` just works at ru
 time, exactly like CI, and it never goes stale as dependencies change. This also
 un-breaks `go mod tidy` and the separate Python project's `pip`/`uv` installs.
 
-The restriction is **not** in the homelab repo, and no PR can lift it. Both mirrors
-are already permitted by everything git controls: the in-container firewall allows
-the whole node IP (`allowlist-extra.sh`), and the launcher already exports
-`GOPROXY=http://192.168.3.10:30506` and `NPM_CONFIG_REGISTRY=http://192.168.3.10:30507/`
-into every profile. What blocks the packets is the **UniFi UDM zone firewall**,
-configured by hand and deliberately not git-managed.
-
-The procedure is two rules, written up in the homelab repo at
-`docs/sandbox/phase3-runbook.md` §4d — clone the working `:30463` (gitea) rule twice
-and change the port, scoped to the sandbox network:
+Most of this is already done, and **none of the remaining work is in this repo** —
+nor, as far as this repo can see, in the homelab repo either:
 
 - npm mirror — host `192.168.3.10`, port `30507`
 - Go proxy — host `192.168.3.10`, port `30506` (bonus: fixes `go mod tidy`)
 
-Nothing else is needed: no image rebuild, no launcher change, no container recreate.
-Verify from inside the sandbox with
-`curl -o /dev/null -w '%{http_code}\n' http://192.168.3.10:30506/`; today it is
-refused, while gitea on `:30463` connects, which is how you can tell the pinholes
-are still missing rather than the service being down.
+The launcher already exports `GOPROXY=http://192.168.3.10:30506` and
+`NPM_CONFIG_REGISTRY=http://192.168.3.10:30507/` into every profile's container, and
+the in-container egress allowlist already permits the whole node IP without scoping
+by port. So the clients are pointed correctly and the container-level firewall is not
+what stops them.
+
+What *is* stopping them is undiagnosed from in here. Note that `curl` cannot tell you:
+a container-level `REJECT`, a network-level block, and a NodePort with no backend all
+surface identically as "Failed to connect … after 0 ms". Two commands run outside the
+container separate them — see `docs/sandbox/phase3-runbook.md` §4d in the homelab
+repo, which owns this pinhole and its diagnosis.
 
 Then in the image (or a `postCreateCommand`), activate the pinned pnpm once:
 
