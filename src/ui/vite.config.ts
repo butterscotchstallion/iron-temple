@@ -143,6 +143,15 @@ const EMPTY_CHANGELOG: Changelog = { version: "", entries: [] };
 // itself entirely rather than showing it.
 const NO_NOTABLE_CHANGES = "(no notable changes)";
 
+/** Run scripts/changelog.sh in one of its modes and return its stdout. */
+function runChangelog(...args: string[]): string {
+  return execFileSync("bash", [CHANGELOG_SCRIPT, ...args], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+}
+
 /** Turn changelog.sh's `- subject (abc1234)` lines into bare entries. */
 function parseNotes(notes: string): string[] {
   return notes
@@ -182,16 +191,22 @@ function readChangelog(): Changelog {
     // Absent (the normal local case) or malformed — fall through to git.
   }
 
-  // Local `pnpm dev`/`pnpm build`: derive it from the working tree. The range is
-  // "since the last stable tag", so what this describes is unreleased work —
-  // labelled as such rather than borrowed from a tag that doesn't contain it.
+  // Local `pnpm dev`/`pnpm build`: derive it from the working tree.
   try {
-    const notes = execFileSync("bash", [CHANGELOG_SCRIPT], {
-      cwd: REPO_ROOT,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    return { version: "unreleased", entries: parseNotes(notes) };
+    // Anything releasable since the last stable tag is work this checkout has
+    // that the tag doesn't, so label it as unreleased rather than borrowing a
+    // version that doesn't contain it.
+    const pending = parseNotes(runChangelog());
+    if (pending.length > 0) return { version: "unreleased", entries: pending };
+
+    // Nothing yet — the usual state of a freshly tagged main, since the release
+    // that consumed those commits moved the tag past them. Fall back to that
+    // release's own notes, which is what a production build of this commit
+    // shows; otherwise the panel is invisible in dev for most of a release
+    // cycle and looks broken rather than empty.
+    const tag = runChangelog("--last-tag").trim();
+    if (!tag) return EMPTY_CHANGELOG;
+    return { version: tag, entries: parseNotes(runChangelog("--release", tag)) };
   } catch {
     return EMPTY_CHANGELOG;
   }

@@ -37,6 +37,13 @@ pnpm dev            # http://localhost:5173 (proxies /api -> localhost:8080)
   in `vite.config.ts`), which reads CI's `changelog.generated.json` when present and
   otherwise derives them from git via `scripts/changelog.sh` — the same definition
   that fills the Gitea Release body. No notes means no panel, just the plain label.
+
+  In dev the notes are whatever is releasable since the last stable tag, labelled
+  `unreleased`. When that range is empty — the usual state right after a release,
+  since the tag has moved past those commits — it falls back to
+  `changelog.sh --release <last tag>`, so you see what a production build of that
+  commit shows instead of an empty panel. To check what the dev server is actually
+  serving: `curl -s 'http://localhost:5173/@id/__x00__virtual:iron-temple/changelog'`.
 - `src/app.css` — Tailwind import + synthwave `@theme` palette.
 
 ## Testing
