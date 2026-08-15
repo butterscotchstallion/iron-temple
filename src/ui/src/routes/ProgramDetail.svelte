@@ -6,8 +6,10 @@
     previewNextSession,
     createSession,
     updateProgramDayWeekday,
+    updateMe,
     type Program,
   } from "../lib/api";
+  import { auth, setMe } from "../lib/auth.svelte";
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
   import { Badge } from "$lib/components/ui/badge";
@@ -75,6 +77,7 @@
       return;
     }
     program = prog.data;
+    void remember();
 
     // Each day's next-session weights come from the server's progression engine.
     days = await Promise.all(
@@ -92,6 +95,23 @@
       }),
     );
     loading = false;
+  }
+
+  // Save this as the program to land on next time. Opening a program is what
+  // counts as selecting it, so this runs on load rather than behind a button.
+  //
+  // Guarded on the value actually changing, which keeps it to one write per
+  // switch: Home renders this component for the program it already resolved,
+  // so a re-render is a no-op. The first such render for an account that
+  // predates the column does write once, persisting the value Home derived
+  // from history — after which the guard holds.
+  //
+  // A failure is swallowed on purpose. It costs the user a preference, not a
+  // workout, and there is nothing they could do about it from here.
+  async function remember() {
+    if (!auth.me || auth.me.currentProgramId === programId) return;
+    const { data } = await updateMe({ body: { currentProgramId: programId } });
+    if (data) setMe(data);
   }
 
   async function start(dayId: number) {

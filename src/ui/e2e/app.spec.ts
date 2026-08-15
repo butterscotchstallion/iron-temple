@@ -160,6 +160,37 @@ test("renders the programs list", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Advanced 3x5", exact: true })).toBeVisible();
 });
 
+// With nothing saved and no history the picker is the right landing screen —
+// that's the fallback the next two tests are the other half of.
+test("lands on the saved program instead of the picker", async ({ page }) => {
+  // Registered after the beforeEach handler, so this one wins.
+  await page.route("**/api/v1/me", (route) =>
+    route.fulfill({ json: { ...signedInUser, currentProgramId: 1 } }),
+  );
+
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Workout A" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Choose a program" })).toBeHidden();
+});
+
+test("remembers the program it opens as the current one", async ({ page }) => {
+  const patched: unknown[] = [];
+  await page.route("**/api/v1/me", (route) => {
+    if (route.request().method() !== "PATCH") {
+      return route.fulfill({ json: signedInUser });
+    }
+    patched.push(route.request().postDataJSON());
+    return route.fulfill({ json: { ...signedInUser, currentProgramId: 1 } });
+  });
+
+  await page.goto("/");
+  await page.getByRole("heading", { name: "StrongLifts 5x5", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Workout A" })).toBeVisible();
+
+  // Opening the program is the whole gesture — no Start, no button.
+  await expect.poll(() => patched).toEqual([{ currentProgramId: 1 }]);
+});
+
 test("navigates into a program's detail", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("heading", { name: "StrongLifts 5x5", exact: true }).click();

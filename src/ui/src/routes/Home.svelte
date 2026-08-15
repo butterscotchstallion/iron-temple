@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { listSessions } from "../lib/api";
+  import { auth } from "../lib/auth.svelte";
   import { currentStreak, STREAK_DISPLAY_THRESHOLD } from "../lib/streak";
   import ProgramDetail from "./ProgramDetail.svelte";
   import Programs from "./Programs.svelte";
@@ -8,9 +9,14 @@
   import ErrorCard from "../lib/ErrorCard.svelte";
   import CalendarHeatmap from "../lib/CalendarHeatmap.svelte";
 
-  // The "normal flow" skips choosing a program: land on the most recently used
-  // program's workout. First-time users (no history) get the picker instead.
-  let currentProgramId = $state<number | null>(null);
+  // The "normal flow" skips choosing a program: land on the one the user last
+  // opened. First-time users (nothing saved, no history) get the picker instead.
+  //
+  // The saved program wins, and history is the fallback for accounts that
+  // predate it — they keep landing on their last workout's program until they
+  // next open one, at which point ProgramDetail saves it.
+  let lastSessionProgramId = $state<number | null>(null);
+  let currentProgramId = $derived(auth.me?.currentProgramId ?? lastSessionProgramId);
   let streak = $state(0);
   let sessions = $state<{ performedOn: string; day: string }[]>([]);
   let loading = $state(true);
@@ -26,14 +32,14 @@
       return;
     }
     if (data && data.items.length > 0) {
-      currentProgramId = data.items[0].programId;
+      lastSessionProgramId = data.items[0].programId;
       streak = currentStreak(data.items);
       sessions = data.items.map((s) => ({
         performedOn: s.performedOn,
         day: s.programDayName.replace(/^workout\s+/i, ""),
       }));
     } else {
-      currentProgramId = null;
+      lastSessionProgramId = null;
       streak = 0;
       sessions = [];
     }

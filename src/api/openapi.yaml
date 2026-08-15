@@ -174,7 +174,7 @@ paths:
     patch:
       tags: [users]
       operationId: updateMe
-      summary: Update display name and avatar colour
+      summary: Update display name, avatar colour, or current program
       requestBody:
         required: true
         content:
@@ -689,6 +689,13 @@ components:
           example: "#b026ff"
         isAdmin:
           type: boolean
+        currentProgramId:
+          type: integer
+          format: int64
+          description: >
+            The program the user last opened, which the app lands on instead of
+            the picker. Absent until they open one; the UI then falls back to
+            the program of their most recent session.
         hasAvatar:
           type: boolean
           description: Whether to render the image or the initials chip.
@@ -754,6 +761,13 @@ components:
           type: string
           description: Hex colour, or empty to fall back to the derived one.
           example: "#b026ff"
+        currentProgramId:
+          type: integer
+          format: int64
+          description: >
+            The program to remember as the user's current one. Must name an
+            existing program. There is no way to clear it back to unset — a
+            program the user has opened is only forgotten when it is deleted.
 
     ChangePasswordRequest:
       type: object

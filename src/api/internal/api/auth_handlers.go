@@ -276,11 +276,12 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 
 	auth.SetCookie(w, token, req.RememberMe, s.secureCookies())
 	writeJSON(w, http.StatusOK, s.userDTO(ctx, store.GetUserRow{
-		ID:          user.ID,
-		Username:    user.Username,
-		DisplayName: user.DisplayName,
-		AvatarColor: user.AvatarColor,
-		IsAdmin:     user.IsAdmin,
+		ID:               user.ID,
+		Username:         user.Username,
+		DisplayName:      user.DisplayName,
+		AvatarColor:      user.AvatarColor,
+		IsAdmin:          user.IsAdmin,
+		CurrentProgramID: user.CurrentProgramID,
 	}))
 }
 
