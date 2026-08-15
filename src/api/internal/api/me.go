@@ -48,17 +48,19 @@ func (s *Server) getMe(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	u := userFrom(ctx)
 	writeJSON(w, http.StatusOK, s.userDTO(ctx, store.GetUserRow{
-		ID:          u.ID,
-		Username:    u.Username,
-		DisplayName: u.DisplayName,
-		AvatarColor: u.AvatarColor,
-		IsAdmin:     u.IsAdmin,
+		ID:               u.ID,
+		Username:         u.Username,
+		DisplayName:      u.DisplayName,
+		AvatarColor:      u.AvatarColor,
+		IsAdmin:          u.IsAdmin,
+		CurrentProgramID: u.CurrentProgramID,
 	}))
 }
 
 type updateProfileRequest struct {
-	DisplayName *string `json:"displayName"`
-	AvatarColor *string `json:"avatarColor"`
+	DisplayName      *string `json:"displayName"`
+	AvatarColor      *string `json:"avatarColor"`
+	CurrentProgramID *int32  `json:"currentProgramId"`
 }
 
 func (s *Server) updateMe(w http.ResponseWriter, r *http.Request) {
@@ -89,6 +91,20 @@ func (s *Server) updateMe(w http.ResponseWriter, r *http.Request) {
 		}
 		params.AvatarColor = &colour
 	}
+	if req.CurrentProgramID != nil {
+		// Checked here rather than left to the foreign key: an unknown id is the
+		// caller's mistake, and a constraint violation surfacing from the UPDATE
+		// would be indistinguishable from a real failure and served as a 500.
+		if _, err := s.q.GetProgram(ctx, *req.CurrentProgramID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				badRequest(w, "currentProgramId must be an existing program")
+				return
+			}
+			internalError(w)
+			return
+		}
+		params.CurrentProgramID = req.CurrentProgramID
+	}
 
 	updated, err := s.q.UpdateUserProfile(ctx, params)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -101,11 +117,12 @@ func (s *Server) updateMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, s.userDTO(ctx, store.GetUserRow{
-		ID:          updated.ID,
-		Username:    updated.Username,
-		DisplayName: updated.DisplayName,
-		AvatarColor: updated.AvatarColor,
-		IsAdmin:     updated.IsAdmin,
+		ID:               updated.ID,
+		Username:         updated.Username,
+		DisplayName:      updated.DisplayName,
+		AvatarColor:      updated.AvatarColor,
+		IsAdmin:          updated.IsAdmin,
+		CurrentProgramID: updated.CurrentProgramID,
 	}))
 }
 
@@ -304,11 +321,12 @@ func (s *Server) getUserAvatar(w http.ResponseWriter, r *http.Request) {
 // without pulling its bytes.
 func (s *Server) userDTO(ctx context.Context, u store.GetUserRow) userDTO {
 	dto := userDTO{
-		ID:          u.ID,
-		Username:    u.Username,
-		DisplayName: u.DisplayName,
-		AvatarColor: u.AvatarColor,
-		IsAdmin:     u.IsAdmin,
+		ID:               u.ID,
+		Username:         u.Username,
+		DisplayName:      u.DisplayName,
+		AvatarColor:      u.AvatarColor,
+		IsAdmin:          u.IsAdmin,
+		CurrentProgramID: u.CurrentProgramID,
 	}
 	etag, err := s.q.GetUserAvatarEtag(ctx, u.ID)
 	if err == nil {

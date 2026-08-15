@@ -23,30 +23,38 @@ SELECT pg_advisory_xact_lock(sqlc.arg('key')::bigint);
 -- name: CreateUser :one
 INSERT INTO users (username, display_name, password_hash, is_admin)
 VALUES (sqlc.arg('username'), sqlc.arg('display_name'), sqlc.arg('password_hash'), sqlc.arg('is_admin'))
-RETURNING id, username, display_name, avatar_color, is_admin, created_at, updated_at;
+RETURNING id, username, display_name, avatar_color, is_admin, created_at, updated_at, current_program_id;
 
 -- GetUserForLogin is the only query that reads password_hash. Username is
 -- matched case-insensitively, which is why users_username_lower_idx exists.
+--
+-- The column list is in table order, which is what makes sqlc return the User
+-- model here rather than a bespoke row struct. Keep new columns at the end.
 -- name: GetUserForLogin :one
-SELECT id, username, display_name, avatar_color, password_hash, is_admin, created_at, updated_at
+SELECT id, username, display_name, avatar_color, password_hash, is_admin, created_at, updated_at, current_program_id
 FROM users
 WHERE lower(username) = lower(sqlc.arg('username'));
 
 -- name: GetUser :one
-SELECT id, username, display_name, avatar_color, is_admin, created_at, updated_at
+SELECT id, username, display_name, avatar_color, is_admin, created_at, updated_at, current_program_id
 FROM users
 WHERE id = sqlc.arg('id');
 
 -- UpdateUserProfile patches the display fields; NULL args leave a column
 -- unchanged. avatar_color is COALESCEd like the rest, so clearing it back to
 -- the derived default is done by sending an empty string, not null.
+--
+-- current_program_id is patched the same way, which means the API can set it
+-- but not clear it. Nothing needs to: the column goes back to NULL when the
+-- program it names is deleted, and that is the only way it should empty.
 -- name: UpdateUserProfile :one
 UPDATE users
-SET display_name = COALESCE(sqlc.narg('display_name'), display_name),
-    avatar_color = COALESCE(sqlc.narg('avatar_color'), avatar_color),
-    updated_at   = now()
+SET display_name       = COALESCE(sqlc.narg('display_name'), display_name),
+    avatar_color       = COALESCE(sqlc.narg('avatar_color'), avatar_color),
+    current_program_id = COALESCE(sqlc.narg('current_program_id'), current_program_id),
+    updated_at         = now()
 WHERE id = sqlc.arg('id')
-RETURNING id, username, display_name, avatar_color, is_admin, created_at, updated_at;
+RETURNING id, username, display_name, avatar_color, is_admin, created_at, updated_at, current_program_id;
 
 -- name: UpdateUserPassword :execrows
 UPDATE users
@@ -83,7 +91,8 @@ SELECT s.token_hash,
        u.username,
        u.display_name,
        u.avatar_color,
-       u.is_admin
+       u.is_admin,
+       u.current_program_id
 FROM user_sessions s
 JOIN users u ON u.id = s.user_id
 WHERE s.token_hash = sqlc.arg('token_hash')

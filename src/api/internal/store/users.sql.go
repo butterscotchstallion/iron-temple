@@ -62,7 +62,7 @@ func (q *Queries) LockRegistration(ctx context.Context, key int64) error {
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (username, display_name, password_hash, is_admin)
 VALUES ($1, $2, $3, $4)
-RETURNING id, username, display_name, avatar_color, is_admin, created_at, updated_at
+RETURNING id, username, display_name, avatar_color, is_admin, created_at, updated_at, current_program_id
 `
 
 type CreateUserParams struct {
@@ -73,13 +73,14 @@ type CreateUserParams struct {
 }
 
 type CreateUserRow struct {
-	ID          int32              `json:"id"`
-	Username    string             `json:"username"`
-	DisplayName string             `json:"display_name"`
-	AvatarColor string             `json:"avatar_color"`
-	IsAdmin     bool               `json:"is_admin"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ID               int32              `json:"id"`
+	Username         string             `json:"username"`
+	DisplayName      string             `json:"display_name"`
+	AvatarColor      string             `json:"avatar_color"`
+	IsAdmin          bool               `json:"is_admin"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	CurrentProgramID *int32             `json:"current_program_id"`
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error) {
@@ -98,6 +99,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateU
 		&i.IsAdmin,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CurrentProgramID,
 	)
 	return i, err
 }
@@ -180,19 +182,20 @@ func (q *Queries) DeleteUserSessionsExcept(ctx context.Context, arg DeleteUserSe
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, username, display_name, avatar_color, is_admin, created_at, updated_at
+SELECT id, username, display_name, avatar_color, is_admin, created_at, updated_at, current_program_id
 FROM users
 WHERE id = $1
 `
 
 type GetUserRow struct {
-	ID          int32              `json:"id"`
-	Username    string             `json:"username"`
-	DisplayName string             `json:"display_name"`
-	AvatarColor string             `json:"avatar_color"`
-	IsAdmin     bool               `json:"is_admin"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ID               int32              `json:"id"`
+	Username         string             `json:"username"`
+	DisplayName      string             `json:"display_name"`
+	AvatarColor      string             `json:"avatar_color"`
+	IsAdmin          bool               `json:"is_admin"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	CurrentProgramID *int32             `json:"current_program_id"`
 }
 
 func (q *Queries) GetUser(ctx context.Context, id int32) (GetUserRow, error) {
@@ -206,6 +209,7 @@ func (q *Queries) GetUser(ctx context.Context, id int32) (GetUserRow, error) {
 		&i.IsAdmin,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CurrentProgramID,
 	)
 	return i, err
 }
@@ -243,13 +247,16 @@ func (q *Queries) GetUserAvatarEtag(ctx context.Context, userID int32) (string, 
 }
 
 const getUserForLogin = `-- name: GetUserForLogin :one
-SELECT id, username, display_name, avatar_color, password_hash, is_admin, created_at, updated_at
+SELECT id, username, display_name, avatar_color, password_hash, is_admin, created_at, updated_at, current_program_id
 FROM users
 WHERE lower(username) = lower($1)
 `
 
 // GetUserForLogin is the only query that reads password_hash. Username is
 // matched case-insensitively, which is why users_username_lower_idx exists.
+//
+// The column list is in table order, which is what makes sqlc return the User
+// model here rather than a bespoke row struct. Keep new columns at the end.
 func (q *Queries) GetUserForLogin(ctx context.Context, username string) (User, error) {
 	row := q.db.QueryRow(ctx, getUserForLogin, username)
 	var i User
@@ -262,6 +269,7 @@ func (q *Queries) GetUserForLogin(ctx context.Context, username string) (User, e
 		&i.IsAdmin,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CurrentProgramID,
 	)
 	return i, err
 }
@@ -276,7 +284,8 @@ SELECT s.token_hash,
        u.username,
        u.display_name,
        u.avatar_color,
-       u.is_admin
+       u.is_admin,
+       u.current_program_id
 FROM user_sessions s
 JOIN users u ON u.id = s.user_id
 WHERE s.token_hash = $1
@@ -284,16 +293,17 @@ WHERE s.token_hash = $1
 `
 
 type GetUserSessionRow struct {
-	TokenHash   []byte             `json:"token_hash"`
-	UserID      int32              `json:"user_id"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	LastSeen    pgtype.Timestamptz `json:"last_seen"`
-	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
-	Persistent  bool               `json:"persistent"`
-	Username    string             `json:"username"`
-	DisplayName string             `json:"display_name"`
-	AvatarColor string             `json:"avatar_color"`
-	IsAdmin     bool               `json:"is_admin"`
+	TokenHash        []byte             `json:"token_hash"`
+	UserID           int32              `json:"user_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	LastSeen         pgtype.Timestamptz `json:"last_seen"`
+	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
+	Persistent       bool               `json:"persistent"`
+	Username         string             `json:"username"`
+	DisplayName      string             `json:"display_name"`
+	AvatarColor      string             `json:"avatar_color"`
+	IsAdmin          bool               `json:"is_admin"`
+	CurrentProgramID *int32             `json:"current_program_id"`
 }
 
 // GetUserSession resolves a presented cookie to its owner, joined so that
@@ -314,6 +324,7 @@ func (q *Queries) GetUserSession(ctx context.Context, tokenHash []byte) (GetUser
 		&i.DisplayName,
 		&i.AvatarColor,
 		&i.IsAdmin,
+		&i.CurrentProgramID,
 	)
 	return i, err
 }
@@ -364,34 +375,46 @@ func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPassword
 
 const updateUserProfile = `-- name: UpdateUserProfile :one
 UPDATE users
-SET display_name = COALESCE($1, display_name),
-    avatar_color = COALESCE($2, avatar_color),
-    updated_at   = now()
-WHERE id = $3
-RETURNING id, username, display_name, avatar_color, is_admin, created_at, updated_at
+SET display_name       = COALESCE($1, display_name),
+    avatar_color       = COALESCE($2, avatar_color),
+    current_program_id = COALESCE($3, current_program_id),
+    updated_at         = now()
+WHERE id = $4
+RETURNING id, username, display_name, avatar_color, is_admin, created_at, updated_at, current_program_id
 `
 
 type UpdateUserProfileParams struct {
-	DisplayName *string `json:"display_name"`
-	AvatarColor *string `json:"avatar_color"`
-	ID          int32   `json:"id"`
+	DisplayName      *string `json:"display_name"`
+	AvatarColor      *string `json:"avatar_color"`
+	CurrentProgramID *int32  `json:"current_program_id"`
+	ID               int32   `json:"id"`
 }
 
 type UpdateUserProfileRow struct {
-	ID          int32              `json:"id"`
-	Username    string             `json:"username"`
-	DisplayName string             `json:"display_name"`
-	AvatarColor string             `json:"avatar_color"`
-	IsAdmin     bool               `json:"is_admin"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ID               int32              `json:"id"`
+	Username         string             `json:"username"`
+	DisplayName      string             `json:"display_name"`
+	AvatarColor      string             `json:"avatar_color"`
+	IsAdmin          bool               `json:"is_admin"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	CurrentProgramID *int32             `json:"current_program_id"`
 }
 
 // UpdateUserProfile patches the display fields; NULL args leave a column
 // unchanged. avatar_color is COALESCEd like the rest, so clearing it back to
 // the derived default is done by sending an empty string, not null.
+//
+// current_program_id is patched the same way, which means the API can set it
+// but not clear it. Nothing needs to: the column goes back to NULL when the
+// program it names is deleted, and that is the only way it should empty.
 func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (UpdateUserProfileRow, error) {
-	row := q.db.QueryRow(ctx, updateUserProfile, arg.DisplayName, arg.AvatarColor, arg.ID)
+	row := q.db.QueryRow(ctx, updateUserProfile,
+		arg.DisplayName,
+		arg.AvatarColor,
+		arg.CurrentProgramID,
+		arg.ID,
+	)
 	var i UpdateUserProfileRow
 	err := row.Scan(
 		&i.ID,
@@ -401,6 +424,7 @@ func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfilePa
 		&i.IsAdmin,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CurrentProgramID,
 	)
 	return i, err
 }

@@ -30,6 +30,10 @@ type userDTO struct {
 	// derive one from the id.
 	AvatarColor string `json:"avatarColor"`
 	IsAdmin     bool   `json:"isAdmin"`
+	// CurrentProgramID is the program the user last opened, so the app can land
+	// them on it. Omitted until they have opened one, which the UI reads as
+	// "fall back to the program of my most recent session".
+	CurrentProgramID *int32 `json:"currentProgramId,omitempty"`
 	// HasAvatar tells the UI whether to render an <img> or the initials chip,
 	// so it needn't request an image that may 404.
 	HasAvatar bool `json:"hasAvatar"`

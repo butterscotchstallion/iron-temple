@@ -2,14 +2,18 @@
   import { onMount } from "svelte";
   import { link } from "svelte-spa-router";
   import { listPrograms, listSessions, type ProgramSummary } from "../lib/api";
+  import { auth } from "../lib/auth.svelte";
   import { programSubtitle } from "../lib/programs";
   import { Card } from "$lib/components/ui/card";
   import ErrorCard from "../lib/ErrorCard.svelte";
 
   let programs = $state<ProgramSummary[]>([]);
-  // The most recently used program, highlighted so the user can see which one
-  // they're currently on. Null for first-time users with no history.
-  let currentProgramId = $state<number | null>(null);
+  // The program the user is on, highlighted so they can see which one. Same
+  // expression as Home's, so the ring can't disagree with what "/" opens:
+  // the saved program, else the most recently used one, else nothing for a
+  // first-time user with no history.
+  let lastSessionProgramId = $state<number | null>(null);
+  let currentProgramId = $derived(auth.me?.currentProgramId ?? lastSessionProgramId);
   let loading = $state(true);
   let failed = $state(false);
 
@@ -28,7 +32,7 @@
     } else {
       programs = data;
     }
-    currentProgramId = sessions.data?.items[0]?.programId ?? null;
+    lastSessionProgramId = sessions.data?.items[0]?.programId ?? null;
     loading = false;
   }
 

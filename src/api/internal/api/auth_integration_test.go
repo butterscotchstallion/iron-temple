@@ -384,6 +384,48 @@ func TestUpdateProfile(t *testing.T) {
 		JSON().Object().HasValue("displayName", "Ada")
 }
 
+// The current program is what "/" lands on, so it has to survive the request
+// that set it — an in-memory value would be indistinguishable from the derived
+// one the UI already had.
+func TestUpdateCurrentProgram(t *testing.T) {
+	e := expect(t)
+	programID := firstProgramID(e)
+
+	// Reset through the pool, not the API: the column is COALESCE-patched, so
+	// there is deliberately no way to clear it back to NULL over HTTP, and
+	// leaving it set would hand every later test a non-empty profile.
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(),
+			`UPDATE users SET current_program_id = NULL WHERE username = $1`, primaryUsername)
+	})
+
+	e.PATCH("/me").
+		WithJSON(map[string]any{"currentProgramId": programID}).
+		Expect().Status(http.StatusOK).JSON().Object().
+		HasValue("currentProgramId", programID)
+
+	e.GET("/me").Expect().Status(http.StatusOK).
+		JSON().Object().HasValue("currentProgramId", programID)
+
+	// A patch that doesn't mention it leaves it alone, which is what lets the
+	// profile form keep sending only the fields it owns.
+	e.PATCH("/me").WithJSON(map[string]any{"displayName": "Primary Lifter"}).
+		Expect().Status(http.StatusOK).JSON().Object().
+		HasValue("currentProgramId", programID)
+}
+
+// An id that names no program is the caller's mistake. Checking it in the
+// handler is what keeps it a 400 rather than a foreign-key violation bubbling
+// out of the UPDATE as a 500.
+func TestUpdateCurrentProgramRejectsAnUnknownID(t *testing.T) {
+	e := expect(t)
+	e.PATCH("/me").WithJSON(map[string]any{"currentProgramId": 999999}).
+		Expect().Status(http.StatusBadRequest)
+
+	e.GET("/me").Expect().Status(http.StatusOK).
+		JSON().Object().NotContainsKey("currentProgramId")
+}
+
 func TestUpdateProfileRejectsBadInput(t *testing.T) {
 	e := expect(t)
 

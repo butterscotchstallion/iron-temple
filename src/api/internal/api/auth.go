@@ -22,6 +22,10 @@ type currentUser struct {
 	DisplayName string
 	AvatarColor string
 	IsAdmin     bool
+	// CurrentProgramID is the program the user last opened, nil until they open
+	// one. It rides the session join rather than a second query because getMe
+	// serves the whole profile from this struct.
+	CurrentProgramID *int32
 	// tokenHash identifies *this* login among the user's sessions, so logout
 	// can revoke exactly the one presented and a password change can revoke
 	// every other one.
@@ -87,12 +91,13 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) (currentUs
 	s.slideSession(ctx, row)
 
 	return currentUser{
-		ID:          row.UserID,
-		Username:    row.Username,
-		DisplayName: row.DisplayName,
-		AvatarColor: row.AvatarColor,
-		IsAdmin:     row.IsAdmin,
-		tokenHash:   digest,
+		ID:               row.UserID,
+		Username:         row.Username,
+		DisplayName:      row.DisplayName,
+		AvatarColor:      row.AvatarColor,
+		IsAdmin:          row.IsAdmin,
+		CurrentProgramID: row.CurrentProgramID,
+		tokenHash:        digest,
 	}, true
 }
 
