@@ -11,6 +11,13 @@
 > longer true. What remains accurate is the air gap itself: there is still no route
 > to any package registry, which is why `go mod tidy`, `govulncheck` and `trivy`
 > stay CI-only.
+>
+> **Fix A was never applied, and is still available** (2026-08-15). It is a smaller
+> job than this document assumed — see the section below for where the rule actually
+> lives. What it would buy on top of Fix B: `go install` of tooling that isn't baked
+> into the image (`sqlc` is the live example — regenerating `internal/store` has to
+> be done by hand without it), `go mod tidy` as a local gate, and an end to the
+> baked-store staleness coupling described under "The catch".
 
 
 This documents *why* `scripts/preflight.sh` can't run the frontend gates in the
@@ -47,11 +54,25 @@ it, the Go proxy). Then nothing needs baking — `pnpm install` just works at ru
 time, exactly like CI, and it never goes stale as dependencies change. This also
 un-breaks `go mod tidy` and the separate Python project's `pip`/`uv` installs.
 
-Wherever the sandbox's egress is restricted (NetworkPolicy / firewall in the
-homelab repo), add an allow rule to the mirror's Service/NodePort:
+The restriction is **not** in the homelab repo, and no PR can lift it. Both mirrors
+are already permitted by everything git controls: the in-container firewall allows
+the whole node IP (`allowlist-extra.sh`), and the launcher already exports
+`GOPROXY=http://192.168.3.10:30506` and `NPM_CONFIG_REGISTRY=http://192.168.3.10:30507/`
+into every profile. What blocks the packets is the **UniFi UDM zone firewall**,
+configured by hand and deliberately not git-managed.
+
+The procedure is two rules, written up in the homelab repo at
+`docs/sandbox/phase3-runbook.md` §4d — clone the working `:30463` (gitea) rule twice
+and change the port, scoped to the sandbox network:
 
 - npm mirror — host `192.168.3.10`, port `30507`
 - Go proxy — host `192.168.3.10`, port `30506` (bonus: fixes `go mod tidy`)
+
+Nothing else is needed: no image rebuild, no launcher change, no container recreate.
+Verify from inside the sandbox with
+`curl -o /dev/null -w '%{http_code}\n' http://192.168.3.10:30506/`; today it is
+refused, while gitea on `:30463` connects, which is how you can tell the pinholes
+are still missing rather than the service being down.
 
 Then in the image (or a `postCreateCommand`), activate the pinned pnpm once:
 

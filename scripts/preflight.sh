@@ -12,9 +12,12 @@
 #   --repo  hadolint, gitleaks                          (hadolint.yml, secret-scan.yml)
 #
 # CI-only ON PURPOSE — each needs something this box cannot have:
-#   go mod tidy   ignores vendor/ and re-resolves through the Go proxy, which is dead
-#                 here (and it would mutate go.mod/go.sum). Measured: exit 1,
+#   go mod tidy   ignores vendor/ and re-resolves through the Go proxy, which this box
+#                 has no route to (and it would mutate go.mod/go.sum). Measured: exit 1,
 #                 "permission denied" on the shared read-only module cache. CI checks it.
+#                 The proxy itself is healthy — GOPROXY points at the in-cluster Athens
+#                 NodePort and the firewall pinhole for it was never opened, so the
+#                 connection is refused from here. See docs/sandbox-ui-tooling.md.
 #   govulncheck   fetches the vulnerability DB from vuln.go.dev on every run. Measured:
 #                 exit 1, i/o timeout. Network-dependent by nature, so it can't be a
 #                 local gate on an air-gapped box — same bucket as trivy.
