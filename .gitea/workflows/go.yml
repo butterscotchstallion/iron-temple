@@ -247,6 +247,95 @@ jobs:
           SHA: ${{ github.sha }}
         run: ./scripts/ci-notify.sh
 
+  # Verify internal/store still matches what sqlc would generate from db/queries +
+  # the schema files listed in sqlc.yaml.
+  #
+  # Why this exists: the generated tree is committed, and the devcontainer sandbox
+  # cannot install sqlc — it has no route to the Go module proxy (see
+  # docs/sandbox-ui-tooling.md), so `make sqlc` is unavailable exactly where the
+  # queries get edited. That made hand-editing internal/store the only way to land a
+  # schema change from the sandbox, which is precisely the drift a generator exists
+  # to prevent. CI has the proxy, so it can hold the line the sandbox can't.
+  #
+  # Independent of the `go` job (only `needs: changes`): it's cheap, needs no
+  # database, and a mismatch here is worth reporting even when lint is failing.
+  sqlc:
+    name: Verify generated store
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    env:
+      # Must match the version stamped into the generated files' header comment.
+      # Bumping it will produce a diff on the first run — regenerate and commit in
+      # the same PR that bumps it.
+      SQLC_VERSION: v1.31.1
+      GOTOOLCHAIN: local
+      GOMODCACHE: ${{ runner.temp }}/gomodcache
+      TAR_OPTIONS: --no-same-owner
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Merge main into the head under test
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: bash "$GITHUB_WORKSPACE/.gitea/scripts/merge-base-branch" "$EVENT_NAME" "$REF_NAME"
+
+      - name: Use the baked Go toolchain
+        run: |
+          echo "/usr/local/go/bin" >> "$GITHUB_PATH"
+          echo "$(/usr/local/go/bin/go env GOPATH)/bin" >> "$GITHUB_PATH"
+          /usr/local/go/bin/go version
+
+      # Cache the compiled binary so the dep graph is built once per version bump,
+      # not once per push — same pattern as the gosec cache in the `go` job.
+      - name: Cache sqlc
+        id: cache-sqlc
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/go/bin/sqlc
+          key: sqlc-${{ env.SQLC_VERSION }}-${{ runner.os }}
+
+      # `go install` rather than a prebuilt release asset (which is what gosec does):
+      # it pins the version by module path with checksum verification via GOSUMDB, and
+      # doesn't depend on the project's release-asset naming staying stable. GOFLAGS is
+      # cleared because the repo default is -mod=vendor, which a module-aware install
+      # of a package outside this module must not inherit.
+      - name: Install sqlc
+        if: steps.cache-sqlc.outputs.cache-hit != 'true'
+        env:
+          GOFLAGS: ""
+        run: go install "github.com/sqlc-dev/sqlc/cmd/sqlc@${SQLC_VERSION}"
+
+      - name: sqlc generate
+        working-directory: src/api
+        run: sqlc generate
+
+      # sqlc.yaml writes only to internal/store, so that's the whole blast radius.
+      - name: Verify the generated tree is unchanged
+        working-directory: src/api
+        run: |
+          set -euo pipefail
+          if [ -n "$(git status --porcelain -- internal/store)" ]; then
+            echo "::error::internal/store is out of date — run 'make sqlc' in src/api and commit the result"
+            git --no-pager diff -- internal/store
+            exit 1
+          fi
+          echo "internal/store matches sqlc ${SQLC_VERSION}"
+
+      - name: Notify on failure
+        if: failure()
+        working-directory: ${{ github.workspace }}
+        env:
+          WORKFLOW: "${{ github.workflow }} / ${{ github.job }}"
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: ./scripts/ci-notify.sh
+
   # DB-backed API tests. `needs: go` gates them on the fast job above — no point
   # provisioning a Postgres pod and running the integration suite if lint/vet/gosec or
   # the unit tests already failed. (When `go` is skipped as irrelevant, this skips too.)
@@ -360,18 +449,18 @@ jobs:
   # THIS the required status check in branch protection.
   result:
     name: Go Lint & Test
-    needs: [changes, go, integration]
+    needs: [changes, go, sqlc, integration]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Require backend jobs to pass
         run: |
           set -euo pipefail
-          echo "changes=${{ needs.changes.result }} go=${{ needs.go.result }} integration=${{ needs.integration.result }}"
+          echo "changes=${{ needs.changes.result }} go=${{ needs.go.result }} sqlc=${{ needs.sqlc.result }} integration=${{ needs.integration.result }}"
           if [ "${{ needs.changes.result }}" != "success" ]; then
             echo "::error::change-detection job did not succeed"; exit 1
           fi
-          for r in "${{ needs.go.result }}" "${{ needs.integration.result }}"; do
+          for r in "${{ needs.go.result }}" "${{ needs.sqlc.result }}" "${{ needs.integration.result }}"; do
             case "$r" in
               success|skipped) ;;
               *) echo "::error::backend checks did not pass ($r)"; exit 1 ;;
