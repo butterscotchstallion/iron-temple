@@ -90,6 +90,30 @@ jobs:
             --ignore-unfixed --ignorefile .trivyignore.yaml --timeout 15m "${IMG}:${TAG}"
           echo "ref=192.168.3.10:3000/${IMAGE_OWNER}/iron-temple-api:${TAG}@${D}" >> "$GITHUB_OUTPUT"
 
+      - name: Compute changelog
+        if: steps.ver.outputs.release == 'true'
+        # BEFORE the tag is created, so changelog.sh's "last stable tag" is the
+        # PREVIOUS release and the range (prev..HEAD) captures this release's commits.
+        # Also BEFORE the UI build below, which bakes changelog.generated.json into
+        # the bundle for the header's changelog panel (src/ui/vite.config.ts) — the
+        # image can't derive it itself, as .dockerignore keeps .git and scripts/ out
+        # of the build context.
+        # Best-effort like the notes step — a changelog hiccup must not block the
+        # release. Without the JSON the panel simply doesn't render, leaving the
+        # header version as the plain text it was before.
+        continue-on-error: true
+        run: |
+          scripts/changelog.sh > /tmp/notes.md || true
+          # Same notes, restructured for the UI: entries without the markdown
+          # bullet, and the sentinel changelog.sh prints for an empty range dropped
+          # so it can't show up as a release note.
+          jq -R -s --arg v "v${{ steps.ver.outputs.version }}" \
+            '{version: $v,
+              entries: (split("\n")
+                        | map(sub("^- "; ""))
+                        | map(select(. != "" and . != "(no notable changes)")))}' \
+            < /tmp/notes.md > src/ui/changelog.generated.json
+
       - name: Build, push, scan — UI
         if: steps.ver.outputs.release == 'true'
         id: ui
@@ -107,14 +131,6 @@ jobs:
           trivy image --insecure --scanners vuln --severity CRITICAL,HIGH --exit-code 1 \
             --ignore-unfixed --ignorefile .trivyignore.yaml --timeout 15m "${IMG}:${TAG}"
           echo "ref=192.168.3.10:3000/${IMAGE_OWNER}/iron-temple-ui:${TAG}@${D}" >> "$GITHUB_OUTPUT"
-
-      - name: Compute changelog
-        if: steps.ver.outputs.release == 'true'
-        # BEFORE the tag is created, so changelog.sh's "last stable tag" is the
-        # PREVIOUS release and the range (prev..HEAD) captures this release's commits.
-        # Best-effort like the notes step — a changelog hiccup must not block the release.
-        continue-on-error: true
-        run: scripts/changelog.sh > /tmp/notes.md || true
 
       - name: Tag the release
         if: steps.ver.outputs.release == 'true'

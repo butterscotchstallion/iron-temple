@@ -15,8 +15,12 @@ export default defineConfig({
     // pre-built static assets, so pages load fast and deterministically — no on-demand
     // vite module transforms. On the CPU-limited CI runner, `vite dev` compiled the app
     // on first request slower than page.goto's 30s timeout, hanging the "load" event.
-    // `pnpm build` here also doubles as the production-build check.
-    command: "pnpm build && pnpm preview --port 5173 --strictPort",
+    // The build here also doubles as the production-build check.
+    //
+    // It goes through build-with-changelog.sh rather than calling `pnpm build`
+    // directly because the header's changelog panel is fed at build time and so can't
+    // be mocked per-test; see that script for why.
+    command: "e2e/build-with-changelog.sh && pnpm preview --port 5173 --strictPort",
     url: "http://localhost:5173",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

@@ -336,3 +336,54 @@ test("marks a session aged past the 12h cutoff as closed automatically", async (
   await expect(page.getByText("Closed automatically · 12h+ old")).toBeVisible();
   await expect(page.getByRole("button", { name: "Finish workout" })).toHaveCount(0);
 });
+
+// The changelog panel hanging off the header version. Its notes are compiled into
+// the bundle (see e2e/build-with-changelog.sh), not fetched, so this is the one
+// fixture the suite plants at build time rather than with page.route. Hover is the
+// feature's whole point and jsdom cannot do it, so this is where it's really
+// exercised — VersionChangelog.test.ts covers the rest.
+async function openHeaderWithVersion(page: import("@playwright/test").Page) {
+  await page.route("**/api/v1/health", (route) =>
+    route.fulfill({ json: { status: "ok", version: "v9.9.9", environment: "production" } }),
+  );
+  await page.goto("/");
+
+  const trigger = page.getByTestId("version");
+  await expect(trigger).toContainText("iron-temple v9.9.9-production");
+
+  // Inert text rather than a button means this build carries no notes, which is
+  // what you get from a dev server reused via reuseExistingServer. Nothing to test.
+  const interactive = await trigger.evaluate((el) => el.tagName === "BUTTON");
+  test.skip(!interactive, "build carries no release notes — see e2e/build-with-changelog.sh");
+
+  return trigger;
+}
+
+test("opens the changelog when the header version is hovered", async ({ page }) => {
+  const trigger = await openHeaderWithVersion(page);
+  await trigger.hover();
+
+  const panel = page.getByTestId("changelog-panel");
+  await expect(panel).toBeVisible();
+  await expect(panel).toContainText("What's new in v9.9.9");
+  await expect(panel).toContainText("show the release notes when you hover the header version");
+  await expect(panel).toContainText("stop 500ing on a program with no days");
+
+  // Escape closes it — LinkPreview's escape layer, no handler of our own.
+  await page.keyboard.press("Escape");
+  await expect(panel).not.toBeVisible();
+});
+
+// The path a tap takes. Firefox can't emulate touch (see the note in
+// playwright.config.ts), so a click is as close as this suite gets — but it is the
+// same handler, and without it the panel would be unreachable on an iPad.
+test("toggles the changelog when the header version is clicked", async ({ page }) => {
+  const trigger = await openHeaderWithVersion(page);
+  const panel = page.getByTestId("changelog-panel");
+
+  await trigger.click();
+  await expect(panel).toBeVisible();
+
+  await trigger.click();
+  await expect(panel).not.toBeVisible();
+});

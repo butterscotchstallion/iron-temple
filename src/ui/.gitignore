@@ -14,6 +14,12 @@ dist
 # hey-api generated client (regenerated from ../api/openapi.yaml)
 src/lib/api/
 
+# Release notes for the header's changelog panel. The release workflow writes this
+# into the UI build context so the notes ship with the image, and the e2e suite
+# plants a fixture copy for the length of its build. Locally the same data comes
+# from git instead, so this file is always generated and never belongs in a commit.
+changelog.generated.json
+
 # openapi-ts drops a crash log here when generation fails. The dev server
 # regenerates on every save of the spec, so a half-typed edit produces one
 # routinely — they are noise, not artifacts worth keeping.

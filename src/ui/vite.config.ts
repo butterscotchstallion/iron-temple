@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -19,6 +19,13 @@ const GENERATED_CLIENT = fileURLToPath(new URL("./src/lib/api", import.meta.url)
 const SPEC_STAMP = fileURLToPath(
   new URL("./node_modules/.cache/iron-temple/openapi-spec.sha256", import.meta.url),
 );
+
+// Release notes for the running build, baked in at build time. CI writes the JSON
+// (see .gitea/workflows/release.yml); locally we derive it from git.
+const CHANGELOG_MODULE = "virtual:iron-temple/changelog";
+const CHANGELOG_JSON = fileURLToPath(new URL("./changelog.generated.json", import.meta.url));
+const CHANGELOG_SCRIPT = fileURLToPath(new URL("../../scripts/changelog.sh", import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
 function hashSpec(): string | null {
   try {
@@ -127,8 +134,94 @@ function regenerateApiOnSpecChange(): Plugin {
   };
 }
 
+type Changelog = { version: string; entries: string[] };
+
+const EMPTY_CHANGELOG: Changelog = { version: "", entries: [] };
+
+// What scripts/changelog.sh prints when nothing releasable landed in the range.
+// It reads as a line item but means "no entries", and the header panel hides
+// itself entirely rather than showing it.
+const NO_NOTABLE_CHANGES = "(no notable changes)";
+
+/** Turn changelog.sh's `- subject (abc1234)` lines into bare entries. */
+function parseNotes(notes: string): string[] {
+  return notes
+    .split("\n")
+    .map((line) => line.replace(/^\s*-\s*/, "").trim())
+    .filter((line) => line !== "" && line !== NO_NOTABLE_CHANGES);
+}
+
+/**
+ * The release notes for this build, from whichever source is available.
+ *
+ * Both paths bottom out in scripts/changelog.sh — the same definition that fills
+ * the Gitea Release body — so the panel in the header and the release page can't
+ * disagree about what shipped.
+ *
+ * Every failure degrades to no entries rather than throwing. The changelog is
+ * decoration: a build must not fail because a git command did, and CI's step that
+ * produces the JSON is deliberately `continue-on-error`.
+ */
+function readChangelog(): Changelog {
+  // Component tests render against their own fixtures, so reading the real
+  // history here would only make the suite depend on the checkout's commits.
+  if (process.env.VITEST) return EMPTY_CHANGELOG;
+
+  // CI's copy wins where it exists: inside the UI image build, .dockerignore
+  // excludes .git and scripts/, so the JSON is the only source that survives.
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(CHANGELOG_JSON, "utf8"));
+    if (parsed && typeof parsed === "object") {
+      const { version, entries } = parsed as Partial<Changelog>;
+      return {
+        version: typeof version === "string" ? version : "",
+        entries: Array.isArray(entries) ? entries.filter((e) => typeof e === "string") : [],
+      };
+    }
+  } catch {
+    // Absent (the normal local case) or malformed — fall through to git.
+  }
+
+  // Local `pnpm dev`/`pnpm build`: derive it from the working tree. The range is
+  // "since the last stable tag", so what this describes is unreleased work —
+  // labelled as such rather than borrowed from a tag that doesn't contain it.
+  try {
+    const notes = execFileSync("bash", [CHANGELOG_SCRIPT], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return { version: "unreleased", entries: parseNotes(notes) };
+  } catch {
+    return EMPTY_CHANGELOG;
+  }
+}
+
+/**
+ * Serve the release notes to the app as `virtual:iron-temple/changelog`.
+ *
+ * A virtual module rather than a generated file on disk: nothing needs to be
+ * committed, gitignored, or regenerated before `svelte-check` and vitest can
+ * resolve the import, and the data is inlined into the bundle at build time so
+ * the panel costs no request at runtime.
+ */
+function changelogVirtualModule(): Plugin {
+  const resolvedId = `\0${CHANGELOG_MODULE}`;
+
+  return {
+    name: "iron-temple:changelog",
+    resolveId(id) {
+      return id === CHANGELOG_MODULE ? resolvedId : null;
+    },
+    load(id) {
+      if (id !== resolvedId) return null;
+      return `export default ${JSON.stringify(readChangelog())};`;
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [svelte(), tailwindcss(), regenerateApiOnSpecChange()],
+  plugins: [svelte(), tailwindcss(), regenerateApiOnSpecChange(), changelogVirtualModule()],
   resolve: {
     // $lib alias for shadcn-svelte's generated components (Vite, not SvelteKit).
     alias: {

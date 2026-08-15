@@ -31,6 +31,12 @@ pnpm dev            # http://localhost:5173 (proxies /api -> localhost:8080)
 - `src/lib/RestTimer.svelte` — 3-minute rest countdown (Svelte 5 runes).
 - `src/lib/time.ts` — pure helpers (unit-tested in `time.test.ts`).
 - `src/lib/api/` — **generated** hey-api client (git-ignored; run `generate:api`).
+- `src/lib/VersionChangelog.svelte` — the header's version label, and the panel of
+  this release's notes that opens off it on hover/tap/focus. The notes are inlined
+  at build time from `virtual:iron-temple/changelog` (see `changelogVirtualModule()`
+  in `vite.config.ts`), which reads CI's `changelog.generated.json` when present and
+  otherwise derives them from git via `scripts/changelog.sh` — the same definition
+  that fills the Gitea Release body. No notes means no panel, just the plain label.
 - `src/app.css` — Tailwind import + synthwave `@theme` palette.
 
 ## Testing
@@ -43,7 +49,10 @@ pnpm dev            # http://localhost:5173 (proxies /api -> localhost:8080)
   shadcn-svelte primitives (`src/lib/components/ui/`) are excluded (see the
   `coverage` block in `vite.config.ts`).
 - **e2e** (`pnpm test:e2e`): Playwright on Firefox against the production build.
-  The API is mocked with `page.route`, so no backend or DB is needed.
+  The API is mocked with `page.route`, so no backend or DB is needed. The one
+  exception is the header's changelog, which is compiled into the bundle rather
+  than fetched — `e2e/build-with-changelog.sh` plants a fixture for the build and
+  removes it afterwards.
 
 ## Notes
 - The generated client is git-ignored and produced from `../api/openapi.yaml`;
