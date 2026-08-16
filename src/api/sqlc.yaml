@@ -8,6 +8,8 @@ sql:
       - "db/migrations/0004_session_finished_at.up.sql"
       - "db/migrations/0005_users.up.sql"
       - "db/migrations/0006_user_current_program.up.sql"
+      # 0007 is seed DML only, so it has no schema to declare here.
+      - "db/migrations/0008_report_runs.up.sql"
     queries: "db/queries"
     gen:
       go:
