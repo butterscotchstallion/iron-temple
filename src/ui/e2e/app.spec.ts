@@ -502,3 +502,202 @@ test("toggles the changelog when the header version is clicked", async ({ page }
   await trigger.click();
   await expect(panel).toBeVisible();
 });
+
+// The Racked recap. Every figure here is computed by the API, so these assert
+// that the page renders the report faithfully — not that the statistics are
+// right, which is internal/racked's own test suite.
+const rackedMarch = {
+  period: { kind: "month", start: "2026-03-01", end: "2026-03-31", label: "March 2026" },
+  totals: { volumeLb: 84000, sessions: 12, sets: 180, reps: 900 },
+  change: { volumeLb: 9000, volumePct: 0.12, sessions: 2, sessionsPct: 0.2 },
+  comparison: { count: 3, label: "school buses", unitLb: 24000 },
+  lifts: [
+    { exerciseId: 1, exerciseName: "Squat", volumeLb: 50000, sets: 90, reps: 450, share: 0.6 },
+    { exerciseId: 2, exerciseName: "Bench Press", volumeLb: 34000, sets: 90, reps: 450, share: 0.4 },
+  ],
+  series: [
+    {
+      exerciseId: 1,
+      exerciseName: "Squat",
+      points: [
+        { performedOn: "2026-03-02", topWeightLb: 200, e1rmLb: 233 },
+        { performedOn: "2026-03-16", topWeightLb: 220, e1rmLb: 256 },
+      ],
+    },
+    {
+      exerciseId: 2,
+      exerciseName: "Bench Press",
+      points: [
+        { performedOn: "2026-03-02", topWeightLb: 150, e1rmLb: 175 },
+        { performedOn: "2026-03-16", topWeightLb: 155, e1rmLb: 181 },
+      ],
+    },
+  ],
+  mostImproved: {
+    exerciseId: 1,
+    exerciseName: "Squat",
+    fromLb: 233,
+    toLb: 256,
+    gainLb: 23,
+    gainPct: 0.0987,
+  },
+  days: [
+    { date: "2026-03-02", volumeLb: 7000, sessions: 1 },
+    { date: "2026-03-16", volumeLb: 7500, sessions: 1 },
+  ],
+  weekdays: [0, 42000, 0, 30000, 0, 12000, 0],
+  bestWeekday: 1,
+  hours: Array.from({ length: 24 }, (_, h) => (h === 6 ? 9 : h === 18 ? 3 : 0)),
+  hourLabel: "Early bird",
+  streak: { longestWeeks: 5, currentWeeks: 3 },
+  attendance: { basis: "cadence", expected: 13, actual: 12, rate: 0.923 },
+  prs: [
+    {
+      kind: "weight",
+      performedOn: "2026-03-16",
+      exerciseId: 1,
+      exerciseName: "Squat",
+      weightLb: 220,
+      reps: 5,
+      valueLb: 220,
+      previousLb: 215,
+    },
+  ],
+  milestones: [
+    {
+      kind: "plate",
+      performedOn: "2026-03-16",
+      label: "First 225 lb Squat",
+      valueLb: 225,
+      exerciseId: 1,
+      exerciseName: "Squat",
+    },
+  ],
+  heaviestSet: {
+    performedOn: "2026-03-16",
+    exerciseId: 1,
+    exerciseName: "Squat",
+    weightLb: 220,
+    reps: 5,
+  },
+  fastestSession: {
+    sessionId: 7,
+    performedOn: "2026-03-09",
+    programDayName: "Workout A",
+    durationSeconds: 2880,
+    volumeLb: 6800,
+    sets: 15,
+  },
+  deloads: [
+    {
+      exerciseId: 2,
+      exerciseName: "Bench Press",
+      performedOn: "2026-03-09",
+      fromLb: 160,
+      toLb: 145,
+      recovered: false,
+      recoveredOn: null,
+    },
+  ],
+  archetype: { name: "The Grinder", description: "Long sessions, no rush." },
+};
+
+test("Racked shows the month's headline figures", async ({ page }) => {
+  await page.route("**/api/v1/racked**", (route) => route.fulfill({ json: rackedMarch }));
+  await page.goto("/#/racked");
+
+  await expect(page.getByRole("heading", { name: "Racked" })).toBeVisible();
+  await expect(page.getByText("March 2026")).toBeVisible();
+
+  // The headline and its restatement in something a person can picture.
+  await expect(page.getByText("84,000")).toBeVisible();
+  await expect(page.getByText("That's 3 school buses.")).toBeVisible();
+  await expect(page.getByText("+12% vs the previous month")).toBeVisible();
+
+  await expect(page.getByText("The Grinder")).toBeVisible();
+});
+
+test("Racked shows the hero moments", async ({ page }) => {
+  await page.route("**/api/v1/racked**", (route) => route.fulfill({ json: rackedMarch }));
+  await page.goto("/#/racked");
+
+  // Scoped to each card: the same figures legitimately appear elsewhere on the
+  // page — the squat's +10% also labels its line in the chart legend, and the
+  // heaviest set is also the record in the PR list.
+  const improved = page.getByTestId("stat-most-improved");
+  await expect(improved.getByText("Squat")).toBeVisible();
+  await expect(improved.getByText("+10%")).toBeVisible();
+  await expect(improved.getByText("233 → 256 lb est. max")).toBeVisible();
+
+  const heaviest = page.getByTestId("stat-heaviest-set");
+  await expect(heaviest.getByText("220 lb × 5")).toBeVisible();
+  await expect(heaviest.getByText("March 16 2026")).toBeVisible();
+
+  // 2880s renders in the units a lifter would say, not as the rest timer's M:SS.
+  const fastest = page.getByTestId("stat-fastest-session");
+  await expect(fastest.getByText("48m")).toBeVisible();
+  await expect(fastest.getByText("Workout A")).toBeVisible();
+});
+
+test("Racked charts every lift and names what it cannot draw", async ({ page }) => {
+  await page.route("**/api/v1/racked**", (route) => route.fulfill({ json: rackedMarch }));
+  await page.goto("/#/racked");
+
+  // The trend chart's legend carries each lift's name and final change, so the
+  // chart never depends on telling two colours apart.
+  const chart = page.getByRole("img", { name: /Improvement for 2 lifts/ });
+  await expect(chart).toBeVisible();
+
+  await expect(page.getByRole("heading", { name: "Where the weight went" })).toBeVisible();
+  await expect(page.getByText("50,000 lb · 60%")).toBeVisible();
+
+  await expect(page.getByRole("img", { name: /by day of the week/ })).toBeVisible();
+  await expect(page.getByText("Monday", { exact: true })).toBeVisible();
+  await expect(page.getByText("Early bird")).toBeVisible();
+});
+
+// The denominator is an estimate whenever the lifter never scheduled their
+// program's days, and the page has to say so rather than imply a real target.
+test("Racked labels an estimated attendance rate as estimated", async ({ page }) => {
+  await page.route("**/api/v1/racked**", (route) => route.fulfill({ json: rackedMarch }));
+  await page.goto("/#/racked");
+
+  await expect(page.getByText("92%")).toBeVisible();
+  await expect(page.getByText(/estimated from your program's shape/)).toBeVisible();
+});
+
+test("Racked lists records, milestones and stalls", async ({ page }) => {
+  await page.route("**/api/v1/racked**", (route) => route.fulfill({ json: rackedMarch }));
+  await page.goto("/#/racked");
+
+  await expect(page.getByRole("heading", { name: "1 personal record" })).toBeVisible();
+  await expect(page.getByText("First 225 lb Squat")).toBeVisible();
+
+  await expect(page.getByRole("heading", { name: "Stalls and comebacks" })).toBeVisible();
+  await expect(page.getByText("still climbing")).toBeVisible();
+});
+
+test("Racked switches to the year", async ({ page }) => {
+  let asked: string[] = [];
+  await page.route("**/api/v1/racked**", (route) => {
+    asked.push(new URL(route.request().url()).searchParams.get("period") ?? "");
+    route.fulfill({
+      json: { ...rackedMarch, period: { ...rackedMarch.period, kind: "year", label: "2026" } },
+    });
+  });
+  await page.goto("/#/racked");
+  await expect(page.getByText("March 2026")).toBeVisible();
+
+  await page.getByRole("radio", { name: "This year" }).click();
+  await expect(page.getByText("2026", { exact: true })).toBeVisible();
+  expect(asked).toContain("year");
+});
+
+test("Racked offers a retry when the report fails to load", async ({ page }) => {
+  await page.route("**/api/v1/racked**", (route) =>
+    route.fulfill({ status: 500, json: { code: "internal", message: "internal server error" } }),
+  );
+  await page.goto("/#/racked");
+
+  await expect(page.getByText("Couldn't load your stats.")).toBeVisible();
+});

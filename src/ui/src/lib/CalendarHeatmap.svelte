@@ -1,10 +1,25 @@
 <script lang="ts">
-  import { buildCalendar, todayIso } from "./calendar";
+  import { buildCalendar, todayIso, volumeLevel } from "./calendar";
 
-  let { sessions }: { sessions: { performedOn: string; day: string }[] } =
-    $props();
+  let {
+    sessions,
+    // Home shows the run-up to today; the Racked recap shows one closed period,
+    // which may have ended months ago and is not 44 weeks long. Both defaults
+    // match the original behaviour, so Home passes neither.
+    endDate = todayIso(),
+    weeks = 44, // ~10 months; fewer columns = slightly larger cells
+    // Per-day tonnage. When given, cells shade by how much was moved rather
+    // than by how many sessions were logged — on a program that trains once a
+    // day, a session count only ever has two states and the grid says little.
+    volumes = null,
+  }: {
+    sessions: { performedOn: string; day: string }[];
+    endDate?: string;
+    weeks?: number;
+    volumes?: Record<string, number> | null;
+  } = $props();
 
-  const WEEKS = 44; // ~10 months; fewer columns = slightly larger cells
+  const WEEKS = $derived(weeks);
 
   const MONTHS = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -14,10 +29,12 @@
   const grid = $derived(
     buildCalendar(
       sessions.map((s) => s.performedOn),
-      todayIso(),
+      endDate,
       WEEKS,
     ),
   );
+
+  const maxVolume = $derived(volumes ? Math.max(0, ...Object.values(volumes)) : 0);
 
   // Workout types performed on each date, for the tooltip.
   const daysByDate = $derived.by(() => {
@@ -45,16 +62,20 @@
     return out;
   });
 
-  function level(count: number): string {
-    if (count <= 0) return "bg-muted/40";
-    if (count === 1) return "bg-primary/50";
-    if (count === 2) return "bg-primary/75";
-    return "bg-primary";
+  const SHADES = ["bg-muted/40", "bg-primary/50", "bg-primary/75", "bg-primary"];
+
+  function level(date: string, count: number): string {
+    const step = volumes
+      ? volumeLevel(volumes[date] ?? 0, maxVolume)
+      : Math.min(count, 3);
+    return SHADES[step];
   }
 
   function tooltip(date: string): string {
     const labels = daysByDate.get(date);
-    return labels?.length ? `${date} · ${labels.join(", ")}` : date;
+    const base = labels?.length ? `${date} · ${labels.join(", ")}` : date;
+    const volume = volumes?.[date];
+    return volume ? `${base} · ${Math.round(volume).toLocaleString("en-US")} lb` : base;
   }
 </script>
 
@@ -69,7 +90,7 @@
       <div class="flex flex-1 flex-col gap-[2px]">
         {#each week as day (day.date)}
           <div
-            class="aspect-square rounded-[2px] {level(day.count)}"
+            class="aspect-square rounded-[2px] {level(day.date, day.count)}"
             title={tooltip(day.date)}
           ></div>
         {/each}

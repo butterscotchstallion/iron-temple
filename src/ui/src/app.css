@@ -119,11 +119,14 @@
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  /* Categorical series colours — see the note on .dark below. index.html pins
+     class="dark", so these exist only so a chart rendered outside that scope is
+     not silently greyscale; they are the same validated steps. */
+  --chart-1: #3987e5;
+  --chart-2: #d95926;
+  --chart-3: #199e70;
+  --chart-4: #c98500;
+  --chart-5: #b060e0;
   --radius: 0.625rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
@@ -165,11 +168,28 @@ body {
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: var(--color-neon);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  /* Categorical series colours, used only by the Racked charts. They replace
+     shadcn's stock greyscale placeholders, which nothing referenced and which
+     could not tell two lifts apart.
+
+     Chosen by validation rather than by eye, against the real chart surface
+     (--card, oklch(0.205 0 0) = #171717): every adjacent pair clears the
+     colourblind separation floor (worst 8.4 protan, 9.9 tritan, target >= 8),
+     the normal-vision floor (worst 19.8, floor 15), 3:1 contrast on that
+     surface, and the dark lightness band L 0.48-0.67. Slot 5 leans toward the
+     app's neon primary as far as that band allows — the literal --color-neon
+     (#b026ff) and --color-cyan sit at L 0.81 and 0.72, too light to stay
+     legible here.
+
+     The order is the safety mechanism, not decoration: re-ordering these can
+     drop an adjacent pair to ΔE 1.6. Re-validate before changing either the
+     hues or their sequence. Charts assign slots by lift, never by rank, so a
+     filter that drops a series never repaints the survivors. */
+  --chart-1: #3987e5;
+  --chart-2: #d95926;
+  --chart-3: #199e70;
+  --chart-4: #c98500;
+  --chart-5: #b060e0;
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);

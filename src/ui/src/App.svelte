@@ -9,6 +9,7 @@
   import Progress from "./routes/Progress.svelte";
   import ExerciseProgress from "./routes/ExerciseProgress.svelte";
   import Profile from "./routes/Profile.svelte";
+  import Racked from "./routes/Racked.svelte";
   import SignIn from "./routes/SignIn.svelte";
   import NavBar from "./lib/NavBar.svelte";
   import HeaderBar from "./lib/HeaderBar.svelte";
@@ -25,6 +26,9 @@
     "/history": History,
     "/progress": Progress,
     "/exercises/:id": ExerciseProgress,
+    // Reached from the account menu rather than the nav bar: it's a place you
+    // visit now and then, not one of the four you move between while training.
+    "/racked": Racked,
     "/profile": Profile,
     // Fallback: unknown paths go home.
     "*": Home,
