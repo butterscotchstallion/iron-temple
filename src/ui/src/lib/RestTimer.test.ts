@@ -103,21 +103,33 @@ describe("RestTimer", () => {
     expect(remaining()).toHaveTextContent("0:08");
   });
 
-  it("resets without starting when the parent bumps resetKey", async () => {
-    const { rerender } = render(RestTimer, { seconds: 10 });
+  it("restarts from the top on each autoStartKey bump", async () => {
+    const { rerender } = render(RestTimer, { seconds: 10, autoStartKey: 0 });
     vi.useFakeTimers();
 
-    await fireEvent.click(startButton());
+    await rerender({ autoStartKey: 1 });
     vi.advanceTimersByTime(4000);
     flushSync();
     expect(remaining()).toHaveTextContent("0:06");
 
-    await rerender({ resetKey: 1 });
-    expect(remaining()).toHaveTextContent("0:10");
-    expect(startButton()).toBeEnabled(); // reset only — not running
-
-    vi.advanceTimersByTime(3000);
+    // A rep mid-rest starts the clock over rather than resuming it.
+    await rerender({ autoStartKey: 2 });
+    vi.advanceTimersByTime(1000);
     flushSync();
-    expect(remaining()).toHaveTextContent("0:10");
+    expect(remaining()).toHaveTextContent("0:09");
+  });
+
+  // The countdown is a floating overlay, not a card in the page flow — the
+  // active session unmounts it to stop it, so nothing may outlive the node.
+  it("clears the interval when unmounted mid-countdown", async () => {
+    const { unmount } = render(RestTimer, { seconds: 10 });
+    vi.useFakeTimers();
+    const clear = vi.spyOn(globalThis, "clearInterval");
+
+    await fireEvent.click(startButton());
+    unmount();
+
+    expect(clear).toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
