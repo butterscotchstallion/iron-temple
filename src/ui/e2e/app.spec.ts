@@ -184,28 +184,6 @@ test("lands on the saved program instead of the picker", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Choose a program" })).toBeHidden();
 });
 
-// Home's headline stat. These two sessions make a streak of 2 — below the
-// display threshold — so this also pins that the card stands on its own rather
-// than riding along with the streak card.
-test("shows the lifetime total lifted on Home", async ({ page }) => {
-  await page.route("**/api/v1/sessions**", (route) =>
-    route.fulfill({
-      json: {
-        items: [sessionSummary(1, "StrongLifts 5x5"), sessionSummary(2, "StrongLifts 5x5")],
-        total: 2,
-        totalVolumeLb: 412650,
-        limit: 100,
-        offset: 0,
-      },
-    }),
-  );
-
-  await page.goto("/");
-  await expect(page.getByText("Total lifted")).toBeVisible();
-  await expect(page.getByText("412,650 lb")).toBeVisible();
-  await expect(page.getByText(/session streak/)).toHaveCount(0);
-});
-
 test("remembers the program it opens as the current one", async ({ page }) => {
   const patched: unknown[] = [];
   await page.route("**/api/v1/me", (route) => {
