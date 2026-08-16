@@ -707,3 +707,55 @@ func logSetAt(e *httpexpect.Expect, sessionID, setID, reps int, weightLb float64
 		WithJSON(map[string]any{"actualReps": reps, "weightLb": weightLb, "completed": completed}).
 		Expect().Status(http.StatusOK)
 }
+
+// Regression: the estimated-max baseline must round exactly as Go does.
+//
+// Set.E1RM rounds to the pound; the baseline query has to as well, or the two
+// disagree inside a sub-pound band — and that band is where a record is decided.
+// 185 lb x 3 is 203.5, which Go calls 204, so an unrounded baseline made
+// repeating the identical set in a later period look like a new record.
+func TestRackedEstimatedMaxBaselineRoundsLikeGo(t *testing.T) {
+	e := expect(t)
+	_, dayID := firstProgramAndDay(e)
+
+	// The same work twice: once in a period that has closed, once in this one.
+	// Nothing improved, so nothing here is a record.
+	const weight, reps = 185.0, 3
+	lastMonth := time.Now().UTC().AddDate(0, 0, -1-time.Now().UTC().Day())
+
+	past := startSession(t, e, dayID)
+	pastID := int(past.Value("id").Number().Raw())
+	pastSet := past.Value("sets").Array().Value(0).Object()
+	exerciseID := int(pastSet.Value("exerciseId").Number().Raw())
+	logSetAt(e, pastID, int(pastSet.Value("id").Number().Raw()), reps, weight, true)
+	backdatePerformedOn(t, pastID, lastMonth)
+
+	now := startSession(t, e, dayID)
+	nowID := int(now.Value("id").Number().Raw())
+	nowSet := now.Value("sets").Array().Value(0).Object()
+	logSetAt(e, nowID, int(nowSet.Value("id").Number().Raw()), reps, weight, true)
+
+	prs := e.GET("/racked").Expect().Status(http.StatusOK).
+		JSON().Object().Value("prs").Array()
+	for i := 0; i < int(prs.Length().Raw()); i++ {
+		pr := prs.Value(i).Object()
+		if int(pr.Value("exerciseId").Number().Raw()) != exerciseID {
+			continue
+		}
+		if pr.Value("weightLb").Number().Raw() == weight {
+			t.Fatalf("repeating %v lb x %d was reported as a %s record",
+				weight, reps, pr.Value("kind").String().Raw())
+		}
+	}
+}
+
+// backdatePerformedOn moves a session into an earlier period, which is the only
+// way to give the baseline queries something to find.
+func backdatePerformedOn(t *testing.T, sessionID int, on time.Time) {
+	t.Helper()
+	_, err := testPool.Exec(context.Background(),
+		"UPDATE sessions SET performed_on = $1 WHERE id = $2", on, sessionID)
+	if err != nil {
+		t.Fatalf("backdate performed_on for %d: %v", sessionID, err)
+	}
+}
