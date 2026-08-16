@@ -479,9 +479,26 @@ test("toggles the changelog when the header version is clicked", async ({ page }
   const trigger = await openHeaderWithVersion(page);
   const panel = page.getByTestId("changelog-panel");
 
-  await trigger.click();
+  // Settle the hover first, then assert on the toggle.
+  //
+  // A click cannot be treated as happening in isolation here: Playwright moves the
+  // pointer onto the trigger before pressing, and LinkPreview opens on hover after
+  // openDelay (150ms). Whether the panel is already open when the press lands is
+  // therefore a race against how quickly the runner gets from mousemove to mousedown
+  // — fast, and the click opens it; slow, and the click closes what hover opened.
+  // The suite used to assert the fast outcome and flaked on the CI host whenever it
+  // lost that race.
+  //
+  // Waiting for hover to open the panel makes the starting state known, and the
+  // toggle is then unambiguous. It also matches what a pointer user actually gets:
+  // the mouse is over the trigger long before the button goes down, so a real click
+  // nearly always closes an already-open panel rather than opening a closed one.
+  await trigger.hover();
   await expect(panel).toBeVisible();
 
   await trigger.click();
   await expect(panel).not.toBeVisible();
+
+  await trigger.click();
+  await expect(panel).toBeVisible();
 });
