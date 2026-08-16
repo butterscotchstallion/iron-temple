@@ -678,11 +678,18 @@ test("Racked lists records, milestones and stalls", async ({ page }) => {
 });
 
 test("Racked switches to the year", async ({ page }) => {
-  let asked: string[] = [];
+  const asked: string[] = [];
+  // Answer the period that was actually asked for. Returning the year's report
+  // to every request would make the assertions pass before the toggle is even
+  // clicked, which is the opposite of what this test is for.
   await page.route("**/api/v1/racked**", (route) => {
-    asked.push(new URL(route.request().url()).searchParams.get("period") ?? "");
+    const period = new URL(route.request().url()).searchParams.get("period") ?? "month";
+    asked.push(period);
     route.fulfill({
-      json: { ...rackedMarch, period: { ...rackedMarch.period, kind: "year", label: "2026" } },
+      json:
+        period === "year"
+          ? { ...rackedMarch, period: { ...rackedMarch.period, kind: "year", label: "2026" } }
+          : rackedMarch,
     });
   });
   await page.goto("/#/racked");
