@@ -472,33 +472,33 @@ test("opens the changelog when the header version is hovered", async ({ page }) 
   await expect(panel).not.toBeVisible();
 });
 
-// The path a tap takes. Firefox can't emulate touch (see the note in
-// playwright.config.ts), so a click is as close as this suite gets — but it is the
-// same handler, and without it the panel would be unreachable on an iPad.
+// The path a tap takes, and the reason the panel is reachable on an iPad at all:
+// a touch device never hovers, so without the onclick handler there would be no
+// way to open it.
+//
+// Dispatched rather than clicked, and with no hover anywhere in the test, because
+// every version that mixed the two flaked. LinkPreview opens on hover after
+// openDelay (150ms) and closes after closeDelay (200ms), and Playwright's click()
+// moves the pointer onto the trigger before pressing — so a real click is always
+// racing those timers, and which way it goes depends on how loaded the runner is.
+// Asserting "click opens it" lost that race when hover got there first; asserting
+// "hover opens, click closes, click opens" then lost it on the second click, which
+// landed inside the close delay.
+//
+// dispatchEvent fires the handler with the pointer never entering the element, so
+// no timer is running and the only state in play is the component's own `open`.
+// That is also a better model of a tap than a synthetic mouse click is.
 test("toggles the changelog when the header version is clicked", async ({ page }) => {
   const trigger = await openHeaderWithVersion(page);
   const panel = page.getByTestId("changelog-panel");
 
-  // Settle the hover first, then assert on the toggle.
-  //
-  // A click cannot be treated as happening in isolation here: Playwright moves the
-  // pointer onto the trigger before pressing, and LinkPreview opens on hover after
-  // openDelay (150ms). Whether the panel is already open when the press lands is
-  // therefore a race against how quickly the runner gets from mousemove to mousedown
-  // — fast, and the click opens it; slow, and the click closes what hover opened.
-  // The suite used to assert the fast outcome and flaked on the CI host whenever it
-  // lost that race.
-  //
-  // Waiting for hover to open the panel makes the starting state known, and the
-  // toggle is then unambiguous. It also matches what a pointer user actually gets:
-  // the mouse is over the trigger long before the button goes down, so a real click
-  // nearly always closes an already-open panel rather than opening a closed one.
-  await trigger.hover();
+  // Nothing has been hovered, so the panel starts closed — which is what makes
+  // the next assertion about the handler rather than about hover.
+  await expect(panel).toBeHidden();
+
+  await trigger.dispatchEvent("click");
   await expect(panel).toBeVisible();
 
-  await trigger.click();
-  await expect(panel).not.toBeVisible();
-
-  await trigger.click();
-  await expect(panel).toBeVisible();
+  await trigger.dispatchEvent("click");
+  await expect(panel).toBeHidden();
 });
