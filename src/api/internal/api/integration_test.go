@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -382,6 +383,82 @@ func TestSessionBecomesOverTwelveHoursAfterItStarted(t *testing.T) {
 		Expect().Status(http.StatusOK).JSON().Object()
 	aged.HasValue("isOver", true)
 	aged.Value("finishedAt").IsNull()
+}
+
+// Volume is weight actually moved, so it counts logged reps rather than
+// completed sets — a set that stopped short of its target still lifted what it
+// lifted. This test pins that reading: it logs one set clean and one short, and
+// expects both in the total even though only one is completed.
+func TestSessionVolumeCountsLoggedRepsNotCompletedSets(t *testing.T) {
+	e := expect(t)
+	_, dayID := firstProgramAndDay(e)
+
+	// Measured as a delta, not an absolute: the whole suite shares one account,
+	// so the lifetime total carries whatever earlier tests left behind.
+	volumeBefore := historyVolume(e)
+
+	created := startSession(t, e, dayID)
+	sessionID := int(created.Value("id").Number().Raw())
+	sets := created.Value("sets").Array()
+
+	clean := sets.Value(0).Object()
+	short := sets.Value(1).Object()
+	cleanReps := int(clean.Value("targetReps").Number().Raw())
+	shortReps := cleanReps - 2
+	if shortReps < 1 {
+		shortReps = 1
+	}
+
+	logSet(e, sessionID, int(clean.Value("id").Number().Raw()), cleanReps, true)
+	logSet(e, sessionID, int(short.Value("id").Number().Raw()), shortReps, false)
+
+	want := float64(cleanReps)*clean.Value("weightLb").Number().Raw() +
+		float64(shortReps)*short.Value("weightLb").Number().Raw()
+	// Guard against a vacuous pass: if the seed ever prescribed a zero weight,
+	// every assertion below would hold at 0 while proving nothing.
+	if want <= 0 {
+		t.Fatalf("expected the seeded day to prescribe real weight, got want=%v", want)
+	}
+
+	summary := historySummary(t, e, sessionID)
+	summary.Value("volumeLb").Number().InDelta(want, 0.001)
+	// The two figures disagreeing is the point: one set met its prescription,
+	// both moved weight.
+	summary.HasValue("completedSetCount", 1)
+
+	if got := historyVolume(e) - volumeBefore; math.Abs(got-want) > 0.001 {
+		t.Fatalf("lifetime totalVolumeLb moved by %v, want %v", got, want)
+	}
+}
+
+// logSet records reps against one materialized set.
+func logSet(e *httpexpect.Expect, sessionID, setID, reps int, completed bool) {
+	e.PATCH(fmt.Sprintf("/sessions/%d/sets/%d", sessionID, setID)).
+		WithJSON(map[string]any{"actualReps": reps, "completed": completed}).
+		Expect().Status(http.StatusOK)
+}
+
+// historyVolume reads the lifetime volume off the session list. It is deliberately
+// taken from a page of the history rather than computed from the items, because
+// spanning every session and not just the page is the field's whole contract.
+func historyVolume(e *httpexpect.Expect) float64 {
+	return e.GET("/sessions").Expect().Status(http.StatusOK).
+		JSON().Object().Value("totalVolumeLb").Number().Raw()
+}
+
+// historySummary returns one session's summary from the history list.
+func historySummary(t *testing.T, e *httpexpect.Expect, sessionID int) *httpexpect.Object {
+	t.Helper()
+	items := e.GET("/sessions").Expect().Status(http.StatusOK).
+		JSON().Object().Value("items").Array()
+	for i := 0; i < int(items.Length().Raw()); i++ {
+		item := items.Value(i).Object()
+		if int(item.Value("id").Number().Raw()) == sessionID {
+			return item
+		}
+	}
+	t.Fatalf("session %d is missing from the history list", sessionID)
+	return nil
 }
 
 // Regression: sets are materialized up front with completed = false, so a

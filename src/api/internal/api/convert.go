@@ -13,7 +13,9 @@ const dateLayout = "2006-01-02"
 
 // numericToFloat flattens a Postgres NUMERIC to float64 for JSON. Weights are
 // small (NUMERIC(6,2)), so float64 is exact enough for display and arithmetic.
-// An invalid/NULL numeric reads as 0.
+// Summed volumes are larger but no less exact: reps × hundredths of a pound over
+// a lifetime of training stays orders of magnitude below float64's 2^53 exactly
+// representable range. An invalid/NULL numeric reads as 0.
 func numericToFloat(n pgtype.Numeric) float64 {
 	if !n.Valid {
 		return 0

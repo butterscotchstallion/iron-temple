@@ -49,6 +49,12 @@ WHERE s.id = sqlc.arg('id')
 -- is_over reads s.finished_at/s.created_at under a GROUP BY: legal because the
 -- grouping includes s.id, the primary key, which makes every other sessions
 -- column functionally dependent on it.
+--
+-- volume_lb is the weight actually moved: actual_reps, not target_reps, and
+-- every logged set rather than only the completed ones — a set that stopped at
+-- 3 of 5 reps still moved the bar three times. SUM already skips the NULL
+-- actual_reps of an unlogged set; COALESCE covers a session where none is
+-- logged. The ::numeric cast is what types the column for sqlc.
 -- name: ListSessions :many
 SELECT s.id,
        s.program_day_id,
@@ -58,6 +64,7 @@ SELECT s.id,
        s.performed_on,
        COUNT(ss.id)                              AS set_count,
        COUNT(ss.id) FILTER (WHERE ss.completed)  AS completed_set_count,
+       COALESCE(SUM(ss.actual_reps * ss.weight_lb), 0)::numeric AS volume_lb,
        (s.finished_at IS NOT NULL
         OR s.created_at < now() - INTERVAL '12 hours')::bool AS is_over
 FROM sessions s
@@ -72,10 +79,23 @@ HAVING COUNT(ss.id) FILTER (WHERE ss.actual_reps > 0) > 0
 ORDER BY s.performed_on DESC, s.id DESC
 LIMIT sqlc.arg('lim') OFFSET sqlc.arg('off');
 
--- name: CountSessions :one
-SELECT COUNT(*) AS total
+-- SessionTotals returns the two figures that describe a whole history rather
+-- than one page of it: how many sessions match the filter, and how much weight
+-- they moved between them. They are one query and not two because they must
+-- share a WHERE clause exactly — a second query is a second place for that
+-- filter to drift, and a total that counts sessions the list never returns is
+-- worse than no total. Hence also the EXISTS guard, which is the same "at least
+-- one logged rep" definition of a started session as ListSessions' HAVING.
+--
+-- The LEFT JOIN fans one row out per set, so the count must be DISTINCT; the
+-- sum wants exactly that fan-out. volume_lb counts logged reps whether or not
+-- the set was completed, matching ListSessions above.
+-- name: SessionTotals :one
+SELECT COUNT(DISTINCT s.id)                                     AS total,
+       COALESCE(SUM(ss.actual_reps * ss.weight_lb), 0)::numeric AS volume_lb
 FROM sessions s
 JOIN program_days pd ON pd.id = s.program_day_id
+LEFT JOIN session_sets ss ON ss.session_id = s.id
 WHERE s.user_id = sqlc.arg('user_id')::int
   AND (sqlc.narg('program_id')::bigint IS NULL OR pd.program_id = sqlc.narg('program_id'))
   AND EXISTS (

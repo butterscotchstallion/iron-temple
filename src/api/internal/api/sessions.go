@@ -65,7 +65,7 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 		internalError(w)
 		return
 	}
-	total, err := s.q.CountSessions(ctx, store.CountSessionsParams{
+	totals, err := s.q.SessionTotals(ctx, store.SessionTotalsParams{
 		UserID: userID, ProgramID: programID,
 	})
 	if err != nil {
@@ -112,13 +112,15 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 			PerformedOn:       dateToString(row.PerformedOn),
 			SetCount:          row.SetCount,
 			CompletedSetCount: row.CompletedSetCount,
+			VolumeLb:          numericToFloat(row.VolumeLb),
 			IsOver:            row.IsOver,
 			Exercises:         exercises,
 		})
 	}
 
 	writeJSON(w, http.StatusOK, sessionListDTO{
-		Items: items, Total: total, Limit: limit, Offset: offset,
+		Items: items, Total: totals.Total, TotalVolumeLb: numericToFloat(totals.VolumeLb),
+		Limit: limit, Offset: offset,
 	})
 }
 
