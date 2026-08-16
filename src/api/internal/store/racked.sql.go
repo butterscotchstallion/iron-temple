@@ -65,6 +65,7 @@ func (q *Queries) RackedExerciseBaseline(ctx context.Context, arg RackedExercise
 }
 
 const rackedPeriodSets = `-- name: RackedPeriodSets :many
+
 SELECT s.id AS session_id,
        s.performed_on,
        s.created_at,
