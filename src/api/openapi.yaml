@@ -414,6 +414,47 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /racked:
+    get:
+      tags: [racked]
+      operationId: getRacked
+      summary: Statistics recap for one month or year
+      description: >
+        The Racked recap: headline volume, hero moments and the series behind
+        each chart, for the calendar month or year containing `on`. The same
+        report is rendered into the monthly and yearly recap email, so the two
+        can never disagree.
+      parameters:
+        - name: period
+          in: query
+          required: false
+          description: Granularity of the recap. Defaults to month.
+          schema:
+            type: string
+            enum: [month, year]
+            default: month
+        - name: on
+          in: query
+          required: false
+          description: >
+            Any date inside the wanted period; the server expands it to the
+            whole month or year. Defaults to today, so the recap opens on the
+            period in progress.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Recap
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RackedReport"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /sessions:
     get:
       tags: [sessions]
@@ -1200,3 +1241,403 @@ components:
           type: integer
         offset:
           type: integer
+
+    # ---- Racked ----
+    # The recap. Every statistic is computed server-side so that the page and
+    # the monthly email render the same numbers from the same report; nothing
+    # here is aggregated again on the client.
+
+    RackedReport:
+      type: object
+      required:
+        [period, totals, change, comparison, lifts, series, mostImproved, days, weekdays,
+         bestWeekday, hours, hourLabel, streak, attendance, prs, milestones, heaviestSet,
+         fastestSession, deloads, archetype]
+      properties:
+        period:
+          $ref: "#/components/schemas/RackedPeriod"
+        totals:
+          $ref: "#/components/schemas/RackedTotals"
+        change:
+          allOf:
+            - $ref: "#/components/schemas/RackedChange"
+          nullable: true
+          description: >
+            Movement against the preceding period, or null when that period
+            holds no sessions to compare against.
+        comparison:
+          $ref: "#/components/schemas/RackedComparison"
+        lifts:
+          type: array
+          description: Volume split by lift, heaviest first.
+          items:
+            $ref: "#/components/schemas/RackedLiftSlice"
+        series:
+          type: array
+          description: One estimated-max progression per lift, oldest point first.
+          items:
+            $ref: "#/components/schemas/RackedSeries"
+        mostImproved:
+          allOf:
+            - $ref: "#/components/schemas/RackedImprovement"
+          nullable: true
+          description: Null until a lift has been performed twice in the period.
+        days:
+          type: array
+          description: Per-day tonnage for the calendar heatmap, oldest first.
+          items:
+            $ref: "#/components/schemas/RackedDayVolume"
+        weekdays:
+          type: array
+          description: Volume by weekday, indexed 0 = Sunday to match programDay.weekday.
+          minItems: 7
+          maxItems: 7
+          items:
+            type: number
+        bestWeekday:
+          type: integer
+          minimum: -1
+          maximum: 6
+          description: Weekday with the most volume, or -1 when nothing was lifted.
+        hours:
+          type: array
+          description: Session start counts by hour of day in the server's report zone.
+          minItems: 24
+          maxItems: 24
+          items:
+            type: integer
+        hourLabel:
+          type: string
+          example: Early bird
+          description: Empty when there are no sessions to characterise.
+        streak:
+          $ref: "#/components/schemas/RackedStreak"
+        attendance:
+          $ref: "#/components/schemas/RackedAttendance"
+        prs:
+          type: array
+          items:
+            $ref: "#/components/schemas/RackedPR"
+        milestones:
+          type: array
+          items:
+            $ref: "#/components/schemas/RackedMilestone"
+        heaviestSet:
+          allOf:
+            - $ref: "#/components/schemas/RackedSetHighlight"
+          nullable: true
+        fastestSession:
+          allOf:
+            - $ref: "#/components/schemas/RackedSessionHighlight"
+          nullable: true
+          description: >
+            Null when no session in the period was finished by hand — an
+            unfinished session has no duration worth reporting.
+        deloads:
+          type: array
+          items:
+            $ref: "#/components/schemas/RackedDeload"
+        archetype:
+          $ref: "#/components/schemas/RackedArchetype"
+
+    RackedPeriod:
+      type: object
+      required: [kind, start, end, label]
+      properties:
+        kind:
+          type: string
+          enum: [month, year]
+        start:
+          type: string
+          format: date
+        end:
+          type: string
+          format: date
+          description: Inclusive last day of the period.
+        label:
+          type: string
+          example: March 2026
+
+    RackedTotals:
+      type: object
+      required: [volumeLb, sessions, sets, reps]
+      properties:
+        volumeLb:
+          type: number
+          minimum: 0
+          description: Same formula as SessionSummary.volumeLb — actualReps × weightLb.
+        sessions:
+          type: integer
+        sets:
+          type: integer
+        reps:
+          type: integer
+
+    RackedChange:
+      type: object
+      required: [volumeLb, volumePct, sessions, sessionsPct]
+      properties:
+        volumeLb:
+          type: number
+          description: Signed difference against the preceding period.
+        volumePct:
+          type: number
+          nullable: true
+          description: >
+            Fraction, so 0.12 is +12%. Null when the preceding period moved no
+            weight, because growth from zero is not a ratio.
+        sessions:
+          type: integer
+        sessionsPct:
+          type: number
+          nullable: true
+
+    RackedComparison:
+      type: object
+      required: [count, label, unitLb]
+      properties:
+        count:
+          type: integer
+          minimum: 0
+          description: Zero when the volume is too small for even the lightest object.
+        label:
+          type: string
+          example: school buses
+          description: Already pluralised to agree with count.
+        unitLb:
+          type: number
+
+    RackedLiftSlice:
+      type: object
+      required: [exerciseId, exerciseName, volumeLb, sets, reps, share]
+      properties:
+        exerciseId:
+          type: integer
+          format: int64
+        exerciseName:
+          type: string
+        volumeLb:
+          type: number
+        sets:
+          type: integer
+        reps:
+          type: integer
+        share:
+          type: number
+          minimum: 0
+          maximum: 1
+
+    RackedSeries:
+      type: object
+      required: [exerciseId, exerciseName, points]
+      properties:
+        exerciseId:
+          type: integer
+          format: int64
+        exerciseName:
+          type: string
+        points:
+          type: array
+          items:
+            $ref: "#/components/schemas/RackedSeriesPoint"
+
+    RackedSeriesPoint:
+      type: object
+      required: [performedOn, topWeightLb, e1rmLb]
+      properties:
+        performedOn:
+          type: string
+          format: date
+        topWeightLb:
+          type: number
+        e1rmLb:
+          type: number
+          description: Epley estimate, weightLb × (1 + reps / 30), rounded to the pound.
+
+    RackedImprovement:
+      type: object
+      required: [exerciseId, exerciseName, fromLb, toLb, gainLb, gainPct]
+      properties:
+        exerciseId:
+          type: integer
+          format: int64
+        exerciseName:
+          type: string
+        fromLb:
+          type: number
+        toLb:
+          type: number
+        gainLb:
+          type: number
+        gainPct:
+          type: number
+          description: Fraction, so 0.08 is +8%.
+
+    RackedDayVolume:
+      type: object
+      required: [date, volumeLb, sessions]
+      properties:
+        date:
+          type: string
+          format: date
+        volumeLb:
+          type: number
+        sessions:
+          type: integer
+
+    RackedStreak:
+      type: object
+      required: [longestWeeks, currentWeeks]
+      properties:
+        longestWeeks:
+          type: integer
+        currentWeeks:
+          type: integer
+          description: >
+            Run of consecutive weeks ending at the last week trained within the
+            period — measured in weeks because no program trains daily.
+
+    RackedAttendance:
+      type: object
+      required: [basis, expected, actual, rate]
+      properties:
+        basis:
+          type: string
+          enum: [weekday, cadence, none]
+          description: >
+            What `expected` was measured against. `weekday` counts real
+            occurrences of the program's scheduled weekdays. `cadence` is an
+            estimate from the program's day count, used when no weekday is set —
+            which is the common case, since programDay.weekday is nullable and
+            no seed populates it. `none` means there is no program to compare to.
+        expected:
+          type: integer
+        actual:
+          type: integer
+        rate:
+          type: number
+          minimum: 0
+          description: actual ÷ expected, or 0 when nothing was expected. May exceed 1.
+
+    RackedPR:
+      type: object
+      required: [kind, performedOn, exerciseId, exerciseName, weightLb, reps, valueLb, previousLb]
+      properties:
+        kind:
+          type: string
+          enum: [weight, e1rm]
+          description: >
+            `weight` is a heavier top set than the lift has ever seen. `e1rm` is
+            the same bar carried for more reps — no new plate, but a higher
+            estimated max, which on a 5x5 is what the session before a jump
+            looks like. A weight record suppresses the e1rm record it implies.
+        performedOn:
+          type: string
+          format: date
+        exerciseId:
+          type: integer
+          format: int64
+        exerciseName:
+          type: string
+        weightLb:
+          type: number
+        reps:
+          type: integer
+        valueLb:
+          type: number
+          description: The record itself — weight for `weight`, estimated max for `e1rm`.
+        previousLb:
+          type: number
+          description: The mark it beat; 0 when the lift had no history.
+
+    RackedMilestone:
+      type: object
+      required: [kind, performedOn, label, valueLb, exerciseId, exerciseName]
+      properties:
+        kind:
+          type: string
+          enum: [volume, plate]
+        performedOn:
+          type: string
+          format: date
+        label:
+          type: string
+          example: First 225 lb Bench Press
+        valueLb:
+          type: number
+        exerciseId:
+          type: integer
+          format: int64
+          description: Zero for a volume milestone, which belongs to no single lift.
+        exerciseName:
+          type: string
+
+    RackedSetHighlight:
+      type: object
+      required: [performedOn, exerciseId, exerciseName, weightLb, reps]
+      properties:
+        performedOn:
+          type: string
+          format: date
+        exerciseId:
+          type: integer
+          format: int64
+        exerciseName:
+          type: string
+        weightLb:
+          type: number
+        reps:
+          type: integer
+
+    RackedSessionHighlight:
+      type: object
+      required: [sessionId, performedOn, programDayName, durationSeconds, volumeLb, sets]
+      properties:
+        sessionId:
+          type: integer
+          format: int64
+        performedOn:
+          type: string
+          format: date
+        programDayName:
+          type: string
+        durationSeconds:
+          type: integer
+        volumeLb:
+          type: number
+        sets:
+          type: integer
+
+    RackedDeload:
+      type: object
+      required: [exerciseId, exerciseName, performedOn, fromLb, toLb, recovered, recoveredOn]
+      properties:
+        exerciseId:
+          type: integer
+          format: int64
+        exerciseName:
+          type: string
+        performedOn:
+          type: string
+          format: date
+        fromLb:
+          type: number
+        toLb:
+          type: number
+        recovered:
+          type: boolean
+        recoveredOn:
+          type: string
+          format: date
+          nullable: true
+
+    RackedArchetype:
+      type: object
+      required: [name, description]
+      properties:
+        name:
+          type: string
+          example: The Grinder
+          description: Empty when the period holds no sessions to characterise.
+        description:
+          type: string

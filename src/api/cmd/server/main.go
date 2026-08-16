@@ -4,6 +4,7 @@
 //	DATABASE_URL  (required)  Postgres DSN, connected as the iron_temple tenant.
 //	PORT          (default 8080)
 //	CORS_ORIGIN   (optional)  comma-separated UI origins; empty allows any.
+//	REPORT_TZ     (default UTC) IANA zone the Racked recap reads clock times in.
 package main
 
 import (
@@ -17,6 +18,11 @@ import (
 	"runtime/debug"
 	"syscall"
 	"time"
+
+	// The release image is FROM scratch and carries no zone database, so
+	// REPORT_TZ would silently degrade to UTC on every deployment. Embedding
+	// tzdata costs ~450 KB and makes the setting mean what it says.
+	_ "time/tzdata"
 
 	_ "github.com/lib/pq"
 
@@ -95,6 +101,7 @@ func run() error {
 	defer pool.Close()
 
 	apiSrv := api.NewServer(pool, resolvedVersion(), environment)
+	apiSrv.SetReportLocation(reportLocation())
 
 	// Expired login sessions are already ignored by every query; this reaps the
 	// dead rows so the table doesn't grow for the life of the deployment.
@@ -131,6 +138,23 @@ func run() error {
 		defer cancel()
 		return srv.Shutdown(shutdownCtx)
 	}
+}
+
+// reportLocation resolves REPORT_TZ, falling back to UTC. A zone the runtime
+// cannot load is logged and ignored rather than fatal: the recap saying "early
+// bird" an hour off is a smaller problem than the API refusing to boot, and
+// the scratch image carries no tzdata unless one is built in.
+func reportLocation() *time.Location {
+	name := os.Getenv("REPORT_TZ")
+	if name == "" {
+		return time.UTC
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		log.Printf("REPORT_TZ %q not loadable, using UTC: %v", name, err)
+		return time.UTC
+	}
+	return loc
 }
 
 // migrate applies the embedded schema via database/sql (lib/pq), reusing the
