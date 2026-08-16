@@ -5,7 +5,6 @@
     getSession,
     getExerciseHistory,
     updateSessionSet,
-    deleteSession,
     finishSession,
     type Session,
     type SessionSet,
@@ -14,7 +13,7 @@
   import RestTimer from "../lib/RestTimer.svelte";
   import ExerciseCard from "../lib/ExerciseCard.svelte";
   import { Card } from "$lib/components/ui/card";
-  import { Button, buttonVariants } from "$lib/components/ui/button";
+  import { Button } from "$lib/components/ui/button";
   import * as AlertDialog from "$lib/components/ui/alert-dialog";
   import ErrorCard from "../lib/ErrorCard.svelte";
   import ErrorBanner from "../lib/ErrorBanner.svelte";
@@ -25,13 +24,11 @@
   let session = $state<Session | null>(null);
   let loading = $state(true);
   let failed = $state(false);
-  // Transient failure from a set/weight/delete action (the tap otherwise no-ops).
+  // Transient failure from a set or weight action (the tap otherwise no-ops).
   let actionError = $state<string | null>(null);
 
   // Bumped on each set completion to auto-restart the rest timer.
   let restTimerKey = $state(0);
-  // Bumped to reset (stop) the rest timer once the whole session is done.
-  let restResetKey = $state(0);
   // Controls the end-of-workout celebration dialog.
   let showComplete = $state(false);
   // Controls the "some sets aren't logged" confirmation before finishing.
@@ -109,6 +106,11 @@
   // more than 12 hours ago. An over session is a record and can't be edited.
   const isOver = $derived(session?.isOver ?? false);
 
+  // Nothing to rest from until a rep is on the board, and a session that's over
+  // is a record to read rather than a workout to pace — so the timer only
+  // exists between those two points.
+  const showRestTimer = $derived(loggedCount > 0 && !isOver);
+
   // Sets with no rep count at all — what the confirm prompt warns about.
   const unloggedCount = $derived(
     (session?.sets ?? []).filter((s) => s.actualReps == null).length,
@@ -161,7 +163,7 @@
     // Finish. A miss anywhere leaves it running until the lifter says so.
     const nowAllComplete = session.sets.every((s) => s.completed);
     if (nowAllComplete && !wasAllComplete) {
-      await finish(); // stops the rest timer as part of finishing
+      await finish(); // takes the rest timer off screen as part of finishing
     } else {
       restTimerKey += 1;
     }
@@ -190,7 +192,6 @@
     }
     actionError = null;
     session = data;
-    restResetKey += 1;
     showComplete = true;
     confetti({ particleCount: 140, spread: 75, origin: { y: 0.6 } });
   }
@@ -217,18 +218,12 @@
       }
     }
   }
-
-  async function remove() {
-    const { error } = await deleteSession({ path: { sessionId } });
-    if (error) {
-      actionError = "Couldn't delete the session.";
-      return;
-    }
-    push("/history");
-  }
 </script>
 
-<div class="flex flex-col gap-6">
+<!-- Extra bottom padding while the timer is up: it's a fixed overlay, so without
+     room to scroll past it the pill would sit on top of Finish workout on a
+     narrow screen. -->
+<div class="flex flex-col gap-6 {showRestTimer ? 'pb-24' : ''}">
   <a
     href="/"
     use:link
@@ -251,45 +246,22 @@
   {:else if failed}
     <ErrorCard message="Couldn't load this session." onRetry={load} />
   {:else if session}
-    <div class="flex items-start justify-between gap-3">
-      <header>
-        <h2 class="text-2xl font-black text-foreground">{session.programName}</h2>
-        <p class="mt-1 text-sm text-muted-foreground">
-          {session.programDayName} · {session.performedOn}
+    <header>
+      <h2 class="text-2xl font-black text-foreground">{session.programName}</h2>
+      <p class="mt-1 text-sm text-muted-foreground">
+        {session.programDayName} · {session.performedOn}
+      </p>
+      <p class="mt-1 text-xs uppercase tracking-[0.3em] text-primary">
+        {loggedCount} / {session.sets.length} sets logged
+      </p>
+      {#if isOver}
+        <p class="mt-2 text-xs uppercase tracking-[0.3em] text-muted-foreground">
+          {session.finishedAt
+            ? `Finished · ${new Date(session.finishedAt).toLocaleDateString()}`
+            : "Closed automatically · 12h+ old"}
         </p>
-        <p class="mt-1 text-xs uppercase tracking-[0.3em] text-primary">
-          {loggedCount} / {session.sets.length} sets logged
-        </p>
-        {#if isOver}
-          <p class="mt-2 text-xs uppercase tracking-[0.3em] text-muted-foreground">
-            {session.finishedAt
-              ? `Finished · ${new Date(session.finishedAt).toLocaleDateString()}`
-              : "Closed automatically · 12h+ old"}
-          </p>
-        {/if}
-      </header>
-
-      <AlertDialog.Root>
-        <AlertDialog.Trigger class={buttonVariants({ variant: "destructive", size: "sm" })}>
-          Delete
-        </AlertDialog.Trigger>
-        <AlertDialog.Content>
-          <AlertDialog.Header>
-            <AlertDialog.Title>Delete this session?</AlertDialog.Title>
-            <AlertDialog.Description>
-              This permanently removes the session and its logged sets. This
-              can't be undone.
-            </AlertDialog.Description>
-          </AlertDialog.Header>
-          <AlertDialog.Footer>
-            <AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
-            <AlertDialog.Action variant="destructive" onclick={remove}>
-              Delete
-            </AlertDialog.Action>
-          </AlertDialog.Footer>
-        </AlertDialog.Content>
-      </AlertDialog.Root>
-    </div>
+      {/if}
+    </header>
 
     {#if actionError}
       <ErrorBanner
@@ -298,16 +270,9 @@
       />
     {/if}
 
-    <Card class="p-6 text-center">
-      <h3 class="mb-4 text-xs uppercase tracking-[0.3em] text-muted-foreground">
-        Rest Timer
-      </h3>
-      <RestTimer
-        seconds={180}
-        autoStartKey={restTimerKey}
-        resetKey={restResetKey}
-      />
-    </Card>
+    {#if showRestTimer}
+      <RestTimer seconds={180} autoStartKey={restTimerKey} />
+    {/if}
 
     {#each groups as group (group.name)}
       <ExerciseCard
