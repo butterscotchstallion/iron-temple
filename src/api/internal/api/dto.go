@@ -193,3 +193,170 @@ type sessionListDTO struct {
 	Limit         int32   `json:"limit"`
 	Offset        int32   `json:"offset"`
 }
+
+// ---- Racked ----
+//
+// The recap's wire types. They mirror racked.Report one for one: the statistics
+// are computed once, server-side, so that this endpoint and the monthly recap
+// email render the same numbers. Nothing here is re-aggregated by the client.
+
+type rackedReportDTO struct {
+	Period     rackedPeriodDTO      `json:"period"`
+	Totals     rackedTotalsDTO      `json:"totals"`
+	Change     *rackedChangeDTO     `json:"change"`
+	Comparison rackedComparisonDTO  `json:"comparison"`
+	Lifts      []rackedLiftSliceDTO `json:"lifts"`
+	Series     []rackedSeriesDTO    `json:"series"`
+	// MostImproved is nil until some lift has been performed twice in the period.
+	MostImproved *rackedImprovementDTO `json:"mostImproved"`
+	Days         []rackedDayVolumeDTO  `json:"days"`
+	// Weekdays is indexed 0 = Sunday, matching programDay.weekday.
+	Weekdays    []float64 `json:"weekdays"`
+	BestWeekday int       `json:"bestWeekday"`
+	Hours       []int     `json:"hours"`
+	HourLabel   string    `json:"hourLabel"`
+
+	Streak     rackedStreakDTO      `json:"streak"`
+	Attendance rackedAttendanceDTO  `json:"attendance"`
+	PRs        []rackedPRDTO        `json:"prs"`
+	Milestones []rackedMilestoneDTO `json:"milestones"`
+
+	HeaviestSet *rackedSetHighlightDTO `json:"heaviestSet"`
+	// FastestSession is nil when nothing in the period was finished by hand — an
+	// unfinished session has no duration worth reporting.
+	FastestSession *rackedSessionHighlightDTO `json:"fastestSession"`
+	Deloads        []rackedDeloadDTO          `json:"deloads"`
+	Archetype      rackedArchetypeDTO         `json:"archetype"`
+}
+
+type rackedPeriodDTO struct {
+	Kind  string `json:"kind"`
+	Start string `json:"start"`
+	End   string `json:"end"`
+	Label string `json:"label"`
+}
+
+type rackedTotalsDTO struct {
+	VolumeLb float64 `json:"volumeLb"`
+	Sessions int     `json:"sessions"`
+	Sets     int     `json:"sets"`
+	Reps     int     `json:"reps"`
+}
+
+// rackedChangeDTO carries percentages as fractions (0.12 is +12%). A nil
+// percentage means the prior figure was zero, where a ratio has no meaning.
+type rackedChangeDTO struct {
+	VolumeLb    float64  `json:"volumeLb"`
+	VolumePct   *float64 `json:"volumePct"`
+	Sessions    int      `json:"sessions"`
+	SessionsPct *float64 `json:"sessionsPct"`
+}
+
+type rackedComparisonDTO struct {
+	Count  int     `json:"count"`
+	Label  string  `json:"label"`
+	UnitLb float64 `json:"unitLb"`
+}
+
+type rackedLiftSliceDTO struct {
+	ExerciseID   int32   `json:"exerciseId"`
+	ExerciseName string  `json:"exerciseName"`
+	VolumeLb     float64 `json:"volumeLb"`
+	Sets         int     `json:"sets"`
+	Reps         int     `json:"reps"`
+	Share        float64 `json:"share"`
+}
+
+type rackedSeriesPointDTO struct {
+	PerformedOn string  `json:"performedOn"`
+	TopWeightLb float64 `json:"topWeightLb"`
+	E1RMLb      float64 `json:"e1rmLb"`
+}
+
+type rackedSeriesDTO struct {
+	ExerciseID   int32                  `json:"exerciseId"`
+	ExerciseName string                 `json:"exerciseName"`
+	Points       []rackedSeriesPointDTO `json:"points"`
+}
+
+type rackedImprovementDTO struct {
+	ExerciseID   int32   `json:"exerciseId"`
+	ExerciseName string  `json:"exerciseName"`
+	FromLb       float64 `json:"fromLb"`
+	ToLb         float64 `json:"toLb"`
+	GainLb       float64 `json:"gainLb"`
+	GainPct      float64 `json:"gainPct"`
+}
+
+type rackedDayVolumeDTO struct {
+	Date     string  `json:"date"`
+	VolumeLb float64 `json:"volumeLb"`
+	Sessions int     `json:"sessions"`
+}
+
+type rackedStreakDTO struct {
+	LongestWeeks int `json:"longestWeeks"`
+	CurrentWeeks int `json:"currentWeeks"`
+}
+
+// rackedAttendanceDTO reports what it was measured against alongside the
+// number, because the honest denominator depends on whether the lifter ever
+// scheduled their program days — most have not.
+type rackedAttendanceDTO struct {
+	Basis    string  `json:"basis"`
+	Expected int     `json:"expected"`
+	Actual   int     `json:"actual"`
+	Rate     float64 `json:"rate"`
+}
+
+type rackedPRDTO struct {
+	Kind         string  `json:"kind"`
+	PerformedOn  string  `json:"performedOn"`
+	ExerciseID   int32   `json:"exerciseId"`
+	ExerciseName string  `json:"exerciseName"`
+	WeightLb     float64 `json:"weightLb"`
+	Reps         int     `json:"reps"`
+	ValueLb      float64 `json:"valueLb"`
+	PreviousLb   float64 `json:"previousLb"`
+}
+
+type rackedMilestoneDTO struct {
+	Kind         string  `json:"kind"`
+	PerformedOn  string  `json:"performedOn"`
+	Label        string  `json:"label"`
+	ValueLb      float64 `json:"valueLb"`
+	ExerciseID   int32   `json:"exerciseId"`
+	ExerciseName string  `json:"exerciseName"`
+}
+
+type rackedSetHighlightDTO struct {
+	PerformedOn  string  `json:"performedOn"`
+	ExerciseID   int32   `json:"exerciseId"`
+	ExerciseName string  `json:"exerciseName"`
+	WeightLb     float64 `json:"weightLb"`
+	Reps         int     `json:"reps"`
+}
+
+type rackedSessionHighlightDTO struct {
+	SessionID       int32   `json:"sessionId"`
+	PerformedOn     string  `json:"performedOn"`
+	ProgramDayName  string  `json:"programDayName"`
+	DurationSeconds int     `json:"durationSeconds"`
+	VolumeLb        float64 `json:"volumeLb"`
+	Sets            int     `json:"sets"`
+}
+
+type rackedDeloadDTO struct {
+	ExerciseID   int32   `json:"exerciseId"`
+	ExerciseName string  `json:"exerciseName"`
+	PerformedOn  string  `json:"performedOn"`
+	FromLb       float64 `json:"fromLb"`
+	ToLb         float64 `json:"toLb"`
+	Recovered    bool    `json:"recovered"`
+	RecoveredOn  *string `json:"recoveredOn"`
+}
+
+type rackedArchetypeDTO struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}

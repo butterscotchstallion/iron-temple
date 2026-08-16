@@ -535,3 +535,227 @@ func TestProgressionCountsFinishedSessionsWithLoggedWork(t *testing.T) {
 		t.Fatalf("expected status advance after a clean session, got %q", statusAfter)
 	}
 }
+
+// ---- Racked ----
+
+// A period the lifter did not train in is a valid recap, not a 404 and not a
+// pile of nulls the UI has to guess at. 1970 is chosen because no other test
+// can reach back and put a session in it.
+func TestRackedEmptyPeriodIsAValidReport(t *testing.T) {
+	e := expect(t)
+	rep := e.GET("/racked").WithQuery("on", "1970-01-15").
+		Expect().Status(http.StatusOK).JSON().Object()
+
+	rep.Value("period").Object().HasValue("kind", "month").HasValue("label", "January 1970")
+	totals := rep.Value("totals").Object()
+	totals.HasValue("volumeLb", 0).HasValue("sessions", 0).HasValue("sets", 0).HasValue("reps", 0)
+
+	// The nullable fields are the contract worth pinning: the UI branches on
+	// each one rather than rendering a zero as if it were a measurement.
+	rep.Value("change").IsNull()
+	rep.Value("mostImproved").IsNull()
+	rep.Value("heaviestSet").IsNull()
+	rep.Value("fastestSession").IsNull()
+
+	rep.HasValue("bestWeekday", -1)
+	rep.HasValue("hourLabel", "")
+	rep.Value("weekdays").Array().Length().IsEqual(7)
+	rep.Value("hours").Array().Length().IsEqual(24)
+	rep.Value("archetype").Object().HasValue("name", "")
+	rep.Value("comparison").Object().HasValue("count", 0)
+}
+
+func TestRackedYearPeriod(t *testing.T) {
+	e := expect(t)
+	e.GET("/racked").WithQuery("period", "year").WithQuery("on", "1970-06-15").
+		Expect().Status(http.StatusOK).JSON().Object().
+		Value("period").Object().
+		HasValue("kind", "year").
+		HasValue("label", "1970").
+		HasValue("start", "1970-01-01").
+		HasValue("end", "1970-12-31")
+}
+
+func TestRackedRejectsBadParameters(t *testing.T) {
+	e := expect(t)
+	e.GET("/racked").WithQuery("period", "week").Expect().Status(http.StatusBadRequest)
+	e.GET("/racked").WithQuery("on", "last-tuesday").Expect().Status(http.StatusBadRequest)
+}
+
+func TestRackedRequiresASession(t *testing.T) {
+	expectAnon(t).GET("/racked").Expect().Status(http.StatusUnauthorized)
+}
+
+// The recap must count the same pounds the history does. Measured as a delta,
+// because the suite shares one account and this month already holds whatever
+// the other tests logged.
+func TestRackedVolumeMatchesLoggedWork(t *testing.T) {
+	e := expect(t)
+	_, dayID := firstProgramAndDay(e)
+	before := rackedTotals(e)
+
+	created := startSession(t, e, dayID)
+	sessionID := int(created.Value("id").Number().Raw())
+	sets := created.Value("sets").Array()
+
+	first := sets.Value(0).Object()
+	second := sets.Value(1).Object()
+	fullReps := int(first.Value("targetReps").Number().Raw())
+	shortReps := fullReps - 2
+	if shortReps < 1 {
+		shortReps = 1
+	}
+	logSet(e, sessionID, int(first.Value("id").Number().Raw()), fullReps, true)
+	logSet(e, sessionID, int(second.Value("id").Number().Raw()), shortReps, false)
+
+	want := float64(fullReps)*first.Value("weightLb").Number().Raw() +
+		float64(shortReps)*second.Value("weightLb").Number().Raw()
+	if want <= 0 {
+		t.Fatalf("expected the seeded day to prescribe real weight, got want=%v", want)
+	}
+
+	after := rackedTotals(e)
+	if got := after.volume - before.volume; math.Abs(got-want) > 0.001 {
+		t.Fatalf("racked volume moved by %v, want %v", got, want)
+	}
+	if got := after.sets - before.sets; got != 2 {
+		t.Fatalf("racked set count moved by %d, want 2 — only logged sets count", got)
+	}
+	if got := after.reps - before.reps; got != fullReps+shortReps {
+		t.Fatalf("racked reps moved by %d, want %d", got, fullReps+shortReps)
+	}
+}
+
+// A set heavier than anything on record is a record, and a set at the same
+// weight later in the period is not a second one.
+func TestRackedDetectsPersonalRecords(t *testing.T) {
+	e := expect(t)
+	_, dayID := firstProgramAndDay(e)
+
+	created := startSession(t, e, dayID)
+	sessionID := int(created.Value("id").Number().Raw())
+	set := created.Value("sets").Array().Value(0).Object()
+	exerciseID := int(set.Value("exerciseId").Number().Raw())
+
+	// Well past anything the seeded programs prescribe, so this cannot depend
+	// on what earlier tests left in the history.
+	const prWeight = 987.5
+	logSetAt(e, sessionID, int(set.Value("id").Number().Raw()), 3, prWeight, true)
+
+	prs := e.GET("/racked").Expect().Status(http.StatusOK).
+		JSON().Object().Value("prs").Array()
+
+	var found int
+	for i := 0; i < int(prs.Length().Raw()); i++ {
+		pr := prs.Value(i).Object()
+		if int(pr.Value("exerciseId").Number().Raw()) != exerciseID {
+			continue
+		}
+		if pr.Value("weightLb").Number().Raw() == prWeight {
+			pr.HasValue("kind", "weight")
+			found++
+		}
+	}
+	if found != 1 {
+		t.Fatalf("got %d records at %v lb, want exactly 1", found, prWeight)
+	}
+}
+
+// Fastest session reads created_at against finished_at, so it only has an
+// answer once the lifter has actually finished something.
+func TestRackedFastestSessionNeedsAFinish(t *testing.T) {
+	e := expect(t)
+	_, dayID := firstProgramAndDay(e)
+
+	created := startSession(t, e, dayID)
+	sessionID := int(created.Value("id").Number().Raw())
+	set := created.Value("sets").Array().Value(0).Object()
+	logSet(e, sessionID, int(set.Value("id").Number().Raw()), 1, true)
+
+	// Backdate the start so the finished session has a duration worth reading
+	// rather than the few milliseconds this test takes.
+	backdateSession(t, sessionID, 40*time.Minute)
+	e.POST(fmt.Sprintf("/sessions/%d/finish", sessionID)).Expect().Status(http.StatusOK)
+
+	fastest := e.GET("/racked").Expect().Status(http.StatusOK).
+		JSON().Object().Value("fastestSession").Object()
+	fastest.Value("durationSeconds").Number().Gt(0)
+	fastest.Value("sessionId").Number().Gt(0)
+}
+
+// rackedFigures are the counters the recap tests compare as deltas.
+type rackedFigures struct {
+	volume float64
+	sets   int
+	reps   int
+}
+
+func rackedTotals(e *httpexpect.Expect) rackedFigures {
+	totals := e.GET("/racked").Expect().Status(http.StatusOK).
+		JSON().Object().Value("totals").Object()
+	return rackedFigures{
+		volume: totals.Value("volumeLb").Number().Raw(),
+		sets:   int(totals.Value("sets").Number().Raw()),
+		reps:   int(totals.Value("reps").Number().Raw()),
+	}
+}
+
+// logSetAt logs a set at an explicit weight, which the prescription-driven
+// helpers cannot express.
+func logSetAt(e *httpexpect.Expect, sessionID, setID, reps int, weightLb float64, completed bool) {
+	e.PATCH(fmt.Sprintf("/sessions/%d/sets/%d", sessionID, setID)).
+		WithJSON(map[string]any{"actualReps": reps, "weightLb": weightLb, "completed": completed}).
+		Expect().Status(http.StatusOK)
+}
+
+// Regression: the estimated-max baseline must round exactly as Go does.
+//
+// Set.E1RM rounds to the pound; the baseline query has to as well, or the two
+// disagree inside a sub-pound band — and that band is where a record is decided.
+// 185 lb x 3 is 203.5, which Go calls 204, so an unrounded baseline made
+// repeating the identical set in a later period look like a new record.
+func TestRackedEstimatedMaxBaselineRoundsLikeGo(t *testing.T) {
+	e := expect(t)
+	_, dayID := firstProgramAndDay(e)
+
+	// The same work twice: once in a period that has closed, once in this one.
+	// Nothing improved, so nothing here is a record.
+	const weight, reps = 185.0, 3
+	lastMonth := time.Now().UTC().AddDate(0, 0, -1-time.Now().UTC().Day())
+
+	past := startSession(t, e, dayID)
+	pastID := int(past.Value("id").Number().Raw())
+	pastSet := past.Value("sets").Array().Value(0).Object()
+	exerciseID := int(pastSet.Value("exerciseId").Number().Raw())
+	logSetAt(e, pastID, int(pastSet.Value("id").Number().Raw()), reps, weight, true)
+	backdatePerformedOn(t, pastID, lastMonth)
+
+	now := startSession(t, e, dayID)
+	nowID := int(now.Value("id").Number().Raw())
+	nowSet := now.Value("sets").Array().Value(0).Object()
+	logSetAt(e, nowID, int(nowSet.Value("id").Number().Raw()), reps, weight, true)
+
+	prs := e.GET("/racked").Expect().Status(http.StatusOK).
+		JSON().Object().Value("prs").Array()
+	for i := 0; i < int(prs.Length().Raw()); i++ {
+		pr := prs.Value(i).Object()
+		if int(pr.Value("exerciseId").Number().Raw()) != exerciseID {
+			continue
+		}
+		if pr.Value("weightLb").Number().Raw() == weight {
+			t.Fatalf("repeating %v lb x %d was reported as a %s record",
+				weight, reps, pr.Value("kind").String().Raw())
+		}
+	}
+}
+
+// backdatePerformedOn moves a session into an earlier period, which is the only
+// way to give the baseline queries something to find.
+func backdatePerformedOn(t *testing.T, sessionID int, on time.Time) {
+	t.Helper()
+	_, err := testPool.Exec(context.Background(),
+		"UPDATE sessions SET performed_on = $1 WHERE id = $2", on, sessionID)
+	if err != nil {
+		t.Fatalf("backdate performed_on for %d: %v", sessionID, err)
+	}
+}

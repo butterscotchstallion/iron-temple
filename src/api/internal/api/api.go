@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -29,6 +30,10 @@ type Server struct {
 	// logins brakes password guessing. In-process state, so it is per-replica —
 	// see the type's doc for why that is the right trade here.
 	logins *auth.RateLimiter
+	// reportLoc is the zone the Racked recap reads clock times in. Dates are
+	// stored as dates and need no zone; session start times are instants, and
+	// "you are an early riser" is a claim about local mornings.
+	reportLoc *time.Location
 }
 
 // NewServer builds a Server over a pgx connection pool. version and environment
@@ -41,7 +46,25 @@ func NewServer(pool *pgxpool.Pool, version, environment string) *Server {
 		version:     version,
 		environment: environment,
 		logins:      auth.NewRateLimiter(auth.DefaultAttempts, auth.DefaultWindow),
+		reportLoc:   time.UTC,
 	}
+}
+
+// SetReportLocation sets the zone the Racked recap buckets session start times
+// in. Defaults to UTC; main.go overrides it from REPORT_TZ. A nil location is
+// ignored rather than accepted, so a bad zone name cannot turn every timestamp
+// into a panic on the first page load.
+func (s *Server) SetReportLocation(loc *time.Location) {
+	if loc != nil {
+		s.reportLoc = loc
+	}
+}
+
+func (s *Server) reportLocation() *time.Location {
+	if s.reportLoc == nil {
+		return time.UTC
+	}
+	return s.reportLoc
 }
 
 // Router returns the fully-wired HTTP handler. corsOrigin is a comma-separated
@@ -103,6 +126,8 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 				r.Get("/{programId}/days/{dayId}/next-session", s.previewNextSession)
 				r.Patch("/{programId}/days/{dayId}", s.updateProgramDayWeekday)
 			})
+
+			r.Get("/racked", s.getRacked)
 
 			r.Route("/sessions", func(r chi.Router) {
 				r.Get("/", s.listSessions)

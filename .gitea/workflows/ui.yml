@@ -154,6 +154,24 @@ jobs:
       - name: Install Playwright Firefox
         run: pnpm exec playwright install firefox
 
+      # Give this run its own preview port instead of the shared default.
+      #
+      # This job runs on a shared host executor, not a disposable container. The
+      # `concurrency.cancel-in-progress` above kills a superseded run outright, and when
+      # that lands during e2e it orphans Playwright's `vite preview` child, which then
+      # holds its port for the life of the host. On a fixed port that breaks every later
+      # run — including commits that were never the one cancelled. Two branches running
+      # this workflow at once would collide on the same port too, since the concurrency
+      # group is keyed per ref.
+      #
+      # Deriving the port from the run id fixes both without killing anything: run ids are
+      # unique and monotonic, so no two runs pick the same port unless their ids differ by
+      # exactly the modulus, and a leaked server simply sits on a port nothing will ask
+      # for again. Range 5200-5699 stays clear of 5173 (the dev server, and where existing
+      # orphans are parked) and of the API's 8080.
+      - name: Assign a preview port
+        run: echo "E2E_PORT=$(( 5200 + (GITHUB_RUN_ID % 500) ))" >> "$GITHUB_ENV"
+
       # CI=true → Playwright starts its own `pnpm dev` vite server (reuseExistingServer
       # is false in CI). The suite mocks the API via page.route, so no backend/DB is needed.
       - name: E2E tests (Playwright/Firefox)
