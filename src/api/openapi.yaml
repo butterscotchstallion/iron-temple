@@ -1137,7 +1137,7 @@ components:
     SessionSummary:
       type: object
       required:
-        [id, programId, programName, programDayId, programDayName, performedOn, setCount, completedSetCount, isOver, exercises]
+        [id, programId, programName, programDayId, programDayName, performedOn, setCount, completedSetCount, volumeLb, isOver, exercises]
       properties:
         id:
           type: integer
@@ -1159,6 +1159,14 @@ components:
           type: integer
         completedSetCount:
           type: integer
+        volumeLb:
+          type: number
+          minimum: 0
+          example: 8450
+          description: >
+            Total weight moved in this session — the sum of actualReps × weightLb
+            over every set with reps logged. A set logged short of its target
+            still counts what was lifted, so this does not track completedSetCount.
         isOver:
           type: boolean
           description: >
@@ -1172,7 +1180,7 @@ components:
 
     SessionList:
       type: object
-      required: [items, total, limit, offset]
+      required: [items, total, totalVolumeLb, limit, offset]
       properties:
         items:
           type: array
@@ -1180,6 +1188,14 @@ components:
             $ref: "#/components/schemas/SessionSummary"
         total:
           type: integer
+        totalVolumeLb:
+          type: number
+          minimum: 0
+          example: 412650
+          description: >
+            Volume summed over every session matching the filter, not just the
+            ones on this page — a lifetime total that does not change as the
+            caller pages through the history.
         limit:
           type: integer
         offset:

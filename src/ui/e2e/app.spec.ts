@@ -9,7 +9,7 @@ const programs = [
   { id: 3, name: "Advanced 3x5", description: "Graduation fork", progressionKind: "linear" },
 ];
 
-const emptySessions = { items: [], total: 0, limit: 100, offset: 0 };
+const emptySessions = { items: [], total: 0, totalVolumeLb: 0, limit: 100, offset: 0 };
 
 // Every route below the header requires a session, so the app renders the
 // sign-in form until /me resolves. Mock a signed-in user for these tests; the
@@ -95,6 +95,8 @@ function sessionSummary(id: number, programName: string) {
     performedOn: "2026-08-01",
     setCount: 5,
     completedSetCount: 5,
+    // 5 sets × 5 reps × 100 lb, consistent with the exercises line below.
+    volumeLb: 2500,
     isOver: true,
     exercises: [{ exerciseName: "Squat", sets: 5, reps: 5, weightLb: 100 }],
   };
@@ -182,6 +184,28 @@ test("lands on the saved program instead of the picker", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Choose a program" })).toBeHidden();
 });
 
+// Home's headline stat. These two sessions make a streak of 2 — below the
+// display threshold — so this also pins that the card stands on its own rather
+// than riding along with the streak card.
+test("shows the lifetime total lifted on Home", async ({ page }) => {
+  await page.route("**/api/v1/sessions**", (route) =>
+    route.fulfill({
+      json: {
+        items: [sessionSummary(1, "StrongLifts 5x5"), sessionSummary(2, "StrongLifts 5x5")],
+        total: 2,
+        totalVolumeLb: 412650,
+        limit: 100,
+        offset: 0,
+      },
+    }),
+  );
+
+  await page.goto("/");
+  await expect(page.getByText("Total lifted")).toBeVisible();
+  await expect(page.getByText("412,650 lb")).toBeVisible();
+  await expect(page.getByText(/session streak/)).toHaveCount(0);
+});
+
 test("remembers the program it opens as the current one", async ({ page }) => {
   const patched: unknown[] = [];
   await page.route("**/api/v1/me", (route) => {
@@ -250,16 +274,31 @@ test("lists past sessions and paginates with Load more", async ({ page }) => {
     const item =
       offset === "0" ? sessionSummary(1, "Alpha Program") : sessionSummary(2, "Beta Program");
     route.fulfill({
-      json: { items: [item], total: 2, limit: 20, offset: Number(offset ?? 0) },
+      json: {
+        items: [item],
+        total: 2,
+        // Spans both sessions, not just the page — so it must not change when
+        // the second page loads.
+        totalVolumeLb: 5000,
+        limit: 20,
+        offset: Number(offset ?? 0),
+      },
     });
   });
 
   await page.goto("/#/history");
   await expect(page.getByText("Alpha Program")).toBeVisible();
   await expect(page.getByText("Beta Program")).toHaveCount(0);
+  await expect(page.getByText("5,000 lb lifted across 2 sessions")).toBeVisible();
+  // Each row carries its own session's volume.
+  await expect(page.getByText("2,500 lb lifted")).toBeVisible();
 
   await page.getByRole("button", { name: "Load more" }).click();
   await expect(page.getByText("Beta Program")).toBeVisible();
+  // The lifetime total is a whole-history figure, so paging in more sessions
+  // leaves it where it was.
+  await expect(page.getByText("5,000 lb lifted across 2 sessions")).toBeVisible();
+  await expect(page.getByText("2,500 lb lifted")).toHaveCount(2);
   // All loaded, so the button is gone.
   await expect(page.getByRole("button", { name: "Load more" })).toHaveCount(0);
 });

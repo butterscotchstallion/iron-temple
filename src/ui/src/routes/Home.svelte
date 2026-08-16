@@ -3,6 +3,7 @@
   import { listSessions } from "../lib/api";
   import { auth } from "../lib/auth.svelte";
   import { currentStreak, STREAK_DISPLAY_THRESHOLD } from "../lib/streak";
+  import { formatVolume } from "../lib/volume";
   import ProgramDetail from "./ProgramDetail.svelte";
   import Programs from "./Programs.svelte";
   import { Card } from "$lib/components/ui/card";
@@ -18,6 +19,9 @@
   let lastSessionProgramId = $state<number | null>(null);
   let currentProgramId = $derived(auth.me?.currentProgramId ?? lastSessionProgramId);
   let streak = $state(0);
+  // Every session's volume, summed by the API — the limit below caps how many
+  // sessions the heatmap draws, not what this total counts.
+  let totalVolumeLb = $state(0);
   let sessions = $state<{ performedOn: string; day: string }[]>([]);
   let loading = $state(true);
   let failed = $state(false);
@@ -34,6 +38,7 @@
     if (data && data.items.length > 0) {
       lastSessionProgramId = data.items[0].programId;
       streak = currentStreak(data.items);
+      totalVolumeLb = data.totalVolumeLb;
       sessions = data.items.map((s) => ({
         performedOn: s.performedOn,
         day: s.programDayName.replace(/^workout\s+/i, ""),
@@ -41,6 +46,7 @@
     } else {
       lastSessionProgramId = null;
       streak = 0;
+      totalVolumeLb = 0;
       sessions = [];
     }
     loading = false;
@@ -59,6 +65,21 @@
           <p class="text-2xl font-black text-primary">🔥 {streak}-session streak</p>
           <p class="mt-0.5 text-xs uppercase tracking-[0.3em] text-muted-foreground">
             Finish every set to keep it alive
+          </p>
+        </Card>
+      {/if}
+      {#if totalVolumeLb > 0}
+        <!-- Plain card, not the streak's primary tint: one accent per page, and
+             the streak is it. This way the layout doesn't shift when the streak
+             sits below its display threshold. -->
+        <Card class="p-4">
+          <h3
+            class="mb-0.5 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground"
+          >
+            <span aria-hidden="true">🏋️</span> Total lifted
+          </h3>
+          <p class="text-2xl font-black tabular-nums text-foreground">
+            {formatVolume(totalVolumeLb)} lb
           </p>
         </Card>
       {/if}

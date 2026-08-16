@@ -167,21 +167,29 @@ type sessionExerciseWeightDTO struct {
 }
 
 type sessionSummaryDTO struct {
-	ID                int32                      `json:"id"`
-	ProgramID         int32                      `json:"programId"`
-	ProgramName       string                     `json:"programName"`
-	ProgramDayID      int32                      `json:"programDayId"`
-	ProgramDayName    string                     `json:"programDayName"`
-	PerformedOn       string                     `json:"performedOn"`
-	SetCount          int64                      `json:"setCount"`
-	CompletedSetCount int64                      `json:"completedSetCount"`
-	IsOver            bool                       `json:"isOver"`
-	Exercises         []sessionExerciseWeightDTO `json:"exercises"`
+	ID                int32  `json:"id"`
+	ProgramID         int32  `json:"programId"`
+	ProgramName       string `json:"programName"`
+	ProgramDayID      int32  `json:"programDayId"`
+	ProgramDayName    string `json:"programDayName"`
+	PerformedOn       string `json:"performedOn"`
+	SetCount          int64  `json:"setCount"`
+	CompletedSetCount int64  `json:"completedSetCount"`
+	// VolumeLb is the weight actually moved this session — actualReps × weightLb
+	// summed over the logged sets. A set logged short of its target still counts
+	// what it lifted, so this deliberately does not track CompletedSetCount.
+	VolumeLb  float64                    `json:"volumeLb"`
+	IsOver    bool                       `json:"isOver"`
+	Exercises []sessionExerciseWeightDTO `json:"exercises"`
 }
 
 type sessionListDTO struct {
-	Items  []sessionSummaryDTO `json:"items"`
-	Total  int64               `json:"total"`
-	Limit  int32               `json:"limit"`
-	Offset int32               `json:"offset"`
+	Items []sessionSummaryDTO `json:"items"`
+	Total int64               `json:"total"`
+	// TotalVolumeLb spans every session matching the filter, not just the ones on
+	// this page, so it reads as a lifetime total and holds still while the caller
+	// pages through their history.
+	TotalVolumeLb float64 `json:"totalVolumeLb"`
+	Limit         int32   `json:"limit"`
+	Offset        int32   `json:"offset"`
 }

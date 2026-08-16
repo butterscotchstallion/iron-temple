@@ -11,30 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const countSessions = `-- name: CountSessions :one
-SELECT COUNT(*) AS total
-FROM sessions s
-JOIN program_days pd ON pd.id = s.program_day_id
-WHERE s.user_id = $1::int
-  AND ($2::bigint IS NULL OR pd.program_id = $2)
-  AND EXISTS (
-    SELECT 1 FROM session_sets ls
-    WHERE ls.session_id = s.id AND ls.actual_reps > 0
-  )
-`
-
-type CountSessionsParams struct {
-	UserID    int32  `json:"user_id"`
-	ProgramID *int64 `json:"program_id"`
-}
-
-func (q *Queries) CountSessions(ctx context.Context, arg CountSessionsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countSessions, arg.UserID, arg.ProgramID)
-	var total int64
-	err := row.Scan(&total)
-	return total, err
-}
-
 const createSession = `-- name: CreateSession :one
 
 INSERT INTO sessions (program_day_id, performed_on, user_id)
@@ -411,6 +387,7 @@ SELECT s.id,
        s.performed_on,
        COUNT(ss.id)                              AS set_count,
        COUNT(ss.id) FILTER (WHERE ss.completed)  AS completed_set_count,
+       COALESCE(SUM(ss.actual_reps * ss.weight_lb), 0)::numeric AS volume_lb,
        (s.finished_at IS NOT NULL
         OR s.created_at < now() - INTERVAL '12 hours')::bool AS is_over
 FROM sessions s
@@ -433,15 +410,16 @@ type ListSessionsParams struct {
 }
 
 type ListSessionsRow struct {
-	ID                int32       `json:"id"`
-	ProgramDayID      int32       `json:"program_day_id"`
-	ProgramDayName    string      `json:"program_day_name"`
-	ProgramID         int32       `json:"program_id"`
-	ProgramName       string      `json:"program_name"`
-	PerformedOn       pgtype.Date `json:"performed_on"`
-	SetCount          int64       `json:"set_count"`
-	CompletedSetCount int64       `json:"completed_set_count"`
-	IsOver            bool        `json:"is_over"`
+	ID                int32          `json:"id"`
+	ProgramDayID      int32          `json:"program_day_id"`
+	ProgramDayName    string         `json:"program_day_name"`
+	ProgramID         int32          `json:"program_id"`
+	ProgramName       string         `json:"program_name"`
+	PerformedOn       pgtype.Date    `json:"performed_on"`
+	SetCount          int64          `json:"set_count"`
+	CompletedSetCount int64          `json:"completed_set_count"`
+	VolumeLb          pgtype.Numeric `json:"volume_lb"`
+	IsOver            bool           `json:"is_over"`
 }
 
 // ListSessions returns paginated session summaries, most recent first,
@@ -449,6 +427,12 @@ type ListSessionsRow struct {
 // is_over reads s.finished_at/s.created_at under a GROUP BY: legal because the
 // grouping includes s.id, the primary key, which makes every other sessions
 // column functionally dependent on it.
+//
+// volume_lb is the weight actually moved: actual_reps, not target_reps, and
+// every logged set rather than only the completed ones — a set that stopped at
+// 3 of 5 reps still moved the bar three times. SUM already skips the NULL
+// actual_reps of an unlogged set; COALESCE covers a session where none is
+// logged. The ::numeric cast is what types the column for sqlc.
 // Only sessions with at least one logged rep count as "started".
 func (q *Queries) ListSessions(ctx context.Context, arg ListSessionsParams) ([]ListSessionsRow, error) {
 	rows, err := q.db.Query(ctx, listSessions,
@@ -473,6 +457,7 @@ func (q *Queries) ListSessions(ctx context.Context, arg ListSessionsParams) ([]L
 			&i.PerformedOn,
 			&i.SetCount,
 			&i.CompletedSetCount,
+			&i.VolumeLb,
 			&i.IsOver,
 		); err != nil {
 			return nil, err
@@ -483,6 +468,48 @@ func (q *Queries) ListSessions(ctx context.Context, arg ListSessionsParams) ([]L
 		return nil, err
 	}
 	return items, nil
+}
+
+const sessionTotals = `-- name: SessionTotals :one
+SELECT COUNT(DISTINCT s.id)                                     AS total,
+       COALESCE(SUM(ss.actual_reps * ss.weight_lb), 0)::numeric AS volume_lb
+FROM sessions s
+JOIN program_days pd ON pd.id = s.program_day_id
+LEFT JOIN session_sets ss ON ss.session_id = s.id
+WHERE s.user_id = $1::int
+  AND ($2::bigint IS NULL OR pd.program_id = $2)
+  AND EXISTS (
+    SELECT 1 FROM session_sets ls
+    WHERE ls.session_id = s.id AND ls.actual_reps > 0
+  )
+`
+
+type SessionTotalsParams struct {
+	UserID    int32  `json:"user_id"`
+	ProgramID *int64 `json:"program_id"`
+}
+
+type SessionTotalsRow struct {
+	Total    int64          `json:"total"`
+	VolumeLb pgtype.Numeric `json:"volume_lb"`
+}
+
+// SessionTotals returns the two figures that describe a whole history rather
+// than one page of it: how many sessions match the filter, and how much weight
+// they moved between them. They are one query and not two because they must
+// share a WHERE clause exactly — a second query is a second place for that
+// filter to drift, and a total that counts sessions the list never returns is
+// worse than no total. Hence also the EXISTS guard, which is the same "at least
+// one logged rep" definition of a started session as ListSessions' HAVING.
+//
+// The LEFT JOIN fans one row out per set, so the count must be DISTINCT; the
+// sum wants exactly that fan-out. volume_lb counts logged reps whether or not
+// the set was completed, matching ListSessions above.
+func (q *Queries) SessionTotals(ctx context.Context, arg SessionTotalsParams) (SessionTotalsRow, error) {
+	row := q.db.QueryRow(ctx, sessionTotals, arg.UserID, arg.ProgramID)
+	var i SessionTotalsRow
+	err := row.Scan(&i.Total, &i.VolumeLb)
+	return i, err
 }
 
 const updateSession = `-- name: UpdateSession :one
