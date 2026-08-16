@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"time"
 
@@ -13,12 +12,6 @@ import (
 	"gitea.homelab/gitadmin/iron-temple/api/internal/racked"
 	"gitea.homelab/gitadmin/iron-temple/api/internal/store"
 )
-
-// maxReportAttempts caps how many times a recap is retried before it is left
-// alone. Six hourly attempts is most of a working day: long enough to ride out
-// a relay restart, short enough that a genuinely broken recap stops generating
-// traffic and sits in report_runs where it can be found.
-const maxReportAttempts = 6
 
 // StartRackedReporter sends the monthly and yearly recaps, on a ticker, until
 // ctx is done. It is a no-op without a mailer, which is how the setting that
@@ -97,20 +90,15 @@ func (s *Server) sendReport(ctx context.Context, due racked.Due, r store.ListRep
 		PeriodStart: pgtype.Date{Time: due.Start, Valid: true},
 	})
 	if err != nil {
-		// No row is the normal, expected outcome for every replica that did not
-		// win the claim, and for every tick after the recap has been sent.
+		// No row is the normal, expected outcome, and covers three cases that
+		// need no action here: another replica holds the claim, the recap has
+		// already been sent, or it has exhausted its attempts. The last is
+		// terminal by way of the claim's own cap rather than a branch here —
+		// which is what keeps the real relay error in last_error instead of
+		// overwriting it with a message about giving up. See ClaimReportRun.
 		if !errors.Is(err, pgx.ErrNoRows) {
 			log.Printf("racked reporter: claim %s for user %d: %v", due.Kind, r.ID, err)
 		}
-		return
-	}
-
-	if run.Attempts > maxReportAttempts {
-		// Give up loudly rather than retrying forever. The row keeps its last
-		// error, so why it never arrived is still on record.
-		s.failReport(ctx, run.ID, fmt.Sprintf("gave up after %d attempts", maxReportAttempts))
-		log.Printf("racked reporter: giving up on %s for user %d after %d attempts",
-			due.Kind, r.ID, run.Attempts)
 		return
 	}
 

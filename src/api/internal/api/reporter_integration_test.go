@@ -378,3 +378,87 @@ func TestReporterIsInertWithoutAMailer(t *testing.T) {
 		t.Fatalf("a server with no mailer claimed %d recaps", claimed)
 	}
 }
+
+// An exhausted recap must go quiet and keep the reason it stopped.
+//
+// 'failed' stays claimable, because that is how a retry happens at all, so the
+// cap has to live in the claim. Without it every tick would re-claim the same
+// broken row forever — attempts climbing without bound, and a give-up message
+// overwriting the relay error an operator actually needs.
+func TestReportClaimStopsAfterTheAttemptCap(t *testing.T) {
+	skipWithoutDB(t)
+	q := store.New(testPool)
+	ctx := context.Background()
+	userID := newReportUser(t, "exhausted")
+	start, _ := lastMonth()
+
+	const cap = 6
+	const realError = "relay returned 502: upstream unavailable"
+
+	var attempts int32
+	for i := 0; i < cap; i++ {
+		run, err := q.ClaimReportRun(ctx, claimParams(userID, start))
+		if err != nil {
+			t.Fatalf("claim %d of %d: %v", i+1, cap, err)
+		}
+		attempts = run.Attempts
+		if err := q.MarkReportRunFailed(ctx, store.MarkReportRunFailedParams{
+			LastError: realError, ID: run.ID,
+		}); err != nil {
+			t.Fatalf("mark failed: %v", err)
+		}
+	}
+	if attempts != cap {
+		t.Fatalf("last attempt counted %d, want %d", attempts, cap)
+	}
+
+	// Terminal: no further tick may take it, however many times it asks.
+	for i := 0; i < 3; i++ {
+		if _, err := q.ClaimReportRun(ctx, claimParams(userID, start)); !errors.Is(err, pgx.ErrNoRows) {
+			t.Fatalf("claim past the cap err = %v, want pgx.ErrNoRows", err)
+		}
+	}
+
+	// And the row still says why it stopped, rather than that it stopped.
+	var status, lastError string
+	var stored int32
+	err := testPool.QueryRow(ctx,
+		`SELECT status, attempts, last_error FROM report_runs
+		  WHERE user_id = $1 AND period_kind = 'month'`, userID).Scan(&status, &stored, &lastError)
+	if err != nil {
+		t.Fatalf("read row: %v", err)
+	}
+	if status != "failed" || stored != cap {
+		t.Fatalf("row is status %q attempts %d, want failed/%d", status, stored, cap)
+	}
+	if lastError != realError {
+		t.Fatalf("last_error = %q, want the relay's own error preserved", lastError)
+	}
+}
+
+// The cap bounds the crash-loop path too: a process that dies mid-send on every
+// attempt must not reclaim its own row forever.
+func TestReportClaimCapsStaleReclaims(t *testing.T) {
+	skipWithoutDB(t)
+	q := store.New(testPool)
+	ctx := context.Background()
+	userID := newReportUser(t, "crashloop")
+	start, _ := lastMonth()
+
+	for i := 0; i < 6; i++ {
+		run, err := q.ClaimReportRun(ctx, claimParams(userID, start))
+		if err != nil {
+			t.Fatalf("claim %d: %v", i+1, err)
+		}
+		// Die without ever marking the row either way.
+		if _, err := testPool.Exec(ctx,
+			`UPDATE report_runs SET claimed_at = now() - INTERVAL '20 minutes' WHERE id = $1`,
+			run.ID); err != nil {
+			t.Fatalf("backdate claim: %v", err)
+		}
+	}
+
+	if _, err := q.ClaimReportRun(ctx, claimParams(userID, start)); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("a crash-looping recap kept reclaiming: %v", err)
+	}
+}

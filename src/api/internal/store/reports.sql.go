@@ -18,9 +18,10 @@ ON CONFLICT (user_id, period_kind, period_start) DO UPDATE
    SET status     = 'sending',
        claimed_at = now(),
        attempts   = report_runs.attempts + 1
- WHERE report_runs.status = 'failed'
-    OR (report_runs.status = 'sending'
-        AND report_runs.claimed_at < now() - INTERVAL '15 minutes')
+ WHERE report_runs.attempts < 6
+   AND (report_runs.status = 'failed'
+        OR (report_runs.status = 'sending'
+            AND report_runs.claimed_at < now() - INTERVAL '15 minutes'))
 RETURNING id, attempts
 `
 
@@ -50,8 +51,22 @@ type ClaimReportRunRow struct {
 // through sqlc buys a type for no benefit; tests reach it by backdating
 // claimed_at, which is how the situation arises in the first place.
 //
-// attempts increments on every claim, so a recap that keeps failing can be
-// capped by the caller instead of retried until the end of time.
+// The attempts < 6 guard is what makes a beaten recap stop rather than churn.
+// 'failed' has to stay claimable — that is how a retry happens at all — so
+// without a cap here every tick would re-claim the same broken row forever,
+// incrementing attempts without bound. Capping in the claim rather than in the
+// caller also keeps the real relay error in last_error: there is no give-up
+// branch that has to overwrite it with a message about giving up. An exhausted
+// row is therefore terminal and self-describing — status 'failed', attempts 6,
+// and the error that actually stopped it.
+//
+// It bounds the stale-'sending' branch too, so a process that crashes mid-send
+// on every attempt cannot loop either.
+//
+// Six hourly attempts is most of a working day: long enough to ride out a relay
+// restart, short enough to stop generating traffic. To retry a recap after
+// fixing the cause, reset the row: UPDATE report_runs SET attempts = 0,
+// status = 'failed' WHERE id = ...
 func (q *Queries) ClaimReportRun(ctx context.Context, arg ClaimReportRunParams) (ClaimReportRunRow, error) {
 	row := q.db.QueryRow(ctx, claimReportRun, arg.UserID, arg.PeriodKind, arg.PeriodStart)
 	var i ClaimReportRunRow
