@@ -73,10 +73,15 @@ Tables:
 - `session_sets` — actual reps, weight, completed flag per set.
 
 Constraints: FKs, `NOT NULL`, check constraints (weight ≥ 0, reps > 0), timestamps.
-Seed data (all linear, A/B split):
+Seed data (all linear, A/B split unless noted):
 - **StrongLifts 5×5** — A: Squat 5×5 / Bench 5×5 / Row 5×5 · B: Squat 5×5 / OHP 5×5 / Deadlift 1×5.
 - **Advanced 3×5** — the graduation fork when 5×5 stalls (same lifts, 3×5).
 - **StrongLifts 5×5 Lite** — A: Squat 2×5 / Bench 2×5 / Row 2×5 · B: Squat 2×5 / OHP 2×5 / Deadlift 2×5.
+- **StrongLifts 5×5 Intermediate** — A/B/**C** split. A: Squat 5×5 / Bench 5×5 / Row 5×8 ·
+  B: Deadlift 5×5 / Incline Bench 5×8 / Feet-Up Bench 5×8 · C: Pause Squat 5×3 /
+  Pause Bench 5×3 / Pause Deadlift 2×3. Each day also calls for assistance work, which is
+  the lifter's choice and so is not seeded.
+- **StrongLifts 5×5 Mini** — A: Squat 2×5 / Bench 2×5 · B: Deadlift 2×5 / OHP 2×5.
 Progression is **computed** from `session_sets` history, not stored.
 
 ### Phase 2 — OpenAPI v3 spec + red integration tests

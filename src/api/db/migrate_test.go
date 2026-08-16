@@ -62,10 +62,12 @@ func TestMigrateAppliesSchemaAndSeed(t *testing.T) {
 		}
 	}
 
-	assertCount(t, sqlDB, "SELECT count(*) FROM exercises", 5)
-	assertCount(t, sqlDB, "SELECT count(*) FROM programs", 3)
-	assertCount(t, sqlDB, "SELECT count(*) FROM program_days", 6)
-	assertCount(t, sqlDB, "SELECT count(*) FROM program_day_exercises", 18)
+	// 0002 seeds three programs over five lifts; 0007 adds two more programs and
+	// the five variation lifts the Intermediate program needs.
+	assertCount(t, sqlDB, "SELECT count(*) FROM exercises", 10)
+	assertCount(t, sqlDB, "SELECT count(*) FROM programs", 5)
+	assertCount(t, sqlDB, "SELECT count(*) FROM program_days", 11)
+	assertCount(t, sqlDB, "SELECT count(*) FROM program_day_exercises", 31)
 }
 
 func assertCount(t *testing.T, db *sql.DB, query string, want int) {

@@ -186,10 +186,10 @@ func TestSeedData(t *testing.T) {
 	e := expect(t)
 	e.GET("/exercises").Expect().
 		Status(http.StatusOK).
-		JSON().Array().Length().IsEqual(5)
+		JSON().Array().Length().IsEqual(10)
 	e.GET("/programs").Expect().
 		Status(http.StatusOK).
-		JSON().Array().Length().IsEqual(3)
+		JSON().Array().Length().IsEqual(5)
 }
 
 func TestGetProgramAndUnknown(t *testing.T) {
