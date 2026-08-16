@@ -221,8 +221,9 @@
 </script>
 
 <!-- Extra bottom padding while the timer is up: it's a fixed overlay, so without
-     room to scroll past it the pill would sit on top of Finish workout on a
-     narrow screen. -->
+     room to scroll past it the pill would cover the last exercise card's set
+     buttons on a narrow screen. (It used to be Finish workout underneath; that
+     has moved up into the header, but the last card still needs the clearance.) -->
 <div class="flex flex-col gap-6 {showRestTimer ? 'pb-24' : ''}">
   <a
     href="/"
@@ -246,22 +247,44 @@
   {:else if failed}
     <ErrorCard message="Couldn't load this session." onRetry={load} />
   {:else if session}
-    <header>
-      <h2 class="text-2xl font-black text-foreground">{session.programName}</h2>
-      <p class="mt-1 text-sm text-muted-foreground">
-        {session.programDayName} · {session.performedOn}
-      </p>
-      <p class="mt-1 text-xs uppercase tracking-[0.3em] text-primary">
-        {loggedCount} / {session.sets.length} sets logged
-      </p>
-      {#if isOver}
-        <p class="mt-2 text-xs uppercase tracking-[0.3em] text-muted-foreground">
-          {session.finishedAt
-            ? `Finished · ${new Date(session.finishedAt).toLocaleDateString()}`
-            : "Closed automatically · 12h+ old"}
+    <div class="flex items-start justify-between gap-3">
+      <header>
+        <h2 class="text-2xl font-black text-foreground">
+          {session.programName}
+        </h2>
+        <p class="mt-1 text-sm text-muted-foreground">
+          {session.programDayName} · {session.performedOn}
         </p>
+        <p class="mt-1 text-xs uppercase tracking-[0.3em] text-primary">
+          {loggedCount} / {session.sets.length} sets logged
+        </p>
+        {#if isOver}
+          <p
+            class="mt-2 text-xs uppercase tracking-[0.3em] text-muted-foreground"
+          >
+            {session.finishedAt
+              ? `Finished · ${new Date(session.finishedAt).toLocaleDateString()}`
+              : "Closed automatically · 12h+ old"}
+          </p>
+        {/if}
+      </header>
+
+      <!-- Nothing to finish until a rep is on the board: the session row exists
+           from the moment "Start" is tapped on the program day, so an untouched
+           workout would otherwise be closable (and unresumable) by a stray tap.
+           Same "has it actually begun" test the rest timer uses. The button's
+           own variants carry shrink-0 and whitespace-nowrap, so a long program
+           name squeezes the heading rather than the button. -->
+      {#if !isOver}
+        <Button
+          size="sm"
+          onclick={requestFinish}
+          disabled={finishing || loggedCount === 0}
+        >
+          {finishing ? "Finishing…" : "Finish workout"}
+        </Button>
       {/if}
-    </header>
+    </div>
 
     {#if actionError}
       <ErrorBanner
@@ -283,12 +306,6 @@
         readonly={isOver}
       />
     {/each}
-
-    {#if !isOver}
-      <Button size="lg" onclick={requestFinish} disabled={finishing}>
-        {finishing ? "Finishing…" : "Finish workout"}
-      </Button>
-    {/if}
 
     <!-- Finishing with sets still unlogged is allowed, but worth confirming. -->
     <AlertDialog.Root bind:open={confirmFinish}>

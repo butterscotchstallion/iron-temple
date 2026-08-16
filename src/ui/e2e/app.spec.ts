@@ -108,6 +108,11 @@ function sessionDetail(
     finishedAt?: string | null;
     actualReps?: number | null;
     completed?: boolean;
+    // How many of the two sets carry reps. Defaults to all of them, so
+    // actualReps/completed apply to the whole session as before. Set to 1 for a
+    // part-done workout — the only shape in which the unlogged-sets confirm can
+    // be reached, now that Finish is disabled until a rep is on the board.
+    loggedSets?: number;
   } = {},
 ) {
   const {
@@ -115,6 +120,7 @@ function sessionDetail(
     finishedAt = null,
     actualReps = null,
     completed = false,
+    loggedSets,
   } = overrides;
   return {
     id: 1,
@@ -127,17 +133,20 @@ function sessionDetail(
     createdAt: "2026-08-01T18:00:00Z",
     finishedAt,
     isOver,
-    sets: [1, 2].map((n) => ({
-      id: n,
-      exerciseId: 1,
-      exerciseName: "Squat",
-      setNumber: n,
-      targetReps: 5,
-      actualReps,
-      weightLb: 80,
-      completed,
-      restSeconds: 180,
-    })),
+    sets: [1, 2].map((n) => {
+      const logged = loggedSets == null || n <= loggedSets;
+      return {
+        id: n,
+        exerciseId: 1,
+        exerciseName: "Squat",
+        setNumber: n,
+        targetReps: 5,
+        actualReps: logged ? actualReps : null,
+        weightLb: 80,
+        completed: logged ? completed : false,
+        restSeconds: 180,
+      };
+    }),
   };
 }
 
@@ -278,14 +287,7 @@ test("shows each lift's top set on the progress page", async ({ page }) => {
   await expect(page.getByText("No sessions yet")).toBeVisible();
 });
 
-test("finishes a session with sets still unlogged, after confirming", async ({ page }) => {
-  let finishCalls = 0;
-  await page.route("**/api/v1/sessions/1/finish", (route) => {
-    finishCalls += 1;
-    route.fulfill({
-      json: sessionDetail({ isOver: true, finishedAt: "2026-08-01T19:30:00Z" }),
-    });
-  });
+test("can't finish a session that hasn't started", async ({ page }) => {
   await page.route("**/api/v1/sessions/1", (route) =>
     route.fulfill({ json: sessionDetail() }),
   );
@@ -294,12 +296,38 @@ test("finishes a session with sets still unlogged, after confirming", async ({ p
   await page.goto("/#/sessions/1");
   await expect(page.getByText("0 / 2 sets logged")).toBeVisible();
 
-  // Both sets are unlogged, so finishing routes through the confirmation.
+  // Nothing has been lifted, so there is no workout to close.
+  await expect(page.getByRole("button", { name: "Finish workout" })).toBeDisabled();
+});
+
+test("finishes a part-done session with sets still unlogged, after confirming", async ({
+  page,
+}) => {
+  let finishCalls = 0;
+  await page.route("**/api/v1/sessions/1/finish", (route) => {
+    finishCalls += 1;
+    route.fulfill({
+      json: sessionDetail({ isOver: true, finishedAt: "2026-08-01T19:30:00Z" }),
+    });
+  });
+  // One set logged, one not: enough to have started, so Finish is live, but
+  // still short of the whole workout.
+  await page.route("**/api/v1/sessions/1", (route) =>
+    route.fulfill({
+      json: sessionDetail({ actualReps: 5, completed: true, loggedSets: 1 }),
+    }),
+  );
+  await page.route("**/api/v1/exercises/1/history", (route) => route.fulfill({ json: [] }));
+
+  await page.goto("/#/sessions/1");
+  await expect(page.getByText("1 / 2 sets logged")).toBeVisible();
+
+  // A set is still unlogged, so finishing routes through the confirmation.
   await page.getByRole("button", { name: "Finish workout" }).click();
   await expect(
     page.getByRole("heading", { name: "Finish with sets unlogged?" }),
   ).toBeVisible();
-  await expect(page.getByText("2 of 2 sets have no reps logged")).toBeVisible();
+  await expect(page.getByText("1 of 2 sets have no reps logged")).toBeVisible();
 
   await page.getByRole("button", { name: "Finish anyway" }).click();
   await expect(page.getByRole("heading", { name: /Workout finished/ })).toBeVisible();
