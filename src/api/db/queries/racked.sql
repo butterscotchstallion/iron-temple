@@ -69,10 +69,18 @@ ORDER BY s.performed_on, s.id, ss.exercise_id, ss.set_number;
 -- estimate that a heavier single and a longer set can be compared on. The Go
 -- side keeps the same two, and estimateOneRepMax in the UI uses the same
 -- formula — weight x (1 + reps/30).
+--
+-- ROUND is load-bearing, not cosmetic. Set.E1RM in Go rounds to the pound, and
+-- personalRecords compares an in-period estimate straight against this baseline;
+-- if only one side rounded, the two would disagree inside a sub-pound band and
+-- that band is exactly where a record is decided. Unrounded here, repeating an
+-- identical set in a later period reads as a new record — 185 x 3 is 203.5, the
+-- Go side calls it 204, and 204 > 203.5. Rounding per row rather than around the
+-- MAX mirrors what Go does, and is equivalent anyway since ROUND is monotonic.
 -- name: RackedExerciseBaseline :many
 SELECT ss.exercise_id,
        MAX(ss.weight_lb)::numeric AS best_weight_lb,
-       MAX(ss.weight_lb * (1 + ss.actual_reps / 30.0))::numeric AS best_e1rm_lb
+       MAX(ROUND(ss.weight_lb * (1 + ss.actual_reps / 30.0)))::numeric AS best_e1rm_lb
 FROM session_sets ss
 JOIN sessions s ON s.id = ss.session_id
 WHERE s.user_id = sqlc.arg('user_id')::int
