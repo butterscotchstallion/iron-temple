@@ -90,13 +90,16 @@
   );
   // Enough columns to cover the period, plus a little air either side.
   const heatmapWeeks = $derived(period === "year" ? 53 : 6);
-  const peakHour = $derived(
-    (report?.hours ?? []).reduce(
-      (best, count, i, all) => (count > all[best] ? i : best),
-      0,
-    ),
-  );
+  // Taken from the report rather than worked out again here. Two readers of the
+  // same hours array broke a tie differently — this page took the earliest hour
+  // holding the maximum, the API took whichever reached it first — so the label
+  // could name one hour while the accent sat on another.
+  const peakHour = $derived(report?.peakHour ?? -1);
   const hasSessions = $derived((report?.totals.sessions ?? 0) > 0);
+  // Only where the report actually offers a ratio: it sends null when the
+  // preceding period moved no weight, and reading that as zero would claim the
+  // volume held steady when nothing is known about it.
+  const volumeChange = $derived(report?.change?.volumePct ?? null);
 
   // The numbers behind each chart, for ChartTable. Derived here rather than
   // inline in the markup so the null-check on `report` holds inside the closures.
@@ -197,9 +200,16 @@
           {report.comparison.label}.
         </p>
       {/if}
-      {#if report.change}
+      {#if volumeChange !== null}
+        <!-- While the period runs, the report compares the days elapsed against
+             the same stretch of the period before — so the wording has to say
+             so, or a part-month reads as having been weighed against a whole
+             one. -->
         <p class="mt-1 text-xs tabular-nums text-muted-foreground">
-          {formatDelta(report.change.volumePct ?? 0)} vs the previous {report.period.kind}
+          {formatDelta(volumeChange)}
+          {report.period.inProgress
+            ? `vs the same point last ${report.period.kind}`
+            : `vs the previous ${report.period.kind}`}
         </p>
       {/if}
     </Card>
@@ -249,6 +259,12 @@
           <p class="text-xs tabular-nums text-muted-foreground">
             {Math.round(report.mostImproved.fromLb)} → {Math.round(report.mostImproved.toLb)} lb est. max
           </p>
+          <!-- Named because the chart below measures improvement differently —
+               each lift against its own first session, where this compares the
+               best of the period's opening sessions against the best of its
+               closing ones. Both are honest; unlabelled they read as one figure
+               contradicting the other. -->
+          <p class="text-[10px] text-muted-foreground">start vs end of period</p>
         </Card>
       {/if}
       {#if report.heaviestSet}
@@ -283,7 +299,11 @@
           Every lift, as change from its first session
         </h3>
         <LiftTrendChart series={trend.shown} />
-        <ChartTable label="Change by lift" columns={["Lift", "Change"]} rows={trendRows} />
+        <ChartTable
+          label="Change by lift"
+          columns={["Lift", "Since first session"]}
+          rows={trendRows}
+        />
         {#if trend.hidden > 0}
           <!-- Said out loud rather than silently truncated: a chart that shows
                five of eight lifts without saying so reads as showing all eight. -->

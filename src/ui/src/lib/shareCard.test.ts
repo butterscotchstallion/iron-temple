@@ -23,7 +23,13 @@ import {
 /** A recap with nothing in it — a month with no sessions logged. */
 function bareReport(): RackedReport {
   return {
-    period: { kind: "month", start: "2026-03-01", end: "2026-03-31", label: "March 2026" },
+    period: {
+      kind: "month",
+      start: "2026-03-01",
+      end: "2026-03-31",
+      label: "March 2026",
+      inProgress: false,
+    },
     totals: { volumeLb: 0, sessions: 0, sets: 0, reps: 0 },
     change: null,
     comparison: { count: 0, label: "", unitLb: 0 },
@@ -34,6 +40,7 @@ function bareReport(): RackedReport {
     weekdays: [0, 0, 0, 0, 0, 0, 0],
     bestWeekday: -1,
     hours: Array.from({ length: 24 }, () => 0) as RackedReport["hours"],
+    peakHour: -1,
     hourLabel: "",
     streak: { longestWeeks: 0, currentWeeks: 0 },
     attendance: { basis: "none", expected: 0, actual: 0, rate: 0, sessionsPerWeek: 0 },
@@ -248,9 +255,25 @@ describe("shareCardContent", () => {
     expect(shareCardContent(scheduled).footnote).toBe("86% of scheduled sessions");
   });
 
+  // The report compares a running period against the same stretch of the one
+  // before it, so the card cannot say "on the previous month" — that is a claim
+  // about two whole months.
+  it("names the elapsed comparison while the period is still running", () => {
+    const report = fullReport();
+    report.period = { ...report.period, inProgress: true };
+
+    expect(shareCardContent(report).change).toBe("+12% on the same point last month");
+  });
+
   it("names the year, not the month, on a yearly recap", () => {
     const report = fullReport();
-    report.period = { kind: "year", start: "2026-01-01", end: "2026-12-31", label: "2026" };
+    report.period = {
+      kind: "year",
+      start: "2026-01-01",
+      end: "2026-12-31",
+      label: "2026",
+      inProgress: false,
+    };
 
     const content = shareCardContent(report);
     expect(content.eyebrow).toBe("RACKED · 2026");
