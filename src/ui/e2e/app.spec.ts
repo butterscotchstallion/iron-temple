@@ -704,3 +704,45 @@ test("Racked offers a retry when the report fails to load", async ({ page }) => 
 
   await expect(page.getByText("Couldn't load your stats.")).toBeVisible();
 });
+
+// The one test that puts the share card in front of a real canvas. Everything
+// about the card that can be checked without one — what it says, whether it
+// fits — is asserted in shareCard.test.ts; that it paints and encodes at all
+// needs a browser, because jsdom has no 2D context to paint on.
+test("Racked renders the recap as a shareable image", async ({ page }) => {
+  await page.route("**/api/v1/racked**", (route) => route.fulfill({ json: rackedMarch }));
+  await page.goto("/#/racked");
+
+  await page.getByRole("button", { name: "Share" }).click();
+
+  await expect(page.getByRole("heading", { name: "Share your recap" })).toBeVisible();
+
+  const preview = page.getByRole("img", { name: /Racked March 2026/ });
+  await expect(preview).toBeVisible();
+  await expect(preview).toHaveAttribute("src", /^blob:/);
+
+  // Decoded, not merely present: a broken blob still has a src attribute, and
+  // naturalWidth is the only thing that proves the PNG came out of the canvas
+  // at the size the card was drawn at.
+  await expect
+    .poll(() => preview.evaluate((img: HTMLImageElement) => img.naturalWidth))
+    .toBe(1080);
+  expect(
+    await preview.evaluate((img: HTMLImageElement) => img.naturalHeight),
+  ).toBe(1350);
+});
+
+test("Racked offers nothing to share from a month with no sessions", async ({ page }) => {
+  await page.route("**/api/v1/racked**", (route) =>
+    route.fulfill({
+      json: {
+        ...rackedMarch,
+        totals: { volumeLb: 0, sessions: 0, sets: 0, reps: 0 },
+      },
+    }),
+  );
+  await page.goto("/#/racked");
+
+  await expect(page.getByText(/Nothing logged in March 2026/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Share" })).toBeHidden();
+});
