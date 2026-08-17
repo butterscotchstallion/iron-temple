@@ -1,6 +1,8 @@
 <script lang="ts">
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
+  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
 
   // A full-width failure card for when a page's data can't be loaded. Shows a
   // muted message and, when a retry handler is supplied, a Retry button.
@@ -15,9 +17,13 @@
   } = $props();
 </script>
 
-<Card class="p-6 text-center {className}" role="alert">
-  <p class="text-sm text-muted-foreground">{message}</p>
+<Card class="flex flex-col items-center p-6 text-center {className}" role="alert">
+  <CircleAlert class="size-6 text-muted-foreground" aria-hidden="true" />
+  <p class="mt-2 text-sm text-muted-foreground">{message}</p>
   {#if onRetry}
-    <Button variant="outline" class="mt-3" onclick={onRetry}>Retry</Button>
+    <Button variant="outline" class="mt-3" onclick={onRetry}>
+      <RotateCcw />
+      Retry
+    </Button>
   {/if}
 </Card>

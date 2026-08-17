@@ -6,6 +6,8 @@
   import { formatVolume } from "../lib/volume";
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import Dumbbell from "@lucide/svelte/icons/dumbbell";
   import ErrorCard from "../lib/ErrorCard.svelte";
   import ErrorBanner from "../lib/ErrorBanner.svelte";
 
@@ -74,8 +76,9 @@
   {:else if failed}
     <ErrorCard message="Couldn't load your history." onRetry={loadInitial} />
   {:else if sessions.length === 0}
-    <Card class="p-6 text-center">
-      <p class="text-sm text-muted-foreground">
+    <Card class="flex flex-col items-center p-6 text-center">
+      <Dumbbell class="size-8 text-muted-foreground/60" aria-hidden="true" />
+      <p class="mt-3 text-sm text-muted-foreground">
         No sessions logged yet. Start a workout to see it here.
       </p>
     </Card>
@@ -143,6 +146,7 @@
         onclick={loadMore}
         disabled={loadingMore}
       >
+        <ChevronDown />
         {loadingMore ? "Loading…" : "Load more"}
       </Button>
     {/if}

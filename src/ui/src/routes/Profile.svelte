@@ -1,6 +1,8 @@
 <script lang="ts">
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
+  import Upload from "@lucide/svelte/icons/upload";
   import Avatar from "../lib/Avatar.svelte";
   import ErrorBanner from "../lib/ErrorBanner.svelte";
   import { auth, setMe } from "../lib/auth.svelte";
@@ -139,6 +141,7 @@
               disabled={avatarBusy}
               onclick={() => fileInput?.click()}
             >
+              <Upload />
               {avatarBusy ? "Working…" : "Upload image"}
             </Button>
             {#if auth.me.hasAvatar}
@@ -148,6 +151,7 @@
                 disabled={avatarBusy}
                 onclick={removeAvatar}
               >
+                <Trash2 />
                 Remove
               </Button>
             {/if}
