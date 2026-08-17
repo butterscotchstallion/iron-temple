@@ -172,6 +172,39 @@ export function shareCardContent(
   };
 }
 
+/**
+ * The archetype panel, from the inside out.
+ *
+ * Its height is derived from the type it holds rather than set beside it. The
+ * three lines used to be positioned by hand against a height maintained
+ * separately, which is how the panel ended up with 22px of padding above the
+ * title and 4px below the description — the offsets were right and the height
+ * was not, and nothing related the two.
+ */
+const PANEL = {
+  padY: 22,
+  padX: 32,
+  /** Clearance below the panel, so it does not butt against the next block. */
+  below: 8,
+  titleSize: 20,
+  nameSize: 34,
+  descriptionSize: 22,
+  /** Leading between the title and the name, and between the name and the text. */
+  afterTitle: 4,
+  afterName: 6,
+} as const;
+
+/** Where each of the panel's three lines starts, measured from the panel top. */
+const PANEL_LINES = {
+  title: PANEL.padY,
+  name: PANEL.padY + PANEL.titleSize + PANEL.afterTitle,
+  description:
+    PANEL.padY + PANEL.titleSize + PANEL.afterTitle + PANEL.nameSize + PANEL.afterName,
+} as const;
+
+/** Tall enough to close the same padding under the description as above the title. */
+const PANEL_HEIGHT = PANEL_LINES.description + PANEL.descriptionSize + PANEL.padY;
+
 // Vertical metrics. Every one of these is an advance, not a font size: the gap
 // is baked in, so a block's height is the sum of the lines it draws and the
 // layout never has to reason about leading.
@@ -183,7 +216,7 @@ const M = {
   change: 38,
 
   gap: 32,
-  archetype: 126,
+  archetype: PANEL_HEIGHT + PANEL.below,
   tiles: 116,
   sectionTitle: 46,
   liftRow: 50,
@@ -442,25 +475,25 @@ function paintArchetype(ctx: Painter, content: ShareCardContent, top: number): v
   const inner = SHARE_CARD.width - pad * 2;
 
   ctx.fillStyle = SHARE_CARD.panel;
-  fillRoundRect(ctx, pad, top, inner, M.archetype - 8, 20);
+  fillRoundRect(ctx, pad, top, inner, PANEL_HEIGHT, 20);
 
-  // Placed against the panel's own height (M.archetype - 8 = 118): the title
-  // ends at 42, the name at 84, the description at 114 — four pixels inside the
-  // rounded edge rather than flush against it.
-  line(ctx, "YOUR LIFTER TYPE", pad + 32, top + 22, {
-    font: font(700, 20),
+  const textX = pad + PANEL.padX;
+  const textMax = inner - PANEL.padX * 2;
+
+  line(ctx, "YOUR LIFTER TYPE", textX, top + PANEL_LINES.title, {
+    font: font(700, PANEL.titleSize),
     fill: SHARE_CARD.muted,
     spacing: "4px",
   });
-  line(ctx, content.archetype.name, pad + 32, top + 50, {
-    font: font(800, 34),
+  line(ctx, content.archetype.name, textX, top + PANEL_LINES.name, {
+    font: font(800, PANEL.nameSize),
     fill: SHARE_CARD.white,
-    max: inner - 64,
+    max: textMax,
   });
-  line(ctx, content.archetype.description, pad + 32, top + 92, {
-    font: font(400, 22),
+  line(ctx, content.archetype.description, textX, top + PANEL_LINES.description, {
+    font: font(400, PANEL.descriptionSize),
     fill: SHARE_CARD.text,
-    max: inner - 64,
+    max: textMax,
   });
 }
 
