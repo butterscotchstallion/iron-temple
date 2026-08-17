@@ -192,13 +192,23 @@ func TestStreakEmpty(t *testing.T) {
 	}
 }
 
+// performedFrom builds n consecutive session dates from a day, which is all
+// attendance reads of a session.
+func performedFrom(from time.Time, n int) []time.Time {
+	out := make([]time.Time, 0, n)
+	for i := 0; i < n; i++ {
+		out = append(out, from.AddDate(0, 0, i))
+	}
+	return out
+}
+
 func TestAttendanceBasis(t *testing.T) {
 	monday, wednesday := 1, 3
 	start, end := day(2026, time.March, 1), day(2026, time.March, 31)
 
 	t.Run("weekday when the program is scheduled", func(t *testing.T) {
 		days := []ProgramDay{{Name: "A", Weekday: &monday}, {Name: "B", Weekday: &wednesday}}
-		got := attendance(days, time.Time{}, 8, start, end)
+		got := attendance(days, time.Time{}, performedFrom(start, 8), start, end)
 		if got.Basis != AttendanceWeekday {
 			t.Fatalf("basis = %q, want weekday", got.Basis)
 		}
@@ -213,7 +223,7 @@ func TestAttendanceBasis(t *testing.T) {
 	// and it is what almost every lifter saw.
 	t.Run("no rate when the program carries no schedule", func(t *testing.T) {
 		days := []ProgramDay{{Name: "A"}, {Name: "B"}, {Name: "C"}}
-		got := attendance(days, time.Time{}, 10, start, end)
+		got := attendance(days, time.Time{}, performedFrom(start, 10), start, end)
 		if got.Basis != AttendanceNone {
 			t.Fatalf("basis = %q, want none", got.Basis)
 		}
@@ -227,7 +237,7 @@ func TestAttendanceBasis(t *testing.T) {
 	})
 
 	t.Run("none without a program", func(t *testing.T) {
-		got := attendance(nil, time.Time{}, 4, start, end)
+		got := attendance(nil, time.Time{}, performedFrom(start, 4), start, end)
 		if got.Basis != AttendanceNone || got.Expected != 0 || got.Actual != 4 {
 			t.Fatalf("attendance = %+v, want none/0/4", got)
 		}
@@ -237,7 +247,7 @@ func TestAttendanceBasis(t *testing.T) {
 	// saying nothing.
 	t.Run("sessions per week is reported even with a schedule", func(t *testing.T) {
 		days := []ProgramDay{{Name: "A", Weekday: &monday}}
-		got := attendance(days, time.Time{}, 4, start, end)
+		got := attendance(days, time.Time{}, performedFrom(start, 4), start, end)
 		if got.Basis != AttendanceWeekday {
 			t.Fatalf("basis = %q, want weekday", got.Basis)
 		}
@@ -247,7 +257,7 @@ func TestAttendanceBasis(t *testing.T) {
 	})
 
 	t.Run("an empty period does not divide by zero", func(t *testing.T) {
-		got := attendance(nil, time.Time{}, 0, start, start)
+		got := attendance(nil, time.Time{}, nil, start, start)
 		if got.SessionsPerWeek != 0 {
 			t.Fatalf("sessionsPerWeek = %v, want 0", got.SessionsPerWeek)
 		}

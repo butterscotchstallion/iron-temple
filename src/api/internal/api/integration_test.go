@@ -579,8 +579,16 @@ func TestRackedFlagsThePeriodInProgress(t *testing.T) {
 		Expect().Status(http.StatusOK).JSON().Object()
 	past.Value("period").Object().HasValue("inProgress", false)
 
+	// The default view is today's month, and a month is no longer in progress on
+	// its final day. Asserting `true` outright would fail on the 28th, 30th or
+	// 31st — roughly twelve days a year, against a clock this test cannot set.
+	// The report zone is UTC here, matching the server's default.
+	now := time.Now().UTC()
+	lastDay := time.Date(now.Year(), now.Month()+1, 0, 0, 0, 0, 0, time.UTC).Day()
+	running := now.Day() != lastDay
+
 	current := e.GET("/racked").Expect().Status(http.StatusOK).JSON().Object()
-	current.Value("period").Object().HasValue("inProgress", true)
+	current.Value("period").Object().HasValue("inProgress", running)
 }
 
 // peakHour is published so the page accents the bar hourLabel names instead of

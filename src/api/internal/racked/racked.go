@@ -115,8 +115,8 @@ type Input struct {
 	Baseline      Baseline
 	ProgramDays   []ProgramDay
 	// ProgramStarted is when the program in ProgramDays came into existence.
-	// A program younger than the period cannot have set its schedule, so
-	// attendance refuses to grade against it. Zero means "always existed".
+	// Attendance grades only the part of the period it existed for, and not at
+	// all when it postdates the period entirely. Zero means "always existed".
 	ProgramStarted time.Time
 }
 
@@ -359,7 +359,7 @@ func Build(in Input) Report {
 	rep.HeaviestSet = heaviestSet(in.Sets)
 	rep.FastestSession = fastestSession(sessions)
 	rep.Attendance = attendance(
-		in.ProgramDays, in.ProgramStarted, len(sessions), in.Start, measuredTo,
+		in.ProgramDays, in.ProgramStarted, sessionDates(sessions), in.Start, measuredTo,
 	)
 	rep.Archetype = archetype(sessions, in.Start, measuredTo)
 
@@ -386,6 +386,16 @@ func Build(in Input) Report {
 		rep.Change = change(rep.Totals, prev)
 	}
 	return rep
+}
+
+// sessionDates is the day each session was performed on, which is all
+// attendance needs of them.
+func sessionDates(sessions []session) []time.Time {
+	out := make([]time.Time, 0, len(sessions))
+	for _, s := range sessions {
+		out = append(out, s.PerformedOn)
+	}
+	return out
 }
 
 // measuredEnd is the last day of the period that has actually happened, held
@@ -821,16 +831,14 @@ func streak(sessions []session) Streak {
 // without a history table, and it is the case that actually arises — a lifter
 // who switches usually switches to something new.
 func attendance(
-	days []ProgramDay, programStarted time.Time, actual int, start, end time.Time,
+	days []ProgramDay, programStarted time.Time, performed []time.Time, start, end time.Time,
 ) Attendance {
 	a := Attendance{
-		Basis:           AttendanceNone,
-		Actual:          actual,
-		SessionsPerWeek: float64(actual) / weeksBetween(start, end),
-	}
-
-	if !programStarted.IsZero() && programStarted.After(start) {
-		return a
+		Basis:  AttendanceNone,
+		Actual: len(performed),
+		// Measured over the whole elapsed period, whatever the program was doing
+		// in it — this is a fact about the lifter, not about a schedule.
+		SessionsPerWeek: float64(len(performed)) / weeksBetween(start, end),
 	}
 
 	// Counted, not collected: a program running two different days on a Monday
@@ -846,7 +854,19 @@ func attendance(
 		return a
 	}
 
-	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
+	// A program speaks only for the days it existed for. Starting one on the
+	// 10th does not make the first nine days of the month a missed target, and
+	// declining to grade the month at all — which this used to do — throws away
+	// the three weeks it does have something to say about.
+	from := start
+	if !programStarted.IsZero() && programStarted.After(from) {
+		from = programStarted
+	}
+	if from.After(end) {
+		return a
+	}
+
+	for d := from; !d.After(end); d = d.AddDate(0, 0, 1) {
 		a.Expected += scheduled[int(d.Weekday())]
 	}
 	// No scheduled day has come round yet — the first days of a month that opens
@@ -857,8 +877,19 @@ func attendance(
 		return a
 	}
 
+	// Counted over the same window as Expected, so the two agree: "4 of 5
+	// scheduled sessions" has to be four sessions out of five chances at them,
+	// not every session of the month over the chances the program had.
+	attended := 0
+	for _, on := range performed {
+		if !on.Before(from) && !on.After(end) {
+			attended++
+		}
+	}
+
 	a.Basis = AttendanceWeekday
-	a.Rate = float64(a.Actual) / float64(a.Expected)
+	a.Actual = attended
+	a.Rate = float64(attended) / float64(a.Expected)
 	return a
 }
 

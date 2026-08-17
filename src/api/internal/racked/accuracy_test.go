@@ -287,6 +287,46 @@ func TestAttendanceWillNotGradeAPeriodAgainstALaterProgram(t *testing.T) {
 	}
 }
 
+// A program taken up mid-month governs the rest of that month, and the recap
+// should grade what it can rather than declining the whole period. Refusing
+// outright threw away three weeks the program had plenty to say about.
+func TestAttendanceGradesFromTheDayTheProgramBegan(t *testing.T) {
+	start, end := Bounds(PeriodMonth, day(2026, time.March, 1))
+	mon := 1
+
+	// One session before the program existed, two after.
+	sets := mkSets(1, day(2026, time.March, 2), 1, "Squat", 5, 5, 200)
+	sets = append(sets, mkSets(2, day(2026, time.March, 16), 1, "Squat", 5, 5, 200)...)
+	sets = append(sets, mkSets(3, day(2026, time.March, 23), 1, "Squat", 5, 5, 200)...)
+
+	rep := Build(Input{
+		Kind: PeriodMonth, Start: start, End: end, AsOf: day(2026, time.April, 1),
+		Sets:           sets,
+		ProgramDays:    []ProgramDay{{Name: "A", Weekday: &mon}},
+		ProgramStarted: day(2026, time.March, 10),
+	})
+
+	if rep.Attendance.Basis != AttendanceWeekday {
+		t.Fatalf("Basis = %q, want weekday for the part of March the program ran",
+			rep.Attendance.Basis)
+	}
+	// Mondays from the 10th: the 16th, 23rd and 30th.
+	if rep.Attendance.Expected != 3 {
+		t.Fatalf("Expected = %d, want 3 — Mondays from the 10th", rep.Attendance.Expected)
+	}
+	// Counted over the same window, so the two figures agree: the session on the
+	// 2nd predates the program and is not one of its three chances.
+	if rep.Attendance.Actual != 2 {
+		t.Fatalf("Actual = %d, want 2 — sessions inside the graded window",
+			rep.Attendance.Actual)
+	}
+	// The frequency is still measured over the whole month, being a fact about
+	// the lifter rather than about the schedule: three sessions over ~4.4 weeks.
+	if rep.Attendance.SessionsPerWeek < 0.6 || rep.Attendance.SessionsPerWeek > 0.7 {
+		t.Fatalf("SessionsPerWeek = %v, want about 0.68", rep.Attendance.SessionsPerWeek)
+	}
+}
+
 func TestAttendanceGradesAPeriodTheProgramCouldHaveGoverned(t *testing.T) {
 	start, end := Bounds(PeriodMonth, day(2026, time.March, 1))
 	mon := 1
