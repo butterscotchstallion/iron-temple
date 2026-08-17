@@ -5,6 +5,7 @@
   import { auth } from "../lib/auth.svelte";
   import { programSubtitle } from "../lib/programs";
   import { Card } from "$lib/components/ui/card";
+  import ClipboardList from "@lucide/svelte/icons/clipboard-list";
   import ErrorCard from "../lib/ErrorCard.svelte";
 
   let programs = $state<ProgramSummary[]>([]);
@@ -54,9 +55,10 @@
         onRetry={load}
       />
     {:else if programs.length === 0}
-      <p class="col-span-full text-center text-sm text-muted-foreground">
-        No programs yet.
-      </p>
+      <div class="col-span-full flex flex-col items-center text-center">
+        <ClipboardList class="size-8 text-muted-foreground/60" aria-hidden="true" />
+        <p class="mt-3 text-sm text-muted-foreground">No programs yet.</p>
+      </div>
     {:else}
       {#each programs as program (program.id)}
         {@const isCurrent = program.id === currentProgramId}

@@ -5,6 +5,7 @@
   import { exerciseEmoji, topSet } from "../lib/exerciseIcon";
   import { formatLongDate } from "../lib/date";
   import { Card } from "$lib/components/ui/card";
+  import TrendingUp from "@lucide/svelte/icons/trending-up";
   import ErrorCard from "../lib/ErrorCard.svelte";
   import ErrorBanner from "../lib/ErrorBanner.svelte";
 
@@ -82,9 +83,10 @@
         onRetry={load}
       />
     {:else if cards.length === 0}
-      <p class="col-span-full text-center text-sm text-muted-foreground">
-        No exercises yet.
-      </p>
+      <div class="col-span-full flex flex-col items-center text-center">
+        <TrendingUp class="size-8 text-muted-foreground/60" aria-hidden="true" />
+        <p class="mt-3 text-sm text-muted-foreground">No exercises yet.</p>
+      </div>
     {:else}
       {#each cards as card (card.id)}
         <a use:link href="/exercises/{card.id}" class="group block">

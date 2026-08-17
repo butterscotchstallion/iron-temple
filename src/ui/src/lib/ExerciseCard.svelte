@@ -1,6 +1,8 @@
 <script lang="ts">
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
+  import Minus from "@lucide/svelte/icons/minus";
+  import Plus from "@lucide/svelte/icons/plus";
   import PlateBar from "./PlateBar.svelte";
   import { plateLabel } from "./plates";
   import { warmupSets } from "./warmup";
@@ -130,7 +132,7 @@
           disabled={readonly}
           aria-label="Decrease weight by 5 lb"
         >
-          −
+          <Minus />
         </Button>
         <span
           class="min-w-16 text-center text-sm font-bold tabular-nums text-card-foreground"
@@ -144,7 +146,7 @@
           disabled={readonly}
           aria-label="Increase weight by 5 lb"
         >
-          +
+          <Plus />
         </Button>
       </div>
     </div>

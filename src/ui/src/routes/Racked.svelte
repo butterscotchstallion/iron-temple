@@ -4,6 +4,8 @@
   import type { RackedReport } from "../lib/api";
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
+  import Share2 from "@lucide/svelte/icons/share-2";
+  import Trophy from "@lucide/svelte/icons/trophy";
   import { auth } from "../lib/auth.svelte";
   import ErrorCard from "../lib/ErrorCard.svelte";
   import ShareCardDialog from "../lib/ShareCardDialog.svelte";
@@ -158,7 +160,10 @@
       <!-- Only where there is something to share. A period with no sessions
            renders the empty card below, and a picture of it says nothing. -->
       {#if report && hasSessions}
-        <Button variant="outline" size="sm" onclick={() => (sharing = true)}>Share</Button>
+        <Button variant="outline" size="sm" onclick={() => (sharing = true)}>
+          <Share2 />
+          Share
+        </Button>
       {/if}
     </div>
   </header>
@@ -177,8 +182,9 @@
   {:else if failed || !report}
     <ErrorCard message="Couldn't load your stats." onRetry={load} />
   {:else if !hasSessions}
-    <Card class="p-8 text-center">
-      <p class="text-sm text-muted-foreground">
+    <Card class="flex flex-col items-center p-8 text-center">
+      <Trophy class="size-8 text-muted-foreground/60" aria-hidden="true" />
+      <p class="mt-3 text-sm text-muted-foreground">
         Nothing logged in {report.period.label} yet. Finish a session and this fills up.
       </p>
     </Card>

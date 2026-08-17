@@ -17,6 +17,7 @@
   import ErrorBanner from "../lib/ErrorBanner.svelte";
   import { weekdayOptions, todayWeekday } from "../lib/weekday";
   import Calendar from "@lucide/svelte/icons/calendar";
+  import Play from "@lucide/svelte/icons/play";
 
   let { params }: { params?: { id?: string } } = $props();
   let programId = $derived(Number(params?.id));
@@ -248,6 +249,7 @@
             onclick={() => start(day.id)}
             disabled={startingDayId !== null}
           >
+            <Play />
             {startingDayId === day.id ? "Starting…" : "Start"}
           </Button>
         </div>

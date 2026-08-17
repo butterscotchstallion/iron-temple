@@ -1,6 +1,8 @@
 <script lang="ts">
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
+  import House from "@lucide/svelte/icons/house";
+  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
 
   // The whole-page failure state, shown by ErrorBoundary when a route throws
   // while rendering. Unlike ErrorCard — which reports one page's data failing to
@@ -72,8 +74,14 @@
 
   <div class="flex flex-wrap justify-center gap-3">
     {#if onReset}
-      <Button onclick={onReset}>Try again</Button>
+      <Button onclick={onReset}>
+        <RotateCcw />
+        Try again
+      </Button>
     {/if}
-    <Button variant="outline" onclick={goHome}>Go home</Button>
+    <Button variant="outline" onclick={goHome}>
+      <House />
+      Go home
+    </Button>
   </div>
 </Card>
