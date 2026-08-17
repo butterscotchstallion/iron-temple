@@ -60,8 +60,29 @@ func TestPlateMilestones(t *testing.T) {
 	t.Run("a big jump crosses every mark it passes", func(t *testing.T) {
 		sets := mkSets(1, day(2026, time.March, 2), 1, "Deadlift", 1, 3, 320)
 		got := plateMilestones(groupSessions(sets), nil)
-		if len(got) != 3 {
-			t.Fatalf("got %d milestones, want 135/225/315", len(got))
+		// 95, 135, 185, 225, 275, 315 — everything the bar passed on the way.
+		if len(got) != 6 {
+			t.Fatalf("got %d milestones, want 6", len(got))
+		}
+	})
+
+	// The reason the ladder starts at 95 rather than 135. An overhead press can
+	// progress for a year without reaching 135, and used to collect nothing while
+	// a deadlift collected four.
+	t.Run("a press earns milestones too", func(t *testing.T) {
+		sets := mkSets(1, day(2026, time.March, 2), 3, "Overhead Press", 1, 5, 100)
+		got := plateMilestones(groupSessions(sets), nil)
+		if len(got) != 1 || got[0].Label != "First 95 lb Overhead Press" {
+			t.Fatalf("got %+v, want a single 95 lb press milestone", got)
+		}
+	})
+
+	// And the reason it stops there: a lighter lifter still working up to the
+	// first rung gets nothing, rather than a milestone for existing.
+	t.Run("below the first rung there is nothing to celebrate", func(t *testing.T) {
+		sets := mkSets(1, day(2026, time.March, 2), 3, "Overhead Press", 1, 5, 65)
+		if got := plateMilestones(groupSessions(sets), nil); len(got) != 0 {
+			t.Fatalf("got %+v, want none below 95 lb", got)
 		}
 	})
 
@@ -76,8 +97,10 @@ func TestPlateMilestones(t *testing.T) {
 				t.Fatalf("225 dated %v, want the 2nd", m.PerformedOn)
 			}
 		}
-		if len(got) != 2 {
-			t.Fatalf("got %d milestones, want 135 and 225 once each", len(got))
+		// 95, 135, 185, 225 on the first session; the second adds nothing, because
+		// each rung is awarded once per lift ever.
+		if len(got) != 4 {
+			t.Fatalf("got %d milestones, want 4", len(got))
 		}
 	})
 }

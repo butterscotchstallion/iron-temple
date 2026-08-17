@@ -8,6 +8,7 @@
   import LiftTrendChart from "../lib/LiftTrendChart.svelte";
   import LiftVolumeBars from "../lib/LiftVolumeBars.svelte";
   import RackedBars from "../lib/RackedBars.svelte";
+  import ChartTable from "../lib/ChartTable.svelte";
   import { formatVolume } from "../lib/volume";
   import { formatLongDate } from "../lib/date";
   import { WEEKDAYS } from "../lib/weekday";
@@ -15,6 +16,7 @@
     formatDelta,
     formatHour,
     formatPercent,
+    formatPerWeek,
     formatSessionLength,
     indexedSeries,
   } from "../lib/racked";
@@ -51,7 +53,12 @@
 
   onMount(load);
 
-  const trend = $derived(indexedSeries(report?.series ?? []));
+  // The chart holds five lifts; volume decides which five, so the lifts the
+  // lifter actually spent the period on are the ones drawn.
+  const volumeByExercise = $derived(
+    new Map((report?.lifts ?? []).map((l) => [l.exerciseId, l.volumeLb])),
+  );
+  const trend = $derived(indexedSeries(report?.series ?? [], volumeByExercise));
   // One colour per lift, shared with the volume bars below the chart so a lift
   // looks the same in both. Lifts the trend chart could not draw get none.
   const colorFor = $derived(
@@ -82,6 +89,35 @@
     ),
   );
   const hasSessions = $derived((report?.totals.sessions ?? 0) > 0);
+
+  // The numbers behind each chart, for ChartTable. Derived here rather than
+  // inline in the markup so the null-check on `report` holds inside the closures.
+  const trendRows = $derived(
+    trend.shown.map((s) => ({
+      label: s.exerciseName,
+      value: formatDelta(s.points[s.points.length - 1].pct),
+    })),
+  );
+  const weekdayRows = $derived(
+    WEEKDAYS.map((name, i) => ({
+      label: name,
+      value: `${formatVolume(report?.weekdays[i] ?? 0)} lb`,
+    })),
+  );
+  // Only the hours with sessions: twenty-four rows of mostly zeroes is not a more
+  // accessible chart, it is a worse one.
+  const hourRows = $derived(
+    (report?.hours ?? [])
+      .map((count, hour) => ({ count, hour }))
+      .filter(({ count }) => count > 0)
+      .map(({ count, hour }) => ({ label: formatHour(hour), value: `${count}` })),
+  );
+  const dayRows = $derived(
+    (report?.days ?? []).map((d) => ({
+      label: formatLongDate(d.date),
+      value: `${formatVolume(d.volumeLb)} lb`,
+    })),
+  );
 </script>
 
 <div class="flex flex-col gap-6">
@@ -224,6 +260,7 @@
           Every lift, as change from its first session
         </h3>
         <LiftTrendChart series={trend.shown} />
+        <ChartTable label="Change by lift" columns={["Lift", "Change"]} rows={trendRows} />
         {#if trend.hidden > 0}
           <!-- Said out loud rather than silently truncated: a chart that shows
                five of eight lifts without saying so reads as showing all eight. -->
@@ -254,6 +291,7 @@
         endDate={report.period.end}
         weeks={heatmapWeeks}
       />
+      <ChartTable label="Training days" columns={["Date", "Volume"]} rows={dayRows} />
     </Card>
 
     <section class="grid gap-4 sm:grid-cols-2">
@@ -262,7 +300,10 @@
           Most productive day
         </h3>
         {#if report.bestWeekday >= 0}
-          <p class="mb-2 text-lg font-black text-foreground">
+          <!-- The testid is on the value itself, not the card: the card also
+               contains this chart's data table, where every weekday appears as a
+               row header. -->
+          <p class="mb-2 text-lg font-black text-foreground" data-testid="best-weekday">
             {WEEKDAYS[report.bestWeekday]}
           </p>
         {/if}
@@ -273,6 +314,7 @@
           format={(v) => `${formatVolume(v)} lb`}
           caption="Volume lifted by day of the week"
         />
+        <ChartTable label="Volume by weekday" columns={["Day", "Volume"]} rows={weekdayRows} />
       </Card>
 
       <Card class="p-4">
@@ -290,11 +332,16 @@
           format={(v) => `${v} session${v === 1 ? "" : "s"}`}
           caption="Sessions started, by hour of the day"
         />
+        <ChartTable label="Sessions by hour" columns={["Hour", "Sessions"]} rows={hourRows} />
       </Card>
     </section>
 
-    {#if report.attendance.basis !== "none"}
-      <Card class="p-4">
+    <!-- A rate only where a rate exists. When the program carries no weekdays
+         there is no target, and the honest thing to report is how often the
+         lifter trained — a measurement rather than a grade against a number
+         nobody entered. See the Attendance type in internal/racked. -->
+    <Card class="p-4">
+      {#if report.attendance.basis === "weekday"}
         <h3 class="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
           Attendance
         </h3>
@@ -302,15 +349,21 @@
           {formatPercent(report.attendance.rate)}
         </p>
         <p class="text-xs text-muted-foreground">
-          {report.attendance.actual} of {report.attendance.expected} sessions
-          {#if report.attendance.basis === "cadence"}
-            <!-- Honest about the denominator: with no weekday set on the program
-                 there is no schedule to measure against, only an estimate. -->
-            · estimated from your program's shape, since its days carry no weekdays
-          {/if}
+          {report.attendance.actual} of {report.attendance.expected} scheduled sessions
         </p>
-      </Card>
-    {/if}
+      {:else}
+        <h3 class="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+          How often you trained
+        </h3>
+        <p class="mt-1 text-2xl font-black tabular-nums text-foreground">
+          {formatPerWeek(report.attendance.sessionsPerWeek)}
+          <span class="text-sm font-semibold text-muted-foreground">/ week</span>
+        </p>
+        <p class="text-xs text-muted-foreground">
+          Set weekdays on your program to compare this against a target.
+        </p>
+      {/if}
+    </Card>
 
     {#if report.prs.length > 0}
       <Card class="p-4">

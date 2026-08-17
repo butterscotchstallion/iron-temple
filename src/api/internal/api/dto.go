@@ -307,6 +307,10 @@ type rackedAttendanceDTO struct {
 	Expected int     `json:"expected"`
 	Actual   int     `json:"actual"`
 	Rate     float64 `json:"rate"`
+	// SessionsPerWeek is the figure to show when Basis is "none", which is most
+	// of the time: it is a measurement rather than a score against a target
+	// nobody entered.
+	SessionsPerWeek float64 `json:"sessionsPerWeek"`
 }
 
 type rackedPRDTO struct {

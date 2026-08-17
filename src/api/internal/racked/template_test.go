@@ -196,3 +196,36 @@ func TestRenderEmailCapsTheLiftTable(t *testing.T) {
 		t.Error("the records list dropped a record; only the lift table is capped")
 	}
 }
+
+// The footer must not present a rate the report does not have. Most lifters have
+// no scheduled weekdays, so most emails take the second branch.
+func TestRenderEmailFooterMatchesTheAttendanceBasis(t *testing.T) {
+	rep := marchReport(t)
+
+	t.Run("no schedule reports frequency", func(t *testing.T) {
+		rep.Attendance = Attendance{Basis: AttendanceNone, Actual: 12, SessionsPerWeek: 2.75}
+		html, err := RenderEmail("Ada", rep)
+		if err != nil {
+			t.Fatalf("RenderEmail: %v", err)
+		}
+		if !strings.Contains(html, "2.8 sessions a week") {
+			t.Error("footer does not report the training frequency")
+		}
+		if strings.Contains(html, "scheduled sessions") {
+			t.Error("footer claims a rate against a schedule that does not exist")
+		}
+	})
+
+	t.Run("a schedule reports a rate", func(t *testing.T) {
+		rep.Attendance = Attendance{
+			Basis: AttendanceWeekday, Expected: 13, Actual: 12, Rate: 0.923, SessionsPerWeek: 2.75,
+		}
+		html, err := RenderEmail("Ada", rep)
+		if err != nil {
+			t.Fatalf("RenderEmail: %v", err)
+		}
+		if !strings.Contains(html, "92% of your scheduled sessions") {
+			t.Error("footer does not report the rate against the program")
+		}
+	})
+}

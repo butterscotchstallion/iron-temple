@@ -196,27 +196,38 @@ type Streak struct {
 	CurrentWeeks int
 }
 
-// AttendanceBasis records what the attendance rate was measured against, since
-// the honest answer depends on data the lifter may never have entered.
+// AttendanceBasis records whether there is a real target to measure against.
 type AttendanceBasis string
 
 const (
-	// AttendanceWeekday means the program's days carry scheduled weekdays and
-	// expected counts real calendar occurrences of them.
+	// AttendanceWeekday means the program's days carry scheduled weekdays, so
+	// expected counts real calendar occurrences of them and Rate means something.
 	AttendanceWeekday AttendanceBasis = "weekday"
-	// AttendanceCadence means no weekday is scheduled, so expected is the
-	// program's day count spread over the period's weeks — an estimate.
-	AttendanceCadence AttendanceBasis = "cadence"
-	// AttendanceNone means there is no current program to measure against.
+	// AttendanceNone means there is no schedule to compare with — either no
+	// current program, or a program whose days carry no weekday. Expected and
+	// Rate are zero and must not be shown; SessionsPerWeek is what to report.
 	AttendanceNone AttendanceBasis = "none"
 )
 
 // Attendance compares sessions performed against sessions the program implies.
+//
+// There used to be a third basis that spread the program's day count over the
+// period's weeks when no weekday was set. It was dropped: program_days.weekday is
+// nullable and no seed populates it, so that branch was what almost every lifter
+// actually saw — a percentage against a denominator nobody had entered, labelled
+// an estimate and still read as a grade. A number that precise about a target
+// that invented is worse than no number at all.
+//
+// SessionsPerWeek needs no configuration and is always populated, so there is
+// something real to report either way.
 type Attendance struct {
 	Basis    AttendanceBasis
 	Expected int
 	Actual   int
 	Rate     float64
+	// SessionsPerWeek is how often the lifter actually trained, measured over
+	// the period's length rather than over the weeks they happened to show up.
+	SessionsPerWeek float64
 }
 
 // PRKind distinguishes the two ways a set can be a record.
@@ -491,17 +502,29 @@ func liftSeries(sessions []session) []LiftSeries {
 	return out
 }
 
-// mostImproved picks the largest percentage gain in estimated max from a lift's
-// first session in the period to its last. Percentage rather than pounds, so
-// that a press competes fairly with a deadlift carrying three times the load.
+// mostImproved picks the largest percentage gain in estimated max, comparing how
+// a lift ended the period against how it started it.
+//
+// Percentage rather than pounds, so a press competes fairly with a deadlift
+// carrying three times the load.
+//
+// "Started" and "ended" are the best session in the period's first third and its
+// last third, not the first and last sessions. Single sessions at the edges are
+// the wrong thing to build a month's verdict on, and the error is not random: a
+// linear program deloads *systematically*, so a lift that stalled in the final
+// week reads as a decline no matter how much ground it gained earlier. Taking
+// the best of a window absorbs that. It still reports a decline when the whole
+// window regressed, which is the honest outcome and the reason this is a window
+// and not a maximum over the period — a max can only ever flatter.
+//
+// Two sessions degenerate to first-versus-last, which is all the data there is.
 func mostImproved(series []LiftSeries) *Improvement {
 	var best *Improvement
 	for _, s := range series {
 		if len(s.Points) < 2 {
 			continue
 		}
-		from := s.Points[0].E1RMLb
-		to := s.Points[len(s.Points)-1].E1RMLb
+		from, to := edgeWindowBests(s.Points)
 		if from <= 0 || to <= from {
 			continue
 		}
@@ -520,6 +543,32 @@ func mostImproved(series []LiftSeries) *Improvement {
 		}
 	}
 	return best
+}
+
+// edgeWindowBests returns the best estimated max in the first third of a series
+// and in the last third — the two figures mostImproved compares.
+//
+// The windows are sized by session count rather than by date, so a month with
+// sessions bunched at one end still splits into thirds of equal weight. They
+// never overlap and are never empty: with two or three points they are one
+// session each, which is the most the data supports.
+func edgeWindowBests(points []SeriesPoint) (float64, float64) {
+	if len(points) == 0 {
+		return 0, 0
+	}
+	window := len(points) / 3
+	if window < 1 {
+		window = 1
+	}
+
+	best := func(ps []SeriesPoint) float64 {
+		var m float64
+		for _, p := range ps {
+			m = math.Max(m, p.E1RMLb)
+		}
+		return m
+	}
+	return best(points[:window]), best(points[len(points)-window:])
 }
 
 func dayVolumes(sessions []session) []DayVolume {
@@ -639,36 +688,35 @@ func streak(sessions []session) Streak {
 	return Streak{LongestWeeks: longest, CurrentWeeks: run}
 }
 
-// attendance measures sessions performed against what the program implies.
+// attendance measures sessions performed against what the program prescribes,
+// and how often the lifter trained regardless.
 //
-// The honest denominator depends on data the lifter may never have entered:
-// program_days.weekday is nullable and no seed populates it, so most programs
-// carry no schedule at all. Rather than invent one or drop the statistic, the
-// basis travels with the number and the surfaces label a cadence estimate as an
-// estimate.
+// A rate is only produced when the program says which days it wants, because
+// that is the only case where a denominator exists rather than being guessed at.
+// Everything else reports SessionsPerWeek, which is a measurement rather than a
+// score, and is the same figure the archetype already reasons about.
 func attendance(days []ProgramDay, actual int, start, end time.Time) Attendance {
-	if len(days) == 0 {
-		return Attendance{Basis: AttendanceNone, Actual: actual}
+	a := Attendance{
+		Basis:           AttendanceNone,
+		Actual:          actual,
+		SessionsPerWeek: float64(actual) / weeksBetween(start, end),
 	}
+
 	scheduled := map[int]bool{}
 	for _, d := range days {
 		if d.Weekday != nil {
 			scheduled[*d.Weekday] = true
 		}
 	}
+	if len(scheduled) == 0 {
+		return a
+	}
 
-	a := Attendance{Actual: actual}
-	if len(scheduled) > 0 {
-		a.Basis = AttendanceWeekday
-		for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
-			if scheduled[int(d.Weekday())] {
-				a.Expected++
-			}
+	a.Basis = AttendanceWeekday
+	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
+		if scheduled[int(d.Weekday())] {
+			a.Expected++
 		}
-	} else {
-		a.Basis = AttendanceCadence
-		weeks := end.Sub(start).Hours()/24/7 + 1.0/7
-		a.Expected = int(math.Round(weeks * float64(len(days))))
 	}
 	if a.Expected > 0 {
 		a.Rate = float64(a.Actual) / float64(a.Expected)
