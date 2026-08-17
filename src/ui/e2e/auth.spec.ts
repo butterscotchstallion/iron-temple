@@ -15,9 +15,34 @@ const ada = {
   hasAvatar: false,
 };
 
-const emptySessions = { items: [], total: 0, limit: 100, offset: 0 };
+const emptySessions = { items: [], total: 0, totalVolumeLb: 0, limit: 100, offset: 0 };
 
 const health = { status: "ok", version: "v9.9.9", environment: "production" };
+
+// A month with nothing logged. Every nullable field is explicitly null rather
+// than absent, because that is what the API sends and the page branches on it.
+const emptyRacked = {
+  period: { kind: "month", start: "2026-03-01", end: "2026-03-31", label: "March 2026" },
+  totals: { volumeLb: 0, sessions: 0, sets: 0, reps: 0 },
+  change: null,
+  comparison: { count: 0, label: "", unitLb: 0 },
+  lifts: [],
+  series: [],
+  mostImproved: null,
+  days: [],
+  weekdays: [0, 0, 0, 0, 0, 0, 0],
+  bestWeekday: -1,
+  hours: Array.from({ length: 24 }, () => 0),
+  hourLabel: "",
+  streak: { longestWeeks: 0, currentWeeks: 0 },
+  attendance: { basis: "none", expected: 0, actual: 0, rate: 0 },
+  prs: [],
+  milestones: [],
+  heaviestSet: null,
+  fastestSession: null,
+  deloads: [],
+  archetype: { name: "", description: "" },
+};
 
 /** Routes shared by both signed-in and signed-out cases. */
 async function mockCommon(page: import("@playwright/test").Page) {
@@ -27,6 +52,7 @@ async function mockCommon(page: import("@playwright/test").Page) {
     route.fulfill({ json: emptySessions }),
   );
   await page.route("**/api/v1/exercises", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/racked**", (route) => route.fulfill({ json: emptyRacked }));
 }
 
 async function mockSignedOut(
@@ -110,13 +136,30 @@ test("signs in and reveals the app", async ({ page }) => {
   expect(loginBody).toMatchObject({ username: "ada", rememberMe: true });
 });
 
-test("the account menu offers profile and sign out", async ({ page }) => {
+test("the account menu offers racked, profile and sign out", async ({ page }) => {
   await mockSignedIn(page);
   await page.goto("/");
 
   await page.getByRole("button", { name: /account menu/i }).click();
+  await expect(page.getByRole("menuitem", { name: /^racked$/i })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: /configure profile/i })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: /sign out/i })).toBeVisible();
+});
+
+// Racked is reachable only from this menu — it has no nav-bar tab — so the
+// menu entry working is the whole of its discoverability.
+test("the account menu navigates to Racked", async ({ page }) => {
+  await mockSignedIn(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: /account menu/i }).click();
+  await page.getByRole("menuitem", { name: /^racked$/i }).click();
+
+  await expect(page).toHaveURL(/#\/racked$/);
+  await expect(page.getByRole("heading", { name: "Racked" })).toBeVisible();
+  // Nothing logged in the fixture month, so it says so rather than rendering
+  // a page of zeroes.
+  await expect(page.getByText(/Nothing logged in March 2026/)).toBeVisible();
 });
 
 test("the account menu navigates to the profile page", async ({ page }) => {

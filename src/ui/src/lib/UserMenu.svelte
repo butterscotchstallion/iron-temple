@@ -1,6 +1,7 @@
 <script lang="ts">
   import { DropdownMenu } from "bits-ui";
   import { push } from "svelte-spa-router";
+  import BarChart3 from "@lucide/svelte/icons/bar-chart-3";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import LogIn from "@lucide/svelte/icons/log-in";
   import LogOut from "@lucide/svelte/icons/log-out";
@@ -50,6 +51,10 @@
         align="end"
         class="z-50 min-w-44 rounded-md border border-border/60 bg-card p-1 shadow-lg shadow-black/40 backdrop-blur"
       >
+        <DropdownMenu.Item class={itemClass} onSelect={() => go("/racked")}>
+          <BarChart3 class="size-4" aria-hidden="true" />
+          Racked
+        </DropdownMenu.Item>
         <DropdownMenu.Item class={itemClass} onSelect={() => go("/profile")}>
           <Settings class="size-4" aria-hidden="true" />
           Configure profile
