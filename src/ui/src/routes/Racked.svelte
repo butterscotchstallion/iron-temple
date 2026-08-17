@@ -318,7 +318,12 @@
           {report.prs.length} personal record{report.prs.length === 1 ? "" : "s"}
         </h3>
         <ul class="flex flex-col gap-1.5">
-          {#each report.prs as pr (`${pr.performedOn}-${pr.exerciseId}-${pr.kind}`)}
+          <!-- Keyed by position. Nothing derived from a date is unique here: two
+               sessions of one lift in a day can each set a weight record, which
+               repeats date + lift + kind exactly. The server sends these in the
+               order they should read, and nothing reorders them, so the index is
+               both correct and the only thing that cannot collide. -->
+          {#each report.prs as pr, i (i)}
             <li class="flex items-baseline justify-between gap-2 text-sm">
               <span class="truncate text-foreground">{pr.exerciseName}</span>
               <span class="shrink-0 tabular-nums text-muted-foreground">
@@ -337,7 +342,11 @@
           Milestones
         </h3>
         <ul class="flex flex-col gap-1.5">
-          {#each report.milestones as m (`${m.performedOn}-${m.kind}-${m.valueLb}-${m.exerciseId}`)}
+          <!-- Position again, for the same reason as the two lists either side.
+               A threshold is only crossed once, so this key happens to be safe
+               today — but it is safe by accident of the milestone logic, and one
+               rule across all three lists is easier to keep right than two. -->
+          {#each report.milestones as m, i (i)}
             <li class="flex items-baseline justify-between gap-2 text-sm">
               <span class="truncate text-foreground">{m.label}</span>
               <span class="shrink-0 text-xs text-muted-foreground">
@@ -355,7 +364,8 @@
           Stalls and comebacks
         </h3>
         <ul class="flex flex-col gap-1.5">
-          {#each report.deloads as d (`${d.performedOn}-${d.exerciseId}`)}
+          <!-- Position: one lift can stall twice in a day, repeating date + lift. -->
+          {#each report.deloads as d, i (i)}
             <li class="flex items-baseline justify-between gap-2 text-sm">
               <span class="truncate text-foreground">
                 {d.exerciseName}

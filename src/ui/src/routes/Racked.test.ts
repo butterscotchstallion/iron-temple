@@ -210,3 +210,59 @@ describe("Racked", () => {
     );
   });
 });
+
+// Two sessions of the same lift on one day is ordinary — a morning and an
+// evening workout — and it used to crash the page.
+//
+// Every keyed {#each} whose key was built from a date collided: the trend chart
+// keyed its points by performedOn, the records list by date+lift+kind, the
+// stalls list by date+lift. Svelte throws each_key_duplicate on the second one,
+// so the whole page died rather than degrading. Position is the identity in all
+// three lists, so they key by index now, and this pins that.
+describe("Racked with two sessions of one lift on the same day", () => {
+  function sameDayReport() {
+    const r = fullReport();
+    const day = "2026-08-06";
+
+    // One lift, two sessions, same date — two points at the same x.
+    r.series = [
+      {
+        exerciseId: 1,
+        exerciseName: "Squat",
+        points: [
+          { performedOn: day, topWeightLb: 200, e1rmLb: 233 },
+          { performedOn: day, topWeightLb: 205, e1rmLb: 239 },
+        ],
+      },
+    ];
+    // Both sessions set a weight record, so date + lift + kind repeats.
+    r.prs = [200, 205].map((weightLb) => ({
+      kind: "weight",
+      performedOn: day,
+      exerciseId: 1,
+      exerciseName: "Squat",
+      weightLb,
+      reps: 5,
+      valueLb: weightLb,
+      previousLb: weightLb - 5,
+    }));
+    // And both dropped back, so date + lift repeats too.
+    r.deloads = [
+      { exerciseId: 1, exerciseName: "Squat", performedOn: day, fromLb: 225, toLb: 210, recovered: false, recoveredOn: null },
+      { exerciseId: 1, exerciseName: "Squat", performedOn: day, fromLb: 210, toLb: 195, recovered: false, recoveredOn: null },
+    ];
+    return r;
+  }
+
+  it("renders instead of throwing on duplicate keys", async () => {
+    getRacked.mockResolvedValue({ data: sameDayReport(), error: undefined });
+    render(Racked);
+
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "2 personal records" })).toBeInTheDocument(),
+    );
+    expect(screen.getByRole("heading", { name: "Stalls and comebacks" })).toBeInTheDocument();
+    // Both entries of each repeated-key list survive rather than one winning.
+    expect(screen.getAllByText("Squat").length).toBeGreaterThanOrEqual(2);
+  });
+});

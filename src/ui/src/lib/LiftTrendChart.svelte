@@ -175,7 +175,10 @@
       stroke-linejoin="round"
       stroke-linecap="round"
     />
-    {#each s.points as p (p.performedOn)}
+    <!-- Keyed by position, not by date: a lifter can train the same lift twice
+         in a day, which gives two points sharing a performedOn. Position is the
+         identity here anyway — these are plotted marks, not rows of a list. -->
+    {#each s.points as p, i (i)}
       <!-- A 1px surface-coloured ring keeps two lines crossing at a point from
            merging into one blob. -->
       <circle
