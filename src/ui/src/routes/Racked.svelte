@@ -295,7 +295,7 @@
     </Card>
 
     <section class="grid gap-4 sm:grid-cols-2">
-      <Card class="p-4">
+      <Card class="p-4" data-testid="stat-best-weekday">
         <h3 class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
           Most productive day
         </h3>

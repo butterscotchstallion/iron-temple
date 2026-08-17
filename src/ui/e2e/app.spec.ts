@@ -630,7 +630,11 @@ test("Racked charts every lift and names what it cannot draw", async ({ page }) 
   await expect(page.getByText("50,000 lb · 60%")).toBeVisible();
 
   await expect(page.getByRole("img", { name: /by day of the week/ })).toBeVisible();
-  await expect(page.getByText("Monday", { exact: true })).toBeVisible();
+  // Scoped to the card: the weekday also appears as a row header in that chart's
+  // data table, which is a second legitimate match rather than a duplicate.
+  await expect(
+    page.getByTestId("stat-best-weekday").getByText("Monday", { exact: true }),
+  ).toBeVisible();
   await expect(page.getByText("Early bird")).toBeVisible();
 });
 
