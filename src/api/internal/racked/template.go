@@ -34,6 +34,7 @@ var emailTemplate = template.Must(template.New("racked").Funcs(template.FuncMap{
 	"plural":  plural,
 	"weekday": weekdayName,
 	"signed":  signedPercent,
+	"perWeek": formatPerWeek,
 }).Parse(emailHTML))
 
 // emailData is the template's view of a report, plus the few strings the report
@@ -128,6 +129,15 @@ func weekdayName(i int) string {
 		return ""
 	}
 	return time.Weekday(i).String()
+}
+
+// formatPerWeek renders a training frequency to one decimal, because the whole
+// number loses the difference between twice a week and nearly three times.
+func formatPerWeek(perWeek float64) string {
+	if math.IsNaN(perWeek) || math.IsInf(perWeek, 0) || perWeek <= 0 {
+		return "0"
+	}
+	return fmt.Sprintf("%.1f", perWeek)
 }
 
 // signed renders a delta the way the email quotes it.
@@ -251,7 +261,12 @@ var emailHTML = strings.TrimSpace(`
   </div>
 
   <div style="padding:14px 30px;background:#f8fafc;border-top:1px solid #e2e8f0;font-size:12px;color:#94a3b8;text-align:center;">
-    🏋️ Iron Temple · {{ pct .Report.Attendance.Rate }} attendance{{ if eq (printf "%s" .Report.Attendance.Basis) "cadence" }} (estimated){{ end }}
+    🏋️ Iron Temple ·
+    {{- if eq (printf "%s" .Report.Attendance.Basis) "weekday" }}
+      {{ pct .Report.Attendance.Rate }} of your scheduled sessions
+    {{- else }}
+      {{ perWeek .Report.Attendance.SessionsPerWeek }} sessions a week
+    {{- end }}
   </div>
 </div>
 </body></html>

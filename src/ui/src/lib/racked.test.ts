@@ -5,6 +5,7 @@ import {
   formatDelta,
   formatHour,
   formatPercent,
+  formatPerWeek,
   formatSessionLength,
   indexedSeries,
   seriesColor,
@@ -98,6 +99,55 @@ describe("indexedSeries", () => {
   it("handles an empty report", () => {
     expect(indexedSeries([])).toEqual({ shown: [], hidden: 0 });
   });
+
+  // The reason selection is by volume. Ranking by the weight on the bar cut the
+  // overhead press from every chart, on a chart about percentage gain where the
+  // press is usually the biggest gainer.
+  it("keeps the lift with the most work over the one with the most weight", () => {
+    const lifts = [
+      series(1, "Deadlift", [400, 405]),
+      series(2, "Squat", [300, 310]),
+      series(3, "Bench Press", [200, 210]),
+      series(4, "Barbell Row", [150, 160]),
+      series(5, "Overhead Press", [100, 120]),
+      series(6, "Pause Squat", [280, 282]),
+    ];
+    // The press is the lightest lift and the one done most; the pause squat is
+    // heavy and barely touched.
+    const volume = new Map([
+      [1, 9_000],
+      [2, 20_000],
+      [3, 14_000],
+      [4, 12_000],
+      [5, 18_000],
+      [6, 500],
+    ]);
+
+    const names = indexedSeries(lifts, volume).shown.map((s) => s.exerciseName);
+    expect(names).toContain("Overhead Press");
+    expect(names).not.toContain("Pause Squat");
+  });
+
+  // A stalled main lift is worth seeing flat; gain-ranked selection would drop it.
+  it("keeps a lift that did not move, if the lifter did the work", () => {
+    const lifts = [
+      series(1, "Squat", [300, 300]),
+      series(2, "Bench Press", [200, 240]),
+    ];
+    const volume = new Map([
+      [1, 30_000],
+      [2, 4_000],
+    ]);
+    const names = indexedSeries(lifts, volume, 1).shown.map((s) => s.exerciseName);
+    expect(names).toEqual(["Squat"]);
+  });
+
+  it("falls back to a stable order when no volume is known", () => {
+    const lifts = [series(9, "Deadlift", [400, 410]), series(1, "Squat", [200, 210])];
+    const first = indexedSeries(lifts).shown.map((s) => s.exerciseId);
+    const second = indexedSeries([...lifts].reverse()).shown.map((s) => s.exerciseId);
+    expect(first).toEqual(second);
+  });
 });
 
 describe("seriesColor", () => {
@@ -183,5 +233,18 @@ describe("barFraction", () => {
 
   it("never overflows its track", () => {
     expect(barFraction(150, 100)).toBe(1);
+  });
+});
+
+describe("formatPerWeek", () => {
+  it.each([
+    [2.75, "2.8"],
+    [3, "3.0"],
+    [0.5, "0.5"],
+    [0, "0"],
+    [-1, "0"],
+    [Number.NaN, "0"],
+  ])("formats %s as %s", (perWeek, want) => {
+    expect(formatPerWeek(perWeek as number)).toBe(want);
   });
 });

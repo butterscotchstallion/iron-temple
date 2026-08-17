@@ -40,19 +40,29 @@ export type IndexedSeries = {
  * number of categorical colours and cycling them would put one colour on two
  * lifts. The caller is told how many were left out so the page can say so
  * rather than quietly showing a subset.
+ *
+ * `volumeByExercise` decides which lifts survive that cap: the ones the lifter
+ * did the most work on. Ranking by the weight on the bar instead — which this
+ * used to do — meant the deadlift and squat always survived and the overhead
+ * press was always cut, on a chart whose entire subject is percentage gain and
+ * where the press is usually the biggest gainer. Volume asks "what did you
+ * actually spend the month doing", which is the right question for what to show,
+ * and it leaves a stalled main lift on the chart where a gain-ranked selection
+ * would drop it just for being flat.
  */
 export function indexedSeries(
   series: LiftSeries[],
+  volumeByExercise: Map<number, number> = new Map(),
   limit: number = CHART_SLOTS,
 ): { shown: IndexedSeries[]; hidden: number } {
   const chartable = series.filter((s) => s.points.length >= 2 && s.points[0].e1rmLb > 0);
 
-  // Selection is by how much of the period each lift accounts for — its last
-  // estimate is a decent stand-in for how central it was — but colour is
-  // assigned in exercise-id order, so a lift keeps its colour when the period
-  // changes underneath it. Colour follows the lift, never its rank in a list.
+  // Selected by volume, then re-sorted by exercise id before colours are handed
+  // out, so a lift keeps its colour when the period changes underneath it.
+  // Colour follows the lift, never its rank in a list.
+  const volume = (s: LiftSeries) => volumeByExercise.get(s.exerciseId) ?? 0;
   const selected = [...chartable]
-    .sort((a, b) => b.points[b.points.length - 1].e1rmLb - a.points[a.points.length - 1].e1rmLb)
+    .sort((a, b) => volume(b) - volume(a) || a.exerciseId - b.exerciseId)
     .slice(0, limit)
     .sort((a, b) => a.exerciseId - b.exerciseId);
 
@@ -127,4 +137,14 @@ export function formatHour(hour: number): string {
 export function barFraction(value: number, max: number): number {
   if (!Number.isFinite(value) || !Number.isFinite(max) || max <= 0 || value <= 0) return 0;
   return Math.min(value / max, 1);
+}
+
+/**
+ * A training frequency, to one decimal: 2.75 -> "2.8". The whole number loses
+ * the difference between twice a week and nearly three times, which is most of
+ * what the figure is for.
+ */
+export function formatPerWeek(perWeek: number): string {
+  if (!Number.isFinite(perWeek) || perWeek <= 0) return "0";
+  return perWeek.toFixed(1);
 }

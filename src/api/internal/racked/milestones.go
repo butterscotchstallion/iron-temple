@@ -33,9 +33,23 @@ var volumeThresholds = []float64{
 	100_000, 250_000, 500_000, 1_000_000, 2_500_000, 5_000_000, 10_000_000, 25_000_000,
 }
 
-// plateThresholds are the working weights lifters actually name, each a round
-// number of 45 lb plates a side on a 45 lb bar.
-var plateThresholds = []float64{135, 225, 315, 405, 495}
+// plateThresholds are the working weights lifters actually name out loud.
+//
+// The ladder has to cover every lift, not just the two heaviest. Starting at 135
+// — a 45 lb plate a side — meant an overhead press could progress for a year
+// without passing a single milestone, while a deadlift collected four, and a
+// lighter lifter got none at all. The recap then said nothing about most of the
+// lifts in it.
+//
+// So the rungs are every landmark the plate set actually makes: 95 is a pair of
+// 25s on the bar, 135 a pair of 45s, and from there each step adds a pair of 25s
+// or 45s. That is the sequence someone announces without thinking about it,
+// which is the only real test for a list like this.
+//
+// Each is awarded once per lift, ever — plateMilestones compares against the
+// lifter's all-time best before the period — so a dense low end costs a beginner
+// a handful of one-off milestones in their first months and nothing after.
+var plateThresholds = []float64{95, 135, 185, 225, 275, 315, 365, 405, 455, 495}
 
 // milestones reports the thresholds crossed inside the period.
 //

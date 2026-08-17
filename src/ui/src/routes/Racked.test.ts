@@ -33,7 +33,7 @@ function emptyReport() {
     hours: Array.from({ length: 24 }, () => 0),
     hourLabel: "",
     streak: { longestWeeks: 0, currentWeeks: 0 },
-    attendance: { basis: "none", expected: 0, actual: 0, rate: 0 },
+    attendance: { basis: "none", expected: 0, actual: 0, rate: 0, sessionsPerWeek: 0 },
     prs: [],
     milestones: [],
     heaviestSet: null,
@@ -81,7 +81,7 @@ function fullReport() {
     hours: Array.from({ length: 24 }, (_, h) => (h === 6 ? 9 : 0)),
     hourLabel: "Early bird",
     streak: { longestWeeks: 5, currentWeeks: 3 },
-    attendance: { basis: "cadence", expected: 13, actual: 12, rate: 0.923 },
+    attendance: { basis: "none", expected: 0, actual: 12, rate: 0, sessionsPerWeek: 2.75 },
     prs: [
       {
         kind: "weight",
@@ -180,12 +180,59 @@ describe("Racked", () => {
     expect(screen.queryByRole("heading", { name: "Attendance" })).not.toBeInTheDocument();
   });
 
-  it("labels an estimated attendance rate as an estimate", async () => {
+  // No schedule means no target, so there must be no percentage — a rate against
+  // a denominator nobody entered reads as a grade regardless of how it is labelled.
+  it("reports frequency, not a rate, when the program carries no schedule", async () => {
     getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
     render(Racked);
 
-    await waitFor(() => expect(screen.getByText("92%")).toBeInTheDocument());
-    expect(screen.getByText(/estimated from your program's shape/)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "How often you trained" })).toBeInTheDocument(),
+    );
+    expect(screen.getByText("2.8")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Attendance" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/estimated/)).not.toBeInTheDocument();
+  });
+
+  it("reports a rate when the program does carry a schedule", async () => {
+    const report = fullReport();
+    report.attendance = {
+      basis: "weekday",
+      expected: 13,
+      actual: 12,
+      rate: 0.923,
+      sessionsPerWeek: 2.75,
+    };
+    getRacked.mockResolvedValue({ data: report, error: undefined });
+    render(Racked);
+
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Attendance" })).toBeInTheDocument(),
+    );
+    expect(screen.getByText("92%")).toBeInTheDocument();
+    expect(screen.getByText("12 of 13 scheduled sessions")).toBeInTheDocument();
+  });
+
+  // Charts speak through pointer hover and title attributes, which a keyboard
+  // and a screen reader never receive. The tables are the way in.
+  it("offers every chart's numbers as a table", async () => {
+    getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
+    render(Racked);
+
+    await waitFor(() =>
+      expect(screen.getByText("Change by lift as a table")).toBeInTheDocument(),
+    );
+    for (const label of [
+      "Volume by weekday as a table",
+      "Sessions by hour as a table",
+      "Training days as a table",
+    ]) {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    }
+
+    // And the rows carry real values, not just headers.
+    expect(screen.getByRole("rowheader", { name: "Monday" })).toBeInTheDocument();
+    expect(screen.getByRole("rowheader", { name: "6am" })).toBeInTheDocument();
   });
 
   it("offers a retry when the report fails to load", async () => {

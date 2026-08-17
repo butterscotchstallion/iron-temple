@@ -1499,25 +1499,38 @@ components:
 
     RackedAttendance:
       type: object
-      required: [basis, expected, actual, rate]
+      required: [basis, expected, actual, rate, sessionsPerWeek]
       properties:
         basis:
           type: string
-          enum: [weekday, cadence, none]
+          enum: [weekday, none]
           description: >
-            What `expected` was measured against. `weekday` counts real
-            occurrences of the program's scheduled weekdays. `cadence` is an
-            estimate from the program's day count, used when no weekday is set —
-            which is the common case, since programDay.weekday is nullable and
-            no seed populates it. `none` means there is no program to compare to.
+            Whether there is a real target to measure against. `weekday` means the
+            program's days carry scheduled weekdays, so `expected` counts their
+            real calendar occurrences and `rate` is meaningful. `none` means there
+            is no schedule — either no current program, or a program whose days
+            carry no weekday, which is the common case since programDay.weekday is
+            nullable and no seed populates it. On `none`, `expected` and `rate` are
+            zero and must not be displayed; show `sessionsPerWeek` instead.
         expected:
           type: integer
+          description: Zero unless basis is `weekday`.
         actual:
           type: integer
         rate:
           type: number
           minimum: 0
-          description: actual ÷ expected, or 0 when nothing was expected. May exceed 1.
+          description: >
+            actual ÷ expected, or 0 when there was no target. May exceed 1.
+            Only meaningful when basis is `weekday`.
+        sessionsPerWeek:
+          type: number
+          minimum: 0
+          example: 2.8
+          description: >
+            How often the lifter actually trained, over the period's whole length
+            rather than only the weeks they showed up. Always populated, needs no
+            configuration, and is what to show when there is no target.
 
     RackedPR:
       type: object

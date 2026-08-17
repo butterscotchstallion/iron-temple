@@ -528,7 +528,7 @@ const rackedMarch = {
   hours: Array.from({ length: 24 }, (_, h) => (h === 6 ? 9 : h === 18 ? 3 : 0)),
   hourLabel: "Early bird",
   streak: { longestWeeks: 5, currentWeeks: 3 },
-  attendance: { basis: "cadence", expected: 13, actual: 12, rate: 0.923 },
+  attendance: { basis: "none", expected: 0, actual: 12, rate: 0, sessionsPerWeek: 2.75 },
   prs: [
     {
       kind: "weight",
@@ -634,14 +634,30 @@ test("Racked charts every lift and names what it cannot draw", async ({ page }) 
   await expect(page.getByText("Early bird")).toBeVisible();
 });
 
-// The denominator is an estimate whenever the lifter never scheduled their
-// program's days, and the page has to say so rather than imply a real target.
-test("Racked labels an estimated attendance rate as estimated", async ({ page }) => {
+// With no weekdays on the program there is no target, so the page reports how
+// often the lifter trained instead of grading them against a number nobody set.
+test("Racked reports frequency when the program has no schedule", async ({ page }) => {
   await page.route("**/api/v1/racked**", (route) => route.fulfill({ json: rackedMarch }));
   await page.goto("/#/racked");
 
-  await expect(page.getByText("92%")).toBeVisible();
-  await expect(page.getByText(/estimated from your program's shape/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "How often you trained" })).toBeVisible();
+  await expect(page.getByText("2.8")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Attendance" })).toHaveCount(0);
+});
+
+// Charts convey their detail through hover and title attributes, which never
+// reach a keyboard or a screen reader.
+test("Racked exposes each chart's numbers as a table", async ({ page }) => {
+  await page.route("**/api/v1/racked**", (route) => route.fulfill({ json: rackedMarch }));
+  await page.goto("/#/racked");
+
+  const table = page.getByText("Volume by weekday as a table");
+  await expect(table).toBeVisible();
+
+  // Collapsed until asked for, so it does not crowd the chart it belongs to.
+  await expect(page.getByRole("rowheader", { name: "Monday" })).toBeHidden();
+  await table.click();
+  await expect(page.getByRole("rowheader", { name: "Monday" })).toBeVisible();
 });
 
 test("Racked lists records, milestones and stalls", async ({ page }) => {

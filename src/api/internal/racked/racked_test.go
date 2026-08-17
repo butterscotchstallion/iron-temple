@@ -208,14 +208,21 @@ func TestAttendanceBasis(t *testing.T) {
 		}
 	})
 
-	t.Run("cadence when no weekday is set", func(t *testing.T) {
+	// The common case: a program exists but nobody set its weekdays. There is no
+	// denominator, so there must be no rate — inventing one was the old behaviour
+	// and it is what almost every lifter saw.
+	t.Run("no rate when the program carries no schedule", func(t *testing.T) {
 		days := []ProgramDay{{Name: "A"}, {Name: "B"}, {Name: "C"}}
 		got := attendance(days, 10, start, end)
-		if got.Basis != AttendanceCadence {
-			t.Fatalf("basis = %q, want cadence", got.Basis)
+		if got.Basis != AttendanceNone {
+			t.Fatalf("basis = %q, want none", got.Basis)
 		}
-		if got.Expected == 0 {
-			t.Fatal("expected = 0, want an estimate from the program's day count")
+		if got.Expected != 0 || got.Rate != 0 {
+			t.Fatalf("attendance = %+v, want no invented target", got)
+		}
+		// What it reports instead is a measurement: 10 sessions over ~4.4 weeks.
+		if got.SessionsPerWeek < 2 || got.SessionsPerWeek > 3 {
+			t.Fatalf("sessionsPerWeek = %v, want about 2.3", got.SessionsPerWeek)
 		}
 	})
 
@@ -223,6 +230,26 @@ func TestAttendanceBasis(t *testing.T) {
 		got := attendance(nil, 4, start, end)
 		if got.Basis != AttendanceNone || got.Expected != 0 || got.Actual != 4 {
 			t.Fatalf("attendance = %+v, want none/0/4", got)
+		}
+	})
+
+	// Always populated, so a surface never has to choose between a fake rate and
+	// saying nothing.
+	t.Run("sessions per week is reported even with a schedule", func(t *testing.T) {
+		days := []ProgramDay{{Name: "A", Weekday: &monday}}
+		got := attendance(days, 4, start, end)
+		if got.Basis != AttendanceWeekday {
+			t.Fatalf("basis = %q, want weekday", got.Basis)
+		}
+		if got.SessionsPerWeek <= 0 {
+			t.Fatalf("sessionsPerWeek = %v, want a measurement", got.SessionsPerWeek)
+		}
+	})
+
+	t.Run("an empty period does not divide by zero", func(t *testing.T) {
+		got := attendance(nil, 0, start, start)
+		if got.SessionsPerWeek != 0 {
+			t.Fatalf("sessionsPerWeek = %v, want 0", got.SessionsPerWeek)
 		}
 	})
 }
@@ -341,4 +368,81 @@ func TestBuildEndToEnd(t *testing.T) {
 	if got.Comparison.Count == 0 {
 		t.Fatal("comparison is empty, want an object count")
 	}
+}
+
+// A linear program deloads on purpose, so the last session of a month is
+// systematically the worst one. Judging improvement by it made a lift that gained
+// all month read as a decline.
+func TestMostImprovedSurvivesAnEndOfPeriodDeload(t *testing.T) {
+	var sets []Set
+	// Five sessions climbing 225 → 245, then a deload to 220 — below where the
+	// month began, which is what makes first-versus-last call this a decline.
+	weights := []float64{225, 230, 235, 240, 245, 220}
+	for i, w := range weights {
+		on := day(2026, time.March, 2).AddDate(0, 0, i*3)
+		sets = append(sets, mkSets(int32(i+1), on, 1, "Squat", 1, 5, w)...)
+	}
+
+	got := mostImproved(liftSeries(groupSessions(sets)))
+	if got == nil {
+		t.Fatal("mostImproved = nil; a month of gains ending in a deload still improved")
+	}
+	if got.GainPct <= 0 {
+		t.Fatalf("gain = %v, want positive despite the final deload", got.GainPct)
+	}
+}
+
+// It still reports a decline when the lift genuinely went backwards — the window
+// absorbs one bad session, it does not launder a bad month.
+func TestMostImprovedStillReportsARealDecline(t *testing.T) {
+	var sets []Set
+	for i, w := range []float64{250, 245, 240, 230, 220, 210} {
+		on := day(2026, time.March, 2).AddDate(0, 0, i*3)
+		sets = append(sets, mkSets(int32(i+1), on, 1, "Squat", 1, 5, w)...)
+	}
+	if got := mostImproved(liftSeries(groupSessions(sets))); got != nil {
+		t.Fatalf("mostImproved = %+v, want nil for a lift that only regressed", got)
+	}
+}
+
+func TestEdgeWindowBests(t *testing.T) {
+	pts := func(e1rms ...float64) []SeriesPoint {
+		out := make([]SeriesPoint, 0, len(e1rms))
+		for i, e := range e1rms {
+			out = append(out, SeriesPoint{
+				PerformedOn: day(2026, time.March, 1).AddDate(0, 0, i),
+				E1RMLb:      e,
+			})
+		}
+		return out
+	}
+
+	cases := []struct {
+		name       string
+		points     []SeriesPoint
+		from, want float64
+	}{
+		// Thirds of nine: best of the first three against best of the last three.
+		{"nine sessions", pts(100, 110, 105, 120, 130, 125, 140, 135, 150), 110, 150},
+		// Too few to split, so it is first against last — all the data there is.
+		{"two sessions", pts(100, 120), 100, 120},
+		{"three sessions", pts(100, 130, 120), 100, 120},
+		// Six sessions: windows of two, and the deload in the last slot loses to
+		// the better session beside it.
+		{"six with a trailing deload", pts(100, 105, 120, 130, 140, 90), 105, 140},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			from, to := edgeWindowBests(tc.points)
+			if from != tc.from || to != tc.want {
+				t.Fatalf("edgeWindowBests = %v, %v; want %v, %v", from, to, tc.from, tc.want)
+			}
+		})
+	}
+
+	t.Run("empty", func(t *testing.T) {
+		if from, to := edgeWindowBests(nil); from != 0 || to != 0 {
+			t.Fatalf("edgeWindowBests(nil) = %v, %v; want 0, 0", from, to)
+		}
+	})
 }
