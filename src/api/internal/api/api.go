@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"gitea.homelab/gitadmin/iron-temple/api/internal/auth"
+	"gitea.homelab/gitadmin/iron-temple/api/internal/racked"
 	"gitea.homelab/gitadmin/iron-temple/api/internal/store"
 )
 
@@ -34,6 +35,10 @@ type Server struct {
 	// stored as dates and need no zone; session start times are instants, and
 	// "you are an early riser" is a claim about local mornings.
 	reportLoc *time.Location
+	// mailer delivers the Racked recap. Nil disables the reporter entirely,
+	// which is how tests and local development avoid sending real mail — the
+	// integration suite drives sendDueReports directly instead.
+	mailer *racked.Mailer
 }
 
 // NewServer builds a Server over a pgx connection pool. version and environment
@@ -58,6 +63,12 @@ func (s *Server) SetReportLocation(loc *time.Location) {
 	if loc != nil {
 		s.reportLoc = loc
 	}
+}
+
+// SetMailer gives the server a way to deliver Racked recaps. Until it is
+// called, StartRackedReporter does nothing.
+func (s *Server) SetMailer(m *racked.Mailer) {
+	s.mailer = m
 }
 
 func (s *Server) reportLocation() *time.Location {

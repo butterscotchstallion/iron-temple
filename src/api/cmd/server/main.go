@@ -5,6 +5,10 @@
 //	PORT          (default 8080)
 //	CORS_ORIGIN   (optional)  comma-separated UI origins; empty allows any.
 //	REPORT_TZ     (default UTC) IANA zone the Racked recap reads clock times in.
+//	REPORT_MAIL   (default on outside development) "off" disables the Racked
+//	              recap emails entirely.
+//	MAIL_RELAY    (default the in-cluster relay) endpoint the recap is POSTed to.
+//	REPORT_MAIL_TO (default alerts@homelab.local) recap recipient.
 package main
 
 import (
@@ -16,6 +20,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"strings"
 	"syscall"
 	"time"
 
@@ -30,6 +35,7 @@ import (
 
 	appdb "gitea.homelab/gitadmin/iron-temple/api/db"
 	"gitea.homelab/gitadmin/iron-temple/api/internal/api"
+	"gitea.homelab/gitadmin/iron-temple/api/internal/racked"
 )
 
 func main() {
@@ -102,12 +108,19 @@ func run() error {
 
 	apiSrv := api.NewServer(pool, resolvedVersion(), environment)
 	apiSrv.SetReportLocation(reportLocation())
+	if mailer := reportMailer(environment); mailer != nil {
+		apiSrv.SetMailer(mailer)
+	}
 
 	// Expired login sessions are already ignored by every query; this reaps the
 	// dead rows so the table doesn't grow for the life of the deployment.
 	sweepCtx, stopSweeper := context.WithCancel(ctx)
 	defer stopSweeper()
 	apiSrv.StartSessionSweeper(sweepCtx, time.Hour)
+
+	// The Racked recap. Hourly rather than daily because the tick is a question
+	// ("is a period outstanding?"), not an alarm — see StartRackedReporter.
+	apiSrv.StartRackedReporter(sweepCtx, time.Hour)
 
 	srv := &http.Server{
 		Addr:              ":" + port,
@@ -155,6 +168,27 @@ func reportLocation() *time.Location {
 		return time.UTC
 	}
 	return loc
+}
+
+// reportMailer builds the Racked recap's mail client, or nil to disable recaps.
+//
+// Off by default in development, because `make dev` against a real DATABASE_URL
+// would otherwise mail a recap the first time it ran in a new month — from a
+// laptop, to the shared alerts address. REPORT_MAIL=on opts a local run in;
+// REPORT_MAIL=off opts a deployment out.
+func reportMailer(environment string) *racked.Mailer {
+	setting := strings.ToLower(strings.TrimSpace(os.Getenv("REPORT_MAIL")))
+	enabled := environment != "development"
+	switch setting {
+	case "on", "true", "1":
+		enabled = true
+	case "off", "false", "0":
+		enabled = false
+	}
+	if !enabled {
+		return nil
+	}
+	return racked.NewMailer(os.Getenv("MAIL_RELAY"), os.Getenv("REPORT_MAIL_TO"))
 }
 
 // migrate applies the embedded schema via database/sql (lib/pq), reusing the

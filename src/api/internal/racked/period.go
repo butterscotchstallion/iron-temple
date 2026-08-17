@@ -39,3 +39,51 @@ func PreviousBounds(kind PeriodKind, on time.Time) (time.Time, time.Time) {
 	}
 	return Bounds(kind, start.AddDate(0, 0, -1))
 }
+
+// CatchUpWindow is how late a recap may still be sent.
+//
+// What stops a first deploy mailing years of back-issues is not this window but
+// DuePeriods only ever considering the *most recently* completed month and
+// year: an empty report_runs table means at most two recaps, never a history.
+//
+// In practice the window therefore binds only the annual recap. A month's end
+// is at most 31 days behind any date inside the following month, so the
+// previous month always falls inside 40 days and is always sent if it has not
+// been — which is exactly the resilience wanted, since the API being down over
+// the 1st should delay the recap rather than cancel it. The year is the case
+// that needs a bound: without one, a deployment first started in September
+// would mail a recap of a year that ended nine months earlier.
+const CatchUpWindow = 40 * 24 * time.Hour
+
+// Due is a completed period that a recap is owed for.
+type Due struct {
+	Kind  PeriodKind
+	Start time.Time
+	End   time.Time
+}
+
+// DuePeriods returns the periods a recap is owed for as of now.
+//
+// The reporter asks this question on a ticker rather than waking at midnight on
+// the 1st, which is what makes it survive downtime: a job that misses its
+// instant has missed it, but a question asked every hour gets the right answer
+// the moment the process comes back. Whether a recap has already been sent is
+// not decided here — that is report_runs' job — so this can be a pure function
+// of the clock and stay easy to test at a year boundary.
+//
+// Only the most recently completed month and year are ever considered. On
+// January 1st both are due and two emails go out, which is the specified
+// behaviour.
+func DuePeriods(now time.Time, window time.Duration) []Due {
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+	var due []Due
+	for _, kind := range []PeriodKind{PeriodMonth, PeriodYear} {
+		start, end := PreviousBounds(kind, today)
+		// end is the period's last day; it becomes complete the day after.
+		if today.Sub(end) <= window {
+			due = append(due, Due{Kind: kind, Start: start, End: end})
+		}
+	}
+	return due
+}

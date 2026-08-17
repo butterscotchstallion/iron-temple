@@ -40,6 +40,18 @@ type ProgramDayExercise struct {
 	StartingWeightLb pgtype.Numeric `json:"starting_weight_lb"`
 }
 
+type ReportRun struct {
+	ID          int32              `json:"id"`
+	UserID      int32              `json:"user_id"`
+	PeriodKind  string             `json:"period_kind"`
+	PeriodStart pgtype.Date        `json:"period_start"`
+	Status      string             `json:"status"`
+	Attempts    int32              `json:"attempts"`
+	ClaimedAt   pgtype.Timestamptz `json:"claimed_at"`
+	SentAt      pgtype.Timestamptz `json:"sent_at"`
+	LastError   string             `json:"last_error"`
+}
+
 type Session struct {
 	ID           int32              `json:"id"`
 	ProgramDayID int32              `json:"program_day_id"`
