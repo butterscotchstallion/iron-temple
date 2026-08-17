@@ -3,7 +3,10 @@
   import { getRacked } from "../lib/api";
   import type { RackedReport } from "../lib/api";
   import { Card } from "$lib/components/ui/card";
+  import { Button } from "$lib/components/ui/button";
+  import { auth } from "../lib/auth.svelte";
   import ErrorCard from "../lib/ErrorCard.svelte";
+  import ShareCardDialog from "../lib/ShareCardDialog.svelte";
   import CalendarHeatmap from "../lib/CalendarHeatmap.svelte";
   import LiftTrendChart from "../lib/LiftTrendChart.svelte";
   import LiftVolumeBars from "../lib/LiftVolumeBars.svelte";
@@ -31,10 +34,15 @@
   let report = $state<RackedReport | null>(null);
   let loading = $state(true);
   let failed = $state(false);
+  let sharing = $state(false);
 
   async function load() {
     loading = true;
     failed = false;
+    // A new report invalidates any card drawn from the last one. Without this,
+    // switching period with the dialog open unmounts it while `sharing` stays
+    // true, and it springs back the next time a period has something to share.
+    sharing = false;
     const { data, error } = await getRacked({ query: { period } });
     if (error || !data) {
       failed = true;
@@ -128,25 +136,40 @@
         {report ? report.period.label : "Your training, in review."}
       </p>
     </div>
-    <!-- A radiogroup rather than tabs: it selects which data the page shows,
-         it does not switch between panels that both exist. -->
-    <div class="flex gap-1 rounded-full bg-muted/40 p-1" role="radiogroup" aria-label="Period">
-      {#each [{ id: "month", label: "This month" }, { id: "year", label: "This year" }] as opt (opt.id)}
-        <button
-          type="button"
-          role="radio"
-          aria-checked={period === opt.id}
-          class="rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.15em] transition
-            {period === opt.id
-            ? 'bg-primary text-primary-foreground'
-            : 'text-muted-foreground hover:text-foreground'}"
-          onclick={() => show(opt.id as Period)}
-        >
-          {opt.label}
-        </button>
-      {/each}
+    <div class="flex items-center gap-2">
+      <!-- A radiogroup rather than tabs: it selects which data the page shows,
+           it does not switch between panels that both exist. -->
+      <div class="flex gap-1 rounded-full bg-muted/40 p-1" role="radiogroup" aria-label="Period">
+        {#each [{ id: "month", label: "This month" }, { id: "year", label: "This year" }] as opt (opt.id)}
+          <button
+            type="button"
+            role="radio"
+            aria-checked={period === opt.id}
+            class="rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.15em] transition
+              {period === opt.id
+              ? 'bg-primary text-primary-foreground'
+              : 'text-muted-foreground hover:text-foreground'}"
+            onclick={() => show(opt.id as Period)}
+          >
+            {opt.label}
+          </button>
+        {/each}
+      </div>
+      <!-- Only where there is something to share. A period with no sessions
+           renders the empty card below, and a picture of it says nothing. -->
+      {#if report && hasSessions}
+        <Button variant="outline" size="sm" onclick={() => (sharing = true)}>Share</Button>
+      {/if}
     </div>
   </header>
+
+  {#if report && hasSessions}
+    <ShareCardDialog
+      bind:open={sharing}
+      {report}
+      displayName={auth.me?.displayName ?? ""}
+    />
+  {/if}
 
   {#if loading}
     <Card class="h-40 animate-pulse" aria-hidden="true"></Card>

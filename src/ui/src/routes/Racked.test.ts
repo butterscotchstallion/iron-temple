@@ -256,6 +256,43 @@ describe("Racked", () => {
       expect(getRacked).toHaveBeenLastCalledWith({ query: { period: "year" } }),
     );
   });
+
+  it("offers the recap as an image once there is something to show", async () => {
+    getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
+    render(Racked);
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Share" })).toBeInTheDocument(),
+    );
+  });
+
+  // A picture of the "nothing logged" card says nothing, and the page already
+  // hides every statistic behind the same condition.
+  it("offers nothing to share from a period with no sessions", async () => {
+    getRacked.mockResolvedValue({ data: emptyReport(), error: undefined });
+    render(Racked);
+
+    await waitFor(() =>
+      expect(screen.getByText(/Nothing logged in March 2026/)).toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("button", { name: "Share" })).not.toBeInTheDocument();
+  });
+
+  // jsdom has no 2D context, so this exercises the branch a browser reaches
+  // only with canvas disabled: the dialog opens, says it could not draw the
+  // card, and leaves the page standing.
+  it("opens the share dialog and survives a canvas it cannot draw on", async () => {
+    getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
+    render(Racked);
+
+    await waitFor(() => screen.getByRole("button", { name: "Share" }));
+    screen.getByRole("button", { name: "Share" }).click();
+
+    await waitFor(() =>
+      expect(screen.getByText("Couldn't draw the card.")).toBeInTheDocument(),
+    );
+    expect(screen.getByRole("heading", { name: "Racked" })).toBeInTheDocument();
+  });
 });
 
 // Two sessions of the same lift on one day is ordinary — a morning and an
