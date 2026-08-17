@@ -327,3 +327,76 @@ func TestAttendanceHasNoRateBeforeTheFirstScheduledDay(t *testing.T) {
 		t.Fatal("SessionsPerWeek must still be reported")
 	}
 }
+
+// Two finished periods are compared whole against whole, however unequal their
+// lengths.
+//
+// The elapsed cut exists for a period still running. Applying it unconditionally
+// trimmed the preceding period to *this* period's day count, so a completed
+// February compared against the first 28 days of January and quietly dropped the
+// 29th to the 31st — and April against 30 days of March, and a common year
+// against 365 days of a leap year. That ran through the reporter, so the recap
+// email's headline was wrong too.
+func TestCompletedPeriodComparesAgainstTheWholePrecedingPeriod(t *testing.T) {
+	start, end := Bounds(PeriodMonth, day(2026, time.February, 10))
+	prevStart, _ := PreviousBounds(PeriodMonth, day(2026, time.February, 10))
+
+	// January's work is split either side of February's length: the second
+	// session falls on the 30th, which is past any 28-day cut.
+	previous := append(
+		mkSets(10, day(2026, time.January, 15), 1, "Squat", 5, 5, 100),
+		mkSets(11, day(2026, time.January, 30), 1, "Squat", 5, 5, 100)...,
+	)
+	// February moves exactly what January did, in one session.
+	current := mkSets(1, day(2026, time.February, 10), 1, "Squat", 5, 5, 200)
+
+	rep := Build(Input{
+		Kind: PeriodMonth, Start: start, End: end,
+		AsOf:         day(2026, time.March, 5),
+		Sets:         current,
+		PreviousSets: previous,
+		// Set exactly as the API sets it, which is what made this reachable.
+		PreviousStart: prevStart,
+	})
+
+	if rep.Period.InProgress {
+		t.Fatal("InProgress = true for a month that has ended")
+	}
+	if rep.Change == nil || rep.Change.VolumePct == nil {
+		t.Fatalf("Change = %+v, want a volume percentage", rep.Change)
+	}
+	// 5,000 lb against January's whole 5,000. Cutting January at the 28th would
+	// leave 2,500 and report a doubling.
+	if *rep.Change.VolumePct != 0 {
+		t.Fatalf("VolumePct = %v, want 0 — January counts to the 31st",
+			*rep.Change.VolumePct)
+	}
+}
+
+// The same, a year at a time: 2026 has 365 days and 2024 had 366, so a cut
+// sized by the current period dropped the last day of the leap year.
+func TestCompletedYearComparesAgainstTheWholePrecedingYear(t *testing.T) {
+	start, end := Bounds(PeriodYear, day(2025, time.June, 1))
+	prevStart, _ := PreviousBounds(PeriodYear, day(2025, time.June, 1))
+
+	previous := append(
+		mkSets(10, day(2024, time.June, 1), 1, "Squat", 5, 5, 100),
+		mkSets(11, day(2024, time.December, 31), 1, "Squat", 5, 5, 100)...,
+	)
+	current := mkSets(1, day(2025, time.June, 1), 1, "Squat", 5, 5, 200)
+
+	rep := Build(Input{
+		Kind: PeriodYear, Start: start, End: end,
+		AsOf:          day(2026, time.January, 5),
+		Sets:          current,
+		PreviousSets:  previous,
+		PreviousStart: prevStart,
+	})
+
+	if rep.Change == nil || rep.Change.VolumePct == nil {
+		t.Fatalf("Change = %+v, want a volume percentage", rep.Change)
+	}
+	if *rep.Change.VolumePct != 0 {
+		t.Fatalf("VolumePct = %v, want 0 — 31 December 2024 counts", *rep.Change.VolumePct)
+	}
+}

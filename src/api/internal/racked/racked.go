@@ -366,12 +366,22 @@ func Build(in Input) Report {
 	fillWeekdays(&rep, sessions)
 	fillHours(&rep, sessions, in.Loc)
 
-	// The comparison is cut to the same number of days as has elapsed here, so
-	// three days of March are weighed against the first three days of February
-	// rather than the whole of it. Comparing a part-month against a whole one
-	// reported a collapse in volume every month, correcting itself only on the
-	// last day.
-	previous := elapsedSets(in.PreviousSets, in.PreviousStart, daysBetween(in.Start, measuredTo))
+	// While the period runs, the comparison is cut to the same number of days as
+	// has elapsed here, so three days of March are weighed against the first
+	// three days of February rather than the whole of it. Comparing a part-month
+	// against a whole one reported a collapse in volume every month, correcting
+	// itself only on the last day.
+	//
+	// Only while it runs. Two finished periods are compared whole against whole,
+	// however unequal their lengths — cutting unconditionally trimmed the
+	// preceding period to this one's day count, so a completed February dropped
+	// the 29th to the 31st of January, April dropped the 31st of March, and a
+	// common year dropped the last day of a leap year. That path is the one the
+	// recap email takes.
+	previous := in.PreviousSets
+	if inProgress {
+		previous = elapsedSets(previous, in.PreviousStart, daysBetween(in.Start, measuredTo))
+	}
 	if prev := totals(previous, groupSessions(previous)); prev.Sessions > 0 {
 		rep.Change = change(rep.Totals, prev)
 	}
