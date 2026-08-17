@@ -118,8 +118,14 @@ function px(value: string, fallback: number): number {
  */
 function stubPainter() {
   const texts: string[] = [];
-  const drawn: { text: string; x: number; y: number; width: number; align: CanvasTextAlign }[] =
-    [];
+  const drawn: {
+    text: string;
+    x: number;
+    y: number;
+    width: number;
+    size: number;
+    align: CanvasTextAlign;
+  }[] = [];
   const fills: { x: number; y: number; w: number; h: number }[] = [];
 
   const width = (text: string) =>
@@ -133,7 +139,14 @@ function stubPainter() {
     letterSpacing: "0px",
     fillText: (text: string, x: number, y: number) => {
       texts.push(text);
-      drawn.push({ text, x, y, width: width(text), align: ctx.textAlign });
+      drawn.push({
+        text,
+        x,
+        y,
+        width: width(text),
+        size: px(ctx.font, 16),
+        align: ctx.textAlign,
+      });
     },
     measureText: (text: string) => ({ width: width(text) }),
     fillRect: (x: number, y: number, w: number, h: number) => void fills.push({ x, y, w, h }),
@@ -439,6 +452,33 @@ describe("paintShareCard", () => {
       expect.soft(rect.x + rect.w).toBeLessThanOrEqual(SHARE_CARD.width - SHARE_CARD.pad);
       expect.soft(rect.y + rect.h).toBeLessThanOrEqual(SHARE_CARD.height);
     }
+  });
+
+  // The archetype panel closed the same padding under its description as above
+  // its title only by coincidence of two numbers kept in different places, and
+  // for a while it did not: 22px above, 4px below. Both now come from PANEL, and
+  // this is what says so.
+  it("pads the lifter type panel evenly, top and bottom", () => {
+    const { ctx, drawn, fills } = stubPainter();
+    paintShareCard(ctx, shareCardContent(fullReport()));
+
+    // The first full-width fill after the background. The footer rule is also
+    // full width, hence the height condition — it is two pixels tall.
+    const panel = fills
+      .slice(1)
+      .find(
+        (r) =>
+          r.x === SHARE_CARD.pad && r.w === SHARE_CARD.width - SHARE_CARD.pad * 2 && r.h > 10,
+      )!;
+    expect(panel).toBeDefined();
+
+    const title = drawn.find((d) => d.text === "YOUR LIFTER TYPE")!;
+    const description = drawn.find((d) => d.text === "Long sessions, no rush.")!;
+
+    const above = title.y - panel.y;
+    const below = panel.y + panel.h - (description.y + description.size);
+    expect(above).toBeGreaterThan(0);
+    expect(below).toBe(above);
   });
 
   // A lift with no volume against a heaviest of zero is a zero-width bar, not a
