@@ -295,12 +295,15 @@
     </Card>
 
     <section class="grid gap-4 sm:grid-cols-2">
-      <Card class="p-4" data-testid="stat-best-weekday">
+      <Card class="p-4">
         <h3 class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
           Most productive day
         </h3>
         {#if report.bestWeekday >= 0}
-          <p class="mb-2 text-lg font-black text-foreground">
+          <!-- The testid is on the value itself, not the card: the card also
+               contains this chart's data table, where every weekday appears as a
+               row header. -->
+          <p class="mb-2 text-lg font-black text-foreground" data-testid="best-weekday">
             {WEEKDAYS[report.bestWeekday]}
           </p>
         {/if}
