@@ -485,7 +485,13 @@ test("toggles the changelog when the header version is clicked", async ({ page }
 // that the page renders the report faithfully — not that the statistics are
 // right, which is internal/racked's own test suite.
 const rackedMarch = {
-  period: { kind: "month", start: "2026-03-01", end: "2026-03-31", label: "March 2026" },
+  period: {
+    kind: "month",
+    start: "2026-03-01",
+    end: "2026-03-31",
+    label: "March 2026",
+    inProgress: false,
+  },
   totals: { volumeLb: 84000, sessions: 12, sets: 180, reps: 900 },
   change: { volumeLb: 9000, volumePct: 0.12, sessions: 2, sessionsPct: 0.2 },
   comparison: { count: 3, label: "school buses", unitLb: 24000 },
@@ -526,6 +532,7 @@ const rackedMarch = {
   weekdays: [0, 42000, 0, 30000, 0, 12000, 0],
   bestWeekday: 1,
   hours: Array.from({ length: 24 }, (_, h) => (h === 6 ? 9 : h === 18 ? 3 : 0)),
+  peakHour: 6,
   hourLabel: "Early bird",
   streak: { longestWeeks: 5, currentWeeks: 3 },
   attendance: { basis: "none", expected: 0, actual: 12, rate: 0, sessionsPerWeek: 2.75 },

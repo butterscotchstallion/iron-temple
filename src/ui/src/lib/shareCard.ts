@@ -109,9 +109,16 @@ export function shareCardContent(
   // The API sends volumePct as null when the previous period moved no weight,
   // because growth from zero is not a ratio — so this asks for the field, not
   // just for the change object.
+  //
+  // While the period is still running the report compares the days elapsed
+  // against the same stretch of the period before, so the card says which. "On
+  // the previous month" would be a claim about two whole months, and one of
+  // them is three days old.
   const pct = report.change?.volumePct;
-  const change =
-    pct != null ? `${formatDelta(pct)} on the previous ${report.period.kind}` : null;
+  const against = report.period.inProgress
+    ? `the same point last ${report.period.kind}`
+    : `the previous ${report.period.kind}`;
+  const change = pct != null ? `${formatDelta(pct)} on ${against}` : null;
 
   // Heaviest first, server-side (sortLifts, internal/racked/racked.go), so the
   // top five here are the five the lifter spent the period on — and the same

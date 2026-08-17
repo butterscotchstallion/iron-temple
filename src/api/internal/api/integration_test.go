@@ -565,6 +565,90 @@ func TestRackedEmptyPeriodIsAValidReport(t *testing.T) {
 	rep.Value("comparison").Object().HasValue("count", 0)
 }
 
+// The audit fixes, checked where they cross the wire rather than only in
+// internal/racked: these are the fields the page reads, and a report that is
+// right in Go and absent from the JSON is still wrong on screen.
+
+// 1970 has ended, so its recap is measured over the whole of itself. The
+// default view is the month in progress and must say so, because every rate in
+// it is then measured over the days elapsed.
+func TestRackedFlagsThePeriodInProgress(t *testing.T) {
+	e := expect(t)
+
+	past := e.GET("/racked").WithQuery("on", "1970-01-15").
+		Expect().Status(http.StatusOK).JSON().Object()
+	past.Value("period").Object().HasValue("inProgress", false)
+
+	current := e.GET("/racked").Expect().Status(http.StatusOK).JSON().Object()
+	current.Value("period").Object().HasValue("inProgress", true)
+}
+
+// peakHour is published so the page accents the bar hourLabel names instead of
+// breaking a tie its own way.
+func TestRackedPublishesThePeakHour(t *testing.T) {
+	e := expect(t)
+
+	empty := e.GET("/racked").WithQuery("on", "1970-01-15").
+		Expect().Status(http.StatusOK).JSON().Object()
+	empty.HasValue("peakHour", -1).HasValue("hourLabel", "")
+
+	_, dayID := firstProgramAndDay(e)
+	created := startSession(t, e, dayID)
+	sessionID := int(created.Value("id").Number().Raw())
+	set := created.Value("sets").Array().Value(0).Object()
+	logSet(e, sessionID, int(set.Value("id").Number().Raw()), 1, true)
+
+	rep := e.GET("/racked").Expect().Status(http.StatusOK).JSON().Object()
+	peak := int(rep.Value("peakHour").Number().Raw())
+	if peak < 0 || peak > 23 {
+		t.Fatalf("peakHour = %d, want an hour of the day", peak)
+	}
+	// The label describes that hour and nothing else, so one implies the other.
+	rep.Value("hourLabel").String().NotEmpty()
+	rep.Value("hours").Array().Value(peak).Number().Gt(0)
+}
+
+// A single is worth what was on the bar. The estimate travels through the
+// baseline query as well as through Go, so this pins the pair of them.
+func TestRackedEstimatedMaxOfASingleIsTheWeight(t *testing.T) {
+	e := expect(t)
+	_, dayID := firstProgramAndDay(e)
+
+	created := startSession(t, e, dayID)
+	sessionID := int(created.Value("id").Number().Raw())
+	set := created.Value("sets").Array().Value(0).Object()
+	exerciseID := int(set.Value("exerciseId").Number().Raw())
+
+	// Heavier than anything else the suite logs, so this set owns the series.
+	const single = 1235.0
+	logSetAt(e, sessionID, int(set.Value("id").Number().Raw()), 1, single, true)
+
+	series := e.GET("/racked").Expect().Status(http.StatusOK).
+		JSON().Object().Value("series").Array()
+
+	var checked bool
+	for i := 0; i < int(series.Length().Raw()); i++ {
+		lift := series.Value(i).Object()
+		if int(lift.Value("exerciseId").Number().Raw()) != exerciseID {
+			continue
+		}
+		points := lift.Value("points").Array()
+		for j := 0; j < int(points.Length().Raw()); j++ {
+			p := points.Value(j).Object()
+			if p.Value("topWeightLb").Number().Raw() != single {
+				continue
+			}
+			// Epley would have made this 1275.6 — an estimate above the number
+			// it is estimating.
+			p.HasValue("e1rmLb", single)
+			checked = true
+		}
+	}
+	if !checked {
+		t.Fatalf("no series point at %v lb to check", single)
+	}
+}
+
 func TestRackedYearPeriod(t *testing.T) {
 	e := expect(t)
 	e.GET("/racked").WithQuery("period", "year").WithQuery("on", "1970-06-15").
@@ -745,6 +829,46 @@ func TestRackedEstimatedMaxBaselineRoundsLikeGo(t *testing.T) {
 		if pr.Value("weightLb").Number().Raw() == weight {
 			t.Fatalf("repeating %v lb x %d was reported as a %s record",
 				weight, reps, pr.Value("kind").String().Raw())
+		}
+	}
+}
+
+// The same regression for a single, which is the branch the baseline query grew
+// a CASE for. Go stopped applying Epley at one rep; had the query kept applying
+// it, the stored baseline would sit a thirtieth above every in-period estimate
+// and repeating an identical single would never clear it — the record would
+// simply stop being reported. Pulling the same weight twice is not a record and
+// not a silence: it is one weight record the first time and nothing after.
+func TestRackedSingleBaselineAgreesWithGo(t *testing.T) {
+	e := expect(t)
+	_, dayID := firstProgramAndDay(e)
+
+	// Heavier than anything else the suite logs, so the history is this test's.
+	const weight = 1111.0
+	lastMonth := time.Now().UTC().AddDate(0, 0, -1-time.Now().UTC().Day())
+
+	past := startSession(t, e, dayID)
+	pastID := int(past.Value("id").Number().Raw())
+	pastSet := past.Value("sets").Array().Value(0).Object()
+	exerciseID := int(pastSet.Value("exerciseId").Number().Raw())
+	logSetAt(e, pastID, int(pastSet.Value("id").Number().Raw()), 1, weight, true)
+	backdatePerformedOn(t, pastID, lastMonth)
+
+	now := startSession(t, e, dayID)
+	nowID := int(now.Value("id").Number().Raw())
+	nowSet := now.Value("sets").Array().Value(0).Object()
+	logSetAt(e, nowID, int(nowSet.Value("id").Number().Raw()), 1, weight, true)
+
+	prs := e.GET("/racked").Expect().Status(http.StatusOK).
+		JSON().Object().Value("prs").Array()
+	for i := 0; i < int(prs.Length().Raw()); i++ {
+		pr := prs.Value(i).Object()
+		if int(pr.Value("exerciseId").Number().Raw()) != exerciseID {
+			continue
+		}
+		if pr.Value("weightLb").Number().Raw() == weight {
+			t.Fatalf("repeating a %v lb single was reported as a %s record",
+				weight, pr.Value("kind").String().Raw())
 		}
 	}
 }

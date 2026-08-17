@@ -214,7 +214,10 @@ type rackedReportDTO struct {
 	Weekdays    []float64 `json:"weekdays"`
 	BestWeekday int       `json:"bestWeekday"`
 	Hours       []int     `json:"hours"`
-	HourLabel   string    `json:"hourLabel"`
+	// PeakHour is the hour hourLabel describes, so a surface accents the same
+	// bar the label names instead of picking its own out of a tie.
+	PeakHour  int    `json:"peakHour"`
+	HourLabel string `json:"hourLabel"`
 
 	Streak     rackedStreakDTO      `json:"streak"`
 	Attendance rackedAttendanceDTO  `json:"attendance"`
@@ -234,6 +237,10 @@ type rackedPeriodDTO struct {
 	Start string `json:"start"`
 	End   string `json:"end"`
 	Label string `json:"label"`
+	// InProgress is true while the period is still running. Every rate in the
+	// report is then measured over the days so far, and the comparison against
+	// the preceding period covers the same stretch of it.
+	InProgress bool `json:"inProgress"`
 }
 
 type rackedTotalsDTO struct {

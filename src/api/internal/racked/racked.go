@@ -61,9 +61,18 @@ func (s Set) VolumeLb() float64 { return float64(s.Reps) * s.WeightLb }
 
 // E1RM estimates a one-rep max by the Epley formula, rounded to the pound —
 // the same calculation as estimateOneRepMax in the UI.
+//
+// A single is worth exactly what was on the bar. Epley is an extrapolation from
+// a set carried past one rep, and applying it at one rep estimates a number that
+// needs no estimating: it returned weight * 31/30, so a lifter who pulled a
+// genuine 225 single was credited with 233. Worse, it ordered the two wrongly —
+// 225x1 estimated above 225x2, when the second is plainly the harder set.
 func (s Set) E1RM() float64 {
 	if s.WeightLb <= 0 || s.Reps <= 0 {
 		return 0
+	}
+	if s.Reps == 1 {
+		return math.Round(s.WeightLb)
 	}
 	return math.Round(s.WeightLb * (1 + float64(s.Reps)/30))
 }
@@ -86,30 +95,51 @@ type ProgramDay struct {
 
 // Input is everything Build needs. Start and End are inclusive date bounds.
 type Input struct {
-	Kind         PeriodKind
-	Start        time.Time
-	End          time.Time
-	Loc          *time.Location
-	Sets         []Set
+	Kind  PeriodKind
+	Start time.Time
+	End   time.Time
+	// AsOf is the date the recap is drawn up on. It matters only when it falls
+	// inside the period: the page opens on the month in progress, and every rate
+	// in the report divides by a window, so a window that runs to the end of a
+	// month barely started measures a lifter against days they have not reached.
+	// The zero value means "the period as a whole", which is what a completed
+	// month is and what the recap email always sends.
+	AsOf time.Time
+	Loc  *time.Location
+	Sets []Set
+	// PreviousSets is the preceding period, for the headline comparison.
 	PreviousSets []Set
-	Baseline     Baseline
-	ProgramDays  []ProgramDay
+	// PreviousStart anchors that period so it can be cut to the same number of
+	// elapsed days as this one. Zero disables the cut and compares whole periods.
+	PreviousStart time.Time
+	Baseline      Baseline
+	ProgramDays   []ProgramDay
+	// ProgramStarted is when the program in ProgramDays came into existence.
+	// A program younger than the period cannot have set its schedule, so
+	// attendance refuses to grade against it. Zero means "always existed".
+	ProgramStarted time.Time
 }
 
 // Report is the whole recap.
 type Report struct {
-	Period         Period
-	Totals         Totals
-	Change         *Change
-	Comparison     Comparison
-	Lifts          []LiftSlice
-	Series         []LiftSeries
-	MostImproved   *Improvement
-	Days           []DayVolume
-	Weekdays       []float64
-	BestWeekday    int
-	Hours          []int
-	HourLabel      string
+	Period       Period
+	Totals       Totals
+	Change       *Change
+	Comparison   Comparison
+	Lifts        []LiftSlice
+	Series       []LiftSeries
+	MostImproved *Improvement
+	Days         []DayVolume
+	Weekdays     []float64
+	BestWeekday  int
+	Hours        []int
+	HourLabel    string
+	// PeakHour is the hour of day the lifter started most sessions in, or -1
+	// when none of them carry a start time. Published rather than left for each
+	// surface to work out: two readers of the same Hours array picked different
+	// hours out of a tie, so the page highlighted one bar while the label named
+	// another.
+	PeakHour       int
 	Streak         Streak
 	Attendance     Attendance
 	PRs            []PR
@@ -126,6 +156,11 @@ type Period struct {
 	Start time.Time
 	End   time.Time
 	Label string
+	// InProgress is true when the period has not finished yet, which is the
+	// default view. Every rate in the report is then measured over the days so
+	// far, and the surfaces say so rather than presenting a part-month as a
+	// whole one.
+	InProgress bool
 }
 
 // Totals are the headline counters.
@@ -292,12 +327,19 @@ func Build(in Input) Report {
 	}
 	sessions := groupSessions(in.Sets)
 
+	// Everything measured as a rate uses this rather than in.End: the days of
+	// the period that have actually happened. For a finished period the two are
+	// the same, which is why a zero AsOf changes nothing.
+	measuredTo := measuredEnd(in.End, in.AsOf)
+	inProgress := measuredTo.Before(in.End)
+
 	rep := Report{
 		Period: Period{
-			Kind:  in.Kind,
-			Start: in.Start,
-			End:   in.End,
-			Label: periodLabel(in.Kind, in.Start),
+			Kind:       in.Kind,
+			Start:      in.Start,
+			End:        in.End,
+			Label:      periodLabel(in.Kind, in.Start),
+			InProgress: inProgress,
 		},
 		Totals:      totals(in.Sets, sessions),
 		Lifts:       liftSlices(in.Sets),
@@ -316,16 +358,59 @@ func Build(in Input) Report {
 	rep.MostImproved = mostImproved(rep.Series)
 	rep.HeaviestSet = heaviestSet(in.Sets)
 	rep.FastestSession = fastestSession(sessions)
-	rep.Attendance = attendance(in.ProgramDays, len(sessions), in.Start, in.End)
-	rep.Archetype = archetype(sessions, in.Start, in.End)
+	rep.Attendance = attendance(
+		in.ProgramDays, in.ProgramStarted, len(sessions), in.Start, measuredTo,
+	)
+	rep.Archetype = archetype(sessions, in.Start, measuredTo)
 
 	fillWeekdays(&rep, sessions)
 	fillHours(&rep, sessions, in.Loc)
 
-	if prev := totals(in.PreviousSets, groupSessions(in.PreviousSets)); prev.Sessions > 0 {
+	// The comparison is cut to the same number of days as has elapsed here, so
+	// three days of March are weighed against the first three days of February
+	// rather than the whole of it. Comparing a part-month against a whole one
+	// reported a collapse in volume every month, correcting itself only on the
+	// last day.
+	previous := elapsedSets(in.PreviousSets, in.PreviousStart, daysBetween(in.Start, measuredTo))
+	if prev := totals(previous, groupSessions(previous)); prev.Sessions > 0 {
 		rep.Change = change(rep.Totals, prev)
 	}
 	return rep
+}
+
+// measuredEnd is the last day of the period that has actually happened.
+func measuredEnd(end, asOf time.Time) time.Time {
+	if asOf.IsZero() || !asOf.Before(end) {
+		return end
+	}
+	return asOf
+}
+
+// daysBetween counts the inclusive span between two dates, never less than one.
+func daysBetween(start, end time.Time) int {
+	days := int(end.Sub(start).Hours()/24) + 1
+	if days < 1 {
+		return 1
+	}
+	return days
+}
+
+// elapsedSets keeps only the first `days` days of a period, so the preceding
+// period can be compared against the same stretch of calendar as this one.
+// A zero start means the caller has nothing to anchor against and wants the
+// period whole.
+func elapsedSets(sets []Set, start time.Time, days int) []Set {
+	if start.IsZero() || len(sets) == 0 {
+		return sets
+	}
+	cutoff := start.AddDate(0, 0, days-1)
+	out := make([]Set, 0, len(sets))
+	for _, s := range sets {
+		if !s.PerformedOn.After(cutoff) {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // session is a period's sets regrouped by the session that produced them.
@@ -614,18 +699,26 @@ func fillWeekdays(rep *Report, sessions []session) {
 // moment the session row was created, which is the moment they started it in
 // the app — a proxy, but the only one the schema carries.
 func fillHours(rep *Report, sessions []session, loc *time.Location) {
-	modal, modalCount := -1, 0
 	for _, s := range sessions {
 		if s.StartedAt.IsZero() {
 			continue
 		}
-		h := s.StartedAt.In(loc).Hour()
-		rep.Hours[h]++
-		if rep.Hours[h] > modalCount {
-			modal, modalCount = h, rep.Hours[h]
+		rep.Hours[s.StartedAt.In(loc).Hour()]++
+	}
+
+	// Counted first, then read — so a tie goes to the earlier hour rather than
+	// to whichever hour happened to reach the count first as the sessions were
+	// walked. That order was invisible in the data and disagreed with how the
+	// page picked the bar to accent, putting "Evening lifter" over a highlighted
+	// six in the morning.
+	rep.PeakHour = -1
+	best := 0
+	for h, count := range rep.Hours {
+		if count > best {
+			best, rep.PeakHour = count, h
 		}
 	}
-	rep.HourLabel = hourLabel(modal)
+	rep.HourLabel = hourLabel(rep.PeakHour)
 }
 
 func hourLabel(hour int) string {
@@ -695,32 +788,55 @@ func streak(sessions []session) Streak {
 // that is the only case where a denominator exists rather than being guessed at.
 // Everything else reports SessionsPerWeek, which is a measurement rather than a
 // score, and is the same figure the archetype already reasons about.
-func attendance(days []ProgramDay, actual int, start, end time.Time) Attendance {
+// end is the last day measured, which for a period still running is today
+// rather than the period's final date.
+//
+// programStarted guards against grading a period the program did not exist for.
+// It is a partial guard by necessity: nothing records which program was current
+// in a given month, only when each program was created, so a lifter who moved
+// between two long-standing programs is still measured against the one they
+// happen to be running now. Catching the newer-program case is what is available
+// without a history table, and it is the case that actually arises — a lifter
+// who switches usually switches to something new.
+func attendance(
+	days []ProgramDay, programStarted time.Time, actual int, start, end time.Time,
+) Attendance {
 	a := Attendance{
 		Basis:           AttendanceNone,
 		Actual:          actual,
 		SessionsPerWeek: float64(actual) / weeksBetween(start, end),
 	}
 
-	scheduled := map[int]bool{}
+	if !programStarted.IsZero() && programStarted.After(start) {
+		return a
+	}
+
+	// Counted, not collected: a program running two different days on a Monday
+	// asks for two Monday sessions. Deduping the weekdays into a set quietly
+	// lowered the target for exactly the lifters doing the most work.
+	scheduled := map[int]int{}
 	for _, d := range days {
 		if d.Weekday != nil {
-			scheduled[*d.Weekday] = true
+			scheduled[*d.Weekday]++
 		}
 	}
 	if len(scheduled) == 0 {
 		return a
 	}
 
-	a.Basis = AttendanceWeekday
 	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
-		if scheduled[int(d.Weekday())] {
-			a.Expected++
-		}
+		a.Expected += scheduled[int(d.Weekday())]
 	}
-	if a.Expected > 0 {
-		a.Rate = float64(a.Actual) / float64(a.Expected)
+	// No scheduled day has come round yet — the first days of a month that opens
+	// mid-week, or a period asked for before it begins. A rate out of nothing is
+	// not a rate, so this stays on the measured frequency until there is a real
+	// denominator.
+	if a.Expected == 0 {
+		return a
 	}
+
+	a.Basis = AttendanceWeekday
+	a.Rate = float64(a.Actual) / float64(a.Expected)
 	return a
 }
 
