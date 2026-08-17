@@ -329,13 +329,26 @@ function line(
   text: string,
   x: number,
   y: number,
-  opts: { font: string; fill: string; align?: CanvasTextAlign; spacing?: string },
+  opts: {
+    font: string;
+    fill: string;
+    align?: CanvasTextAlign;
+    spacing?: string;
+    /** Truncate to this width. Measured in this line's own font, not the last one's. */
+    max?: number;
+  },
 ): void {
   ctx.font = opts.font;
   ctx.fillStyle = opts.fill;
   ctx.textAlign = opts.align ?? "left";
   ctx.letterSpacing = opts.spacing ?? "0px";
-  ctx.fillText(text, x, y);
+  // Truncation happens here, after the font and letter spacing are set, and
+  // never at the call site. Passing fitText(ctx, …) as an argument would run it
+  // before this function set the font, so every string would be measured in
+  // whichever font the previous line happened to leave behind — the comparison
+  // line measured at the headline's 96px and drawn at 30px, and so on down the
+  // card. Keeping the two together makes that ordering impossible to get wrong.
+  ctx.fillText(opts.max ? fitText(ctx, text, opts.max) : text, x, y);
   ctx.letterSpacing = "0px";
 }
 
@@ -400,9 +413,10 @@ function paintHeader(ctx: Painter, content: ShareCardContent, top: number): void
   });
   y += M.eyebrow;
 
-  line(ctx, fitText(ctx, content.lede, SHARE_CARD.width - pad * 2), pad, y, {
+  line(ctx, content.lede, pad, y, {
     font: font(400, 30),
     fill: SHARE_CARD.muted,
+    max: SHARE_CARD.width - pad * 2,
   });
   y += M.lede;
 
@@ -410,9 +424,10 @@ function paintHeader(ctx: Painter, content: ShareCardContent, top: number): void
   y += M.headline;
 
   if (content.comparison) {
-    line(ctx, fitText(ctx, content.comparison, SHARE_CARD.width - pad * 2), pad, y, {
+    line(ctx, content.comparison, pad, y, {
       font: font(400, 30),
       fill: SHARE_CARD.text,
+      max: SHARE_CARD.width - pad * 2,
     });
     y += M.comparison;
   }
@@ -437,13 +452,15 @@ function paintArchetype(ctx: Painter, content: ShareCardContent, top: number): v
     fill: SHARE_CARD.muted,
     spacing: "4px",
   });
-  line(ctx, fitText(ctx, content.archetype.name, inner - 64), pad + 32, top + 50, {
+  line(ctx, content.archetype.name, pad + 32, top + 50, {
     font: font(800, 34),
     fill: SHARE_CARD.white,
+    max: inner - 64,
   });
-  line(ctx, fitText(ctx, content.archetype.description, inner - 64), pad + 32, top + 92, {
+  line(ctx, content.archetype.description, pad + 32, top + 92, {
     font: font(400, 22),
     fill: SHARE_CARD.text,
+    max: inner - 64,
   });
 }
 
@@ -487,9 +504,10 @@ function paintLifts(ctx: Painter, content: ShareCardContent, top: number): void 
   content.lifts.forEach((lift, i) => {
     const y = top + M.sectionTitle + i * M.liftRow;
 
-    line(ctx, fitText(ctx, lift.name, nameWidth), pad, y + 6, {
+    line(ctx, lift.name, pad, y + 6, {
       font: font(600, 26),
       fill: SHARE_CARD.white,
+      max: nameWidth,
     });
 
     ctx.fillStyle = SHARE_CARD.track;
@@ -521,10 +539,11 @@ function paintMoments(ctx: Painter, content: ShareCardContent, top: number): voi
   content.moments.forEach((moment, i) => {
     const y = top + M.sectionTitle + i * M.momentRow;
     line(ctx, moment.label, pad, y, { font: font(400, 26), fill: SHARE_CARD.muted });
-    line(ctx, fitText(ctx, moment.value, 560), right, y, {
+    line(ctx, moment.value, right, y, {
       font: font(600, 26),
       fill: SHARE_CARD.white,
       align: "right",
+      max: 560,
     });
   });
 }

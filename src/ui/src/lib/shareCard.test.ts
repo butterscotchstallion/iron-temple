@@ -98,16 +98,33 @@ function fullReport(): RackedReport {
   };
 }
 
+/** A glyph's average width as a fraction of the font size. Inter, eyeballed. */
+const GLYPH = 0.55;
+
+function px(value: string, fallback: number): number {
+  return Number(/(-?\d+(?:\.\d+)?)px/.exec(value)?.[1] ?? fallback);
+}
+
 /**
- * A recording stand-in for a canvas context. measureText charges a flat width
- * per character, which is wrong in the way every monospace approximation is
- * wrong and right in the only way fitText cares about: longer strings measure
- * wider.
+ * A recording stand-in for a canvas context.
+ *
+ * measureText scales with the font that is currently set, which is the whole
+ * point of it. A stub that charged a flat width per character — as this one used
+ * to — cannot tell a string measured at 96px from the same string measured at
+ * 30px, and so cannot see the bug where text is measured in whatever font the
+ * previous line left behind and drawn in another. Proportional-to-font-size is
+ * still an approximation, but it is wrong by a constant factor rather than wrong
+ * about which font was in effect.
  */
 function stubPainter() {
   const texts: string[] = [];
-  const drawn: { text: string; x: number; y: number }[] = [];
+  const drawn: { text: string; x: number; y: number; width: number; align: CanvasTextAlign }[] =
+    [];
   const fills: { x: number; y: number; w: number; h: number }[] = [];
+
+  const width = (text: string) =>
+    text.length * (px(ctx.font, 16) * GLYPH + px(ctx.letterSpacing, 0));
+
   const ctx = {
     fillStyle: "",
     font: "",
@@ -116,9 +133,9 @@ function stubPainter() {
     letterSpacing: "0px",
     fillText: (text: string, x: number, y: number) => {
       texts.push(text);
-      drawn.push({ text, x, y });
+      drawn.push({ text, x, y, width: width(text), align: ctx.textAlign });
     },
-    measureText: (text: string) => ({ width: text.length * 12 }),
+    measureText: (text: string) => ({ width: width(text) }),
     fillRect: (x: number, y: number, w: number, h: number) => void fills.push({ x, y, w, h }),
     createLinearGradient: () => ({ addColorStop: () => {} }),
     save: () => {},
@@ -127,6 +144,13 @@ function stubPainter() {
     fill: () => {},
   };
   return { ctx: ctx as unknown as Painter, texts, drawn, fills };
+}
+
+/** Where a drawn string actually starts and ends, given how it was aligned. */
+function extent(d: { x: number; width: number; align: CanvasTextAlign }) {
+  if (d.align === "right") return { left: d.x - d.width, right: d.x };
+  if (d.align === "center") return { left: d.x - d.width / 2, right: d.x + d.width / 2 };
+  return { left: d.x, right: d.x + d.width };
 }
 
 describe("shareCardContent", () => {
@@ -307,7 +331,7 @@ describe("fitText", () => {
   });
 
   it("truncates to an ellipsis inside the width", () => {
-    // 12px per character in the stub, so 60px holds five.
+    // No font set, so the stub charges its 16px fallback: a handful of glyphs.
     const fitted = fitText(ctx, "Romanian Deadlift", 60);
     expect(fitted.endsWith("…")).toBe(true);
     expect(fitted.length).toBeLessThan("Romanian Deadlift".length);
@@ -363,6 +387,34 @@ describe("paintShareCard", () => {
     expect(fills.length).toBeGreaterThan(LIFT_ROWS * 2);
   });
 
+  // Every string is truncated against the font it is drawn in, never the one
+  // the previous line left set. Measuring the comparison at the headline's 96px
+  // and drawing it at 30px cut "That's 3 school buses." down to "That's 3 school
+  // b…" — a sentence that fits with room to spare, ellipsised for no reason.
+  it("measures each line in the font that line is drawn in", () => {
+    const { ctx, texts } = stubPainter();
+    paintShareCard(ctx, shareCardContent(fullReport(), "Ada Lovelace"));
+
+    expect(texts).toContain("That's 3 school buses.");
+    expect(texts).toContain("Ada Lovelace lifted");
+    expect(texts).toContain("Long sessions, no rush.");
+    expect(texts.filter((t) => t.endsWith("…"))).toEqual([]);
+  });
+
+  // The other half of the same bug: a string measured in a smaller font than it
+  // is drawn in is under-truncated, and runs off the right edge instead.
+  it("truncates a long name against its own font, not a smaller one", () => {
+    const { ctx, drawn } = stubPainter();
+    const wordy = fullReport();
+    wordy.archetype = { name: "The Extraordinarily Verbose Metronome", description: "x" };
+
+    paintShareCard(ctx, shareCardContent(wordy, "Bartholomew ".repeat(6)));
+
+    const lede = drawn.find((d) => d.text.startsWith("Bartholomew"))!;
+    expect(lede.text.endsWith("…")).toBe(true);
+    expect(extent(lede).right).toBeLessThanOrEqual(SHARE_CARD.width - SHARE_CARD.pad);
+  });
+
   // The other check nobody can make by looking at the app, and the one that
   // catches a column arithmetic slip: anything drawn outside the canvas is
   // simply not in the PNG, and the card would come out looking merely sparse
@@ -371,11 +423,12 @@ describe("paintShareCard", () => {
     const { ctx, drawn, fills } = stubPainter();
     paintShareCard(ctx, shareCardContent(fullReport(), "Ada Lovelace"));
 
-    for (const { text, x, y } of drawn) {
-      expect.soft(x, `x of "${text}"`).toBeGreaterThanOrEqual(0);
-      expect.soft(x, `x of "${text}"`).toBeLessThanOrEqual(SHARE_CARD.width);
-      expect.soft(y, `y of "${text}"`).toBeGreaterThanOrEqual(0);
-      expect.soft(y, `y of "${text}"`).toBeLessThan(SHARE_CARD.height);
+    for (const d of drawn) {
+      const { left, right } = extent(d);
+      expect.soft(left, `left of "${d.text}"`).toBeGreaterThanOrEqual(0);
+      expect.soft(right, `right of "${d.text}"`).toBeLessThanOrEqual(SHARE_CARD.width);
+      expect.soft(d.y, `y of "${d.text}"`).toBeGreaterThanOrEqual(0);
+      expect.soft(d.y, `y of "${d.text}"`).toBeLessThan(SHARE_CARD.height);
     }
 
     // The background covers the whole card, so it is the only fill allowed to
