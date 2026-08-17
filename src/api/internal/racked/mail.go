@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -94,8 +95,20 @@ func (m *Mailer) Send(ctx context.Context, subject, html string) error {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 200))
-		return fmt.Errorf("relay returned %d: %s", resp.StatusCode, bytes.TrimSpace(snippet))
+		return fmt.Errorf("relay returned %d: %s", resp.StatusCode, errorSnippet(resp.Body))
 	}
 	return nil
+}
+
+// errorSnippet reads the head of a failed response for the error message.
+//
+// Sanitised, because this ends up in report_runs.last_error, a TEXT column on a
+// UTF8 server that rejects invalid byte sequences outright — and everything here
+// is bytes the relay chose, not us. Two ways they arrive invalid: a body that
+// was never UTF-8, and a body that was, cut mid-rune by the byte limit. The
+// limit has to be in bytes (it is a bound on what we read from a remote, before
+// we know anything about it), so the coercion afterwards is what makes it safe.
+func errorSnippet(body io.Reader) string {
+	raw, _ := io.ReadAll(io.LimitReader(body, 200))
+	return strings.ToValidUTF8(string(bytes.TrimSpace(raw)), "")
 }

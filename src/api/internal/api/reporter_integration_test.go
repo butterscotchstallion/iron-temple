@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -460,5 +461,59 @@ func TestReportClaimCapsStaleReclaims(t *testing.T) {
 
 	if _, err := q.ClaimReportRun(ctx, claimParams(userID, start)); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("a crash-looping recap kept reclaiming: %v", err)
+	}
+}
+
+// Recording *why* a recap failed is the one write that must not fail itself.
+//
+// The relay's error body is copied verbatim into last_error, a TEXT column on a
+// UTF8 server that rejects invalid byte sequences (SQLSTATE 22021). If that
+// write errors the row never leaves 'sending', so instead of being retried on
+// the next tick it sits unclaimable until the 15-minute stale window expires.
+func TestReporterRecordsAFailureWithAnUnprintableRelayBody(t *testing.T) {
+	skipWithoutDB(t)
+	userID := newReportUser(t, "badbytes")
+	start, _ := lastMonth()
+	logSessionOn(t, userID, start.AddDate(0, 0, 6), 155)
+
+	// Invalid UTF-8, and a body long enough that the reporter's own truncation
+	// has to cut it — the second way a bad sequence gets manufactured.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write(append([]byte(strings.Repeat("世", 80)), 0xff, 0xfe))
+	}))
+	t.Cleanup(srv.Close)
+
+	api2 := api.NewServer(testPool, "test", "test")
+	api2.SetMailer(racked.NewMailer(srv.URL, "alerts@homelab.local"))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	api2.StartRackedReporter(ctx, time.Hour)
+
+	waitFor(t, "the failure to be recorded despite the body", func() bool {
+		var status string
+		err := testPool.QueryRow(context.Background(),
+			`SELECT status FROM report_runs WHERE user_id = $1 AND period_kind = 'month'`,
+			userID).Scan(&status)
+		return err == nil && status == "failed"
+	})
+
+	// Stuck in 'sending' is the shape of the bug: claimed, never recorded, and
+	// unclaimable again until the stale window expires.
+	var status, lastError string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT status, last_error FROM report_runs WHERE user_id = $1 AND period_kind = 'month'`,
+		userID).Scan(&status, &lastError); err != nil {
+		t.Fatalf("read row: %v", err)
+	}
+	if status != "failed" {
+		t.Fatalf("row is %q, want failed — the error was never recorded", status)
+	}
+	if !utf8.ValidString(lastError) {
+		t.Fatalf("last_error round-tripped invalid UTF-8: %q", lastError)
+	}
+	if !strings.Contains(lastError, "502") {
+		t.Fatalf("last_error lost the status: %q", lastError)
 	}
 }

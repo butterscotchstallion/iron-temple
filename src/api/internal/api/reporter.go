@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -141,12 +142,34 @@ func (s *Server) failReport(ctx context.Context, id int32, reason string) {
 	}
 }
 
-// truncateError keeps last_error readable. The column is unbounded, but a wall
-// of text from a relay's HTML error page helps nobody.
+// truncateError keeps last_error readable, and storable.
+//
+// Readable because a wall of text from a relay's HTML error page helps nobody;
+// the column is unbounded, so the limit is only about the reader.
+//
+// Storable is the subtler half. The message can carry bytes this process never
+// chose — a relay's error body is copied into it verbatim — and last_error is a
+// TEXT column on a UTF8 server, which rejects an invalid byte sequence outright
+// (SQLSTATE 22021). That failure lands in the one place that must not fail:
+// recording *why* a recap failed. The write would error, the row would stay
+// 'sending', and it would sit unclaimable until the 15-minute stale window
+// expired rather than being retried on the next tick.
+//
+// So the string is coerced to valid UTF-8 and cut on a rune boundary, never a
+// byte offset — slicing at a byte offset is itself a way to manufacture the
+// invalid sequence this is guarding against. The limit counts runes for the same
+// reason.
 func truncateError(s string) string {
 	const limit = 300
-	if len(s) <= limit {
+
+	// Drop anything that is not valid UTF-8 rather than substituting a
+	// replacement character: this is diagnostic text, and a run of U+FFFD is no
+	// more informative than its absence.
+	s = strings.ToValidUTF8(s, "")
+
+	r := []rune(s)
+	if len(r) <= limit {
 		return s
 	}
-	return s[:limit] + "…"
+	return string(r[:limit]) + "…"
 }
