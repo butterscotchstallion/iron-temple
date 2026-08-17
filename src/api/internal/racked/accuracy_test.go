@@ -400,3 +400,45 @@ func TestCompletedYearComparesAgainstTheWholePrecedingYear(t *testing.T) {
 		t.Fatalf("VolumePct = %v, want 0 — 31 December 2024 counts", *rep.Change.VolumePct)
 	}
 }
+
+// The measured window can never fall outside the period it belongs to.
+//
+// AsOf and the period bounds are both "today", and if they are ever read off
+// different clocks — a report zone behind UTC, in the small hours of the 1st —
+// AsOf can land before the period even opens. Everything downstream then goes
+// quietly incoherent: a negative day count, an attendance loop that never runs,
+// a comparison cut to a single day, while Totals still counts the whole period.
+// Clamping here means no caller can produce that report.
+func TestMeasuredWindowStaysInsideThePeriod(t *testing.T) {
+	start, end := Bounds(PeriodMonth, day(2026, time.April, 1))
+	prevStart, _ := PreviousBounds(PeriodMonth, day(2026, time.April, 1))
+	wed := 3
+
+	rep := Build(Input{
+		Kind: PeriodMonth, Start: start, End: end,
+		// A day before the period opens, which is what a zone skew produces.
+		AsOf: day(2026, time.March, 31),
+		Sets: mkSets(1, day(2026, time.April, 1), 1, "Squat", 5, 5, 200),
+		// One elapsed day compares against the period before it, one day deep.
+		PreviousSets:  mkSets(9, day(2026, time.March, 1), 1, "Squat", 5, 5, 200),
+		PreviousStart: prevStart,
+		ProgramDays:   []ProgramDay{{Name: "A", Weekday: &wed}},
+	})
+
+	// April 1 2026 is a Wednesday, so the first scheduled day has come round and
+	// there is a real denominator rather than a loop that never ran.
+	if rep.Attendance.Basis != AttendanceWeekday {
+		t.Fatalf("Basis = %q, want weekday — the period's first day is scheduled",
+			rep.Attendance.Basis)
+	}
+	if rep.Attendance.Expected != 1 {
+		t.Fatalf("Expected = %d, want 1", rep.Attendance.Expected)
+	}
+	if rep.Attendance.SessionsPerWeek <= 0 {
+		t.Fatalf("SessionsPerWeek = %v, want a measurement", rep.Attendance.SessionsPerWeek)
+	}
+	// The comparison still covers a day of March rather than nothing at all.
+	if rep.Change == nil {
+		t.Fatal("Change = nil, want the preceding period's first day")
+	}
+}

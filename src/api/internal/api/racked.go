@@ -26,7 +26,10 @@ func (s *Server) getRacked(w http.ResponseWriter, r *http.Request) {
 		kind = parsed
 	}
 
-	on := time.Now().UTC()
+	// Both the period and the point it is measured to come from this one
+	// reading — see reportToday.
+	today := s.reportToday()
+	on := today
 	if v := r.URL.Query().Get("on"); v != "" {
 		parsed, err := time.Parse(dateLayout, v)
 		if err != nil {
@@ -36,7 +39,7 @@ func (s *Server) getRacked(w http.ResponseWriter, r *http.Request) {
 		on = parsed
 	}
 
-	report, err := s.buildRacked(r.Context(), userFrom(r.Context()).ID, kind, on)
+	report, err := s.buildRacked(r.Context(), userFrom(r.Context()).ID, kind, on, today)
 	if err != nil {
 		internalError(w)
 		return
@@ -55,7 +58,7 @@ func (s *Server) getRacked(w http.ResponseWriter, r *http.Request) {
 // because the recap email needs exactly this, for a user with no request in
 // flight.
 func (s *Server) buildRacked(
-	ctx context.Context, userID int32, kind racked.PeriodKind, on time.Time,
+	ctx context.Context, userID int32, kind racked.PeriodKind, on, asOf time.Time,
 ) (racked.Report, error) {
 	start, end := racked.Bounds(kind, on)
 	prevStart, prevEnd := racked.PreviousBounds(kind, on)
@@ -77,13 +80,11 @@ func (s *Server) buildRacked(
 		return racked.Report{}, err
 	}
 
-	// The date the recap is drawn up on, which for the default view is today and
-	// falls inside the period. racked measures its rates over the days that have
-	// actually happened rather than over the whole month, and cuts the preceding
-	// period to the same length for the comparison.
-	asOf := time.Now().In(s.reportLocation())
-	asOf = time.Date(asOf.Year(), asOf.Month(), asOf.Day(), 0, 0, 0, 0, time.UTC)
-
+	// asOf is the day the recap is drawn up on, which for the default view falls
+	// inside the period: racked then measures its rates over the days that have
+	// actually happened and cuts the preceding period to match. It is passed in
+	// rather than read here so that it and `on` are the same reading of the
+	// clock.
 	return racked.Build(racked.Input{
 		Kind:           kind,
 		Start:          start,

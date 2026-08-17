@@ -330,7 +330,7 @@ func Build(in Input) Report {
 	// Everything measured as a rate uses this rather than in.End: the days of
 	// the period that have actually happened. For a finished period the two are
 	// the same, which is why a zero AsOf changes nothing.
-	measuredTo := measuredEnd(in.End, in.AsOf)
+	measuredTo := measuredEnd(in.Start, in.End, in.AsOf)
 	inProgress := measuredTo.Before(in.End)
 
 	rep := Report{
@@ -388,10 +388,22 @@ func Build(in Input) Report {
 	return rep
 }
 
-// measuredEnd is the last day of the period that has actually happened.
-func measuredEnd(end, asOf time.Time) time.Time {
+// measuredEnd is the last day of the period that has actually happened, held
+// inside the period whatever AsOf says.
+//
+// The clamp is not defensive padding. AsOf and the period bounds are two
+// readings of "today", and a caller taking them from different clocks — a
+// report zone behind UTC, in the small hours of the 1st — can put AsOf before
+// the period opens. Every window downstream is derived from this one, so an
+// out-of-range answer here produces a report that disagrees with itself:
+// attendance with no days to count, a comparison cut to nothing, and totals
+// still counting the whole period.
+func measuredEnd(start, end, asOf time.Time) time.Time {
 	if asOf.IsZero() || !asOf.Before(end) {
 		return end
+	}
+	if asOf.Before(start) {
+		return start
 	}
 	return asOf
 }

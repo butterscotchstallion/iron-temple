@@ -78,6 +78,19 @@ func (s *Server) reportLocation() *time.Location {
 	return s.reportLoc
 }
 
+// reportToday is the current date in the zone recaps are reported in, as the
+// UTC midnight every date in the system is held at.
+//
+// One reading, used for both the period a recap covers and the point it is
+// measured up to. Taking those from different clocks — one UTC, one the report
+// zone — lets them land on different calendar days in the hours around a month
+// boundary, and a recap whose window sits outside its own period is incoherent
+// in every figure derived from it.
+func (s *Server) reportToday() time.Time {
+	now := time.Now().In(s.reportLocation())
+	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+}
+
 // Router returns the fully-wired HTTP handler. corsOrigin is a comma-separated
 // allowlist of UI origins; empty means allow any origin (dev convenience).
 func (s *Server) Router(corsOrigin string) http.Handler {
