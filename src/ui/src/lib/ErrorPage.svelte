@@ -37,7 +37,13 @@
   }
 </script>
 
-<Card class="flex flex-col items-center gap-5 p-8 text-center" role="alert">
+<!-- The image is the card's first child, which trips Card's
+     `has-[>img:first-child]:pt-0` rule — meant for edge-to-edge cover images.
+     This illustration is inset, so restore the top padding to match the sides. -->
+<Card
+  class="flex flex-col items-center gap-5 p-8 text-center has-[>img:first-child]:pt-8"
+  role="alert"
+>
   {#if showImage}
     <img
       src="/images/gym-fire.png"
