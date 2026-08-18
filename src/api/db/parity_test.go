@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	_ "github.com/lib/pq"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 // The database the integration suite runs against is built two different ways: CI creates a
@@ -53,7 +53,7 @@ func TestDatabaseParity(t *testing.T) {
 		t.Skip("TEST_DATABASE_URL unset (Testcontainers path) — parity constants do not apply")
 	}
 
-	sqlDB, err := sql.Open("postgres", dsn)
+	sqlDB, err := sql.Open("pgx", dsn)
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}

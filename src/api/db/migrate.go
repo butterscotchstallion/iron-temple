@@ -9,7 +9,11 @@ import (
 	"fmt"
 
 	"github.com/golang-migrate/migrate/v4"
-	"github.com/golang-migrate/migrate/v4/database/postgres"
+	// The pgx/v5 migrate driver, not database/postgres: the latter hard-imports
+	// github.com/lib/pq, which is unmaintained (last release v1.10.9, 2023) and
+	// carries five unfixable advisories. Same Postgres, driven through pgx —
+	// which the app already uses for its runtime pool.
+	pgxmigrate "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 )
 
@@ -21,7 +25,7 @@ func Migrate(sqlDB *sql.DB) error {
 		return fmt.Errorf("load embedded migrations: %w", err)
 	}
 
-	driver, err := postgres.WithInstance(sqlDB, &postgres.Config{})
+	driver, err := pgxmigrate.WithInstance(sqlDB, &pgxmigrate.Config{})
 	if err != nil {
 		return fmt.Errorf("build postgres driver: %w", err)
 	}

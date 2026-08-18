@@ -16,7 +16,7 @@ import (
 
 	"github.com/gavv/httpexpect/v2"
 	"github.com/jackc/pgx/v5/pgxpool"
-	_ "github.com/lib/pq"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -56,7 +56,7 @@ func TestMain(m *testing.M) {
 	dsn, stopDB := testDB(ctx)
 
 	// Apply schema + seed via the shared migrator.
-	sqlDB, err := sql.Open("postgres", dsn)
+	sqlDB, err := sql.Open("pgx", dsn)
 	if err != nil {
 		log.Fatalf("open database: %v", err)
 	}
