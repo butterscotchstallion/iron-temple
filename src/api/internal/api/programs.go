@@ -197,6 +197,22 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32) 
 		return nil, err
 	}
 
+	// The lifts the program itself prescribes today. Used below to drop an
+	// assistance entry that names one of them: addAssistance refuses to create
+	// such a row, but this is what makes the invariant hold rather than merely
+	// being checked. A row can predate that guard, and a seed migration adding a
+	// lift to a day would create the same collision from the other side.
+	//
+	// Emitting the lift twice does not degrade gracefully — createSession would
+	// insert two sets numbered 1 for it and trip session_sets' UNIQUE, turning
+	// every attempt to start the workout into a 500. Skipping is the behaviour
+	// that keeps the day usable; the program's own prescription wins, because it
+	// is the one with a progression behind it.
+	prescribed := make(map[int32]bool, len(pres))
+	for _, p := range pres {
+		prescribed[p.ExerciseID] = true
+	}
+
 	out := make([]prescribedExerciseDTO, 0, len(pres))
 	for _, p := range pres {
 		hist, err := s.q.ListLiftHistory(ctx, store.ListLiftHistoryParams{
@@ -240,6 +256,9 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32) 
 		return nil, err
 	}
 	for _, a := range assist {
+		if prescribed[a.ExerciseID] {
+			continue
+		}
 		// No engine runs on assistance. A curl is not a squat: it does not
 		// advance five pounds a session, and stalling on one is not a signal
 		// worth deloading over. So the rule is the one lifters already follow —

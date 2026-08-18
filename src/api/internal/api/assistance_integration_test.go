@@ -343,6 +343,91 @@ func TestAssistanceValidationAndConflicts(t *testing.T) {
 		Expect().Status(http.StatusNotFound)
 }
 
+// Regression: a lift the program already prescribes on a day must not also be
+// addable as assistance on it.
+//
+// The two tables have no constraint between them, so nothing in the database
+// stops it — and the result was not a cosmetic mislabelling. prescribe() emitted
+// the lift twice, createSession materialized both, and the second set number 1
+// tripped session_sets' UNIQUE (session_id, exercise_id, set_number): starting
+// that workout returned 500, and kept doing so until the entry was deleted.
+func TestAssistanceRejectsALiftTheDayAlreadyPrescribes(t *testing.T) {
+	e := expect(t)
+	programID, dayID := firstProgramAndDay(e)
+
+	preview := e.GET(fmt.Sprintf("/programs/%d/days/%d/next-session", programID, dayID)).
+		Expect().Status(http.StatusOK).JSON().Object().Value("exercises").Array()
+	before := int(preview.Length().Raw())
+	prescribedID := int(preview.Value(0).Object().Value("exerciseId").Number().Raw())
+
+	e.POST(fmt.Sprintf("/programs/%d/days/%d/assistance", programID, dayID)).
+		WithJSON(map[string]any{"exerciseId": prescribedID, "sets": 3, "reps": 8}).
+		Expect().Status(http.StatusConflict).
+		JSON().Object().Value("code").String().IsEqual("already_prescribed")
+
+	// Nothing was added, and the day still starts.
+	e.GET(fmt.Sprintf("/programs/%d/days/%d/next-session", programID, dayID)).
+		Expect().Status(http.StatusOK).
+		JSON().Object().Value("exercises").Array().Length().IsEqual(before)
+	startSession(t, e, dayID)
+}
+
+// The same collision approached from the other side: a row that already exists —
+// written before the guard above, or created by a program that later adopted the
+// lift — must not be able to break the day. prescribe() drops it, so the workout
+// still starts and the lift appears once, driven by the engine.
+func TestPrescribeSkipsAssistanceTheProgramAlsoPrescribes(t *testing.T) {
+	e := expect(t)
+	programID, dayID := firstProgramAndDay(e)
+
+	preview := e.GET(fmt.Sprintf("/programs/%d/days/%d/next-session", programID, dayID)).
+		Expect().Status(http.StatusOK).JSON().Object().Value("exercises").Array()
+	before := int(preview.Length().Raw())
+	prescribedID := int(preview.Value(0).Object().Value("exerciseId").Number().Raw())
+
+	// Written straight to the database, since the API now refuses to create it —
+	// the same reaching past the API that backdateSession does.
+	var userID int32
+	if err := testPool.QueryRow(context.Background(),
+		"SELECT id FROM users WHERE username = $1", primaryUsername).Scan(&userID); err != nil {
+		t.Fatalf("look up primary user: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(),
+		`INSERT INTO program_day_assistance
+		     (user_id, program_day_id, exercise_id, position, sets, reps, weight_lb)
+		 VALUES ($1, $2, $3, 1, 3, 8, 0)`,
+		userID, dayID, prescribedID); err != nil {
+		t.Fatalf("insert colliding assistance: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(),
+			"DELETE FROM program_day_assistance WHERE user_id = $1 AND program_day_id = $2 AND exercise_id = $3",
+			userID, dayID, prescribedID)
+	})
+
+	// The lift is prescribed once, as the program's own work.
+	after := e.GET(fmt.Sprintf("/programs/%d/days/%d/next-session", programID, dayID)).
+		Expect().Status(http.StatusOK).JSON().Object().Value("exercises").Array()
+	after.Length().IsEqual(before)
+	seen := 0
+	for i := 0; i < int(after.Length().Raw()); i++ {
+		ex := after.Value(i).Object()
+		if int(ex.Value("exerciseId").Number().Raw()) == prescribedID {
+			seen++
+			ex.Value("kind").String().IsEqual("main")
+		}
+	}
+	if seen != 1 {
+		t.Fatalf("lift %d appears %d times in the prescription, want 1", prescribedID, seen)
+	}
+
+	// And the workout still starts, rather than 500ing on the duplicate set.
+	session := startSession(t, e, dayID)
+	if n := len(sessionSetsFor(session, prescribedID)); n != 5 {
+		t.Fatalf("materialized %d sets for the prescribed lift, want its prescribed 5", n)
+	}
+}
+
 func TestAssistancePatchMergesAndValidates(t *testing.T) {
 	e := expect(t)
 	programID, dayID := firstProgramAndDay(e)

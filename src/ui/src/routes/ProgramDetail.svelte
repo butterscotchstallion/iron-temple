@@ -430,8 +430,17 @@
           {/if}
 
           {#if pickerDayId === day.id}
+            <!-- Hide what can't be added: the lifts already on this day as
+                 assistance, and the ones the program itself prescribes. Adding
+                 the latter is a 409, and offering a choice that can only fail
+                 is worse than not offering it. -->
             <AssistancePicker
-              exclude={day.assistance.map((a) => a.exerciseId)}
+              exclude={[
+                ...day.assistance.map((a) => a.exerciseId),
+                ...day.exercises
+                  .filter((e) => e.kind !== "assistance")
+                  .map((e) => e.exerciseId),
+              ]}
               onAdd={(choice) => add(day, choice)}
               onCancel={() => (pickerDayId = null)}
             />

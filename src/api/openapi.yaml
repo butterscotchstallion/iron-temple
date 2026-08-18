@@ -476,6 +476,12 @@ paths:
         prescription is not modified, and nobody else's view of the day changes.
         Takes effect on the next session started from this day — a session
         already in progress keeps the sets it was created with.
+
+
+        Two 409s: the exercise is already on this day as assistance, or the
+        program itself already prescribes it. The second is not a nicety —
+        prescribing one lift twice collides on the session's own unique
+        constraint, so the workout could not be started at all.
       requestBody:
         required: true
         content:

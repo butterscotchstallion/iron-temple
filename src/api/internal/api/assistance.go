@@ -91,6 +91,34 @@ func (s *Server) addAssistance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A lift the program already prescribes on this day cannot also be assistance
+	// on it, and the database cannot say so: the UNIQUE on program_day_assistance
+	// covers that table alone, and the prescription lives in another one.
+	//
+	// Without this check the day is not merely mislabelled, it is unusable.
+	// prescribe() would return the lift twice — once from the prescription, once
+	// from assistance — and createSession materializes both, so the second set
+	// number 1 collides with the first on session_sets' UNIQUE (session_id,
+	// exercise_id, set_number). Every attempt to start that workout 500s, and
+	// keeps 500ing until the assistance entry is deleted.
+	//
+	// It would be wrong even if it worked. is_assistance is derived from whether
+	// a program_day_exercises row exists, so the duplicate's sets would come back
+	// labelled "main" and ordered by the prescription's position — the engine's
+	// weight and the carried-forward weight fighting over the same bar.
+	prescribed, err := s.q.ListPrescriptionsByDay(ctx, day.ID)
+	if err != nil {
+		internalError(w)
+		return
+	}
+	for _, p := range prescribed {
+		if p.ExerciseID == ex.ID {
+			conflict(w, "already_prescribed",
+				"this day already prescribes that lift — assistance is for work the program doesn't cover")
+			return
+		}
+	}
+
 	created, err := s.q.CreateAssistance(ctx, store.CreateAssistanceParams{
 		UserID:       userID,
 		ProgramDayID: day.ID,
