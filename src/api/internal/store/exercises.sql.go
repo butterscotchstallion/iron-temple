@@ -222,6 +222,7 @@ func (q *Queries) ListExerciseHistory(ctx context.Context, arg ListExerciseHisto
 }
 
 const listExercises = `-- name: ListExercises :many
+
 SELECT e.id,
        e.name,
        e.muscle_group,
@@ -255,6 +256,12 @@ type ListExercisesRow struct {
 	IsCustom    bool   `json:"is_custom"`
 }
 
+// Exercises are the library: the seeded catalogue everyone shares, plus the
+// movements a lifter added for themselves. created_by_user_id is what separates
+// them — NULL is shared, non-NULL is owned — and every read below carries the
+// same "mine or everyone's" filter. A custom exercise belonging to someone else
+// must be indistinguishable from one that does not exist, the same rule
+// sessions.sql applies to performances.
 // ListExercises returns the library, alphabetically.
 //
 // performed_only narrows it to lifts this user has actually logged, which is

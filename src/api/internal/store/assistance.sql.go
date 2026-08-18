@@ -142,6 +142,7 @@ func (q *Queries) GetAssistance(ctx context.Context, arg GetAssistanceParams) (G
 }
 
 const listAssistanceByDay = `-- name: ListAssistanceByDay :many
+
 SELECT pda.id,
        pda.program_day_id,
        pda.exercise_id,
@@ -173,6 +174,23 @@ type ListAssistanceByDayRow struct {
 	WeightLb     pgtype.Numeric `json:"weight_lb"`
 }
 
+// Assistance work: the exercises a lifter bolts onto the end of a program day.
+//
+// This table is the reason programs never have to be edited. program_days and
+// program_day_exercises are shared and seeded, and stay that way; assistance is
+// a per-user overlay keyed on (user_id, program_day_id). So the same Workout A
+// is squat/bench/row for every account, the progression engine reads a
+// prescription nobody has touched, and what one lifter adds is invisible to the
+// next.
+//
+// Every query is scoped to one owner. That is not defence in depth here, it is
+// the whole isolation model: program days are shared, so an unscoped read would
+// hand one lifter another's plan on a row they are equally entitled to see.
+//
+// Deleting a row deletes a plan, never a performance. Sets already logged
+// against the exercise stay in session_sets and keep counting toward volume and
+// records — which is why ListSessionSets orders with a fallback for sets whose
+// assistance row has since gone.
 // ListAssistanceByDay returns one day's assistance in display order.
 func (q *Queries) ListAssistanceByDay(ctx context.Context, arg ListAssistanceByDayParams) ([]ListAssistanceByDayRow, error) {
 	rows, err := q.db.Query(ctx, listAssistanceByDay, arg.ProgramDayID, arg.UserID)
