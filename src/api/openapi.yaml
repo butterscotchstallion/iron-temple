@@ -1359,12 +1359,22 @@ components:
 
     UpdateSessionRequest:
       type: object
+      description: Any subset of fields may be provided.
       properties:
         performedOn:
           type: string
           format: date
         notes:
           type: string
+        bodyweightLb:
+          type: number
+          nullable: true
+          exclusiveMinimum: true
+          minimum: 0
+          description: >
+            What the lifter weighed on the day. Omit the field to leave an
+            existing weigh-in alone; send null to erase one. Zero and negatives
+            are rejected — a weigh-in of nothing is a typo, not a measurement.
 
     UpdateSessionSetRequest:
       type: object
@@ -1422,10 +1432,40 @@ components:
             True once the session was finished by hand or was started more than
             12 hours ago. An over session is read-only and is what the
             progression engine counts.
+        bodyweightLb:
+          type: number
+          nullable: true
+          description: >
+            What the lifter weighed on the day of this session. Null means they
+            did not step on a scale, which is a distinct answer from any number —
+            a weight-loss series is the days that were measured.
+        lastWeighIn:
+          # Wrapped in allOf because a sibling of $ref is ignored in OpenAPI 3.0,
+          # and this field needs both nullable and a description of its own.
+          allOf:
+            - $ref: "#/components/schemas/WeighIn"
+          nullable: true
+          description: >
+            The lifter's most recent weigh-in from a *different* session, so a new
+            session's box can open pre-filled rather than empty. Null until they
+            have recorded one. Carrying it here rather than writing it onto the
+            new session is what keeps an un-weighed day null.
         sets:
           type: array
           items:
             $ref: "#/components/schemas/SessionSet"
+
+    WeighIn:
+      description: A recorded bodyweight and the day it was recorded.
+      type: object
+      required: [weightLb, performedOn]
+      properties:
+        weightLb:
+          type: number
+          example: 184.5
+        performedOn:
+          type: string
+          format: date
 
     SessionSet:
       type: object

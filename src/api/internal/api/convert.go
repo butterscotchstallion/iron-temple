@@ -34,6 +34,19 @@ func floatToNumeric(f float64) pgtype.Numeric {
 	return pgtype.Numeric{Int: big.NewInt(hundredths), Exp: -2, Valid: true}
 }
 
+// optionalNumeric flattens a nullable NUMERIC for a nullable JSON field, where
+// SQL NULL must serialize as null rather than 0. numericToFloat above reads NULL
+// as 0, which is right for a weight that is always present and wrong for one
+// whose absence is the point (a session with no weigh-in is not a session at
+// zero pounds).
+func optionalNumeric(n pgtype.Numeric) *float64 {
+	if !n.Valid {
+		return nil
+	}
+	f := numericToFloat(n)
+	return &f
+}
+
 // dateToString formats a date-only value; an invalid/NULL date reads as "".
 func dateToString(d pgtype.Date) string {
 	if !d.Valid {

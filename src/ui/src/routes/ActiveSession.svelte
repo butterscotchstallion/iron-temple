@@ -4,6 +4,7 @@
   import {
     getSession,
     getExerciseHistory,
+    updateSession,
     updateSessionSet,
     finishSession,
     type Session,
@@ -17,6 +18,7 @@
   import Trophy from "@lucide/svelte/icons/trophy";
   import RestTimer from "../lib/RestTimer.svelte";
   import ExerciseCard from "../lib/ExerciseCard.svelte";
+  import BodyweightCard from "../lib/BodyweightCard.svelte";
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
   import * as AlertDialog from "$lib/components/ui/alert-dialog";
@@ -215,6 +217,22 @@
     confetti({ particleCount: 140, spread: 75, origin: { y: 0.6 } });
   }
 
+  // Record (or, with null, erase) what the lifter weighed today. The response is
+  // the whole session, so it also refreshes lastWeighIn — no second request to
+  // find out what the box should carry next time.
+  async function saveBodyweight(weightLb: number | null) {
+    const { data, error } = await updateSession({
+      path: { sessionId },
+      body: { bodyweightLb: weightLb },
+    });
+    if (error || !data) {
+      actionError = "Couldn't save your weight.";
+      return;
+    }
+    actionError = null;
+    session = data;
+  }
+
   // Adjust the working weight for every set of an exercise by delta lb.
   async function changeWeight(sets: SessionSet[], delta: number) {
     if (isOver) return;
@@ -316,6 +334,16 @@
         onDismiss={() => (actionError = null)}
       />
     {/if}
+
+    <!-- Above the lifting, because weighing in is what you do before you start
+         — and because it opens pre-filled, so it needs no attention on the days
+         the number hasn't moved. -->
+    <BodyweightCard
+      bodyweightLb={session.bodyweightLb}
+      lastWeighIn={session.lastWeighIn}
+      readonly={isOver}
+      onSave={saveBodyweight}
+    />
 
     {#if showRestTimer}
       <RestTimer seconds={180} autoStartKey={restTimerKey} />

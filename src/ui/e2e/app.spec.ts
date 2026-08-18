@@ -372,6 +372,40 @@ test("separates assistance from the program's work in a session", async ({ page 
   await expect(page.getByText("Assistance", { exact: true })).toBeVisible();
 });
 
+// The box opens holding last time's number so a weigh-in is a nudge rather than
+// a fresh entry — but showing it and recording it are different things, and only
+// an edit crosses that line.
+test("carries the last weigh-in into a session and records an edit", async ({ page }) => {
+  const patched: unknown[] = [];
+  const session = {
+    ...sessionDetail(),
+    bodyweightLb: null,
+    lastWeighIn: { weightLb: 184.5, performedOn: "2026-07-31" },
+  };
+  await page.route("**/api/v1/sessions/1", (route) => {
+    if (route.request().method() !== "PATCH") {
+      return route.fulfill({ json: session });
+    }
+    patched.push(route.request().postDataJSON());
+    return route.fulfill({ json: { ...session, bodyweightLb: 183 } });
+  });
+  await page.route("**/api/v1/exercises/*/history", (route) => route.fulfill({ json: [] }));
+
+  await page.goto("/#/sessions/1");
+
+  // Pre-filled, and captioned as last week's number rather than this session's.
+  const box = page.getByLabel("Bodyweight");
+  await expect(box).toHaveValue("184.5");
+  await expect(page.getByText("Carried from July 31 2026")).toBeVisible();
+
+  // Editing it is what writes it — and nothing was written before that.
+  expect(patched).toEqual([]);
+  await box.fill("183");
+  await box.blur();
+  await expect.poll(() => patched).toEqual([{ bodyweightLb: 183 }]);
+  await expect(page.getByText("Logged for this session")).toBeVisible();
+});
+
 test("shows the empty history state", async ({ page }) => {
   await page.goto("/#/history");
   await expect(page.getByRole("heading", { name: "History", exact: true })).toBeVisible();

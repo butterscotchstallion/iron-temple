@@ -232,10 +232,11 @@ func (s *Server) getSession(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, full)
 }
 
-type updateSessionRequest struct {
-	PerformedOn *string `json:"performedOn"`
-	Notes       *string `json:"notes"`
-}
+// maxBodyweightLb bounds a weigh-in. It is a typo catch rather than a claim
+// about people: the heaviest human on record was under 1,500 lb, and the column
+// is NUMERIC(6,2), so anything this side of the limit stores fine. Its job is to
+// turn a fat-fingered 18450 into a 400 rather than a row nobody meant to write.
+const maxBodyweightLb = 2000
 
 func (s *Server) updateSession(w http.ResponseWriter, r *http.Request) {
 	id, ok := idParam(r, "sessionId")
@@ -245,21 +246,54 @@ func (s *Server) updateSession(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 
-	var req updateSessionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	// Decoded as raw fields rather than a struct, for the same reason
+	// updateSessionSet does it: bodyweightLb absent must differ from
+	// bodyweightLb: null. The first leaves a weigh-in alone, the second erases
+	// it, and a *float64 renders both as nil.
+	var raw map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		badRequest(w, "invalid JSON body")
 		return
 	}
 
 	userID := userFrom(ctx).ID
-	params := store.UpdateSessionParams{ID: id, UserID: userID, Notes: req.Notes}
-	if req.PerformedOn != nil {
-		d, err := parseDate(*req.PerformedOn)
+	params := store.UpdateSessionParams{ID: id, UserID: userID}
+
+	// performedOn and notes keep their original semantics, where a null is the
+	// same as omitting the field — the store COALESCEs them, so neither can be
+	// cleared and null asks for nothing. Only bodyweightLb reads a null as an
+	// instruction, and only it needs the distinction.
+	if v, ok := raw["performedOn"]; ok && string(v) != "null" {
+		var performedOn string
+		if err := json.Unmarshal(v, &performedOn); err != nil {
+			badRequest(w, "performedOn must be a YYYY-MM-DD date")
+			return
+		}
+		d, err := parseDate(performedOn)
 		if err != nil {
 			badRequest(w, "performedOn must be a YYYY-MM-DD date")
 			return
 		}
 		params.PerformedOn = d
+	}
+	if v, ok := raw["notes"]; ok && string(v) != "null" {
+		var notes string
+		if err := json.Unmarshal(v, &notes); err != nil {
+			badRequest(w, "notes must be a string")
+			return
+		}
+		params.Notes = &notes
+	}
+	if v, ok := raw["bodyweightLb"]; ok {
+		params.SetBodyweight = true
+		if string(v) != "null" {
+			var weight float64
+			if err := json.Unmarshal(v, &weight); err != nil || weight <= 0 || weight > maxBodyweightLb {
+				badRequest(w, "bodyweightLb must be a positive number up to 2000, or null")
+				return
+			}
+			params.BodyweightLb = floatToNumeric(weight)
+		}
 	}
 
 	if _, err := s.q.UpdateSession(ctx, params); errors.Is(err, pgx.ErrNoRows) {
@@ -432,6 +466,24 @@ func (s *Server) buildSession(ctx context.Context, id, userID int32) (sessionDTO
 		return sessionDTO{}, err
 	}
 
+	// The weigh-in to pre-fill this session's box with, if the lifter has one on
+	// another session. ErrNoRows means they don't, and must be swallowed here:
+	// every caller reads an error out of buildSession as "no such session" and
+	// answers 404, so letting it escape would make a first-ever session vanish.
+	var lastWeighIn *weighInDTO
+	last, err := s.q.LastWeighIn(ctx, store.LastWeighInParams{
+		UserID: userID, ExcludeSessionID: id,
+	})
+	switch {
+	case err == nil:
+		lastWeighIn = &weighInDTO{
+			WeightLb:    numericToFloat(last.BodyweightLb),
+			PerformedOn: dateToString(last.PerformedOn),
+		}
+	case !errors.Is(err, pgx.ErrNoRows):
+		return sessionDTO{}, err
+	}
+
 	setDTOs := make([]sessionSetDTO, 0, len(sets))
 	for _, set := range sets {
 		setDTOs = append(setDTOs, sessionSetDTO{
@@ -459,6 +511,8 @@ func (s *Server) buildSession(ctx context.Context, id, userID int32) (sessionDTO
 		CreatedAt:      timestamptzToString(g.CreatedAt),
 		FinishedAt:     optionalTimestamptz(g.FinishedAt),
 		IsOver:         g.IsOver,
+		BodyweightLb:   optionalNumeric(g.BodyweightLb),
+		LastWeighIn:    lastWeighIn,
 		Sets:           setDTOs,
 	}, nil
 }

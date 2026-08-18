@@ -15,11 +15,17 @@
 -- which is why the set-level queries below reach the owner through a JOIN back
 -- to sessions rather than trusting the set id alone — a caller learning that
 -- someone else's set id is valid is already a leak.
+--
+-- The three RETURNING lists on sessions name every column of the table, in the
+-- table's own order, and that is deliberate: it is what makes sqlc reuse the
+-- Session model struct instead of emitting a bespoke row type per query. A
+-- column added to sessions has to be added to all three, or the next generation
+-- silently splits them apart.
 
 -- name: CreateSession :one
 INSERT INTO sessions (program_day_id, performed_on, user_id)
 VALUES (sqlc.arg('program_day_id'), sqlc.arg('performed_on'), sqlc.arg('user_id')::int)
-RETURNING id, program_day_id, performed_on, notes, created_at, finished_at, user_id;
+RETURNING id, program_day_id, performed_on, notes, created_at, finished_at, user_id, bodyweight_lb;
 
 -- name: CreateSessionSet :one
 INSERT INTO session_sets (session_id, exercise_id, set_number, target_reps, weight_lb)
@@ -36,6 +42,7 @@ SELECT s.id,
        s.notes,
        s.created_at,
        s.finished_at,
+       s.bodyweight_lb,
        (s.finished_at IS NOT NULL
         OR s.created_at < now() - INTERVAL '12 hours')::bool AS is_over
 FROM sessions s
@@ -43,6 +50,35 @@ JOIN program_days pd ON pd.id = s.program_day_id
 JOIN programs p ON p.id = pd.program_id
 WHERE s.id = sqlc.arg('id')
   AND s.user_id = sqlc.arg('user_id')::int;
+
+-- LastWeighIn returns the lifter's most recent recorded bodyweight, which the
+-- session screen pre-fills its box with so a new session needs a nudge rather
+-- than a fresh entry.
+--
+-- Deliberately excludes the session being read. A session's own weigh-in is
+-- already on it (GetSession above); what this answers is "what did you last
+-- weigh BEFORE this one", and a session that carried itself would report a
+-- number the lifter had already entered as something waiting to be entered.
+--
+-- "Most recent" is by performed_on, not by created_at, so a back-dated session
+-- lands where the lifter says it happened. Note that this is the latest weigh-in
+-- overall rather than the latest one before this session's date: a session
+-- back-dated into the middle of a history pre-fills with today's weight, not the
+-- weight of the week it is filed under. That is the right default for the only
+-- caller — the box is a scale reading taken now — and the wrong one for a chart,
+-- which should read the column directly rather than through this query.
+--
+-- :one, so no prior weigh-in is pgx.ErrNoRows and not an empty row. The caller
+-- has to translate that into "none" rather than let it escape as a 404.
+-- name: LastWeighIn :one
+SELECT s.performed_on,
+       s.bodyweight_lb
+FROM sessions s
+WHERE s.user_id = sqlc.arg('user_id')::int
+  AND s.id <> sqlc.arg('exclude_session_id')
+  AND s.bodyweight_lb IS NOT NULL
+ORDER BY s.performed_on DESC, s.id DESC
+LIMIT 1;
 
 -- ListSessions returns paginated session summaries, most recent first,
 -- optionally filtered to one program. Pass NULL program_id for all programs.
@@ -104,13 +140,24 @@ WHERE s.user_id = sqlc.arg('user_id')::int
   );
 
 -- UpdateSession patches metadata; NULL args leave a column unchanged.
+--
+-- bodyweight_lb cannot use that convention, because clearing a weigh-in and
+-- leaving it alone are different requests and COALESCE renders them identically
+-- — the same problem, and the same reasoning, as actual_reps in UpdateSessionSet
+-- below. set_bodyweight is what separates them: false means the PATCH body had
+-- no bodyweightLb key at all, true means it had one, and the value may then be
+-- NULL to erase the entry. The ::numeric cast types the branch for sqlc, which
+-- has no column to infer from inside a CASE.
 -- name: UpdateSession :one
 UPDATE sessions
-SET performed_on = COALESCE(sqlc.narg('performed_on'), performed_on),
-    notes        = COALESCE(sqlc.narg('notes'), notes)
+SET performed_on  = COALESCE(sqlc.narg('performed_on'), performed_on),
+    notes         = COALESCE(sqlc.narg('notes'), notes),
+    bodyweight_lb = CASE WHEN sqlc.arg('set_bodyweight')::bool
+                         THEN sqlc.narg('bodyweight_lb')::numeric
+                         ELSE bodyweight_lb END
 WHERE id = sqlc.arg('id')
   AND user_id = sqlc.arg('user_id')::int
-RETURNING id, program_day_id, performed_on, notes, created_at, finished_at, user_id;
+RETURNING id, program_day_id, performed_on, notes, created_at, finished_at, user_id, bodyweight_lb;
 
 -- FinishSession stamps the explicit end of a session. COALESCE makes it
 -- idempotent: finishing an already-finished session keeps the original time
@@ -120,7 +167,7 @@ UPDATE sessions
 SET finished_at = COALESCE(finished_at, now())
 WHERE id = sqlc.arg('id')
   AND user_id = sqlc.arg('user_id')::int
-RETURNING id, program_day_id, performed_on, notes, created_at, finished_at, user_id;
+RETURNING id, program_day_id, performed_on, notes, created_at, finished_at, user_id, bodyweight_lb;
 
 -- name: DeleteSession :execrows
 DELETE FROM sessions
