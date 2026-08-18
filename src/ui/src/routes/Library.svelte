@@ -23,6 +23,9 @@
   import { Button } from "$lib/components/ui/button";
   import ErrorCard from "../lib/ErrorCard.svelte";
   import ErrorBanner from "../lib/ErrorBanner.svelte";
+  import Plus from "@lucide/svelte/icons/plus";
+  import SearchX from "@lucide/svelte/icons/search-x";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
 
   let exercises = $state<Exercise[]>([]);
   let loading = $state(true);
@@ -161,8 +164,9 @@
     </div>
 
     {#if matchCount === 0}
-      <Card class="p-6 text-center">
-        <p class="text-sm text-muted-foreground">
+      <Card class="flex flex-col items-center p-6 text-center">
+        <SearchX class="size-8 text-muted-foreground/60" aria-hidden="true" />
+        <p class="mt-3 text-sm text-muted-foreground">
           No exercises match that search.
         </p>
       </Card>
@@ -196,10 +200,11 @@
               {#if exercise.isCustom}
                 <button
                   type="button"
-                  class="shrink-0 rounded-md px-2 py-1 text-xs font-semibold text-muted-foreground transition hover:text-destructive"
+                  class="shrink-0 rounded-md p-1.5 text-muted-foreground transition hover:text-destructive"
+                  aria-label="Delete {exercise.name}"
                   onclick={() => remove(exercise)}
                 >
-                  Delete
+                  <Trash2 class="size-4" aria-hidden="true" />
                 </button>
               {/if}
             </div>
@@ -250,6 +255,7 @@
           </div>
           <div class="flex gap-2">
             <Button type="submit" size="sm" disabled={saving}>
+              <Plus />
               {saving ? "Adding…" : "Add exercise"}
             </Button>
             <Button
@@ -270,6 +276,7 @@
         class="self-start"
         onclick={() => (adding = true)}
       >
+        <Plus />
         Add your own exercise
       </Button>
     {/if}

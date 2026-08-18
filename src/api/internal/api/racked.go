@@ -26,7 +26,10 @@ func (s *Server) getRacked(w http.ResponseWriter, r *http.Request) {
 		kind = parsed
 	}
 
-	on := time.Now().UTC()
+	// Both the period and the point it is measured to come from this one
+	// reading — see reportToday.
+	today := s.reportToday()
+	on := today
 	if v := r.URL.Query().Get("on"); v != "" {
 		parsed, err := time.Parse(dateLayout, v)
 		if err != nil {
@@ -36,7 +39,7 @@ func (s *Server) getRacked(w http.ResponseWriter, r *http.Request) {
 		on = parsed
 	}
 
-	report, err := s.buildRacked(r.Context(), userFrom(r.Context()).ID, kind, on)
+	report, err := s.buildRacked(r.Context(), userFrom(r.Context()).ID, kind, on, today)
 	if err != nil {
 		internalError(w)
 		return
@@ -55,7 +58,7 @@ func (s *Server) getRacked(w http.ResponseWriter, r *http.Request) {
 // because the recap email needs exactly this, for a user with no request in
 // flight.
 func (s *Server) buildRacked(
-	ctx context.Context, userID int32, kind racked.PeriodKind, on time.Time,
+	ctx context.Context, userID int32, kind racked.PeriodKind, on, asOf time.Time,
 ) (racked.Report, error) {
 	start, end := racked.Bounds(kind, on)
 	prevStart, prevEnd := racked.PreviousBounds(kind, on)
@@ -72,20 +75,28 @@ func (s *Server) buildRacked(
 	if err != nil {
 		return racked.Report{}, err
 	}
-	days, err := s.rackedProgramDays(ctx, userID)
+	days, programStarted, err := s.rackedProgramDays(ctx, userID)
 	if err != nil {
 		return racked.Report{}, err
 	}
 
+	// asOf is the day the recap is drawn up on, which for the default view falls
+	// inside the period: racked then measures its rates over the days that have
+	// actually happened and cuts the preceding period to match. It is passed in
+	// rather than read here so that it and `on` are the same reading of the
+	// clock.
 	return racked.Build(racked.Input{
-		Kind:         kind,
-		Start:        start,
-		End:          end,
-		Loc:          s.reportLocation(),
-		Sets:         current,
-		PreviousSets: previous,
-		Baseline:     baseline,
-		ProgramDays:  days,
+		Kind:           kind,
+		Start:          start,
+		End:            end,
+		AsOf:           asOf,
+		Loc:            s.reportLocation(),
+		Sets:           current,
+		PreviousSets:   previous,
+		PreviousStart:  prevStart,
+		Baseline:       baseline,
+		ProgramDays:    days,
+		ProgramStarted: programStarted,
 	}), nil
 }
 
@@ -161,24 +172,35 @@ func (s *Server) rackedBaseline(
 	return base, nil
 }
 
-// rackedProgramDays returns the days of the lifter's current program, which is
-// what attendance measures against. A lifter with no current program is not an
-// error: the recap reports an attendance basis of "none" and says nothing.
-func (s *Server) rackedProgramDays(ctx context.Context, userID int32) ([]racked.ProgramDay, error) {
+// rackedProgramDays returns the days of the lifter's current program and when
+// that program came into being, which together are what attendance measures
+// against. A lifter with no current program is not an error: the recap reports
+// an attendance basis of "none" and says nothing.
+//
+// The creation date travels with the days because a program is only evidence
+// about periods it existed for — see attendance in internal/racked.
+func (s *Server) rackedProgramDays(
+	ctx context.Context, userID int32,
+) ([]racked.ProgramDay, time.Time, error) {
 	user, err := s.q.GetUser(ctx, userID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil
+			return nil, time.Time{}, nil
 		}
-		return nil, err
+		return nil, time.Time{}, err
 	}
 	if user.CurrentProgramID == nil {
-		return nil, nil
+		return nil, time.Time{}, nil
 	}
 	rows, err := s.q.ListProgramDays(ctx, *user.CurrentProgramID)
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
+	started, err := s.q.RackedProgramStart(ctx, *user.CurrentProgramID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, time.Time{}, err
+	}
+
 	out := make([]racked.ProgramDay, 0, len(rows))
 	for _, row := range rows {
 		day := racked.ProgramDay{Name: row.Name}
@@ -188,7 +210,15 @@ func (s *Server) rackedProgramDays(ctx context.Context, userID int32) ([]racked.
 		}
 		out = append(out, day)
 	}
-	return out, nil
+
+	// Compared against period dates, which are UTC midnights, so the stamp is
+	// reduced to the day it fell on.
+	var startedOn time.Time
+	if started.Valid {
+		t := started.Time.In(s.reportLocation())
+		startedOn = time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+	}
+	return out, startedOn, nil
 }
 
 // ---- wire conversion ----
@@ -196,10 +226,11 @@ func (s *Server) rackedProgramDays(ctx context.Context, userID int32) ([]racked.
 func rackedReportToDTO(rep racked.Report) rackedReportDTO {
 	out := rackedReportDTO{
 		Period: rackedPeriodDTO{
-			Kind:  string(rep.Period.Kind),
-			Start: rep.Period.Start.Format(dateLayout),
-			End:   rep.Period.End.Format(dateLayout),
-			Label: rep.Period.Label,
+			Kind:       string(rep.Period.Kind),
+			Start:      rep.Period.Start.Format(dateLayout),
+			End:        rep.Period.End.Format(dateLayout),
+			Label:      rep.Period.Label,
+			InProgress: rep.Period.InProgress,
 		},
 		Totals: rackedTotalsDTO{
 			VolumeLb: rep.Totals.VolumeLb,
@@ -218,6 +249,7 @@ func rackedReportToDTO(rep racked.Report) rackedReportDTO {
 		Weekdays:    rep.Weekdays,
 		BestWeekday: rep.BestWeekday,
 		Hours:       rep.Hours,
+		PeakHour:    rep.PeakHour,
 		HourLabel:   rep.HourLabel,
 		Streak: rackedStreakDTO{
 			LongestWeeks: rep.Streak.LongestWeeks,

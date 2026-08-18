@@ -11,7 +11,7 @@ import { canShareFile, shareCardFile, shareCardFilename, shareOrDownload } from 
 // ways a browser will take a file, and what a cancelled share sheet means.
 
 function period(label: string): RackedPeriod {
-  return { kind: "month", start: "2026-03-01", end: "2026-03-31", label };
+  return { kind: "month", start: "2026-03-01", end: "2026-03-31", label, inProgress: false };
 }
 
 function file(): File {

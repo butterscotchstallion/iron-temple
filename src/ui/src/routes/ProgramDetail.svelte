@@ -21,6 +21,9 @@
   import AssistancePicker from "../lib/AssistancePicker.svelte";
   import { weekdayOptions, todayWeekday } from "../lib/weekday";
   import Calendar from "@lucide/svelte/icons/calendar";
+  import Play from "@lucide/svelte/icons/play";
+  import Plus from "@lucide/svelte/icons/plus";
+  import X from "@lucide/svelte/icons/x";
 
   let { params }: { params?: { id?: string } } = $props();
   let programId = $derived(Number(params?.id));
@@ -344,6 +347,7 @@
             onclick={() => start(day.id)}
             disabled={startingDayId !== null}
           >
+            <Play />
             {startingDayId === day.id ? "Starting…" : "Start"}
           </Button>
         </div>
@@ -409,11 +413,11 @@
                     </span>
                     <button
                       type="button"
-                      class="text-xs font-semibold text-muted-foreground transition hover:text-destructive"
+                      class="rounded-md p-1 text-muted-foreground transition hover:text-destructive"
                       aria-label="Remove {entry.exerciseName} from {day.name}"
                       onclick={() => remove(day, entry)}
                     >
-                      Remove
+                      <X class="size-4" aria-hidden="true" />
                     </button>
                   </span>
                 </li>
@@ -438,6 +442,7 @@
               class="mt-2"
               onclick={() => (pickerDayId = day.id)}
             >
+              <Plus />
               Add assistance
             </Button>
           {/if}

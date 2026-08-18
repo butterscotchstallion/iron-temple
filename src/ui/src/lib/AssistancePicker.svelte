@@ -11,6 +11,8 @@
   import { exerciseEmoji } from "./exerciseIcon";
   import { Button } from "$lib/components/ui/button";
   import ErrorBanner from "./ErrorBanner.svelte";
+  import Plus from "@lucide/svelte/icons/plus";
+  import SearchX from "@lucide/svelte/icons/search-x";
 
   // Picking an exercise from the library and prescribing it, in one panel.
   //
@@ -143,6 +145,7 @@
     </p>
     <div class="flex gap-2">
       <Button size="sm" onclick={confirm} disabled={saving}>
+        <Plus />
         {saving ? "Adding…" : "Add to this day"}
       </Button>
       <Button size="sm" variant="ghost" onclick={onCancel}>Cancel</Button>
@@ -179,9 +182,12 @@
 
     <div class="max-h-64 overflow-y-auto rounded-md border border-border/40">
       {#if matchCount === 0}
-        <p class="p-4 text-center text-sm text-muted-foreground">
-          No exercises match that search.
-        </p>
+        <div class="flex flex-col items-center p-4 text-center">
+          <SearchX class="size-6 text-muted-foreground/60" aria-hidden="true" />
+          <p class="mt-2 text-sm text-muted-foreground">
+            No exercises match that search.
+          </p>
+        </div>
       {/if}
       {#each groups as section (section.group)}
         <p

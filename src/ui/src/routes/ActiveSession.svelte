@@ -10,6 +10,11 @@
     type SessionSet,
   } from "../lib/api";
   import confetti from "canvas-confetti";
+  import ArrowLeft from "@lucide/svelte/icons/arrow-left";
+  import Dumbbell from "@lucide/svelte/icons/dumbbell";
+  import Flag from "@lucide/svelte/icons/flag";
+  import PartyPopper from "@lucide/svelte/icons/party-popper";
+  import Trophy from "@lucide/svelte/icons/trophy";
   import RestTimer from "../lib/RestTimer.svelte";
   import ExerciseCard from "../lib/ExerciseCard.svelte";
   import { Card } from "$lib/components/ui/card";
@@ -242,9 +247,10 @@
   <a
     href="/"
     use:link
-    class="text-sm text-muted-foreground transition hover:text-foreground"
+    class="inline-flex items-center gap-1.5 self-start text-sm text-muted-foreground transition hover:text-foreground"
   >
-    ← Workout
+    <ArrowLeft class="size-4" aria-hidden="true" />
+    Workout
   </a>
 
   {#if prMessage}
@@ -252,7 +258,10 @@
       class="rounded-2xl border border-primary/60 bg-primary/15 p-3 text-center"
       role="status"
     >
-      <p class="font-black text-primary">🏆 New PR! {prMessage}</p>
+      <p class="flex items-center justify-center gap-2 font-black text-primary">
+        <Trophy class="size-5" aria-hidden="true" />
+        New PR! {prMessage}
+      </p>
     </div>
   {/if}
 
@@ -295,6 +304,7 @@
           onclick={requestFinish}
           disabled={finishing || loggedCount === 0}
         >
+          <Flag />
           {finishing ? "Finishing…" : "Finish workout"}
         </Button>
       {/if}
@@ -355,8 +365,14 @@
     <AlertDialog.Root bind:open={showComplete}>
       <AlertDialog.Content>
         <AlertDialog.Header>
-          <AlertDialog.Title>
-            {allComplete ? "Workout complete 🎉" : "Workout finished 💪"}
+          <AlertDialog.Title class="flex items-center gap-2">
+            {#if allComplete}
+              <PartyPopper class="size-5 shrink-0" aria-hidden="true" />
+              Workout complete
+            {:else}
+              <Dumbbell class="size-5 shrink-0" aria-hidden="true" />
+              Workout finished
+            {/if}
           </AlertDialog.Title>
           <AlertDialog.Description>
             {session.programName} · {session.programDayName}

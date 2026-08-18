@@ -1,0 +1,484 @@
+package racked
+
+import (
+	"testing"
+	"time"
+)
+
+// Accuracy fixes from the recap audit.
+//
+// Each test here names a figure the recap used to get wrong and pins the
+// corrected reading. They are grouped in one file because they were found
+// together and share a cause more often than the file layout suggests: four of
+// them are the same mistake — measuring a period that has not finished as
+// though it had.
+
+// Epley is defined for a set carried past one rep. At exactly one it returns
+// weight * 31/30, so a lifter who actually pulled a 225 single was told their
+// estimated max was 233 — an estimate three percent above a number that needs
+// no estimating.
+func TestE1RMOfASingleIsTheWeightLifted(t *testing.T) {
+	if got := (Set{Reps: 1, WeightLb: 225}).E1RM(); got != 225 {
+		t.Fatalf("E1RM of 225x1 = %v, want 225", got)
+	}
+	// Unchanged above one rep: 185 * (1 + 3/30) = 203.5, rounded to 204.
+	if got := (Set{Reps: 3, WeightLb: 185}).E1RM(); got != 204 {
+		t.Fatalf("E1RM of 185x3 = %v, want 204", got)
+	}
+}
+
+// A single must not be able to beat a genuinely harder set on the same bar.
+// Under the old formula 225x1 estimated 233 and 225x2 estimated 240; the first
+// is now 225, which is the right order.
+func TestE1RMSingleDoesNotOutrankAHarderSet(t *testing.T) {
+	single := Set{Reps: 1, WeightLb: 225}.E1RM()
+	double := Set{Reps: 2, WeightLb: 225}.E1RM()
+	if single >= double {
+		t.Fatalf("225x1 estimated %v, 225x2 estimated %v — a single should not rank higher", single, double)
+	}
+}
+
+// --- the period in progress ---
+
+// The live page opens on the month in progress, so Expected used to count every
+// scheduled day of a month that had barely started: a lifter two days in, having
+// trained both of them, was told they had made 15% of their sessions.
+func TestAttendanceCountsOnlyTheDaysThatHaveHappened(t *testing.T) {
+	start, end := Bounds(PeriodMonth, day(2026, time.March, 3))
+	mon, wed, fri := 1, 3, 5
+
+	rep := Build(Input{
+		Kind:  PeriodMonth,
+		Start: start,
+		End:   end,
+		AsOf:  day(2026, time.March, 3),
+		Sets: append(
+			mkSets(1, day(2026, time.March, 2), 1, "Squat", 5, 5, 200),
+			mkSets(2, day(2026, time.March, 3), 1, "Squat", 5, 5, 205)...,
+		),
+		ProgramDays: []ProgramDay{
+			{Name: "A", Weekday: &mon}, {Name: "B", Weekday: &wed}, {Name: "C", Weekday: &fri},
+		},
+	})
+
+	// March 2 is a Monday and March 3 a Tuesday, so only Monday the 2nd has come
+	// round of the three scheduled weekdays.
+	if rep.Attendance.Expected != 1 {
+		t.Fatalf("Expected = %d, want 1 — only the elapsed days count", rep.Attendance.Expected)
+	}
+	if rep.Attendance.Rate != 2 {
+		t.Fatalf("Rate = %v, want 2 (two sessions against one scheduled day)", rep.Attendance.Rate)
+	}
+}
+
+// Same cause: dividing by the whole month's four and a half weeks reported a
+// lifter training daily as managing half a session a week.
+func TestSessionsPerWeekUsesTheElapsedWindow(t *testing.T) {
+	start, end := Bounds(PeriodMonth, day(2026, time.March, 3))
+
+	rep := Build(Input{
+		Kind: PeriodMonth, Start: start, End: end, AsOf: day(2026, time.March, 3),
+		Sets: append(
+			mkSets(1, day(2026, time.March, 2), 1, "Squat", 5, 5, 200),
+			mkSets(2, day(2026, time.March, 3), 1, "Squat", 5, 5, 205)...,
+		),
+	})
+
+	// Three days elapsed, floored to one week: two sessions in that week.
+	if rep.Attendance.SessionsPerWeek != 2 {
+		t.Fatalf("SessionsPerWeek = %v, want 2", rep.Attendance.SessionsPerWeek)
+	}
+}
+
+// The archetype reads frequency off the same window, so a lifter training every
+// day of a young month used to be classified from a denominator of weeks they
+// had not reached.
+func TestArchetypeJudgesFrequencyOnElapsedWeeks(t *testing.T) {
+	start, end := Bounds(PeriodMonth, day(2026, time.March, 5))
+
+	var sets []Set
+	for i := 1; i <= 5; i++ {
+		sets = append(sets, mkSets(int32(i), day(2026, time.March, i), 1, "Squat", 5, 5, 200)...)
+	}
+
+	rep := Build(Input{
+		Kind: PeriodMonth, Start: start, End: end, AsOf: day(2026, time.March, 5), Sets: sets,
+	})
+	if rep.Archetype.Name != "The Machine" {
+		t.Fatalf("Archetype = %q, want The Machine — five sessions in five days", rep.Archetype.Name)
+	}
+}
+
+// The headline compared a month three days old against a month that ran its full
+// length, which made every in-progress recap open on a large fall.
+func TestChangeComparesTheSameElapsedWindow(t *testing.T) {
+	start, end := Bounds(PeriodMonth, day(2026, time.March, 3))
+	prevStart, _ := PreviousBounds(PeriodMonth, day(2026, time.March, 3))
+
+	// Two sessions in the first three days of March, against a February that
+	// opened with the same two and then ran on for another eight.
+	current := append(
+		mkSets(1, day(2026, time.March, 1), 1, "Squat", 5, 5, 200),
+		mkSets(2, day(2026, time.March, 3), 1, "Squat", 5, 5, 200)...,
+	)
+	previous := append(
+		mkSets(10, day(2026, time.February, 1), 1, "Squat", 5, 5, 200),
+		mkSets(11, day(2026, time.February, 3), 1, "Squat", 5, 5, 200)...,
+	)
+	for i := 4; i <= 11; i++ {
+		previous = append(previous, mkSets(int32(20+i), day(2026, time.February, i), 1, "Squat", 5, 5, 200)...)
+	}
+
+	rep := Build(Input{
+		Kind: PeriodMonth, Start: start, End: end, AsOf: day(2026, time.March, 3),
+		Sets: current, PreviousSets: previous, PreviousStart: prevStart,
+	})
+
+	if rep.Change == nil || rep.Change.VolumePct == nil {
+		t.Fatalf("Change = %+v, want a volume percentage", rep.Change)
+	}
+	// Like for like: the same two sessions on both sides, so no movement at all.
+	if *rep.Change.VolumePct != 0 {
+		t.Fatalf("VolumePct = %v, want 0 — the first three days of each month match",
+			*rep.Change.VolumePct)
+	}
+}
+
+// A completed period is measured over the whole of itself, which is what the
+// recap email sends and what an `on` date inside a past month asks for.
+func TestCompletedPeriodMeasuresItsWholeLength(t *testing.T) {
+	start, end := Bounds(PeriodMonth, day(2026, time.March, 1))
+	mon := 1
+
+	rep := Build(Input{
+		Kind: PeriodMonth, Start: start, End: end, AsOf: day(2026, time.April, 2),
+		Sets:        mkSets(1, day(2026, time.March, 2), 1, "Squat", 5, 5, 200),
+		ProgramDays: []ProgramDay{{Name: "A", Weekday: &mon}},
+	})
+
+	if rep.Period.InProgress {
+		t.Fatal("InProgress = true for a month that has ended")
+	}
+	// Five Mondays in March 2026.
+	if rep.Attendance.Expected != 5 {
+		t.Fatalf("Expected = %d, want 5", rep.Attendance.Expected)
+	}
+}
+
+func TestPeriodInProgressIsFlagged(t *testing.T) {
+	start, end := Bounds(PeriodMonth, day(2026, time.March, 3))
+	rep := Build(Input{
+		Kind: PeriodMonth, Start: start, End: end, AsOf: day(2026, time.March, 3),
+		Sets: mkSets(1, day(2026, time.March, 2), 1, "Squat", 5, 5, 200),
+	})
+	if !rep.Period.InProgress {
+		t.Fatal("InProgress = false for a month still running")
+	}
+}
+
+// An absent AsOf must not silently truncate anything — Build is called directly
+// in tests and by the reporter, and a zero date means "the period as a whole".
+func TestZeroAsOfMeasuresTheWholePeriod(t *testing.T) {
+	start, end := Bounds(PeriodMonth, day(2026, time.March, 1))
+	mon := 1
+
+	rep := Build(Input{
+		Kind: PeriodMonth, Start: start, End: end,
+		Sets:        mkSets(1, day(2026, time.March, 2), 1, "Squat", 5, 5, 200),
+		ProgramDays: []ProgramDay{{Name: "A", Weekday: &mon}},
+	})
+	if rep.Period.InProgress {
+		t.Fatal("InProgress = true with no AsOf")
+	}
+	if rep.Attendance.Expected != 5 {
+		t.Fatalf("Expected = %d, want 5", rep.Attendance.Expected)
+	}
+}
+
+// --- the peak hour ---
+
+// The report named the hour that first reached the highest count as the sessions
+// were walked, while the page highlighted the earliest hour holding that count.
+// Two evenings followed by two mornings put the label on one bar and the accent
+// on another.
+func TestPeakHourBreaksTiesTowardTheEarlierHour(t *testing.T) {
+	at := func(id int32, d int, hour int) []Set {
+		sets := mkSets(id, day(2026, time.March, d), 1, "Squat", 5, 5, 100)
+		for i := range sets {
+			sets[i].StartedAt = time.Date(2026, time.March, d, hour, 0, 0, 0, time.UTC)
+		}
+		return sets
+	}
+	var sets []Set
+	sets = append(sets, at(1, 2, 18)...)
+	sets = append(sets, at(2, 3, 18)...)
+	sets = append(sets, at(3, 4, 6)...)
+	sets = append(sets, at(4, 5, 6)...)
+
+	start, end := Bounds(PeriodMonth, day(2026, time.March, 1))
+	rep := Build(Input{Kind: PeriodMonth, Start: start, End: end, AsOf: end, Sets: sets})
+
+	if rep.PeakHour != 6 {
+		t.Fatalf("PeakHour = %d, want 6 — the earlier of two hours tied on two sessions", rep.PeakHour)
+	}
+	if rep.HourLabel != "Early bird" {
+		t.Fatalf("HourLabel = %q, want Early bird", rep.HourLabel)
+	}
+}
+
+func TestPeakHourIsAbsentWithoutSessions(t *testing.T) {
+	start, end := Bounds(PeriodMonth, day(2026, time.March, 1))
+	rep := Build(Input{Kind: PeriodMonth, Start: start, End: end, AsOf: end})
+	if rep.PeakHour != -1 {
+		t.Fatalf("PeakHour = %d, want -1", rep.PeakHour)
+	}
+	if rep.HourLabel != "" {
+		t.Fatalf("HourLabel = %q, want empty", rep.HourLabel)
+	}
+}
+
+// --- attendance against the program ---
+
+// Two program days on the same weekday are two sessions asked for, not one. The
+// weekdays used to collapse into a set, so a four-day program running Monday
+// twice expected three sessions a week.
+func TestAttendanceCountsEveryProgramDayOnAWeekday(t *testing.T) {
+	start, end := Bounds(PeriodMonth, day(2026, time.March, 1))
+	mon, wed := 1, 3
+
+	rep := Build(Input{
+		Kind: PeriodMonth, Start: start, End: end, AsOf: end,
+		Sets: mkSets(1, day(2026, time.March, 2), 1, "Squat", 5, 5, 200),
+		ProgramDays: []ProgramDay{
+			{Name: "A", Weekday: &mon},
+			{Name: "B", Weekday: &mon},
+			{Name: "C", Weekday: &wed},
+		},
+	})
+
+	// March 2026 holds five Mondays and four Wednesdays: 5*2 + 4.
+	if rep.Attendance.Expected != 14 {
+		t.Fatalf("Expected = %d, want 14 — both Monday days count", rep.Attendance.Expected)
+	}
+}
+
+// A program created after the period ended cannot have governed it, so grading
+// that period against its schedule invents a target. There is no record of which
+// program was current back then, so the honest answer is to report frequency.
+func TestAttendanceWillNotGradeAPeriodAgainstALaterProgram(t *testing.T) {
+	start, end := Bounds(PeriodMonth, day(2026, time.March, 1))
+	mon := 1
+
+	rep := Build(Input{
+		Kind: PeriodMonth, Start: start, End: end, AsOf: day(2026, time.June, 1),
+		Sets:           mkSets(1, day(2026, time.March, 2), 1, "Squat", 5, 5, 200),
+		ProgramDays:    []ProgramDay{{Name: "A", Weekday: &mon}},
+		ProgramStarted: day(2026, time.May, 1),
+	})
+
+	if rep.Attendance.Basis != AttendanceNone {
+		t.Fatalf("Basis = %q, want none for a program newer than the period", rep.Attendance.Basis)
+	}
+	if rep.Attendance.Expected != 0 || rep.Attendance.Rate != 0 {
+		t.Fatalf("Expected/Rate = %d/%v, want 0/0", rep.Attendance.Expected, rep.Attendance.Rate)
+	}
+	if rep.Attendance.SessionsPerWeek <= 0 {
+		t.Fatal("SessionsPerWeek must still be reported when there is no target")
+	}
+}
+
+// A program taken up mid-month governs the rest of that month, and the recap
+// should grade what it can rather than declining the whole period. Refusing
+// outright threw away three weeks the program had plenty to say about.
+func TestAttendanceGradesFromTheDayTheProgramBegan(t *testing.T) {
+	start, end := Bounds(PeriodMonth, day(2026, time.March, 1))
+	mon := 1
+
+	// One session before the program existed, two after.
+	sets := mkSets(1, day(2026, time.March, 2), 1, "Squat", 5, 5, 200)
+	sets = append(sets, mkSets(2, day(2026, time.March, 16), 1, "Squat", 5, 5, 200)...)
+	sets = append(sets, mkSets(3, day(2026, time.March, 23), 1, "Squat", 5, 5, 200)...)
+
+	rep := Build(Input{
+		Kind: PeriodMonth, Start: start, End: end, AsOf: day(2026, time.April, 1),
+		Sets:           sets,
+		ProgramDays:    []ProgramDay{{Name: "A", Weekday: &mon}},
+		ProgramStarted: day(2026, time.March, 10),
+	})
+
+	if rep.Attendance.Basis != AttendanceWeekday {
+		t.Fatalf("Basis = %q, want weekday for the part of March the program ran",
+			rep.Attendance.Basis)
+	}
+	// Mondays from the 10th: the 16th, 23rd and 30th.
+	if rep.Attendance.Expected != 3 {
+		t.Fatalf("Expected = %d, want 3 — Mondays from the 10th", rep.Attendance.Expected)
+	}
+	// Counted over the same window, so the two figures agree: the session on the
+	// 2nd predates the program and is not one of its three chances.
+	if rep.Attendance.Actual != 2 {
+		t.Fatalf("Actual = %d, want 2 — sessions inside the graded window",
+			rep.Attendance.Actual)
+	}
+	// The frequency is still measured over the whole month, being a fact about
+	// the lifter rather than about the schedule: three sessions over ~4.4 weeks.
+	if rep.Attendance.SessionsPerWeek < 0.6 || rep.Attendance.SessionsPerWeek > 0.7 {
+		t.Fatalf("SessionsPerWeek = %v, want about 0.68", rep.Attendance.SessionsPerWeek)
+	}
+}
+
+func TestAttendanceGradesAPeriodTheProgramCouldHaveGoverned(t *testing.T) {
+	start, end := Bounds(PeriodMonth, day(2026, time.March, 1))
+	mon := 1
+
+	rep := Build(Input{
+		Kind: PeriodMonth, Start: start, End: end, AsOf: day(2026, time.April, 1),
+		Sets:           mkSets(1, day(2026, time.March, 2), 1, "Squat", 5, 5, 200),
+		ProgramDays:    []ProgramDay{{Name: "A", Weekday: &mon}},
+		ProgramStarted: day(2026, time.January, 15),
+	})
+
+	if rep.Attendance.Basis != AttendanceWeekday {
+		t.Fatalf("Basis = %q, want weekday", rep.Attendance.Basis)
+	}
+}
+
+// A month whose first scheduled day has not come round yet has no denominator,
+// and a rate out of zero is not a rate. This is reachable on the 1st and 2nd of
+// most months, which is exactly when somebody opens the recap to see the new
+// month start.
+func TestAttendanceHasNoRateBeforeTheFirstScheduledDay(t *testing.T) {
+	start, end := Bounds(PeriodMonth, day(2026, time.March, 1))
+	thu := 4 // March 2026 opens on a Sunday; the first Thursday is the 5th.
+
+	rep := Build(Input{
+		Kind: PeriodMonth, Start: start, End: end, AsOf: day(2026, time.March, 2),
+		Sets:        mkSets(1, day(2026, time.March, 2), 1, "Squat", 5, 5, 200),
+		ProgramDays: []ProgramDay{{Name: "A", Weekday: &thu}},
+	})
+
+	if rep.Attendance.Basis != AttendanceNone {
+		t.Fatalf("Basis = %q, want none before any scheduled day has passed", rep.Attendance.Basis)
+	}
+	if rep.Attendance.Rate != 0 || rep.Attendance.Expected != 0 {
+		t.Fatalf("attendance = %+v, want no rate", rep.Attendance)
+	}
+	if rep.Attendance.SessionsPerWeek <= 0 {
+		t.Fatal("SessionsPerWeek must still be reported")
+	}
+}
+
+// Two finished periods are compared whole against whole, however unequal their
+// lengths.
+//
+// The elapsed cut exists for a period still running. Applying it unconditionally
+// trimmed the preceding period to *this* period's day count, so a completed
+// February compared against the first 28 days of January and quietly dropped the
+// 29th to the 31st — and April against 30 days of March, and a common year
+// against 365 days of a leap year. That ran through the reporter, so the recap
+// email's headline was wrong too.
+func TestCompletedPeriodComparesAgainstTheWholePrecedingPeriod(t *testing.T) {
+	start, end := Bounds(PeriodMonth, day(2026, time.February, 10))
+	prevStart, _ := PreviousBounds(PeriodMonth, day(2026, time.February, 10))
+
+	// January's work is split either side of February's length: the second
+	// session falls on the 30th, which is past any 28-day cut.
+	previous := append(
+		mkSets(10, day(2026, time.January, 15), 1, "Squat", 5, 5, 100),
+		mkSets(11, day(2026, time.January, 30), 1, "Squat", 5, 5, 100)...,
+	)
+	// February moves exactly what January did, in one session.
+	current := mkSets(1, day(2026, time.February, 10), 1, "Squat", 5, 5, 200)
+
+	rep := Build(Input{
+		Kind: PeriodMonth, Start: start, End: end,
+		AsOf:         day(2026, time.March, 5),
+		Sets:         current,
+		PreviousSets: previous,
+		// Set exactly as the API sets it, which is what made this reachable.
+		PreviousStart: prevStart,
+	})
+
+	if rep.Period.InProgress {
+		t.Fatal("InProgress = true for a month that has ended")
+	}
+	if rep.Change == nil || rep.Change.VolumePct == nil {
+		t.Fatalf("Change = %+v, want a volume percentage", rep.Change)
+	}
+	// 5,000 lb against January's whole 5,000. Cutting January at the 28th would
+	// leave 2,500 and report a doubling.
+	if *rep.Change.VolumePct != 0 {
+		t.Fatalf("VolumePct = %v, want 0 — January counts to the 31st",
+			*rep.Change.VolumePct)
+	}
+}
+
+// The same, a year at a time: 2026 has 365 days and 2024 had 366, so a cut
+// sized by the current period dropped the last day of the leap year.
+func TestCompletedYearComparesAgainstTheWholePrecedingYear(t *testing.T) {
+	start, end := Bounds(PeriodYear, day(2025, time.June, 1))
+	prevStart, _ := PreviousBounds(PeriodYear, day(2025, time.June, 1))
+
+	previous := append(
+		mkSets(10, day(2024, time.June, 1), 1, "Squat", 5, 5, 100),
+		mkSets(11, day(2024, time.December, 31), 1, "Squat", 5, 5, 100)...,
+	)
+	current := mkSets(1, day(2025, time.June, 1), 1, "Squat", 5, 5, 200)
+
+	rep := Build(Input{
+		Kind: PeriodYear, Start: start, End: end,
+		AsOf:          day(2026, time.January, 5),
+		Sets:          current,
+		PreviousSets:  previous,
+		PreviousStart: prevStart,
+	})
+
+	if rep.Change == nil || rep.Change.VolumePct == nil {
+		t.Fatalf("Change = %+v, want a volume percentage", rep.Change)
+	}
+	if *rep.Change.VolumePct != 0 {
+		t.Fatalf("VolumePct = %v, want 0 — 31 December 2024 counts", *rep.Change.VolumePct)
+	}
+}
+
+// The measured window can never fall outside the period it belongs to.
+//
+// AsOf and the period bounds are both "today", and if they are ever read off
+// different clocks — a report zone behind UTC, in the small hours of the 1st —
+// AsOf can land before the period even opens. Everything downstream then goes
+// quietly incoherent: a negative day count, an attendance loop that never runs,
+// a comparison cut to a single day, while Totals still counts the whole period.
+// Clamping here means no caller can produce that report.
+func TestMeasuredWindowStaysInsideThePeriod(t *testing.T) {
+	start, end := Bounds(PeriodMonth, day(2026, time.April, 1))
+	prevStart, _ := PreviousBounds(PeriodMonth, day(2026, time.April, 1))
+	wed := 3
+
+	rep := Build(Input{
+		Kind: PeriodMonth, Start: start, End: end,
+		// A day before the period opens, which is what a zone skew produces.
+		AsOf: day(2026, time.March, 31),
+		Sets: mkSets(1, day(2026, time.April, 1), 1, "Squat", 5, 5, 200),
+		// One elapsed day compares against the period before it, one day deep.
+		PreviousSets:  mkSets(9, day(2026, time.March, 1), 1, "Squat", 5, 5, 200),
+		PreviousStart: prevStart,
+		ProgramDays:   []ProgramDay{{Name: "A", Weekday: &wed}},
+	})
+
+	// April 1 2026 is a Wednesday, so the first scheduled day has come round and
+	// there is a real denominator rather than a loop that never ran.
+	if rep.Attendance.Basis != AttendanceWeekday {
+		t.Fatalf("Basis = %q, want weekday — the period's first day is scheduled",
+			rep.Attendance.Basis)
+	}
+	if rep.Attendance.Expected != 1 {
+		t.Fatalf("Expected = %d, want 1", rep.Attendance.Expected)
+	}
+	if rep.Attendance.SessionsPerWeek <= 0 {
+		t.Fatalf("SessionsPerWeek = %v, want a measurement", rep.Attendance.SessionsPerWeek)
+	}
+	// The comparison still covers a day of March rather than nothing at all.
+	if rep.Change == nil {
+		t.Fatal("Change = nil, want the preceding period's first day")
+	}
+}

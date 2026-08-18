@@ -1549,7 +1549,7 @@ components:
       type: object
       required:
         [period, totals, change, comparison, lifts, series, mostImproved, days, weekdays,
-         bestWeekday, hours, hourLabel, streak, attendance, prs, milestones, heaviestSet,
+         bestWeekday, hours, peakHour, hourLabel, streak, attendance, prs, milestones, heaviestSet,
          fastestSession, deloads, archetype]
       properties:
         period:
@@ -1604,6 +1604,15 @@ components:
           maxItems: 24
           items:
             type: integer
+        peakHour:
+          type: integer
+          minimum: -1
+          maximum: 23
+          description: >
+            The hour `hourLabel` describes — the earliest hour holding the most
+            session starts — or -1 when no session carries a start time. Read
+            this rather than scanning `hours`, so the bar a surface accents is
+            the one the label is talking about.
         hourLabel:
           type: string
           example: Early bird
@@ -1640,7 +1649,7 @@ components:
 
     RackedPeriod:
       type: object
-      required: [kind, start, end, label]
+      required: [kind, start, end, label, inProgress]
       properties:
         kind:
           type: string
@@ -1655,6 +1664,14 @@ components:
         label:
           type: string
           example: March 2026
+        inProgress:
+          type: boolean
+          description: >
+            Whether the period is still running. Every rate in the report is
+            then measured over the days that have elapsed rather than the
+            period's whole length, and `change` compares the same stretch of
+            the preceding period — so a month three days old is not weighed
+            against a month that ran its full length.
 
     RackedTotals:
       type: object

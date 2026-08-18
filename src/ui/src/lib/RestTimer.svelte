@@ -1,5 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
+  import Play from "@lucide/svelte/icons/play";
+  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import { formatTime } from "./time";
 
   // The design specifies a 3-minute rest between sets; default accordingly.
@@ -78,16 +80,18 @@
   </div>
   <div class="flex gap-1.5">
     <button
-      class="rounded-full border border-neon/60 bg-neon/10 px-3 py-1 text-xs font-semibold text-ink transition hover:bg-neon/25 disabled:opacity-40"
+      class="inline-flex items-center gap-1.5 rounded-full border border-neon/60 bg-neon/10 px-3 py-1 text-xs font-semibold text-ink transition hover:bg-neon/25 disabled:opacity-40"
       onclick={start}
       disabled={running || remaining === 0}
     >
+      <Play class="size-3" aria-hidden="true" />
       Start
     </button>
     <button
-      class="rounded-full border border-magenta/60 bg-magenta/10 px-3 py-1 text-xs font-semibold text-ink transition hover:bg-magenta/25"
+      class="inline-flex items-center gap-1.5 rounded-full border border-magenta/60 bg-magenta/10 px-3 py-1 text-xs font-semibold text-ink transition hover:bg-magenta/25"
       onclick={reset}
     >
+      <RotateCcw class="size-3" aria-hidden="true" />
       Reset
     </button>
   </div>

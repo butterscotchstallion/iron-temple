@@ -10,6 +10,9 @@
   import { formatLongDate } from "../lib/date";
   import ProgressChart from "../lib/ProgressChart.svelte";
   import { Card } from "$lib/components/ui/card";
+  import ArrowLeft from "@lucide/svelte/icons/arrow-left";
+  import ChartLine from "@lucide/svelte/icons/chart-line";
+  import Trophy from "@lucide/svelte/icons/trophy";
   import ErrorCard from "../lib/ErrorCard.svelte";
 
   let { params }: { params?: { id?: string } } = $props();
@@ -72,9 +75,10 @@
   <a
     href="/progress"
     use:link
-    class="text-sm text-muted-foreground transition hover:text-foreground"
+    class="inline-flex items-center gap-1.5 self-start text-sm text-muted-foreground transition hover:text-foreground"
   >
-    ← Progress
+    <ArrowLeft class="size-4" aria-hidden="true" />
+    Progress
   </a>
 
   {#if loading}
@@ -85,8 +89,9 @@
     <h2 class="text-2xl font-black text-foreground">{name}</h2>
 
     {#if points.length === 0}
-      <Card class="p-6 text-center">
-        <p class="text-sm text-muted-foreground">
+      <Card class="flex flex-col items-center p-6 text-center">
+        <ChartLine class="size-8 text-muted-foreground/60" aria-hidden="true" />
+        <p class="mt-3 text-sm text-muted-foreground">
           No logged sessions yet for this lift.
         </p>
       </Card>
@@ -131,7 +136,16 @@
               <tr class="border-t border-border/50">
                 <td class="py-1.5 pr-4 text-card-foreground">
                   {formatLongDate(r.performedOn)}
-                  {#if r.isPr}<span title="New heaviest weight">🏆</span>{/if}
+                  <!-- The icon is aria-hidden, so the label it replaces (the
+                       trophy emoji, which announced as "trophy") is restated
+                       for screen readers rather than left to the tooltip. -->
+                  {#if r.isPr}<span title="New heaviest weight">
+                      <Trophy
+                        class="inline size-3.5 align-[-0.15em] text-primary"
+                        aria-hidden="true"
+                      />
+                      <span class="sr-only">New heaviest weight</span>
+                    </span>{/if}
                 </td>
                 <td class="py-1.5 pr-4 tabular-nums text-muted-foreground">
                   {r.weightLb} lb × {r.reps}

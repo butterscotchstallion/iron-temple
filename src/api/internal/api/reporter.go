@@ -103,7 +103,9 @@ func (s *Server) sendReport(ctx context.Context, due racked.Due, r store.ListRep
 		return
 	}
 
-	report, err := s.buildRacked(ctx, r.ID, due.Kind, due.Start)
+	// due.Start names a period that has already closed, and today is the day it
+	// is being sent on — so the recap measures the period whole.
+	report, err := s.buildRacked(ctx, r.ID, due.Kind, due.Start, s.reportToday())
 	if err != nil {
 		s.failReport(ctx, run.ID, "build report: "+err.Error())
 		return

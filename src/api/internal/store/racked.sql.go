@@ -14,7 +14,10 @@ import (
 const rackedExerciseBaseline = `-- name: RackedExerciseBaseline :many
 SELECT ss.exercise_id,
        MAX(ss.weight_lb)::numeric AS best_weight_lb,
-       MAX(ROUND(ss.weight_lb * (1 + ss.actual_reps / 30.0)))::numeric AS best_e1rm_lb
+       MAX(ROUND(CASE WHEN ss.actual_reps = 1
+                      THEN ss.weight_lb
+                      ELSE ss.weight_lb * (1 + ss.actual_reps / 30.0)
+                 END))::numeric AS best_e1rm_lb
 FROM session_sets ss
 JOIN sessions s ON s.id = ss.session_id
 WHERE s.user_id = $1::int
@@ -52,6 +55,10 @@ type RackedExerciseBaselineRow struct {
 // identical set in a later period reads as a new record — 185 x 3 is 203.5, the
 // Go side calls it 204, and 204 > 203.5. Rounding per row rather than around the
 // MAX mirrors what Go does, and is equivalent anyway since ROUND is monotonic.
+//
+// The single is spelled out for the same reason the CASE exists in Go: Epley
+// extrapolates from a set carried past one rep, and at exactly one rep it
+// inflates a known number by a thirtieth. A 225 single is a 225 estimated max.
 func (q *Queries) RackedExerciseBaseline(ctx context.Context, arg RackedExerciseBaselineParams) ([]RackedExerciseBaselineRow, error) {
 	rows, err := q.db.Query(ctx, rackedExerciseBaseline, arg.UserID, arg.StartOn)
 	if err != nil {
@@ -186,6 +193,27 @@ func (q *Queries) RackedPeriodSets(ctx context.Context, arg RackedPeriodSetsPara
 		return nil, err
 	}
 	return items, nil
+}
+
+const rackedProgramStart = `-- name: RackedProgramStart :one
+SELECT created_at
+FROM programs
+WHERE id = $1::int
+`
+
+// RackedProgramStart returns when a program came into existence.
+//
+// Attendance needs it to know whether it may grade a period at all: a program
+// created in May cannot have set the schedule a lifter was following in March,
+// and measuring March against it invents a target the lifter never had. Nothing
+// records which program was current in a given month — only when each was
+// created — so this catches the newer-program case and no more, which is the
+// case that actually arises when somebody switches.
+func (q *Queries) RackedProgramStart(ctx context.Context, programID int32) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, rackedProgramStart, programID)
+	var created_at pgtype.Timestamptz
+	err := row.Scan(&created_at)
+	return created_at, err
 }
 
 const rackedVolumeBefore = `-- name: RackedVolumeBefore :one

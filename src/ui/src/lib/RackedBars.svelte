@@ -35,12 +35,15 @@
     {#each values as value, i (i)}
       <!-- A floor of 2% keeps a zero column visible as an empty slot rather
            than a gap, so the shape of the week stays readable. -->
+      <!-- data-peak marks the accented bar. The accent is otherwise only a
+           colour, which neither a test nor a screen reader can see. -->
       <div
         class="flex-1 rounded-t-[3px] transition-colors {i === highlight
           ? 'bg-primary'
           : 'bg-primary/35'}"
         style="height: {empty ? 2 : Math.max(barFraction(value, max) * 100, 2)}%"
         title="{labels[i]} · {format(value, i)}"
+        data-peak={i === highlight ? "true" : undefined}
       ></div>
     {/each}
   </div>

@@ -6,6 +6,7 @@
   import ProgramDetail from "./ProgramDetail.svelte";
   import Programs from "./Programs.svelte";
   import { Card } from "$lib/components/ui/card";
+  import Flame from "@lucide/svelte/icons/flame";
   import ErrorCard from "../lib/ErrorCard.svelte";
   import CalendarHeatmap from "../lib/CalendarHeatmap.svelte";
 
@@ -56,7 +57,12 @@
         <Card
           class="flex flex-col justify-center border-primary/40 bg-primary/5 p-6 text-center ring-primary/30"
         >
-          <p class="text-2xl font-black text-primary">🔥 {streak}-session streak</p>
+          <p
+            class="flex items-center justify-center gap-2 text-2xl font-black text-primary"
+          >
+            <Flame class="size-6" aria-hidden="true" />
+            {streak}-session streak
+          </p>
           <p class="mt-0.5 text-xs uppercase tracking-[0.3em] text-muted-foreground">
             Finish every set to keep it alive
           </p>

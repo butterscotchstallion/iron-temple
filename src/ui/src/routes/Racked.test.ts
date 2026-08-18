@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Racked from "./Racked.svelte";
+import type { RackedReport } from "../lib/api";
 
 // A render test for a route, which the suite otherwise leaves to Playwright.
 //
@@ -18,9 +19,15 @@ vi.mock("../lib/api", async (importOriginal) => ({
 }));
 
 /** A recap with every optional section absent — the shape of a quiet month. */
-function emptyReport() {
+function emptyReport(): RackedReport {
   return {
-    period: { kind: "month", start: "2026-03-01", end: "2026-03-31", label: "March 2026" },
+    period: {
+      kind: "month",
+      start: "2026-03-01",
+      end: "2026-03-31",
+      label: "March 2026",
+      inProgress: false,
+    },
     totals: { volumeLb: 0, sessions: 0, sets: 0, reps: 0 },
     change: null,
     comparison: { count: 0, label: "", unitLb: 0 },
@@ -30,7 +37,8 @@ function emptyReport() {
     days: [],
     weekdays: [0, 0, 0, 0, 0, 0, 0],
     bestWeekday: -1,
-    hours: Array.from({ length: 24 }, () => 0),
+    hours: Array.from({ length: 24 }, () => 0) as RackedReport["hours"],
+    peakHour: -1,
     hourLabel: "",
     streak: { longestWeeks: 0, currentWeeks: 0 },
     attendance: { basis: "none", expected: 0, actual: 0, rate: 0, sessionsPerWeek: 0 },
@@ -44,7 +52,7 @@ function emptyReport() {
 }
 
 /** A recap with every section populated. */
-function fullReport() {
+function fullReport(): RackedReport {
   return {
     ...emptyReport(),
     totals: { volumeLb: 84_000, sessions: 12, sets: 180, reps: 900 },
@@ -78,7 +86,8 @@ function fullReport() {
     ],
     weekdays: [0, 42_000, 0, 30_000, 0, 12_000, 0],
     bestWeekday: 1,
-    hours: Array.from({ length: 24 }, (_, h) => (h === 6 ? 9 : 0)),
+    hours: Array.from({ length: 24 }, (_, h) => (h === 6 ? 9 : 0)) as RackedReport["hours"],
+    peakHour: 6,
     hourLabel: "Early bird",
     streak: { longestWeeks: 5, currentWeeks: 3 },
     attendance: { basis: "none", expected: 0, actual: 12, rate: 0, sessionsPerWeek: 2.75 },
@@ -257,6 +266,91 @@ describe("Racked", () => {
     );
   });
 
+  // Accuracy fixes from the recap audit — each pins a figure the page used to
+  // read wrong off a report that was already right, or say more than it knew.
+
+  // volumePct is null when the preceding period moved no weight, because growth
+  // from nothing is not a ratio. Defaulting it to zero asserted "no change",
+  // which is a claim the report explicitly declined to make.
+  it("says nothing rather than 0% when there is no ratio to quote", async () => {
+    const report = fullReport();
+    report.change = { volumeLb: 9_000, volumePct: null, sessions: 2, sessionsPct: null };
+    getRacked.mockResolvedValue({ data: report, error: undefined });
+    render(Racked);
+
+    await waitFor(() => expect(screen.getByText("84,000")).toBeInTheDocument());
+    expect(screen.queryByText(/vs the previous month/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^0% /)).not.toBeInTheDocument();
+  });
+
+  // A month three days old is compared against the first three days of the month
+  // before it, not the whole of it. The page has to say which, or the figure
+  // reads as a comparison against a full month.
+  it("names the elapsed comparison while the period is still running", async () => {
+    const report = fullReport();
+    report.period = { ...report.period, inProgress: true };
+    getRacked.mockResolvedValue({ data: report, error: undefined });
+    render(Racked);
+
+    await waitFor(() =>
+      expect(screen.getByText(/vs the same point last month/)).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/vs the previous month/)).not.toBeInTheDocument();
+  });
+
+  it("compares against the whole period once it has finished", async () => {
+    getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
+    render(Racked);
+
+    await waitFor(() =>
+      expect(screen.getByText(/vs the previous month/)).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/same point/)).not.toBeInTheDocument();
+  });
+
+  // The page used to pick its own peak out of the hours array and could land on
+  // a different hour than hourLabel described, accenting one bar while the label
+  // named another.
+  it("accents the hour the report names, not one of its own choosing", async () => {
+    const report = fullReport();
+    // Two hours tied on sessions; the report has already resolved the tie.
+    report.hours = Array.from({ length: 24 }, (_, h) =>
+      h === 6 || h === 18 ? 2 : 0,
+    ) as RackedReport["hours"];
+    report.peakHour = 18;
+    report.hourLabel = "Evening lifter";
+    getRacked.mockResolvedValue({ data: report, error: undefined });
+    render(Racked);
+
+    await waitFor(() => expect(screen.getByText("Evening lifter")).toBeInTheDocument());
+
+    // Every bar carries a title; only the accented one carries data-peak, so
+    // this asserts the highlight rather than the mere presence of a 6pm bar.
+    const peaks = Array.from(document.querySelectorAll("[data-peak='true']"));
+    const titles = peaks.map((el) => el.getAttribute("title"));
+    expect(titles).toContain("6pm · 2 sessions");
+    expect(titles).not.toContain("6am · 2 sessions");
+  });
+
+  // Two figures on this page measure improvement differently — the chart indexes
+  // each lift off its own first session, while "most improved" compares the best
+  // of the period's start against the best of its end. Both are right; saying so
+  // is what stops them reading as a contradiction.
+  it("names the basis of each improvement measure", async () => {
+    getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
+    render(Racked);
+
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Most improved" })).toBeInTheDocument(),
+    );
+    expect(screen.getByText("start vs end of period")).toBeInTheDocument();
+
+    await screen.getByText("Change by lift as a table").click();
+    expect(
+      screen.getByRole("columnheader", { name: "Since first session" }),
+    ).toBeInTheDocument();
+  });
+
   it("offers the recap as an image once there is something to show", async () => {
     getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
     render(Racked);
@@ -304,7 +398,7 @@ describe("Racked", () => {
 // so the whole page died rather than degrading. Position is the identity in all
 // three lists, so they key by index now, and this pins that.
 describe("Racked with two sessions of one lift on the same day", () => {
-  function sameDayReport() {
+  function sameDayReport(): RackedReport {
     const r = fullReport();
     const day = "2026-08-06";
 
