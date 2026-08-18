@@ -194,9 +194,23 @@ type sessionDTO struct {
 	CreatedAt      string `json:"createdAt"`
 	// FinishedAt is nil until the session is finished by hand; a session can be
 	// over (IsOver) without one, having simply aged out.
-	FinishedAt *string         `json:"finishedAt"`
-	IsOver     bool            `json:"isOver"`
-	Sets       []sessionSetDTO `json:"sets"`
+	FinishedAt *string `json:"finishedAt"`
+	IsOver     bool    `json:"isOver"`
+	// BodyweightLb is nil when the lifter did not weigh in, which is a different
+	// answer from any number: the weight-loss series is the days that were
+	// actually measured.
+	BodyweightLb *float64 `json:"bodyweightLb"`
+	// LastWeighIn is the most recent weigh-in from another session, which is what
+	// lets the session screen open its box pre-filled. Nil until there is one.
+	LastWeighIn *weighInDTO     `json:"lastWeighIn"`
+	Sets        []sessionSetDTO `json:"sets"`
+}
+
+// weighInDTO pairs a bodyweight with the day it was recorded, so a client
+// showing "carried from <date>" cannot pair the number with the wrong day.
+type weighInDTO struct {
+	WeightLb    float64 `json:"weightLb"`
+	PerformedOn string  `json:"performedOn"`
 }
 
 type sessionExerciseWeightDTO struct {

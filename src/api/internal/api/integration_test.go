@@ -387,6 +387,73 @@ func TestSessionBecomesOverTwelveHoursAfterItStarted(t *testing.T) {
 	aged.Value("finishedAt").IsNull()
 }
 
+// A weigh-in is recorded per session and carried forward to the next one as a
+// suggestion, never copied into it. That distinction is the feature: a session
+// nobody stood on a scale for stays null, so the series a weight chart reads is
+// the days that were actually measured rather than a flat line of the last
+// number anyone typed.
+func TestSessionBodyweightCarriesForwardWithoutBeingCopied(t *testing.T) {
+	e := expect(t)
+	_, dayID := firstProgramAndDay(e)
+
+	first := startSession(t, e, dayID)
+	firstID := int(first.Value("id").Number().Raw())
+
+	// Nothing weighed anywhere yet, so there is neither a record nor a hint.
+	first.Value("bodyweightLb").IsNull()
+	first.Value("lastWeighIn").IsNull()
+
+	recorded := e.PATCH(fmt.Sprintf("/sessions/%d", firstID)).
+		WithJSON(map[string]any{"bodyweightLb": 184.5}).
+		Expect().Status(http.StatusOK).JSON().Object()
+	recorded.HasValue("bodyweightLb", 184.5)
+	// A session never carries itself: its own weigh-in is already bodyweightLb,
+	// and offering it back as a hint would ask for what it already has.
+	recorded.Value("lastWeighIn").IsNull()
+
+	// Omitting the field leaves the weigh-in alone — absent is not null.
+	e.PATCH(fmt.Sprintf("/sessions/%d", firstID)).
+		WithJSON(map[string]any{"notes": "felt light"}).
+		Expect().Status(http.StatusOK).JSON().Object().
+		HasValue("bodyweightLb", 184.5)
+
+	// The next session offers the number without recording it.
+	second := startSession(t, e, dayID)
+	secondID := int(second.Value("id").Number().Raw())
+	second.Value("bodyweightLb").IsNull()
+	carried := second.Value("lastWeighIn").Object()
+	carried.HasValue("weightLb", 184.5)
+	carried.Value("performedOn").String().NotEmpty()
+
+	// Explicit null erases the entry, and the hint goes with it.
+	e.PATCH(fmt.Sprintf("/sessions/%d", firstID)).
+		WithJSON(map[string]any{"bodyweightLb": nil}).
+		Expect().Status(http.StatusOK).JSON().Object().
+		Value("bodyweightLb").IsNull()
+	e.GET(fmt.Sprintf("/sessions/%d", secondID)).
+		Expect().Status(http.StatusOK).JSON().Object().
+		Value("lastWeighIn").IsNull()
+}
+
+// Zero is rejected along with the negatives: unlike an assistance weight, where
+// 0 legitimately means bodyweight work, a lifter who weighs nothing has mistyped.
+func TestSessionBodyweightRejectsNonsense(t *testing.T) {
+	e := expect(t)
+	_, dayID := firstProgramAndDay(e)
+	sessionID := int(startSession(t, e, dayID).Value("id").Number().Raw())
+
+	for _, bad := range []any{0, -1, 5000, "heavy"} {
+		e.PATCH(fmt.Sprintf("/sessions/%d", sessionID)).
+			WithJSON(map[string]any{"bodyweightLb": bad}).
+			Expect().Status(http.StatusBadRequest)
+	}
+
+	// None of them landed.
+	e.GET(fmt.Sprintf("/sessions/%d", sessionID)).
+		Expect().Status(http.StatusOK).JSON().Object().
+		Value("bodyweightLb").IsNull()
+}
+
 // Volume is weight actually moved, so it counts logged reps rather than
 // completed sets — a set that stopped short of its target still lifted what it
 // lifted. This test pins that reading: it logs one set clean and one short, and

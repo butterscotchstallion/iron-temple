@@ -15,7 +15,7 @@ const createSession = `-- name: CreateSession :one
 
 INSERT INTO sessions (program_day_id, performed_on, user_id)
 VALUES ($1, $2, $3::int)
-RETURNING id, program_day_id, performed_on, notes, created_at, finished_at, user_id
+RETURNING id, program_day_id, performed_on, notes, created_at, finished_at, user_id, bodyweight_lb
 `
 
 type CreateSessionParams struct {
@@ -41,6 +41,12 @@ type CreateSessionParams struct {
 // which is why the set-level queries below reach the owner through a JOIN back
 // to sessions rather than trusting the set id alone — a caller learning that
 // someone else's set id is valid is already a leak.
+//
+// The three RETURNING lists on sessions name every column of the table, in the
+// table's own order, and that is deliberate: it is what makes sqlc reuse the
+// Session model struct instead of emitting a bespoke row type per query. A
+// column added to sessions has to be added to all three, or the next generation
+// silently splits them apart.
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error) {
 	row := q.db.QueryRow(ctx, createSession, arg.ProgramDayID, arg.PerformedOn, arg.UserID)
 	var i Session
@@ -52,6 +58,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		&i.CreatedAt,
 		&i.FinishedAt,
 		&i.UserID,
+		&i.BodyweightLb,
 	)
 	return i, err
 }
@@ -116,7 +123,7 @@ UPDATE sessions
 SET finished_at = COALESCE(finished_at, now())
 WHERE id = $1
   AND user_id = $2::int
-RETURNING id, program_day_id, performed_on, notes, created_at, finished_at, user_id
+RETURNING id, program_day_id, performed_on, notes, created_at, finished_at, user_id, bodyweight_lb
 `
 
 type FinishSessionParams struct {
@@ -138,6 +145,7 @@ func (q *Queries) FinishSession(ctx context.Context, arg FinishSessionParams) (S
 		&i.CreatedAt,
 		&i.FinishedAt,
 		&i.UserID,
+		&i.BodyweightLb,
 	)
 	return i, err
 }
@@ -152,6 +160,7 @@ SELECT s.id,
        s.notes,
        s.created_at,
        s.finished_at,
+       s.bodyweight_lb,
        (s.finished_at IS NOT NULL
         OR s.created_at < now() - INTERVAL '12 hours')::bool AS is_over
 FROM sessions s
@@ -176,6 +185,7 @@ type GetSessionRow struct {
 	Notes          string             `json:"notes"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	FinishedAt     pgtype.Timestamptz `json:"finished_at"`
+	BodyweightLb   pgtype.Numeric     `json:"bodyweight_lb"`
 	IsOver         bool               `json:"is_over"`
 }
 
@@ -192,6 +202,7 @@ func (q *Queries) GetSession(ctx context.Context, arg GetSessionParams) (GetSess
 		&i.Notes,
 		&i.CreatedAt,
 		&i.FinishedAt,
+		&i.BodyweightLb,
 		&i.IsOver,
 	)
 	return i, err
@@ -257,6 +268,53 @@ func (q *Queries) GetSessionSet(ctx context.Context, arg GetSessionSetParams) (G
 		&i.Completed,
 		&i.IsAssistance,
 	)
+	return i, err
+}
+
+const lastWeighIn = `-- name: LastWeighIn :one
+SELECT s.performed_on,
+       s.bodyweight_lb
+FROM sessions s
+WHERE s.user_id = $1::int
+  AND s.id <> $2
+  AND s.bodyweight_lb IS NOT NULL
+ORDER BY s.performed_on DESC, s.id DESC
+LIMIT 1
+`
+
+type LastWeighInParams struct {
+	UserID           int32 `json:"user_id"`
+	ExcludeSessionID int32 `json:"exclude_session_id"`
+}
+
+type LastWeighInRow struct {
+	PerformedOn  pgtype.Date    `json:"performed_on"`
+	BodyweightLb pgtype.Numeric `json:"bodyweight_lb"`
+}
+
+// LastWeighIn returns the lifter's most recent recorded bodyweight, which the
+// session screen pre-fills its box with so a new session needs a nudge rather
+// than a fresh entry.
+//
+// Deliberately excludes the session being read. A session's own weigh-in is
+// already on it (GetSession above); what this answers is "what did you last
+// weigh BEFORE this one", and a session that carried itself would report a
+// number the lifter had already entered as something waiting to be entered.
+//
+// "Most recent" is by performed_on, not by created_at, so a back-dated session
+// lands where the lifter says it happened. Note that this is the latest weigh-in
+// overall rather than the latest one before this session's date: a session
+// back-dated into the middle of a history pre-fills with today's weight, not the
+// weight of the week it is filed under. That is the right default for the only
+// caller — the box is a scale reading taken now — and the wrong one for a chart,
+// which should read the column directly rather than through this query.
+//
+// :one, so no prior weigh-in is pgx.ErrNoRows and not an empty row. The caller
+// has to translate that into "none" rather than let it escape as a 404.
+func (q *Queries) LastWeighIn(ctx context.Context, arg LastWeighInParams) (LastWeighInRow, error) {
+	row := q.db.QueryRow(ctx, lastWeighIn, arg.UserID, arg.ExcludeSessionID)
+	var i LastWeighInRow
+	err := row.Scan(&i.PerformedOn, &i.BodyweightLb)
 	return i, err
 }
 
@@ -561,25 +619,40 @@ func (q *Queries) SessionTotals(ctx context.Context, arg SessionTotalsParams) (S
 
 const updateSession = `-- name: UpdateSession :one
 UPDATE sessions
-SET performed_on = COALESCE($1, performed_on),
-    notes        = COALESCE($2, notes)
-WHERE id = $3
-  AND user_id = $4::int
-RETURNING id, program_day_id, performed_on, notes, created_at, finished_at, user_id
+SET performed_on  = COALESCE($1, performed_on),
+    notes         = COALESCE($2, notes),
+    bodyweight_lb = CASE WHEN $3::bool
+                         THEN $4::numeric
+                         ELSE bodyweight_lb END
+WHERE id = $5
+  AND user_id = $6::int
+RETURNING id, program_day_id, performed_on, notes, created_at, finished_at, user_id, bodyweight_lb
 `
 
 type UpdateSessionParams struct {
-	PerformedOn pgtype.Date `json:"performed_on"`
-	Notes       *string     `json:"notes"`
-	ID          int32       `json:"id"`
-	UserID      int32       `json:"user_id"`
+	PerformedOn   pgtype.Date    `json:"performed_on"`
+	Notes         *string        `json:"notes"`
+	SetBodyweight bool           `json:"set_bodyweight"`
+	BodyweightLb  pgtype.Numeric `json:"bodyweight_lb"`
+	ID            int32          `json:"id"`
+	UserID        int32          `json:"user_id"`
 }
 
 // UpdateSession patches metadata; NULL args leave a column unchanged.
+//
+// bodyweight_lb cannot use that convention, because clearing a weigh-in and
+// leaving it alone are different requests and COALESCE renders them identically
+// — the same problem, and the same reasoning, as actual_reps in UpdateSessionSet
+// below. set_bodyweight is what separates them: false means the PATCH body had
+// no bodyweightLb key at all, true means it had one, and the value may then be
+// NULL to erase the entry. The ::numeric cast types the branch for sqlc, which
+// has no column to infer from inside a CASE.
 func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error) {
 	row := q.db.QueryRow(ctx, updateSession,
 		arg.PerformedOn,
 		arg.Notes,
+		arg.SetBodyweight,
+		arg.BodyweightLb,
 		arg.ID,
 		arg.UserID,
 	)
@@ -592,6 +665,7 @@ func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) (S
 		&i.CreatedAt,
 		&i.FinishedAt,
 		&i.UserID,
+		&i.BodyweightLb,
 	)
 	return i, err
 }

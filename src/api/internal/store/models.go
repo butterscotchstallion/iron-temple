@@ -76,6 +76,7 @@ type Session struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	FinishedAt   pgtype.Timestamptz `json:"finished_at"`
 	UserID       *int32             `json:"user_id"`
+	BodyweightLb pgtype.Numeric     `json:"bodyweight_lb"`
 }
 
 type SessionSet struct {
