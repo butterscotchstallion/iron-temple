@@ -5,6 +5,7 @@
   import Programs from "./routes/Programs.svelte";
   import ProgramDetail from "./routes/ProgramDetail.svelte";
   import ActiveSession from "./routes/ActiveSession.svelte";
+  import Library from "./routes/Library.svelte";
   import History from "./routes/History.svelte";
   import Progress from "./routes/Progress.svelte";
   import ExerciseProgress from "./routes/ExerciseProgress.svelte";
@@ -23,8 +24,11 @@
     "/programs": Programs,
     "/programs/:id": ProgramDetail,
     "/sessions/:id": ActiveSession,
+    "/library": Library,
     "/history": History,
     "/progress": Progress,
+    // Owned by the Progress tab: it is a lift's chart, and both Progress and
+    // the library link into it.
     "/exercises/:id": ExerciseProgress,
     // Reached from the account menu rather than the nav bar: it's a place you
     // visit now and then, not one of the four you move between while training.

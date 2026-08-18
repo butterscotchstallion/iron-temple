@@ -6,6 +6,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"gitea.homelab/gitadmin/iron-temple/api/internal/auth"
@@ -141,14 +143,25 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 				r.Delete("/avatar", s.deleteAvatar)
 			})
 
-			r.Get("/exercises", s.listExercises)
-			r.Get("/exercises/{exerciseId}/history", s.getExerciseHistory)
+			r.Route("/exercises", func(r chi.Router) {
+				r.Get("/", s.listExercises)
+				r.Post("/", s.createExercise)
+				r.Delete("/{exerciseId}", s.deleteExercise)
+				r.Get("/{exerciseId}/history", s.getExerciseHistory)
+			})
 
 			r.Route("/programs", func(r chi.Router) {
 				r.Get("/", s.listPrograms)
 				r.Get("/{programId}", s.getProgram)
 				r.Get("/{programId}/days/{dayId}/next-session", s.previewNextSession)
 				r.Patch("/{programId}/days/{dayId}", s.updateProgramDayWeekday)
+				// Assistance is per-user state hanging off a shared program day,
+				// which is why it is a nested collection rather than a field on
+				// the day: it is created and deleted by the caller alone, and
+				// the program itself is never written to.
+				r.Post("/{programId}/days/{dayId}/assistance", s.addAssistance)
+				r.Patch("/{programId}/days/{dayId}/assistance/{assistanceId}", s.updateAssistance)
+				r.Delete("/{programId}/days/{dayId}/assistance/{assistanceId}", s.removeAssistance)
 			})
 
 			r.Get("/racked", s.getRacked)
@@ -206,6 +219,36 @@ func unauthorized(w http.ResponseWriter, message string) {
 
 func forbidden(w http.ResponseWriter, code, message string) {
 	writeError(w, http.StatusForbidden, code, message)
+}
+
+// conflict reports a request that is well-formed and permitted but collides with
+// state that already exists — a duplicate name, an exercise still in use. It
+// takes an explicit code because, unlike the responses above, the caller usually
+// wants to tell the cases apart to choose a message.
+func conflict(w http.ResponseWriter, code, message string) {
+	writeError(w, http.StatusConflict, code, message)
+}
+
+// uniqueViolation is Postgres' SQLSTATE for a unique constraint breach. Spelled
+// out rather than pulled from jackc/pgerrcode, which is not a dependency here and
+// is not worth becoming one for a single constant.
+const uniqueViolation = "23505"
+
+// isUniqueViolation reports whether err is that breach. Used where a constraint
+// is the real arbiter of a rule and the pre-check above it can be raced — so
+// losing that race is a 409 like any other, not a 500.
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == uniqueViolation
+}
+
+// setKind maps the is_assistance flag the session queries derive onto the wire
+// enum, so the mapping lives in one place rather than at each call site.
+func setKind(isAssistance bool) string {
+	if isAssistance {
+		return exerciseKindAssistance
+	}
+	return exerciseKindMain
 }
 
 func internalError(w http.ResponseWriter) {

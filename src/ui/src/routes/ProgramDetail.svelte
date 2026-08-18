@@ -6,8 +6,11 @@
     previewNextSession,
     createSession,
     updateProgramDayWeekday,
+    addAssistance,
+    removeAssistance,
     updateMe,
     type Program,
+    type ProgramDayAssistance,
   } from "../lib/api";
   import { auth, setMe } from "../lib/auth.svelte";
   import { Card } from "$lib/components/ui/card";
@@ -15,14 +18,22 @@
   import { Badge } from "$lib/components/ui/badge";
   import ErrorCard from "../lib/ErrorCard.svelte";
   import ErrorBanner from "../lib/ErrorBanner.svelte";
+  import AssistancePicker from "../lib/AssistancePicker.svelte";
   import { weekdayOptions, todayWeekday } from "../lib/weekday";
   import Calendar from "@lucide/svelte/icons/calendar";
   import Play from "@lucide/svelte/icons/play";
+  import Plus from "@lucide/svelte/icons/plus";
+  import X from "@lucide/svelte/icons/x";
 
   let { params }: { params?: { id?: string } } = $props();
   let programId = $derived(Number(params?.id));
 
   // A day plus its progression-computed next-session prescription.
+  //
+  // exercises holds the whole prescription, main lifts and assistance alike, as
+  // the preview returned it. assistance is the editable list from the program
+  // itself, which is what carries the row ids the remove control needs — the
+  // preview knows what will be lifted, not which row said so.
   type DayView = {
     id: number;
     name: string;
@@ -30,16 +41,18 @@
     exercises: {
       exerciseId: number;
       exerciseName: string;
+      kind: "main" | "assistance";
       sets: number;
       reps: number;
       weightLb: number;
       progression: {
-        status: "start" | "advance" | "hold" | "deload";
+        status: "start" | "advance" | "hold" | "deload" | "fixed";
         failureCount: number;
         failuresBeforeDeload: number;
         previousWeightLb: number;
       };
     }[];
+    assistance: ProgramDayAssistance[];
   };
 
   let program = $state<Program | null>(null);
@@ -92,10 +105,88 @@
           name: day.name,
           weekday: day.weekday ?? null,
           exercises: preview.data?.exercises ?? [],
+          assistance: day.assistance,
         };
       }),
     );
     loading = false;
+  }
+
+  // The weight the next session will actually prescribe for an assistance lift:
+  // carried forward from the last time it was logged, which is what the preview
+  // computed. Falls back to the stored weight for a lift never performed, which
+  // is also what the server would send.
+  function assistanceWeight(day: DayView, entry: ProgramDayAssistance): number {
+    const prescribed = day.exercises.find(
+      (e) => e.kind === "assistance" && e.exerciseId === entry.exerciseId,
+    );
+    return prescribed?.weightLb ?? entry.weightLb;
+  }
+
+  // Which day has the picker open, if any. One at a time: two open pickers on a
+  // three-day program is a lot of screen for a decision about one of them.
+  let pickerDayId = $state<number | null>(null);
+  // An assistance add or remove failed.
+  let assistanceError = $state<string | null>(null);
+
+  // Add an exercise to a day. Returns whether it worked, so the picker can keep
+  // the lifter's numbers on screen if it didn't.
+  async function add(
+    day: DayView,
+    choice: { exerciseId: number; sets: number; reps: number; weightLb: number },
+  ): Promise<boolean> {
+    assistanceError = null;
+    const { data, error } = await addAssistance({
+      path: { programId, dayId: day.id },
+      body: choice,
+    });
+    if (error || !data) {
+      assistanceError = error?.message ?? "Couldn't add that exercise.";
+      return false;
+    }
+    pickerDayId = null;
+    // Re-preview this day rather than calling load(): the new entry's weight
+    // carries forward from history and is the server's to compute, but a full
+    // reload would blank the whole program to a skeleton over one added lift.
+    await refreshDay(day.id, [...day.assistance, data]);
+    return true;
+  }
+
+  // Recompute one day's prescription in place, leaving the rest of the page
+  // alone. A failed preview leaves the day's old weights on screen behind the
+  // banner, which is better than replacing them with nothing.
+  async function refreshDay(dayId: number, assistance: ProgramDayAssistance[]) {
+    const preview = await previewNextSession({ path: { programId, dayId } });
+    days = days.map((d) =>
+      d.id === dayId
+        ? { ...d, assistance, exercises: preview.data?.exercises ?? d.exercises }
+        : d,
+    );
+    if (preview.error) previewFailed = true;
+  }
+
+  async function remove(day: DayView, entry: ProgramDayAssistance) {
+    assistanceError = null;
+    const { error } = await removeAssistance({
+      path: { programId, dayId: day.id, assistanceId: entry.id },
+    });
+    if (error) {
+      assistanceError = error.message ?? `Couldn't remove ${entry.exerciseName}.`;
+      return;
+    }
+    // Local removal is enough here: nothing else on the card depends on it, so
+    // a full reload would only cost a flash of skeleton.
+    days = days.map((d) =>
+      d.id === day.id
+        ? {
+            ...d,
+            assistance: d.assistance.filter((a) => a.id !== entry.id),
+            exercises: d.exercises.filter(
+              (e) => !(e.kind === "assistance" && e.exerciseId === entry.exerciseId),
+            ),
+          }
+        : d,
+    );
   }
 
   // Save this as the program to land on next time. Opening a program is what
@@ -214,6 +305,13 @@
       />
     {/if}
 
+    {#if assistanceError}
+      <ErrorBanner
+        message={assistanceError}
+        onDismiss={() => (assistanceError = null)}
+      />
+    {/if}
+
     {#each orderedDays as day (day.id)}
       <Card
         class="p-5 {day.weekday === todayWeekday() ? 'ring-2 ring-primary' : ''}"
@@ -254,7 +352,7 @@
           </Button>
         </div>
         <ul class="mt-3 flex flex-col gap-1.5">
-          {#each day.exercises as ex (ex.exerciseId)}
+          {#each day.exercises.filter((e) => e.kind !== "assistance") as ex (ex.exerciseId)}
             {@const prog = progressionView(ex.progression, ex.weightLb)}
             <li class="flex flex-col gap-0.5 text-sm">
               <div class="flex items-baseline justify-between gap-2">
@@ -282,6 +380,82 @@
             </li>
           {/each}
         </ul>
+
+        <!-- Assistance sits below the program's own work, visibly separate,
+             because that is exactly what it is: the prescription above is the
+             program's and is never edited, and this part is yours. -->
+        <div class="mt-4 border-t border-border/60 pt-3">
+          <h4
+            class="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground"
+          >
+            Assistance
+          </h4>
+
+          {#if day.assistance.length > 0}
+            <ul class="mt-2 flex flex-col gap-1.5">
+              {#each day.assistance as entry (entry.id)}
+                <li class="flex items-baseline justify-between gap-2 text-sm">
+                  <a
+                    use:link
+                    href="/exercises/{entry.exerciseId}"
+                    class="text-card-foreground underline-offset-2 transition hover:text-primary hover:underline"
+                  >
+                    {entry.exerciseName}
+                  </a>
+                  <span class="flex items-center gap-2">
+                    <span class="tabular-nums text-muted-foreground">
+                      {entry.sets}×{entry.reps}
+                      {#if assistanceWeight(day, entry) > 0}
+                        · {assistanceWeight(day, entry)} lb
+                      {:else}
+                        · bodyweight
+                      {/if}
+                    </span>
+                    <button
+                      type="button"
+                      class="rounded-md p-1 text-muted-foreground transition hover:text-destructive"
+                      aria-label="Remove {entry.exerciseName} from {day.name}"
+                      onclick={() => remove(day, entry)}
+                    >
+                      <X class="size-4" aria-hidden="true" />
+                    </button>
+                  </span>
+                </li>
+              {/each}
+            </ul>
+          {:else if pickerDayId !== day.id}
+            <p class="mt-1 text-sm text-muted-foreground">
+              Nothing yet — add accessory work to finish this day off.
+            </p>
+          {/if}
+
+          {#if pickerDayId === day.id}
+            <!-- Hide what can't be added: the lifts already on this day as
+                 assistance, and the ones the program itself prescribes. Adding
+                 the latter is a 409, and offering a choice that can only fail
+                 is worse than not offering it. -->
+            <AssistancePicker
+              exclude={[
+                ...day.assistance.map((a) => a.exerciseId),
+                ...day.exercises
+                  .filter((e) => e.kind !== "assistance")
+                  .map((e) => e.exerciseId),
+              ]}
+              onAdd={(choice) => add(day, choice)}
+              onCancel={() => (pickerDayId = null)}
+            />
+          {:else}
+            <Button
+              variant="outline"
+              size="sm"
+              class="mt-2"
+              onclick={() => (pickerDayId = day.id)}
+            >
+              <Plus />
+              Add assistance
+            </Button>
+          {/if}
+        </div>
       </Card>
     {/each}
   {/if}

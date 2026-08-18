@@ -29,7 +29,7 @@ import (
 	// tzdata costs ~450 KB and makes the setting mean what it says.
 	_ "time/tzdata"
 
-	_ "github.com/lib/pq"
+	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -191,7 +191,7 @@ func reportMailer(environment string) *racked.Mailer {
 	return racked.NewMailer(os.Getenv("MAIL_RELAY"), os.Getenv("REPORT_MAIL_TO"))
 }
 
-// migrate applies the embedded schema via database/sql (lib/pq), reusing the
+// migrate applies the embedded schema via database/sql (pgx stdlib), reusing the
 // same migrator as cmd/migrate so startup and the standalone tool stay in sync.
 // migrateWithRetry runs the boot migration, retrying on transient failures. A new
 // pod's egress NetworkPolicy is applied a moment after start (kube-router race,
@@ -210,7 +210,7 @@ func migrateWithRetry(dsn string) error {
 }
 
 func migrate(dsn string) error {
-	sqlDB, err := sql.Open("postgres", dsn)
+	sqlDB, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return err
 	}

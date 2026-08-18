@@ -9,9 +9,13 @@ import (
 )
 
 type Exercise struct {
-	ID        int32              `json:"id"`
-	Name      string             `json:"name"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	ID              int32              `json:"id"`
+	Name            string             `json:"name"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	MuscleGroup     string             `json:"muscle_group"`
+	Equipment       string             `json:"equipment"`
+	IsAccessory     bool               `json:"is_accessory"`
+	CreatedByUserID *int32             `json:"created_by_user_id"`
 }
 
 type Program struct {
@@ -28,6 +32,18 @@ type ProgramDay struct {
 	Name      string `json:"name"`
 	Position  int32  `json:"position"`
 	Weekday   *int32 `json:"weekday"`
+}
+
+type ProgramDayAssistance struct {
+	ID           int32              `json:"id"`
+	UserID       int32              `json:"user_id"`
+	ProgramDayID int32              `json:"program_day_id"`
+	ExerciseID   int32              `json:"exercise_id"`
+	Position     int32              `json:"position"`
+	Sets         int32              `json:"sets"`
+	Reps         int32              `json:"reps"`
+	WeightLb     pgtype.Numeric     `json:"weight_lb"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
 type ProgramDayExercise struct {

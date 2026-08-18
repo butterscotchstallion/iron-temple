@@ -4,6 +4,7 @@
   import ClipboardList from "@lucide/svelte/icons/clipboard-list";
   import Dumbbell from "@lucide/svelte/icons/dumbbell";
   import HistoryIcon from "@lucide/svelte/icons/history";
+  import LibraryIcon from "@lucide/svelte/icons/library";
   import TrendingUp from "@lucide/svelte/icons/trending-up";
 
   // The icon is decoration, not content: every tab keeps its text label, and the
@@ -11,6 +12,7 @@
   const items = [
     { href: "/", label: "Workout", icon: Dumbbell },
     { href: "/programs", label: "Programs", icon: ClipboardList },
+    { href: "/library", label: "Library", icon: LibraryIcon },
     { href: "/history", label: "History", icon: HistoryIcon },
     { href: "/progress", label: "Progress", icon: TrendingUp },
   ];
@@ -43,8 +45,11 @@
 </script>
 
 <nav class="mt-5 flex justify-center">
+  <!-- flex-wrap, and justify-center on the pills themselves: five tabs no longer
+       fit one row on a narrow phone, and a second centred row reads better than
+       a bar that overflows its own border. -->
   <div
-    class="inline-flex items-center gap-1 rounded-full border border-border/60 bg-card/40 p-1 backdrop-blur"
+    class="inline-flex flex-wrap items-center justify-center gap-1 rounded-full border border-border/60 bg-card/40 p-1 backdrop-blur"
   >
     {#each items as item (item.href)}
       {@const Icon = item.icon}

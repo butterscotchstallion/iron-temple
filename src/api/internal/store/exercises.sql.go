@@ -11,21 +11,159 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const getExercise = `-- name: GetExercise :one
-SELECT id, name
+const countExerciseNameConflicts = `-- name: CountExerciseNameConflicts :one
+SELECT count(*)
 FROM exercises
-WHERE id = $1
+WHERE lower(name) = lower($1)
+  AND (created_by_user_id IS NULL OR created_by_user_id = $2::int)
 `
 
-type GetExerciseRow struct {
-	ID   int32  `json:"id"`
-	Name string `json:"name"`
+type CountExerciseNameConflictsParams struct {
+	Name   string `json:"name"`
+	UserID int32  `json:"user_id"`
 }
 
-func (q *Queries) GetExercise(ctx context.Context, id int32) (GetExerciseRow, error) {
-	row := q.db.QueryRow(ctx, getExercise, id)
+// CountExerciseNameConflicts asks whether a proposed name is already taken, in
+// the only sense that matters to the caller: a shared exercise, or one of their
+// own. Case-insensitive to match the two partial unique indexes in 0009 — the
+// database would reject the insert anyway, and this turns that into a 409 with
+// something to say rather than a 500.
+func (q *Queries) CountExerciseNameConflicts(ctx context.Context, arg CountExerciseNameConflictsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countExerciseNameConflicts, arg.Name, arg.UserID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countExerciseUses = `-- name: CountExerciseUses :one
+SELECT (SELECT count(*) FROM session_sets ss
+        WHERE ss.exercise_id = $1)::bigint AS logged_sets,
+       (SELECT count(*) FROM program_day_assistance pda
+        WHERE pda.exercise_id = $1)::bigint AS assistance_entries
+`
+
+type CountExerciseUsesRow struct {
+	LoggedSets        int64 `json:"logged_sets"`
+	AssistanceEntries int64 `json:"assistance_entries"`
+}
+
+// CountExerciseUses reports what would break if an exercise were deleted.
+//
+// logged_sets is the one that must never be overridden: session_sets.exercise_id
+// has no ON DELETE clause, so the delete would fail anyway, and a finished
+// session is a record — losing the name of a lift out of it is losing history.
+// assistance_entries would cascade cleanly, but silently rewriting someone's
+// program from the library screen is a surprise, so the API refuses that too and
+// says which day to remove it from.
+func (q *Queries) CountExerciseUses(ctx context.Context, exerciseID int32) (CountExerciseUsesRow, error) {
+	row := q.db.QueryRow(ctx, countExerciseUses, exerciseID)
+	var i CountExerciseUsesRow
+	err := row.Scan(&i.LoggedSets, &i.AssistanceEntries)
+	return i, err
+}
+
+const createExercise = `-- name: CreateExercise :one
+INSERT INTO exercises (name, muscle_group, equipment, created_by_user_id)
+VALUES ($1, $2, $3, $4::int)
+RETURNING id, name, muscle_group, equipment, is_accessory,
+          (created_by_user_id IS NOT NULL)::bool AS is_custom
+`
+
+type CreateExerciseParams struct {
+	Name        string `json:"name"`
+	MuscleGroup string `json:"muscle_group"`
+	Equipment   string `json:"equipment"`
+	UserID      int32  `json:"user_id"`
+}
+
+type CreateExerciseRow struct {
+	ID          int32  `json:"id"`
+	Name        string `json:"name"`
+	MuscleGroup string `json:"muscle_group"`
+	Equipment   string `json:"equipment"`
+	IsAccessory bool   `json:"is_accessory"`
+	IsCustom    bool   `json:"is_custom"`
+}
+
+func (q *Queries) CreateExercise(ctx context.Context, arg CreateExerciseParams) (CreateExerciseRow, error) {
+	row := q.db.QueryRow(ctx, createExercise,
+		arg.Name,
+		arg.MuscleGroup,
+		arg.Equipment,
+		arg.UserID,
+	)
+	var i CreateExerciseRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.MuscleGroup,
+		&i.Equipment,
+		&i.IsAccessory,
+		&i.IsCustom,
+	)
+	return i, err
+}
+
+const deleteExercise = `-- name: DeleteExercise :execrows
+DELETE FROM exercises
+WHERE id = $1
+  AND created_by_user_id = $2::int
+`
+
+type DeleteExerciseParams struct {
+	ID     int32 `json:"id"`
+	UserID int32 `json:"user_id"`
+}
+
+// DeleteExercise removes one of the caller's own movements. The
+// created_by_user_id predicate is doing two jobs: it scopes to the owner, and it
+// makes the seeded catalogue undeletable by anyone, since those rows have NULL
+// there and NULL = anything is never true.
+func (q *Queries) DeleteExercise(ctx context.Context, arg DeleteExerciseParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExercise, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const getExercise = `-- name: GetExercise :one
+SELECT e.id,
+       e.name,
+       e.muscle_group,
+       e.equipment,
+       e.is_accessory,
+       (e.created_by_user_id IS NOT NULL)::bool AS is_custom
+FROM exercises e
+WHERE e.id = $1
+  AND (e.created_by_user_id IS NULL OR e.created_by_user_id = $2::int)
+`
+
+type GetExerciseParams struct {
+	ID     int32 `json:"id"`
+	UserID int32 `json:"user_id"`
+}
+
+type GetExerciseRow struct {
+	ID          int32  `json:"id"`
+	Name        string `json:"name"`
+	MuscleGroup string `json:"muscle_group"`
+	Equipment   string `json:"equipment"`
+	IsAccessory bool   `json:"is_accessory"`
+	IsCustom    bool   `json:"is_custom"`
+}
+
+func (q *Queries) GetExercise(ctx context.Context, arg GetExerciseParams) (GetExerciseRow, error) {
+	row := q.db.QueryRow(ctx, getExercise, arg.ID, arg.UserID)
 	var i GetExerciseRow
-	err := row.Scan(&i.ID, &i.Name)
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.MuscleGroup,
+		&i.Equipment,
+		&i.IsAccessory,
+		&i.IsCustom,
+	)
 	return i, err
 }
 
@@ -84,18 +222,56 @@ func (q *Queries) ListExerciseHistory(ctx context.Context, arg ListExerciseHisto
 }
 
 const listExercises = `-- name: ListExercises :many
-SELECT id, name
-FROM exercises
-ORDER BY name
+
+SELECT e.id,
+       e.name,
+       e.muscle_group,
+       e.equipment,
+       e.is_accessory,
+       (e.created_by_user_id IS NOT NULL)::bool AS is_custom
+FROM exercises e
+WHERE (e.created_by_user_id IS NULL OR e.created_by_user_id = $1::int)
+  AND (NOT $2::bool
+       OR EXISTS (
+           SELECT 1
+           FROM session_sets ss
+           JOIN sessions s ON s.id = ss.session_id
+           WHERE ss.exercise_id = e.id
+             AND s.user_id = $1::int
+             AND ss.actual_reps > 0))
+ORDER BY e.name
 `
 
-type ListExercisesRow struct {
-	ID   int32  `json:"id"`
-	Name string `json:"name"`
+type ListExercisesParams struct {
+	UserID        int32 `json:"user_id"`
+	PerformedOnly bool  `json:"performed_only"`
 }
 
-func (q *Queries) ListExercises(ctx context.Context) ([]ListExercisesRow, error) {
-	rows, err := q.db.Query(ctx, listExercises)
+type ListExercisesRow struct {
+	ID          int32  `json:"id"`
+	Name        string `json:"name"`
+	MuscleGroup string `json:"muscle_group"`
+	Equipment   string `json:"equipment"`
+	IsAccessory bool   `json:"is_accessory"`
+	IsCustom    bool   `json:"is_custom"`
+}
+
+// Exercises are the library: the seeded catalogue everyone shares, plus the
+// movements a lifter added for themselves. created_by_user_id is what separates
+// them — NULL is shared, non-NULL is owned — and every read below carries the
+// same "mine or everyone's" filter. A custom exercise belonging to someone else
+// must be indistinguishable from one that does not exist, the same rule
+// sessions.sql applies to performances.
+// ListExercises returns the library, alphabetically.
+//
+// performed_only narrows it to lifts this user has actually logged, which is
+// what the Progress page wants: a wall of untrained accessories reading "No
+// sessions yet" is noise, and it costs one history request each to render. The
+// EXISTS uses actual_reps > 0, the same definition of real work as
+// ListExerciseHistory below, so a lift appears on Progress exactly when it has a
+// history to draw.
+func (q *Queries) ListExercises(ctx context.Context, arg ListExercisesParams) ([]ListExercisesRow, error) {
+	rows, err := q.db.Query(ctx, listExercises, arg.UserID, arg.PerformedOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +279,14 @@ func (q *Queries) ListExercises(ctx context.Context) ([]ListExercisesRow, error)
 	var items []ListExercisesRow
 	for rows.Next() {
 		var i ListExercisesRow
-		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.MuscleGroup,
+			&i.Equipment,
+			&i.IsAccessory,
+			&i.IsCustom,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

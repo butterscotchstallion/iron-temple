@@ -10,6 +10,9 @@ sql:
       - "db/migrations/0006_user_current_program.up.sql"
       # 0007 is seed DML only, so it has no schema to declare here.
       - "db/migrations/0008_report_runs.up.sql"
+      # 0009 is mixed: the ALTER/CREATE at the top is schema, the catalogue seed
+      # in the middle is DML. sqlc ignores the INSERT/UPDATE statements.
+      - "db/migrations/0009_exercise_library.up.sql"
     queries: "db/queries"
     gen:
       go:

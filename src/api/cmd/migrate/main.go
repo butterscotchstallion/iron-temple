@@ -8,7 +8,7 @@ import (
 	"log"
 	"os"
 
-	_ "github.com/lib/pq"
+	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"gitea.homelab/gitadmin/iron-temple/api/db"
 )
@@ -19,7 +19,7 @@ func main() {
 		log.Fatal("DATABASE_URL is required")
 	}
 
-	sqlDB, err := sql.Open("postgres", dsn)
+	sqlDB, err := sql.Open("pgx", dsn)
 	if err != nil {
 		log.Fatalf("open database: %v", err)
 	}
