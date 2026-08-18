@@ -16,9 +16,9 @@ afterEach(() => {
 const link = (name: string) => screen.getByRole("link", { name });
 
 describe("NavBar", () => {
-  it("renders all four tabs", () => {
+  it("renders all five tabs", () => {
     render(NavBar);
-    for (const name of ["Workout", "Programs", "History", "Progress"]) {
+    for (const name of ["Workout", "Programs", "Library", "History", "Progress"]) {
       expect(link(name)).toBeInTheDocument();
     }
   });
@@ -41,6 +41,22 @@ describe("NavBar", () => {
     setHash("#/programs/1");
     render(NavBar);
     expect(link("Programs")).toHaveAttribute("aria-current", "page");
+  });
+
+  it("marks Library active on its own route", () => {
+    setHash("#/library");
+    render(NavBar);
+    expect(link("Library")).toHaveAttribute("aria-current", "page");
+    expect(link("Progress")).not.toHaveAttribute("aria-current");
+  });
+
+  // A lift's chart is reached from both the Library and Progress, and it is
+  // Progress that owns it — so browsing the library and tapping through to a
+  // chart moves the highlight, rather than leaving it on Library.
+  it("leaves /exercises to the Progress tab, not Library", () => {
+    setHash("#/exercises/3");
+    render(NavBar);
+    expect(link("Library")).not.toHaveAttribute("aria-current");
   });
 
   it("keeps Workout active across the /sessions flow", () => {

@@ -185,9 +185,11 @@ func TestHealth(t *testing.T) {
 
 func TestSeedData(t *testing.T) {
 	e := expect(t)
+	// The ten lifts the programs prescribe, plus the accessory catalogue 0009
+	// seeded for the exercise library.
 	e.GET("/exercises").Expect().
 		Status(http.StatusOK).
-		JSON().Array().Length().IsEqual(10)
+		JSON().Array().Length().IsEqual(53)
 	e.GET("/programs").Expect().
 		Status(http.StatusOK).
 		JSON().Array().Length().IsEqual(5)

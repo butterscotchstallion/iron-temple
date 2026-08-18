@@ -42,9 +42,21 @@ const program1 = {
           restSeconds: 180,
         },
       ],
+      // The lifter's own additions to this day. Empty by default; the assistance
+      // tests below override the route with a day that has some.
+      assistance: [],
     },
   ],
 };
+
+// The exercise library, as GET /exercises returns it.
+const libraryExercises = [
+  { id: 1, name: "Squat", muscleGroup: "legs", equipment: "barbell", isAccessory: false, isCustom: false },
+  { id: 2, name: "Bench Press", muscleGroup: "chest", equipment: "barbell", isAccessory: false, isCustom: false },
+  { id: 3, name: "Dip", muscleGroup: "chest", equipment: "bodyweight", isAccessory: true, isCustom: false },
+  { id: 4, name: "Barbell Curl", muscleGroup: "arms", equipment: "barbell", isAccessory: true, isCustom: false },
+  { id: 5, name: "Plank", muscleGroup: "core", equipment: "bodyweight", isAccessory: true, isCustom: false },
+];
 
 const nextSession = {
   programId: 1,
@@ -55,6 +67,7 @@ const nextSession = {
     {
       exerciseId: 1,
       exerciseName: "Squat",
+      kind: "main",
       sets: 5,
       reps: 5,
       weightLb: 45,
@@ -70,6 +83,7 @@ const nextSession = {
     {
       exerciseId: 2,
       exerciseName: "Bench Press",
+      kind: "main",
       sets: 5,
       reps: 5,
       weightLb: 65,
@@ -141,6 +155,7 @@ function sessionDetail(
         id: n,
         exerciseId: 1,
         exerciseName: "Squat",
+        kind: "main",
         setNumber: n,
         targetReps: 5,
         actualReps: logged ? actualReps : null,
@@ -161,7 +176,7 @@ test.beforeEach(async ({ page }) => {
     route.fulfill({ json: nextSession }),
   );
   // Default the Progress page to no exercises; individual tests override this.
-  await page.route("**/api/v1/exercises", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/exercises**", (route) => route.fulfill({ json: [] }));
 });
 
 test("renders the programs list", async ({ page }) => {
@@ -230,11 +245,131 @@ test("navigates between the main tabs via the nav bar", async ({ page }) => {
   await expect(page).toHaveURL(/#\/progress$/);
   await expect(page.getByRole("heading", { name: "Progress", exact: true })).toBeVisible();
 
+  await page.getByRole("link", { name: "Library" }).click();
+  await expect(page).toHaveURL(/#\/library$/);
+  await expect(page.getByRole("heading", { name: "Exercise library" })).toBeVisible();
+
   await page.getByRole("link", { name: "Programs" }).click();
   await expect(page).toHaveURL(/#\/programs$/);
   await expect(page.getByRole("heading", { name: "Choose a program" })).toBeVisible();
   // The active tab is exposed to assistive tech.
   await expect(page.getByRole("link", { name: "Programs" })).toHaveAttribute("aria-current", "page");
+});
+
+test("browses and searches the exercise library", async ({ page }) => {
+  await page.route("**/api/v1/exercises**", (route) =>
+    route.fulfill({ json: libraryExercises }),
+  );
+
+  await page.goto("/#/library");
+  await expect(page.getByRole("heading", { name: "Exercise library" })).toBeVisible();
+
+  // Grouped by muscle group, in the library's reading order.
+  await expect(page.getByRole("heading", { name: "Chest" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Arms" })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Dip/ })).toBeVisible();
+
+  // The lifts a program prescribes are marked as such.
+  await expect(page.getByText("Barbell · Program lift").first()).toBeVisible();
+
+  // Searching narrows to matches and drops the groups it emptied.
+  await page.getByPlaceholder("Search exercises…").fill("curl");
+  await expect(page.getByRole("link", { name: /Barbell Curl/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Chest" })).toBeHidden();
+
+  // A search that matches nothing says so rather than showing empty headings.
+  await page.getByPlaceholder("Search exercises…").fill("zercher");
+  await expect(page.getByText("No exercises match that search.")).toBeVisible();
+});
+
+test("adds assistance to a program day", async ({ page }) => {
+  await page.route("**/api/v1/exercises**", (route) =>
+    route.fulfill({ json: libraryExercises }),
+  );
+
+  // Once the POST lands, the program and its preview come back carrying the
+  // new entry — ProgramDetail reloads rather than guessing the weight itself.
+  let added = false;
+  const posted: unknown[] = [];
+  await page.route("**/api/v1/programs/1/days/10/assistance", (route) => {
+    posted.push(route.request().postDataJSON());
+    added = true;
+    return route.fulfill({
+      status: 201,
+      json: { id: 7, exerciseId: 3, exerciseName: "Dip", position: 1, sets: 3, reps: 8, weightLb: 0 },
+    });
+  });
+  await page.route("**/api/v1/programs/1", (route) =>
+    route.fulfill({
+      json: added
+        ? {
+            ...program1,
+            days: [
+              {
+                ...program1.days[0],
+                assistance: [
+                  { id: 7, exerciseId: 3, exerciseName: "Dip", position: 1, sets: 3, reps: 8, weightLb: 0 },
+                ],
+              },
+            ],
+          }
+        : program1,
+    }),
+  );
+
+  await page.goto("/#/programs/1");
+  await expect(page.getByRole("heading", { name: "Workout A" })).toBeVisible();
+  await expect(page.getByText("Nothing yet — add accessory work to finish this day off.")).toBeVisible();
+
+  await page.getByRole("button", { name: "Add assistance" }).click();
+  await page.getByRole("button", { name: /Dip/ }).click();
+  await page.getByLabel("Reps").fill("8");
+  await page.getByRole("button", { name: "Add to this day" }).click();
+
+  await expect.poll(() => posted).toEqual([
+    { exerciseId: 3, sets: 3, reps: 8, weightLb: 0 },
+  ]);
+
+  // It shows up under the day, below the program's own lifts, and reads as
+  // bodyweight rather than "0 lb".
+  await expect(page.getByRole("link", { name: "Dip" })).toBeVisible();
+  await expect(page.getByText("3×8 · bodyweight")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Remove Dip from Workout A" }),
+  ).toBeVisible();
+});
+
+test("separates assistance from the program's work in a session", async ({ page }) => {
+  const session = sessionDetail();
+  await page.route("**/api/v1/sessions/1", (route) =>
+    route.fulfill({
+      json: {
+        ...session,
+        sets: [
+          ...session.sets,
+          {
+            id: 3,
+            exerciseId: 3,
+            exerciseName: "Dip",
+            kind: "assistance",
+            setNumber: 1,
+            targetReps: 8,
+            actualReps: null,
+            weightLb: 0,
+            completed: false,
+            restSeconds: 180,
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/api/v1/exercises/*/history", (route) => route.fulfill({ json: [] }));
+
+  await page.goto("/#/sessions/1");
+  await expect(page.getByRole("heading", { name: "Squat" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Dip" })).toBeVisible();
+  // One rule between the barbell work and what comes after it.
+  await expect(page.getByText("Assistance", { exact: true })).toBeVisible();
 });
 
 test("shows the empty history state", async ({ page }) => {
@@ -282,7 +417,7 @@ test("lists past sessions and paginates with Load more", async ({ page }) => {
 });
 
 test("shows each lift's top set on the progress page", async ({ page }) => {
-  await page.route("**/api/v1/exercises", (route) =>
+  await page.route("**/api/v1/exercises**", (route) =>
     route.fulfill({ json: [{ id: 1, name: "Squat" }, { id: 2, name: "Bench Press" }] }),
   );
   await page.route("**/api/v1/exercises/1/history", (route) =>

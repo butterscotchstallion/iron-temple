@@ -50,9 +50,29 @@ type avatarDTO struct {
 	Etag string `json:"etag"`
 }
 
+// Which list an exercise in a session came from: the program's own prescription,
+// or the lifter's assistance. Derived at read time from whether the exercise has
+// a program_day_exercises row for the day, never stored on the set.
+const (
+	exerciseKindMain       = "main"
+	exerciseKindAssistance = "assistance"
+)
+
+// progressionFixed is the status reported for assistance work. It is not one of
+// progression.Status: the engine never produces it, because no engine runs on
+// assistance at all. It says "this weight was carried forward, not computed",
+// which is what stops the UI reaching for a stall badge that has no meaning here.
+const progressionFixed = "fixed"
+
 type exerciseDTO struct {
-	ID   int32  `json:"id"`
-	Name string `json:"name"`
+	ID          int32  `json:"id"`
+	Name        string `json:"name"`
+	MuscleGroup string `json:"muscleGroup"`
+	Equipment   string `json:"equipment"`
+	IsAccessory bool   `json:"isAccessory"`
+	// IsCustom marks a movement this lifter created, which is the only kind
+	// anyone may delete.
+	IsCustom bool `json:"isCustom"`
 }
 
 type exerciseHistoryPointDTO struct {
@@ -76,11 +96,29 @@ type programDTO struct {
 }
 
 type programDayDTO struct {
-	ID        int32                   `json:"id"`
-	Name      string                  `json:"name"`
-	Position  int32                   `json:"position"`
-	Weekday   *int32                  `json:"weekday"`
-	Exercises []programDayExerciseDTO `json:"exercises"`
+	ID       int32  `json:"id"`
+	Name     string `json:"name"`
+	Position int32  `json:"position"`
+	Weekday  *int32 `json:"weekday"`
+	// Exercises is the program's own prescription: shared by every account and
+	// never edited. Assistance is the calling lifter's overlay on top of it.
+	Exercises  []programDayExerciseDTO   `json:"exercises"`
+	Assistance []programDayAssistanceDTO `json:"assistance"`
+}
+
+// programDayAssistanceDTO has no starting weight and no progression, which is
+// the difference from programDayExerciseDTO in one line: the engine drives the
+// prescription, and assistance is driven by what the lifter last did.
+type programDayAssistanceDTO struct {
+	ID           int32  `json:"id"`
+	ExerciseID   int32  `json:"exerciseId"`
+	ExerciseName string `json:"exerciseName"`
+	Position     int32  `json:"position"`
+	Sets         int32  `json:"sets"`
+	Reps         int32  `json:"reps"`
+	// WeightLb is the fallback used until the lift has been logged once; after
+	// that the prescription carries forward from the last performance.
+	WeightLb float64 `json:"weightLb"`
 }
 
 type programDayExerciseDTO struct {
@@ -104,6 +142,7 @@ type prescribedSessionDTO struct {
 type prescribedExerciseDTO struct {
 	ExerciseID   int32              `json:"exerciseId"`
 	ExerciseName string             `json:"exerciseName"`
+	Kind         string             `json:"kind"`
 	Sets         int32              `json:"sets"`
 	Reps         int32              `json:"reps"`
 	WeightLb     float64            `json:"weightLb"`
@@ -135,6 +174,7 @@ type sessionSetDTO struct {
 	ID           int32   `json:"id"`
 	ExerciseID   int32   `json:"exerciseId"`
 	ExerciseName string  `json:"exerciseName"`
+	Kind         string  `json:"kind"`
 	SetNumber    int32   `json:"setNumber"`
 	TargetReps   int32   `json:"targetReps"`
 	ActualReps   *int32  `json:"actualReps"`

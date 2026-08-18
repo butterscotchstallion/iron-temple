@@ -63,11 +63,20 @@ func TestMigrateAppliesSchemaAndSeed(t *testing.T) {
 	}
 
 	// 0002 seeds three programs over five lifts; 0007 adds two more programs and
-	// the five variation lifts the Intermediate program needs.
-	assertCount(t, sqlDB, "SELECT count(*) FROM exercises", 10)
+	// the five variation lifts the Intermediate program needs; 0009 adds the
+	// accessory catalogue the exercise library browses.
+	assertCount(t, sqlDB, "SELECT count(*) FROM exercises", 53)
 	assertCount(t, sqlDB, "SELECT count(*) FROM programs", 5)
 	assertCount(t, sqlDB, "SELECT count(*) FROM program_days", 11)
 	assertCount(t, sqlDB, "SELECT count(*) FROM program_day_exercises", 31)
+
+	// The split 0009 draws: the ten lifts the programs prescribe are not
+	// accessories, and everything it seeded is. Asserted as a split rather than
+	// two magic numbers because it is what the library's default view leans on.
+	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE NOT is_accessory", 10)
+	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE is_accessory", 43)
+	// Nothing seeded belongs to a user; every seeded row is shared.
+	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE created_by_user_id IS NOT NULL", 0)
 }
 
 func assertCount(t *testing.T, db *sql.DB, query string, want int) {

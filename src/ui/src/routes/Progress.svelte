@@ -29,7 +29,13 @@
     loading = true;
     failed = false;
     partialFailed = false;
-    const { data: exercises, error } = await listExercises();
+    // Only the lifts with something to chart. Without the scope this asks for
+    // the whole library — dozens of accessories nobody has touched — and then
+    // fires a history request per card to discover they are empty. The Library
+    // tab is where the full catalogue lives.
+    const { data: exercises, error } = await listExercises({
+      query: { scope: "performed" },
+    });
     if (error || !exercises) {
       failed = true;
       loading = false;
@@ -83,7 +89,7 @@
       />
     {:else if cards.length === 0}
       <p class="col-span-full text-center text-sm text-muted-foreground">
-        No exercises yet.
+        Nothing logged yet. Finish a workout and your lifts will show up here.
       </p>
     {:else}
       {#each cards as card (card.id)}

@@ -80,7 +80,9 @@
     if (prTimer) clearTimeout(prTimer);
   });
 
-  // Sets grouped by exercise, preserving prescription order.
+  // Sets grouped by exercise, preserving prescription order. The server already
+  // returns main lifts first and assistance after them, so insertion order into
+  // the Map is the order to render.
   const groups = $derived.by(() => {
     const byExercise = new Map<string, SessionSet[]>();
     for (const set of session?.sets ?? []) {
@@ -88,8 +90,20 @@
       list.push(set);
       byExercise.set(set.exerciseName, list);
     }
-    return [...byExercise.entries()].map(([name, sets]) => ({ name, sets }));
+    return [...byExercise.entries()].map(([name, sets]) => ({
+      name,
+      sets,
+      // A group is assistance when its sets are. They cannot disagree — the
+      // kind comes from the exercise, and a group is one exercise.
+      assistance: sets[0]?.kind === "assistance",
+    }));
   });
+
+  // The first assistance group, so a divider can be drawn above it exactly once
+  // rather than between every pair of assistance cards.
+  const firstAssistanceName = $derived(
+    groups.find((g) => g.assistance)?.name ?? null,
+  );
 
   // A set is "logged" once it has a rep count (success or a miss).
   const loggedCount = $derived(
@@ -298,6 +312,20 @@
     {/if}
 
     {#each groups as group (group.name)}
+      <!-- One rule between the program's work and the lifter's own, so the
+           barbell lifts still read as the session and assistance reads as what
+           comes after them. -->
+      {#if group.name === firstAssistanceName}
+        <div class="flex items-center gap-3" aria-hidden="true">
+          <span class="h-px flex-1 bg-border/60"></span>
+          <span
+            class="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground"
+          >
+            Assistance
+          </span>
+          <span class="h-px flex-1 bg-border/60"></span>
+        </div>
+      {/if}
       <ExerciseCard
         name={group.name}
         sets={group.sets}

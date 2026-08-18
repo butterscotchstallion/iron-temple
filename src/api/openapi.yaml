@@ -294,7 +294,23 @@ paths:
     get:
       tags: [exercises]
       operationId: listExercises
-      summary: List all exercises
+      summary: List the exercise library
+      description: >
+        The seeded catalogue plus the caller's own custom movements. Someone
+        else's custom exercise is never returned.
+      parameters:
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [all, performed]
+            default: all
+          description: >
+            all returns the whole library. performed narrows it to lifts the
+            caller has actually logged, which is what the Progress page wants —
+            a library's worth of untrained movements reading "no sessions yet"
+            is noise.
       responses:
         "200":
           description: Exercises
@@ -304,6 +320,62 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Exercise"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [exercises]
+      operationId: createExercise
+      summary: Add a custom exercise to the library
+      description: >
+        Creates a movement visible only to the caller. Names are compared
+        case-insensitively against the shared catalogue and the caller's own
+        exercises; a collision with either is a 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateExerciseRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Exercise"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /exercises/{exerciseId}:
+    parameters:
+      - name: exerciseId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    delete:
+      tags: [exercises]
+      operationId: deleteExercise
+      summary: Delete one of your own custom exercises
+      description: >
+        Seeded exercises cannot be deleted by anyone. A custom one cannot be
+        deleted while it has logged sets against it — that would take a lift out
+        of a finished session, which is a record — or while it is on a program
+        day as assistance; remove it there first.
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "401":
           $ref: "#/components/responses/Unauthorized"
 
@@ -386,6 +458,85 @@ paths:
           description: Updated
         "400":
           $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /programs/{programId}/days/{dayId}/assistance:
+    parameters:
+      - $ref: "#/components/parameters/ProgramId"
+      - $ref: "#/components/parameters/DayId"
+    post:
+      tags: [programs]
+      operationId: addAssistance
+      summary: Attach an assistance exercise to a program day
+      description: >
+        Adds to the caller's own overlay on a shared program day; the program's
+        prescription is not modified, and nobody else's view of the day changes.
+        Takes effect on the next session started from this day — a session
+        already in progress keeps the sets it was created with.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAssistanceRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProgramDayAssistance"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /programs/{programId}/days/{dayId}/assistance/{assistanceId}:
+    parameters:
+      - $ref: "#/components/parameters/ProgramId"
+      - $ref: "#/components/parameters/DayId"
+      - $ref: "#/components/parameters/AssistanceId"
+    patch:
+      tags: [programs]
+      operationId: updateAssistance
+      summary: Change an assistance exercise's sets, reps or fallback weight
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAssistanceRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProgramDayAssistance"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    delete:
+      tags: [programs]
+      operationId: removeAssistance
+      summary: Remove an assistance exercise from a program day
+      description: >
+        Removes the plan, never the performance. Sets already logged against the
+        exercise stay in the sessions that recorded them and keep counting toward
+        volume and records.
+      responses:
+        "204":
+          description: Removed
         "404":
           $ref: "#/components/responses/NotFound"
         "401":
@@ -671,6 +822,13 @@ components:
       schema:
         type: integer
         format: int64
+    AssistanceId:
+      name: assistanceId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
 
   responses:
     BadRequest:
@@ -687,6 +845,12 @@ components:
             $ref: "#/components/schemas/Error"
     Unauthorized:
       description: Not signed in, or the session has expired
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Conflict:
+      description: The request is valid but collides with existing state
       content:
         application/json:
           schema:
@@ -841,9 +1005,18 @@ components:
           type: string
           example: session 42 not found
 
+    MuscleGroup:
+      type: string
+      enum: [chest, back, legs, shoulders, arms, core, other]
+
+    Equipment:
+      type: string
+      enum: [barbell, dumbbell, machine, cable, bodyweight, other]
+
     Exercise:
+      description: One movement in the library.
       type: object
-      required: [id, name]
+      required: [id, name, muscleGroup, equipment, isAccessory, isCustom]
       properties:
         id:
           type: integer
@@ -851,6 +1024,35 @@ components:
         name:
           type: string
           example: Squat
+        muscleGroup:
+          $ref: "#/components/schemas/MuscleGroup"
+        equipment:
+          $ref: "#/components/schemas/Equipment"
+        isAccessory:
+          type: boolean
+          description: >-
+            False for the compound lifts the seeded programs prescribe, true for
+            accessory work. The library leans on this to lead with the movements
+            a lifter is shopping for when adding assistance.
+        isCustom:
+          type: boolean
+          description: >-
+            True for a movement this lifter created. Only custom exercises can be
+            deleted, and only by their owner; the seeded catalogue is shared.
+
+    CreateExerciseRequest:
+      type: object
+      required: [name, muscleGroup, equipment]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+          example: Copenhagen Plank
+        muscleGroup:
+          $ref: "#/components/schemas/MuscleGroup"
+        equipment:
+          $ref: "#/components/schemas/Equipment"
 
     ExerciseHistoryPoint:
       description: One performed session's top set for a lift.
@@ -900,7 +1102,7 @@ components:
 
     ProgramDay:
       type: object
-      required: [id, name, position, weekday, exercises]
+      required: [id, name, position, weekday, exercises, assistance]
       properties:
         id:
           type: integer
@@ -919,8 +1121,91 @@ components:
           description: 0 = Sunday … 6 = Saturday; null if unscheduled.
         exercises:
           type: array
+          description: >-
+            The program's own prescription, shared by every lifter and never
+            edited.
           items:
             $ref: "#/components/schemas/ProgramDayExercise"
+        assistance:
+          type: array
+          description: >-
+            The calling lifter's assistance work for this day — an additive
+            overlay on the prescription above, private to them, and empty until
+            they add something.
+          items:
+            $ref: "#/components/schemas/ProgramDayAssistance"
+
+    ProgramDayAssistance:
+      description: >-
+        One assistance exercise a lifter has attached to a program day. Unlike
+        ProgramDayExercise it has no starting weight and no progression: the
+        prescribed weight is whatever they last logged for the lift, falling back
+        to weightLb here.
+      type: object
+      required: [id, exerciseId, exerciseName, position, sets, reps, weightLb]
+      properties:
+        id:
+          type: integer
+          format: int64
+        exerciseId:
+          type: integer
+          format: int64
+        exerciseName:
+          type: string
+          example: Dip
+        position:
+          type: integer
+          example: 1
+        sets:
+          type: integer
+          example: 3
+        reps:
+          type: integer
+          example: 8
+        weightLb:
+          type: number
+          minimum: 0
+          description: Fallback weight, used until the lift has been logged once.
+          example: 0
+
+    CreateAssistanceRequest:
+      type: object
+      required: [exerciseId, sets, reps]
+      properties:
+        exerciseId:
+          type: integer
+          format: int64
+        sets:
+          type: integer
+          minimum: 1
+          maximum: 20
+          example: 3
+        reps:
+          type: integer
+          minimum: 1
+          maximum: 100
+          example: 8
+        weightLb:
+          type: number
+          minimum: 0
+          default: 0
+          description: Omit or send 0 for bodyweight work.
+
+    UpdateAssistanceRequest:
+      description: Any subset; omitted fields keep their current value.
+      type: object
+      properties:
+        sets:
+          type: integer
+          minimum: 1
+          maximum: 20
+        reps:
+          type: integer
+          minimum: 1
+          maximum: 100
+        weightLb:
+          type: number
+          minimum: 0
 
     UpdateProgramDayRequest:
       type: object
@@ -984,15 +1269,25 @@ components:
           items:
             $ref: "#/components/schemas/PrescribedExercise"
 
+    ExerciseKind:
+      type: string
+      enum: [main, assistance]
+      description: >-
+        main is the program's own prescription, driven by the progression engine.
+        assistance is the lifter's own addition to the day, whose weight carries
+        forward from what they last logged.
+
     PrescribedExercise:
       type: object
-      required: [exerciseId, exerciseName, sets, reps, weightLb, restSeconds, progression]
+      required: [exerciseId, exerciseName, kind, sets, reps, weightLb, restSeconds, progression]
       properties:
         exerciseId:
           type: integer
           format: int64
         exerciseName:
           type: string
+        kind:
+          $ref: "#/components/schemas/ExerciseKind"
         sets:
           type: integer
           example: 5
@@ -1019,11 +1314,12 @@ components:
       properties:
         status:
           type: string
-          enum: [start, advance, hold, deload]
+          enum: [start, advance, hold, deload, fixed]
           description: >-
             start (no history), advance (last session passed), hold (recent
             failure, repeating the weight), deload (stall hit the threshold, weight
-            dropped).
+            dropped), fixed (assistance work — no engine runs on it; the weight is
+            carried forward from what was last logged).
           example: hold
         failureCount:
           type: integer
@@ -1128,7 +1424,7 @@ components:
     SessionSet:
       type: object
       required:
-        [id, exerciseId, exerciseName, setNumber, targetReps, weightLb, completed, restSeconds]
+        [id, exerciseId, exerciseName, kind, setNumber, targetReps, weightLb, completed, restSeconds]
       properties:
         id:
           type: integer
@@ -1139,6 +1435,8 @@ components:
         exerciseName:
           type: string
           example: Squat
+        kind:
+          $ref: "#/components/schemas/ExerciseKind"
         setNumber:
           type: integer
           example: 1

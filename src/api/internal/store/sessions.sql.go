@@ -206,10 +206,13 @@ SELECT ss.id,
        ss.target_reps,
        ss.actual_reps,
        ss.weight_lb,
-       ss.completed
+       ss.completed,
+       (pde.id IS NULL)::bool AS is_assistance
 FROM session_sets ss
 JOIN exercises e ON e.id = ss.exercise_id
 JOIN sessions s ON s.id = ss.session_id
+LEFT JOIN program_day_exercises pde
+  ON pde.program_day_id = s.program_day_id AND pde.exercise_id = ss.exercise_id
 WHERE ss.id = $1
   AND s.user_id = $2::int
 `
@@ -229,10 +232,16 @@ type GetSessionSetRow struct {
 	ActualReps   *int32         `json:"actual_reps"`
 	WeightLb     pgtype.Numeric `json:"weight_lb"`
 	Completed    bool           `json:"completed"`
+	IsAssistance bool           `json:"is_assistance"`
 }
 
 // GetSessionSet reaches the owner through session_sets -> sessions, so a set id
 // belonging to someone else simply does not resolve.
+//
+// is_assistance is derived the same way as in ListSessionSets — absence of a
+// program_day_exercises row for the day — so the field a PATCH echoes back
+// cannot disagree with the one the session was read with. Only the pde join is
+// needed here; this query does no ordering, so it has no use for pda.
 func (q *Queries) GetSessionSet(ctx context.Context, arg GetSessionSetParams) (GetSessionSetRow, error) {
 	row := q.db.QueryRow(ctx, getSessionSet, arg.ID, arg.UserID)
 	var i GetSessionSetRow
@@ -246,6 +255,7 @@ func (q *Queries) GetSessionSet(ctx context.Context, arg GetSessionSetParams) (G
 		&i.ActualReps,
 		&i.WeightLb,
 		&i.Completed,
+		&i.IsAssistance,
 	)
 	return i, err
 }
@@ -259,12 +269,16 @@ SELECT ss.session_id,
 FROM session_sets ss
 JOIN exercises e ON e.id = ss.exercise_id
 JOIN sessions s ON s.id = ss.session_id
-JOIN program_day_exercises pde
+LEFT JOIN program_day_exercises pde
   ON pde.program_day_id = s.program_day_id AND pde.exercise_id = ss.exercise_id
+LEFT JOIN program_day_assistance pda
+  ON pda.program_day_id = s.program_day_id
+ AND pda.exercise_id = ss.exercise_id
+ AND pda.user_id = s.user_id
 WHERE ss.session_id = ANY($1::int[])
   AND s.user_id = $2::int
 GROUP BY ss.session_id, e.name
-ORDER BY ss.session_id, MIN(pde.position)
+ORDER BY ss.session_id, MIN(COALESCE(pde.position, 1000 + pda.position, 2000))
 `
 
 type ListSessionExerciseWeightsParams struct {
@@ -283,6 +297,10 @@ type ListSessionExerciseWeightsRow struct {
 // ListSessionExerciseWeights returns each exercise's top working weight for the
 // given sessions, ordered by the day's exercise position — used to show a
 // per-lift weight line on each history row.
+//
+// Same LEFT JOINs and same ordering expression as ListSessionSets above, for the
+// same reason: an INNER JOIN here would quietly drop assistance work from the
+// history list while the session detail still showed it. Keep the two in sync.
 func (q *Queries) ListSessionExerciseWeights(ctx context.Context, arg ListSessionExerciseWeightsParams) ([]ListSessionExerciseWeightsRow, error) {
 	rows, err := q.db.Query(ctx, listSessionExerciseWeights, arg.SessionIds, arg.UserID)
 	if err != nil {
@@ -318,15 +336,20 @@ SELECT ss.id,
        ss.target_reps,
        ss.actual_reps,
        ss.weight_lb,
-       ss.completed
+       ss.completed,
+       (pde.id IS NULL)::bool AS is_assistance
 FROM session_sets ss
 JOIN exercises e ON e.id = ss.exercise_id
 JOIN sessions s ON s.id = ss.session_id
-JOIN program_day_exercises pde
+LEFT JOIN program_day_exercises pde
   ON pde.program_day_id = s.program_day_id AND pde.exercise_id = ss.exercise_id
+LEFT JOIN program_day_assistance pda
+  ON pda.program_day_id = s.program_day_id
+ AND pda.exercise_id = ss.exercise_id
+ AND pda.user_id = s.user_id
 WHERE ss.session_id = $1
   AND s.user_id = $2::int
-ORDER BY pde.position, ss.set_number
+ORDER BY COALESCE(pde.position, 1000 + pda.position, 2000), ss.exercise_id, ss.set_number
 `
 
 type ListSessionSetsParams struct {
@@ -344,10 +367,33 @@ type ListSessionSetsRow struct {
 	ActualReps   *int32         `json:"actual_reps"`
 	WeightLb     pgtype.Numeric `json:"weight_lb"`
 	Completed    bool           `json:"completed"`
+	IsAssistance bool           `json:"is_assistance"`
 }
 
-// ListSessionSets returns a session's logged sets in prescription order
-// (by the day's exercise position, then set number), joined to exercise names.
+// ListSessionSets returns a session's logged sets in prescription order (the
+// day's main lifts by position, then that lifter's assistance, then set number),
+// joined to exercise names.
+//
+// Both position joins are LEFT, and that is load-bearing rather than defensive.
+// A set exists because it was materialized into the session; the joins here only
+// decide what order to read it in. An INNER JOIN makes ordering a filter, so any
+// set without a current row on the other side disappears from a finished session
+// — from a record that is supposed to be immutable. Three ways that happens:
+// assistance work, which has no program_day_exercises row at all; assistance the
+// lifter removed after performing it; and, before assistance existed, a
+// prescription edited out from under old sessions.
+//
+//	COALESCE(pde.position, 1000 + pda.position, 2000)
+//
+// reads as: main lifts in prescribed order, then assistance below them, then
+// anything orphaned last. The 1000 offset is a separator, not a limit on how
+// many exercises a day may hold — positions are small integers assigned max+1,
+// and a day would need a thousand prescribed lifts to collide.
+//
+// is_assistance is derived from the same join rather than stored on the set: the
+// session materializes whatever prescribe() returned, and asking "was this on
+// the program's own list?" at read time cannot drift from the answer the
+// ordering above already depends on.
 func (q *Queries) ListSessionSets(ctx context.Context, arg ListSessionSetsParams) ([]ListSessionSetsRow, error) {
 	rows, err := q.db.Query(ctx, listSessionSets, arg.SessionID, arg.UserID)
 	if err != nil {
@@ -367,6 +413,7 @@ func (q *Queries) ListSessionSets(ctx context.Context, arg ListSessionSetsParams
 			&i.ActualReps,
 			&i.WeightLb,
 			&i.Completed,
+			&i.IsAssistance,
 		); err != nil {
 			return nil, err
 		}

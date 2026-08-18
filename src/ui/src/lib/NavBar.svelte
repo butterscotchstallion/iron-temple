@@ -5,6 +5,7 @@
   const items = [
     { href: "/", label: "Workout" },
     { href: "/programs", label: "Programs" },
+    { href: "/library", label: "Library" },
     { href: "/history", label: "History" },
     { href: "/progress", label: "Progress" },
   ];
@@ -37,8 +38,11 @@
 </script>
 
 <nav class="mt-5 flex justify-center">
+  <!-- flex-wrap, and justify-center on the pills themselves: five tabs no longer
+       fit one row on a narrow phone, and a second centred row reads better than
+       a bar that overflows its own border. -->
   <div
-    class="inline-flex items-center gap-1 rounded-full border border-border/60 bg-card/40 p-1 backdrop-blur"
+    class="inline-flex flex-wrap items-center justify-center gap-1 rounded-full border border-border/60 bg-card/40 p-1 backdrop-blur"
   >
     {#each items as item (item.href)}
       <a
