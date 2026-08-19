@@ -26,15 +26,17 @@ import (
 const barWidth = 62.0
 
 var emailTemplate = template.Must(template.New("racked").Funcs(template.FuncMap{
-	"lb":      formatLb,
-	"pct":     formatEmailPercent,
-	"dur":     formatEmailDuration,
-	"date":    formatEmailDate,
-	"barPct":  barPct,
-	"plural":  plural,
-	"weekday": weekdayName,
-	"signed":  signedPercent,
-	"perWeek": formatPerWeek,
+	"lb":       formatLb,
+	"weight":   formatWeightLb,
+	"signedLb": signedWeightLb,
+	"pct":      formatEmailPercent,
+	"dur":      formatEmailDuration,
+	"date":     formatEmailDate,
+	"barPct":   barPct,
+	"plural":   plural,
+	"weekday":  weekdayName,
+	"signed":   signedPercent,
+	"perWeek":  formatPerWeek,
 }).Parse(emailHTML))
 
 // emailData is the template's view of a report, plus the few strings the report
@@ -149,6 +151,39 @@ func signedPercent(fraction float64) string {
 	return fmt.Sprintf("%d%%", pct)
 }
 
+// formatWeightLb renders a scale reading, to one decimal and without the
+// trailing ".0" on a whole number.
+//
+// Separate from formatLb, which rounds. That is right for tonnage — nobody reads
+// a half-pound of a five-figure total — and wrong here, where the half-pound is
+// most of what changed: a month of careful eating rounds to no change at all.
+func formatWeightLb(lb float64) string {
+	if math.IsNaN(lb) || math.IsInf(lb, 0) || lb <= 0 {
+		return "0"
+	}
+	return strings.TrimSuffix(fmt.Sprintf("%.1f", lb), ".0")
+}
+
+// signedWeightLb renders a bodyweight delta with its sign, so a loss and a gain
+// are told apart at a glance rather than by comparing two numbers.
+func signedWeightLb(lb float64) string {
+	if math.IsNaN(lb) || math.IsInf(lb, 0) {
+		return "0"
+	}
+	body := strings.TrimSuffix(fmt.Sprintf("%.1f", math.Abs(lb)), ".0")
+	switch {
+	case lb > 0:
+		return "+" + body
+	case lb < 0:
+		// A hyphen-minus, not the typographic minus the page uses: mail clients
+		// that fall back through a font stack render U+2212 as a box often
+		// enough that the character is not worth the alignment it buys.
+		return "-" + body
+	default:
+		return "0"
+	}
+}
+
 // trimmed keeps the template readable in source without shipping the leading
 // indentation into every mail client.
 var emailHTML = strings.TrimSpace(`
@@ -202,12 +237,51 @@ var emailHTML = strings.TrimSpace(`
     </table>
     {{ end }}
 
+    {{ with .Report.Bodyweight }}
+    <div style="font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#94a3b8;margin-bottom:10px;padding-bottom:5px;border-bottom:1px solid #f1f5f9;">Bodyweight</div>
+    <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:24px;">
+      {{ if .ChangeLb }}
+      <tr>
+        <td style="padding:7px 0;color:#64748b;">Start to end</td>
+        <td style="padding:7px 0;text-align:right;color:#1e293b;">
+          <strong>{{ weight .StartLb }} &rarr; {{ weight .EndLb }} lb</strong>
+          {{ signedLb .ChangeLb }} lb{{ if .ChangePct }} &middot; {{ signed .ChangePct }}{{ end }}
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:7px 0;color:#64748b;">Range</td>
+        <td style="padding:7px 0;text-align:right;color:#1e293b;">
+          {{ weight .LowLb }}&ndash;{{ weight .HighLb }} lb over {{ len .Points }} weigh-ins
+        </td>
+      </tr>
+      {{ else }}
+      <!-- One weigh-in is a reading, not a series: there is a number to report
+           and no change to quote, so the row says the number and stops. -->
+      <tr>
+        <td style="padding:7px 0;color:#64748b;">Weighed in at</td>
+        <td style="padding:7px 0;text-align:right;color:#1e293b;"><strong>{{ weight .EndLb }} lb</strong></td>
+      </tr>
+      {{ end }}
+    </table>
+    {{ end }}
+
     {{ if .Lifts }}
     <div style="font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#94a3b8;margin-bottom:10px;padding-bottom:5px;border-bottom:1px solid #f1f5f9;">Where the weight went</div>
+    {{ with .Report.Split }}{{ if gt .Assistance.VolumeLb 0.0 }}
+    <!-- Only where there is assistance to account for. A lifter who does none
+         should not read a line telling them 100% of their work was the program's
+         — that is not news, it is the default. -->
+    <div style="font-size:12px;color:#64748b;margin:-4px 0 10px;">
+      Main lifts {{ pct .Main.Share }} &middot; assistance {{ pct .Assistance.Share }}
+      across {{ .Assistance.Lifts }} {{ plural .Assistance.Lifts "movement" "movements" }}
+    </div>
+    {{ end }}{{ end }}
     <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:24px;">
       {{ range .Lifts }}
       <tr>
-        <td style="padding:4px 8px 4px 0;color:#1e293b;white-space:nowrap;">{{ .ExerciseName }}</td>
+        <td style="padding:4px 8px 4px 0;color:#1e293b;white-space:nowrap;">
+          {{ .ExerciseName }}{{ if .IsAssistance }}<span style="color:#94a3b8;"> &middot; assistance</span>{{ end }}
+        </td>
         <td style="padding:4px 0;width:100%;">
           <div style="background:#7b2ff7;height:10px;border-radius:5px;width:{{ barPct .VolumeLb $.MaxLift }}%;"></div>
         </td>

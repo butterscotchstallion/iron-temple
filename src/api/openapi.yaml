@@ -1594,9 +1594,9 @@ components:
     RackedReport:
       type: object
       required:
-        [period, totals, change, comparison, lifts, series, mostImproved, days, weekdays,
-         bestWeekday, hours, peakHour, hourLabel, streak, attendance, prs, milestones, heaviestSet,
-         fastestSession, deloads, archetype]
+        [period, totals, change, comparison, split, lifts, series, mostImproved, bodyweight, days,
+         weekdays, bestWeekday, hours, peakHour, hourLabel, streak, attendance, prs, milestones,
+         heaviestSet, fastestSession, deloads, archetype]
       properties:
         period:
           $ref: "#/components/schemas/RackedPeriod"
@@ -1611,6 +1611,8 @@ components:
             holds no sessions to compare against.
         comparison:
           $ref: "#/components/schemas/RackedComparison"
+        split:
+          $ref: "#/components/schemas/RackedSplit"
         lifts:
           type: array
           description: Volume split by lift, heaviest first.
@@ -1626,6 +1628,15 @@ components:
             - $ref: "#/components/schemas/RackedImprovement"
           nullable: true
           description: Null until a lift has been performed twice in the period.
+        bodyweight:
+          allOf:
+            - $ref: "#/components/schemas/RackedBodyweight"
+          nullable: true
+          description: >
+            The period's weigh-ins, or null when it holds none — which is the
+            common case, since recording a bodyweight is optional on every
+            session. Surfaces drop the section entirely rather than render a
+            lifter who weighs nothing.
         days:
           type: array
           description: Per-day tonnage for the calendar heatmap, oldest first.
@@ -1768,9 +1779,90 @@ components:
         unitLb:
           type: number
 
+    RackedSplit:
+      type: object
+      required: [main, assistance]
+      description: >
+        The period's volume divided between the work the program prescribed and
+        the assistance the lifter added to it. It divides rather than subtracts:
+        main.volumeLb + assistance.volumeLb equals totals.volumeLb, and the two
+        shares sum to 1. The recap counted assistance in its headline from the
+        day assistance shipped; this only names which is which.
+      properties:
+        main:
+          $ref: "#/components/schemas/RackedWork"
+        assistance:
+          $ref: "#/components/schemas/RackedWork"
+
+    RackedWork:
+      type: object
+      required: [volumeLb, sets, reps, lifts, share]
+      properties:
+        volumeLb:
+          type: number
+        sets:
+          type: integer
+        reps:
+          type: integer
+        lifts:
+          type: integer
+          description: >
+            Distinct exercises this class covered — eighteen percent of a month
+            across one movement and across eight are different months.
+        share:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Share of the period's whole volume, not of its own class.
+
+    RackedBodyweight:
+      type: object
+      required: [points, startLb, endLb, lowLb, highLb, changeLb, changePct]
+      properties:
+        points:
+          type: array
+          description: >
+            The weigh-ins themselves, oldest first, one per session that recorded
+            one. Days without a weigh-in are absent rather than interpolated — a
+            reading exists only where somebody stood on a scale.
+          items:
+            $ref: "#/components/schemas/RackedWeighIn"
+        startLb:
+          type: number
+          description: >
+            The first reading in the period, which is not the same as the
+            lifter's weight on its first day.
+        endLb:
+          type: number
+        lowLb:
+          type: number
+        highLb:
+          type: number
+        changeLb:
+          type: number
+          nullable: true
+          description: >
+            endLb minus startLb, or null when the period holds a single weigh-in
+            — one reading is a fact, not a trend, and zero would claim a
+            stability nobody measured.
+        changePct:
+          type: number
+          nullable: true
+          description: Fraction, not percent — -0.014 is -1.4%. Null with changeLb.
+
+    RackedWeighIn:
+      type: object
+      required: [performedOn, weightLb]
+      properties:
+        performedOn:
+          type: string
+          format: date
+        weightLb:
+          type: number
+
     RackedLiftSlice:
       type: object
-      required: [exerciseId, exerciseName, volumeLb, sets, reps, share]
+      required: [exerciseId, exerciseName, volumeLb, sets, reps, share, isAssistance]
       properties:
         exerciseId:
           type: integer
@@ -1787,16 +1879,27 @@ components:
           type: number
           minimum: 0
           maximum: 1
+        isAssistance:
+          type: boolean
+          description: >
+            True when every set of this lift in the period was assistance work.
+            Every, not most: a lift can be prescribed on one program day and
+            bolted onto another, and one prescribed set makes it the program's
+            work. Use `split` for figures that have to add up — this only decides
+            what a lift is called in a list.
 
     RackedSeries:
       type: object
-      required: [exerciseId, exerciseName, points]
+      required: [exerciseId, exerciseName, points, isAssistance]
       properties:
         exerciseId:
           type: integer
           format: int64
         exerciseName:
           type: string
+        isAssistance:
+          type: boolean
+          description: As on RackedLiftSlice.
         points:
           type: array
           items:

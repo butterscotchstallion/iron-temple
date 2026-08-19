@@ -180,10 +180,22 @@ func fastestSession(sessions []session) *SessionHighlight {
 // set or a rounding difference is not mistaken for stalling out. Recovery is
 // judged within the period: a deload the lifter has not yet answered is still
 // part of the story, and saying so is the point of including this at all.
+//
+// Assistance work is skipped, alone among the statistics in this package. A
+// deload is a claim about a progression, and assistance has no progression
+// behind it: 0009 gave program_day_assistance a plain weight_lb column with no
+// engine on it, so the weight is whatever the lifter last logged. Picking up the
+// 15s instead of the 20s because the 20s were taken is not stalling out, and
+// reporting it as "still climbing" tells the lifter something untrue about a
+// month that went fine. Records and most-improved read assistance happily —
+// those are claims about what was lifted, and what was lifted was lifted.
 func deloads(sessions []session) []Deload {
 	series := liftSeries(sessions)
 	var out []Deload
 	for _, s := range series {
+		if s.IsAssistance {
+			continue
+		}
 		for i := 1; i < len(s.Points); i++ {
 			from, to := s.Points[i-1].TopWeightLb, s.Points[i].TopWeightLb
 			if from-to < progression.BarIncrementLb {

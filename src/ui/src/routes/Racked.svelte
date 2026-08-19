@@ -14,6 +14,7 @@
   import LiftVolumeBars from "../lib/LiftVolumeBars.svelte";
   import RackedBars from "../lib/RackedBars.svelte";
   import ChartTable from "../lib/ChartTable.svelte";
+  import BodyweightChart from "../lib/BodyweightChart.svelte";
   import { formatVolume } from "../lib/volume";
   import { formatLongDate } from "../lib/date";
   import { WEEKDAYS } from "../lib/weekday";
@@ -23,6 +24,8 @@
     formatPercent,
     formatPerWeek,
     formatSessionLength,
+    formatSignedLb,
+    formatWeighIn,
     indexedSeries,
   } from "../lib/racked";
 
@@ -82,6 +85,18 @@
       sets: l.sets,
       share: l.share,
       color: colorFor.get(l.exerciseId) ?? null,
+      isAssistance: l.isAssistance,
+    })),
+  );
+  // Only worth stating where there is assistance to account for. Telling a
+  // lifter who does none that all their work was the program's is not news.
+  const assistance = $derived(report?.split.assistance ?? null);
+  const hasAssistance = $derived((assistance?.volumeLb ?? 0) > 0);
+  const bodyweight = $derived(report?.bodyweight ?? null);
+  const weighInRows = $derived(
+    (bodyweight?.points ?? []).map((p) => ({
+      label: formatLongDate(p.performedOn),
+      value: `${formatWeighIn(p.weightLb)} lb`,
     })),
   );
   const volumesByDate = $derived(
@@ -326,7 +341,78 @@
         <h3 class="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
           Where the weight went
         </h3>
+        {#if hasAssistance}
+          <!-- The split divides the headline rather than qualifying it: these two
+               bars are the same tonnage as the number at the top of the page,
+               and assistance has always been inside it. The bar is there because
+               a percentage read next to a length is understood faster than a
+               percentage read alone. -->
+          <div class="mb-3" data-testid="work-split">
+            <div class="flex h-2 w-full overflow-hidden rounded-full bg-muted/40">
+              <div
+                class="h-full bg-primary"
+                style="width: {report.split.main.share * 100}%"
+              ></div>
+              <div
+                class="h-full bg-muted-foreground/50"
+                style="width: {report.split.assistance.share * 100}%"
+              ></div>
+            </div>
+            <p class="mt-1.5 text-xs text-muted-foreground">
+              <span class="font-semibold text-foreground">
+                {formatPercent(report.split.main.share)}
+              </span>
+              main lifts ·
+              <span class="font-semibold text-foreground">
+                {formatPercent(report.split.assistance.share)}
+              </span>
+              assistance, across {report.split.assistance.lifts}
+              {report.split.assistance.lifts === 1 ? "movement" : "movements"}
+            </p>
+          </div>
+        {/if}
         <LiftVolumeBars rows={liftRows} />
+      </Card>
+    {/if}
+
+    <!-- Bodyweight, where there is any. Recording it is optional on every
+         session, so most periods hold none and the card is simply absent —
+         rather than present and empty, which would read as a prompt. -->
+    {#if bodyweight}
+      <Card class="p-4" data-testid="stat-bodyweight">
+        <h3 class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+          Bodyweight
+        </h3>
+        <p class="text-3xl font-black tabular-nums text-foreground">
+          {formatWeighIn(bodyweight.endLb)}
+          <span class="text-sm font-semibold text-muted-foreground">lb</span>
+        </p>
+        {#if bodyweight.changeLb !== null && bodyweight.changeLb !== undefined}
+          <p class="text-xs tabular-nums text-muted-foreground">
+            {formatSignedLb(bodyweight.changeLb)} lb
+            {#if bodyweight.changePct !== null && bodyweight.changePct !== undefined}
+              ({formatDelta(bodyweight.changePct)})
+            {/if}
+            from {formatWeighIn(bodyweight.startLb)} lb, across
+            {bodyweight.points.length} weigh-ins
+          </p>
+        {:else}
+          <!-- One reading is a fact and not a trend, so there is no change to
+               quote and the card says what it knows: the number, and the day. -->
+          <p class="text-xs text-muted-foreground">
+            Weighed in once, on {formatLongDate(bodyweight.points[0].performedOn)}.
+            Log another and this becomes a trend.
+          </p>
+        {/if}
+        {#if bodyweight.points.length > 1}
+          <div class="mt-2">
+            <BodyweightChart points={bodyweight.points} />
+          </div>
+          <p class="text-xs text-muted-foreground">
+            Range {formatWeighIn(bodyweight.lowLb)}–{formatWeighIn(bodyweight.highLb)} lb
+          </p>
+        {/if}
+        <ChartTable label="Weigh-ins" columns={["Date", "Bodyweight"]} rows={weighInRows} />
       </Card>
     {/if}
 

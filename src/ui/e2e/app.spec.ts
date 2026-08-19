@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import type { RackedReport } from "../src/lib/api";
 
 // The UI is driven entirely by the API, so the e2e suite mocks those responses
 // (via page.route) to stay self-contained — no running backend or seeded DB.
@@ -653,7 +654,15 @@ test("toggles the changelog when the header version is clicked", async ({ page }
 // The Racked recap. Every figure here is computed by the API, so these assert
 // that the page renders the report faithfully — not that the statistics are
 // right, which is internal/racked's own test suite.
-const rackedMarch = {
+//
+// Typed against the generated contract, unlike the smaller fixtures above, and
+// deliberately so: the report carries twenty-odd required fields and the page
+// reads them without guarding, so a field added to the spec and forgotten here
+// blanks the page at runtime. Untyped, that surfaced only in this suite — the
+// one gate a sandbox cannot run — and every Racked test failed at once with a
+// missing heading rather than pointing at the missing field. `pnpm check` now
+// names it instead. See tsconfig.json, where e2e joined the type-check for this.
+const rackedMarch: RackedReport = {
   period: {
     kind: "month",
     start: "2026-03-01",
@@ -664,14 +673,35 @@ const rackedMarch = {
   totals: { volumeLb: 84000, sessions: 12, sets: 180, reps: 900 },
   change: { volumeLb: 9000, volumePct: 0.12, sessions: 2, sessionsPct: 0.2 },
   comparison: { count: 3, label: "school buses", unitLb: 24000 },
+  split: {
+    main: { volumeLb: 84000, sets: 180, reps: 900, lifts: 2, share: 1 },
+    assistance: { volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0 },
+  },
   lifts: [
-    { exerciseId: 1, exerciseName: "Squat", volumeLb: 50000, sets: 90, reps: 450, share: 0.6 },
-    { exerciseId: 2, exerciseName: "Bench Press", volumeLb: 34000, sets: 90, reps: 450, share: 0.4 },
+    {
+      exerciseId: 1,
+      exerciseName: "Squat",
+      volumeLb: 50000,
+      sets: 90,
+      reps: 450,
+      share: 0.6,
+      isAssistance: false,
+    },
+    {
+      exerciseId: 2,
+      exerciseName: "Bench Press",
+      volumeLb: 34000,
+      sets: 90,
+      reps: 450,
+      share: 0.4,
+      isAssistance: false,
+    },
   ],
   series: [
     {
       exerciseId: 1,
       exerciseName: "Squat",
+      isAssistance: false,
       points: [
         { performedOn: "2026-03-02", topWeightLb: 200, e1rmLb: 233 },
         { performedOn: "2026-03-16", topWeightLb: 220, e1rmLb: 256 },
@@ -680,6 +710,7 @@ const rackedMarch = {
     {
       exerciseId: 2,
       exerciseName: "Bench Press",
+      isAssistance: false,
       points: [
         { performedOn: "2026-03-02", topWeightLb: 150, e1rmLb: 175 },
         { performedOn: "2026-03-16", topWeightLb: 155, e1rmLb: 181 },
@@ -694,13 +725,18 @@ const rackedMarch = {
     gainLb: 23,
     gainPct: 0.0987,
   },
+  bodyweight: null,
   days: [
     { date: "2026-03-02", volumeLb: 7000, sessions: 1 },
     { date: "2026-03-16", volumeLb: 7500, sessions: 1 },
   ],
   weekdays: [0, 42000, 0, 30000, 0, 12000, 0],
   bestWeekday: 1,
-  hours: Array.from({ length: 24 }, (_, h) => (h === 6 ? 9 : h === 18 ? 3 : 0)),
+  // Cast for the same reason the vitest fixtures cast it: the contract types
+  // this as a 24-tuple, and Array.from produces a plain array.
+  hours: Array.from({ length: 24 }, (_, h) =>
+    h === 6 ? 9 : h === 18 ? 3 : 0,
+  ) as RackedReport["hours"],
   peakHour: 6,
   hourLabel: "Early bird",
   streak: { longestWeeks: 5, currentWeeks: 3 },
@@ -821,6 +857,88 @@ test("Racked reports frequency when the program has no schedule", async ({ page 
   await expect(page.getByRole("heading", { name: "How often you trained" })).toBeVisible();
   await expect(page.getByText("2.8")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Attendance" })).toHaveCount(0);
+});
+
+// A month with assistance work and a run of weigh-ins — the two sections
+// rackedMarch has nothing to show for, since most lifters have neither.
+const rackedWithAssistanceAndBodyweight: RackedReport = {
+  ...rackedMarch,
+  split: {
+    main: { volumeLb: 76000, sets: 160, reps: 800, lifts: 2, share: 0.905 },
+    assistance: { volumeLb: 8000, sets: 20, reps: 100, lifts: 1, share: 0.095 },
+  },
+  lifts: [
+    ...rackedMarch.lifts,
+    {
+      exerciseId: 3,
+      exerciseName: "Barbell Curl",
+      volumeLb: 8000,
+      sets: 20,
+      reps: 100,
+      share: 0.095,
+      isAssistance: true,
+    },
+  ],
+  bodyweight: {
+    points: [
+      { performedOn: "2026-03-02", weightLb: 184 },
+      { performedOn: "2026-03-09", weightLb: 182.5 },
+      { performedOn: "2026-03-16", weightLb: 181.4 },
+    ],
+    startLb: 184,
+    endLb: 181.4,
+    lowLb: 181.4,
+    highLb: 184,
+    changeLb: -2.6,
+    changePct: -0.0141,
+  },
+};
+
+// The split divides the headline rather than qualifying it, so both halves have
+// to read against the same total the card above them prints.
+test("Racked splits the volume into main work and assistance", async ({ page }) => {
+  await page.route("**/api/v1/racked**", (route) =>
+    route.fulfill({ json: rackedWithAssistanceAndBodyweight }),
+  );
+  await page.goto("/#/racked");
+
+  const split = page.getByTestId("work-split");
+  await expect(split).toBeVisible();
+  await expect(split).toContainText("91%");
+  await expect(split).toContainText("10%");
+  await expect(split).toContainText("across 1 movement");
+
+  // The assistance lift keeps its place in the volume ranking and is tagged
+  // there, rather than being moved into a list of its own.
+  await expect(page.getByText("Barbell Curl")).toBeVisible();
+  await expect(page.getByText("assistance", { exact: true })).toBeVisible();
+});
+
+// The bodyweight chart is plain SVG, so this is the only suite that lays it out
+// for real — jsdom renders the markup without ever computing a path.
+test("Racked charts bodyweight and its change", async ({ page }) => {
+  await page.route("**/api/v1/racked**", (route) =>
+    route.fulfill({ json: rackedWithAssistanceAndBodyweight }),
+  );
+  await page.goto("/#/racked");
+
+  const card = page.getByTestId("stat-bodyweight");
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("181.4");
+  await expect(card).toContainText("−2.6 lb");
+  await expect(card).toContainText("Range 181.4–184 lb");
+  await expect(card.getByRole("img", { name: /Bodyweight across 3 weigh-ins/ })).toBeVisible();
+});
+
+// Recording a bodyweight is optional on every session, so most periods hold
+// none — and the section is absent rather than empty.
+test("Racked omits bodyweight and the split when there is nothing to show", async ({ page }) => {
+  await page.route("**/api/v1/racked**", (route) => route.fulfill({ json: rackedMarch }));
+  await page.goto("/#/racked");
+
+  await expect(page.getByRole("heading", { name: "Where the weight went" })).toBeVisible();
+  await expect(page.getByTestId("stat-bodyweight")).toHaveCount(0);
+  await expect(page.getByTestId("work-split")).toHaveCount(0);
 });
 
 // Charts convey their detail through hover and title attributes, which never

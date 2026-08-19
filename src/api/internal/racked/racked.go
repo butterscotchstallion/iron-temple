@@ -53,6 +53,14 @@ type Set struct {
 	Reps           int
 	WeightLb       float64
 	Completed      bool
+	// IsAssistance is true for work the lifter bolted onto the program day
+	// rather than work the program prescribed — the same distinction the session
+	// screen draws, derived in SQL from the absence of a prescription.
+	//
+	// It never removes a set from a total. Assistance is training, and the
+	// headline tonnage counted it before this field existed and still does; what
+	// the flag buys is a report that can say how the month divided.
+	IsAssistance bool
 }
 
 // VolumeLb is the weight this set moved: reps actually performed times the
@@ -107,6 +115,10 @@ type Input struct {
 	AsOf time.Time
 	Loc  *time.Location
 	Sets []Set
+	// WeighIns is every bodyweight recorded in the period, oldest first. Most
+	// lifters record none, and an empty slice is that answer rather than a gap
+	// to fill in — see the Bodyweight type.
+	WeighIns []WeighIn
 	// PreviousSets is the preceding period, for the headline comparison.
 	PreviousSets []Set
 	// PreviousStart anchors that period so it can be cut to the same number of
@@ -122,18 +134,23 @@ type Input struct {
 
 // Report is the whole recap.
 type Report struct {
-	Period       Period
-	Totals       Totals
-	Change       *Change
-	Comparison   Comparison
+	Period     Period
+	Totals     Totals
+	Change     *Change
+	Comparison Comparison
+	// Split is Totals.VolumeLb divided between prescribed work and assistance.
+	Split        Split
 	Lifts        []LiftSlice
 	Series       []LiftSeries
 	MostImproved *Improvement
-	Days         []DayVolume
-	Weekdays     []float64
-	BestWeekday  int
-	Hours        []int
-	HourLabel    string
+	// Bodyweight is the period's weigh-ins, or nil when it holds none — which is
+	// the common case, and a section the surfaces then omit entirely.
+	Bodyweight  *Bodyweight
+	Days        []DayVolume
+	Weekdays    []float64
+	BestWeekday int
+	Hours       []int
+	HourLabel   string
 	// PeakHour is the hour of day the lifter started most sessions in, or -1
 	// when none of them carry a start time. Published rather than left for each
 	// surface to work out: two readers of the same Hours array picked different
@@ -189,6 +206,47 @@ type LiftSlice struct {
 	Sets         int
 	Reps         int
 	Share        float64
+	// IsAssistance is true when every set of this lift in the period was
+	// assistance work.
+	//
+	// Every, not most. A lift can sit on two program days — prescribed on one,
+	// bolted onto the other — and one prescribed set is enough to make it the
+	// program's work. Labelling by majority instead would move a lift between
+	// classes as the ratio drifted week to week, and a squat does not become
+	// accessory work because of how a month went.
+	//
+	// Nothing that has to add up depends on this: Split counts set by set, so a
+	// mixed lift lands on both sides in the proportion it was actually trained.
+	// This field only decides what a lift is called in a list.
+	IsAssistance bool
+}
+
+// Work is one class of training: what the program asked for, or what the lifter
+// added to it. The counters are the same ones Totals carries, so a surface can
+// put a class beside the headline and have the two agree.
+type Work struct {
+	VolumeLb float64
+	Sets     int
+	Reps     int
+	// Lifts is how many distinct exercises the class covered — the figure that
+	// makes "18% of your volume" mean something, since eighteen percent across
+	// one movement and across eight are different months.
+	Lifts int
+	// Share is of the period's whole volume, so Main.Share + Assistance.Share is
+	// 1 for any period that moved weight and 0 for one that did not.
+	Share float64
+}
+
+// Split divides the period between the program's own work and the lifter's
+// assistance.
+//
+// It divides, it does not subtract: Main.VolumeLb + Assistance.VolumeLb is
+// Totals.VolumeLb exactly. The recap counted assistance in its headline from the
+// day assistance shipped — it simply could not name it — and moving that number
+// now would rewrite every month a lifter has already read.
+type Split struct {
+	Main       Work
+	Assistance Work
 }
 
 // SeriesPoint is one session's showing for one lift.
@@ -203,6 +261,9 @@ type LiftSeries struct {
 	ExerciseID   int32
 	ExerciseName string
 	Points       []SeriesPoint
+	// IsAssistance is true when every set of this lift in the period was
+	// assistance work. deloads reads it; nothing else does.
+	IsAssistance bool
 }
 
 // Improvement is the lift that moved the most, measured on estimated one-rep
@@ -342,8 +403,10 @@ func Build(in Input) Report {
 			InProgress: inProgress,
 		},
 		Totals:      totals(in.Sets, sessions),
+		Split:       split(in.Sets),
 		Lifts:       liftSlices(in.Sets),
 		Series:      liftSeries(sessions),
+		Bodyweight:  bodyweight(in.WeighIns),
 		Days:        dayVolumes(sessions),
 		Weekdays:    make([]float64, 7),
 		BestWeekday: -1,
@@ -540,6 +603,35 @@ func change(cur, prev Totals) *Change {
 	return c
 }
 
+// split divides the period's volume between prescribed work and assistance.
+//
+// Sets are counted where they were performed, which is the only way the two
+// halves can add back up to the headline. A lift is not assigned wholesale to
+// one class: squats prescribed on Workout A and added as assistance to Workout B
+// contribute to both, and each set knows which it was.
+func split(sets []Set) Split {
+	var sp Split
+	mainLifts, assistLifts := map[int32]bool{}, map[int32]bool{}
+	var total float64
+	for _, s := range sets {
+		side, seen := &sp.Main, mainLifts
+		if s.IsAssistance {
+			side, seen = &sp.Assistance, assistLifts
+		}
+		side.VolumeLb += s.VolumeLb()
+		side.Sets++
+		side.Reps += s.Reps
+		seen[s.ExerciseID] = true
+		total += s.VolumeLb()
+	}
+	sp.Main.Lifts, sp.Assistance.Lifts = len(mainLifts), len(assistLifts)
+	if total > 0 {
+		sp.Main.Share = sp.Main.VolumeLb / total
+		sp.Assistance.Share = sp.Assistance.VolumeLb / total
+	}
+	return sp
+}
+
 func liftSlices(sets []Set) []LiftSlice {
 	if len(sets) == 0 {
 		return nil
@@ -549,12 +641,19 @@ func liftSlices(sets []Set) []LiftSlice {
 	for _, s := range sets {
 		cur, ok := byID[s.ExerciseID]
 		if !ok {
-			cur = &LiftSlice{ExerciseID: s.ExerciseID, ExerciseName: s.ExerciseName}
+			cur = &LiftSlice{
+				ExerciseID:   s.ExerciseID,
+				ExerciseName: s.ExerciseName,
+				// Starts true and is cleared by the first prescribed set, which
+				// is liftIsAssistance's rule expressed as one pass.
+				IsAssistance: true,
+			}
 			byID[s.ExerciseID] = cur
 		}
 		cur.VolumeLb += s.VolumeLb()
 		cur.Sets++
 		cur.Reps += s.Reps
+		cur.IsAssistance = cur.IsAssistance && s.IsAssistance
 		total += s.VolumeLb()
 	}
 	out := make([]LiftSlice, 0, len(byID))
@@ -591,23 +690,33 @@ func liftSeries(sessions []session) []LiftSeries {
 	for _, sess := range sessions {
 		best := map[int32]*SeriesPoint{}
 		names := map[int32]string{}
+		// Assistance until a prescribed set says otherwise — the same "every set"
+		// rule LiftSlice.IsAssistance documents.
+		assistance := map[int32]bool{}
 		for _, set := range sess.Sets {
 			p, ok := best[set.ExerciseID]
 			if !ok {
 				p = &SeriesPoint{PerformedOn: sess.PerformedOn}
 				best[set.ExerciseID] = p
 				names[set.ExerciseID] = set.ExerciseName
+				assistance[set.ExerciseID] = true
 			}
 			p.TopWeightLb = math.Max(p.TopWeightLb, set.WeightLb)
 			p.E1RMLb = math.Max(p.E1RMLb, set.E1RM())
+			assistance[set.ExerciseID] = assistance[set.ExerciseID] && set.IsAssistance
 		}
 		for id, p := range best {
 			series, ok := byID[id]
 			if !ok {
-				series = &LiftSeries{ExerciseID: id, ExerciseName: names[id]}
+				series = &LiftSeries{
+					ExerciseID:   id,
+					ExerciseName: names[id],
+					IsAssistance: true,
+				}
 				byID[id] = series
 				order = append(order, id)
 			}
+			series.IsAssistance = series.IsAssistance && assistance[id]
 			series.Points = append(series.Points, *p)
 		}
 	}

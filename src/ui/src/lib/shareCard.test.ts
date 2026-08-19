@@ -33,9 +33,14 @@ function bareReport(): RackedReport {
     totals: { volumeLb: 0, sessions: 0, sets: 0, reps: 0 },
     change: null,
     comparison: { count: 0, label: "", unitLb: 0 },
+    split: {
+      main: { volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0 },
+      assistance: { volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0 },
+    },
     lifts: [],
     series: [],
     mostImproved: null,
+    bodyweight: null,
     days: [],
     weekdays: [0, 0, 0, 0, 0, 0, 0],
     bestWeekday: -1,
@@ -53,8 +58,16 @@ function bareReport(): RackedReport {
   };
 }
 
-function lift(id: number, name: string, volumeLb: number) {
-  return { exerciseId: id, exerciseName: name, volumeLb, sets: 12, reps: 60, share: 0.2 };
+function lift(id: number, name: string, volumeLb: number, isAssistance = false) {
+  return {
+    exerciseId: id,
+    exerciseName: name,
+    volumeLb,
+    sets: 12,
+    reps: 60,
+    share: 0.2,
+    isAssistance,
+  };
 }
 
 /** A recap with every section the card can draw, at its fullest. */
