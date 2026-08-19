@@ -625,6 +625,13 @@ func TestRackedEmptyPeriodIsAValidReport(t *testing.T) {
 	rep.Value("mostImproved").IsNull()
 	rep.Value("heaviestSet").IsNull()
 	rep.Value("fastestSession").IsNull()
+	rep.Value("bodyweight").IsNull()
+
+	// The split is always present — a period that moved nothing divides nothing
+	// — and must not divide by zero into a NaN the page would render verbatim.
+	split := rep.Value("split").Object()
+	split.Value("main").Object().HasValue("volumeLb", 0).HasValue("share", 0).HasValue("lifts", 0)
+	split.Value("assistance").Object().HasValue("volumeLb", 0).HasValue("share", 0)
 
 	rep.HasValue("bestWeekday", -1)
 	rep.HasValue("hourLabel", "")
@@ -958,5 +965,172 @@ func backdatePerformedOn(t *testing.T, sessionID int, on time.Time) {
 		"UPDATE sessions SET performed_on = $1 WHERE id = $2", on, sessionID)
 	if err != nil {
 		t.Fatalf("backdate performed_on for %d: %v", sessionID, err)
+	}
+}
+
+// Assistance is counted, and named.
+//
+// The headline is the claim worth pinning: the recap counted assistance in its
+// tonnage from the day assistance shipped, and the split names it without
+// moving it. A lifter who read last month's number must find the same number
+// there, with a breakdown beside it rather than instead of it.
+func TestRackedSplitsAssistanceOutWithoutRemovingIt(t *testing.T) {
+	e := expect(t)
+	programID, dayID := firstProgramAndDay(e)
+
+	curlID := exerciseIDByName(t, e, "Barbell Curl")
+	addAssistance(t, e, programID, dayID, curlID, 3, 10, 40)
+
+	before := rackedTotals(e)
+	beforeSplit := rackedSplit(e)
+
+	created := startSession(t, e, dayID)
+	sessionID := int(created.Value("id").Number().Raw())
+
+	curlSets := sessionSetsFor(created, curlID)
+	if len(curlSets) == 0 {
+		t.Fatal("the session materialized no assistance sets")
+	}
+	const reps = 10
+	var want float64
+	for _, set := range curlSets {
+		logSet(e, sessionID, int(set.Value("id").Number().Raw()), reps, true)
+		want += reps * set.Value("weightLb").Number().Raw()
+	}
+	if want <= 0 {
+		t.Fatalf("expected the assistance entry to carry weight, got %v", want)
+	}
+
+	after := rackedTotals(e)
+	afterSplit := rackedSplit(e)
+
+	// In the headline, where it has always been.
+	if got := after.volume - before.volume; math.Abs(got-want) > 0.001 {
+		t.Fatalf("headline volume moved by %v, want %v — assistance is training", got, want)
+	}
+	// And on the assistance side of the split, not the main one.
+	if got := afterSplit.assistance - beforeSplit.assistance; math.Abs(got-want) > 0.001 {
+		t.Fatalf("assistance volume moved by %v, want %v", got, want)
+	}
+	if got := afterSplit.main - beforeSplit.main; math.Abs(got) > 0.001 {
+		t.Fatalf("main volume moved by %v on assistance work, want 0", got)
+	}
+	// The two halves are the whole.
+	if got := afterSplit.main + afterSplit.assistance; math.Abs(got-after.volume) > 0.001 {
+		t.Fatalf("split sums to %v, want the headline %v", got, after.volume)
+	}
+
+	// And the lift itself is labelled, so the page can tag its row.
+	lifts := e.GET("/racked").Expect().Status(http.StatusOK).JSON().Object().Value("lifts").Array()
+	var found bool
+	for i := 0; i < int(lifts.Length().Raw()); i++ {
+		lift := lifts.Value(i).Object()
+		if int(lift.Value("exerciseId").Number().Raw()) == curlID {
+			lift.Value("isAssistance").Boolean().IsTrue()
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the assistance lift is missing from the volume breakdown")
+	}
+}
+
+// A lift the program prescribes is never labelled assistance, whatever else the
+// lifter added that day.
+func TestRackedLabelsPrescribedWorkAsMain(t *testing.T) {
+	e := expect(t)
+	_, dayID := firstProgramAndDay(e)
+
+	created := startSession(t, e, dayID)
+	sessionID := int(created.Value("id").Number().Raw())
+	set := created.Value("sets").Array().Value(0).Object()
+	exerciseID := int(set.Value("exerciseId").Number().Raw())
+	logSet(e, sessionID, int(set.Value("id").Number().Raw()), 5, true)
+
+	lifts := e.GET("/racked").Expect().Status(http.StatusOK).JSON().Object().Value("lifts").Array()
+	for i := 0; i < int(lifts.Length().Raw()); i++ {
+		lift := lifts.Value(i).Object()
+		if int(lift.Value("exerciseId").Number().Raw()) == exerciseID {
+			lift.Value("isAssistance").Boolean().IsFalse()
+			return
+		}
+	}
+	t.Fatal("the prescribed lift is missing from the volume breakdown")
+}
+
+// The bodyweight column reaches the recap as a dated series. Recording one is
+// optional, so a period without any carries no section at all rather than a
+// lifter who weighs nothing.
+func TestRackedReportsWeighIns(t *testing.T) {
+	e := expect(t)
+	_, dayID := firstProgramAndDay(e)
+
+	e.GET("/racked").WithQuery("on", "1970-01-15").Expect().Status(http.StatusOK).
+		JSON().Object().Value("bodyweight").IsNull()
+
+	created := startSession(t, e, dayID)
+	sessionID := int(created.Value("id").Number().Raw())
+	const weight = 181.4
+	e.PATCH(fmt.Sprintf("/sessions/%d", sessionID)).
+		WithJSON(map[string]any{"bodyweightLb": weight}).
+		Expect().Status(http.StatusOK)
+
+	body := e.GET("/racked").Expect().Status(http.StatusOK).
+		JSON().Object().Value("bodyweight").Object()
+
+	// The suite shares one account and this month may already hold weigh-ins
+	// from another test, so this asserts the reading is present rather than that
+	// it is the only one.
+	points := body.Value("points").Array()
+	var found bool
+	for i := 0; i < int(points.Length().Raw()); i++ {
+		if points.Value(i).Object().Value("weightLb").Number().Raw() == weight {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the %v lb weigh-in is missing from the bodyweight series", weight)
+	}
+	body.Value("highLb").Number().Ge(body.Value("lowLb").Number().Raw())
+}
+
+// A weigh-in is a fact about the day, not about the session it was typed into:
+// it counts whether or not any set was ever logged. RackedPeriodSets filters on
+// logged work and this query deliberately does not, and that difference is easy
+// to erase by copying the wrong WHERE clause.
+func TestRackedCountsAWeighInFromAnUnloggedSession(t *testing.T) {
+	e := expect(t)
+	_, dayID := firstProgramAndDay(e)
+
+	created := startSession(t, e, dayID)
+	sessionID := int(created.Value("id").Number().Raw())
+	const weight = 923.5
+	e.PATCH(fmt.Sprintf("/sessions/%d", sessionID)).
+		WithJSON(map[string]any{"bodyweightLb": weight}).
+		Expect().Status(http.StatusOK)
+
+	points := e.GET("/racked").Expect().Status(http.StatusOK).
+		JSON().Object().Value("bodyweight").Object().Value("points").Array()
+	for i := 0; i < int(points.Length().Raw()); i++ {
+		if points.Value(i).Object().Value("weightLb").Number().Raw() == weight {
+			return
+		}
+	}
+	t.Fatalf("a weigh-in on a session with no logged sets was dropped")
+}
+
+// rackedSplit reads the two sides of the work split, which the recap tests
+// compare as deltas for the same reason rackedTotals does.
+type rackedSplitFigures struct {
+	main       float64
+	assistance float64
+}
+
+func rackedSplit(e *httpexpect.Expect) rackedSplitFigures {
+	split := e.GET("/racked").Expect().Status(http.StatusOK).
+		JSON().Object().Value("split").Object()
+	return rackedSplitFigures{
+		main:       split.Value("main").Object().Value("volumeLb").Number().Raw(),
+		assistance: split.Value("assistance").Object().Value("volumeLb").Number().Raw(),
 	}
 }

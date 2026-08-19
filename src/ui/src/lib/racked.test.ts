@@ -7,6 +7,8 @@ import {
   formatPercent,
   formatPerWeek,
   formatSessionLength,
+  formatSignedLb,
+  formatWeighIn,
   indexedSeries,
   seriesColor,
   type LiftSeries,
@@ -246,5 +248,45 @@ describe("formatPerWeek", () => {
     [Number.NaN, "0"],
   ])("formats %s as %s", (perWeek, want) => {
     expect(formatPerWeek(perWeek as number)).toBe(want);
+  });
+});
+
+describe("formatWeighIn", () => {
+  it.each([
+    [181.4, "181.4"],
+    // The trailing ".0" goes: a scale that read exactly 181 should say so.
+    [181, "181"],
+    [181.44, "181.4"],
+    [0, "—"],
+    [Number.NaN, "—"],
+  ])("formats %s as %s", (lb, want) => {
+    expect(formatWeighIn(lb as number)).toBe(want);
+  });
+
+  // Not formatVolume, which rounds to whole pounds. That is right for a
+  // five-figure tonnage and wrong for a scale, where the half-pound is most of
+  // what moved.
+  it("keeps the decimal a volume would round away", () => {
+    expect(formatWeighIn(181.4)).not.toBe("181");
+  });
+});
+
+describe("formatSignedLb", () => {
+  it.each([
+    [-2.6, "−2.6"],
+    [1.5, "+1.5"],
+    [2, "+2"],
+    // Held steady is a real answer, and reads as one rather than as "+0".
+    [0, "0"],
+    [Number.NaN, "—"],
+  ])("formats %s as %s", (lb, want) => {
+    expect(formatSignedLb(lb as number)).toBe(want);
+  });
+
+  // A real minus sign, for the reason formatDelta uses one: these sit in
+  // tabular-nums columns where a hyphen is narrower than a digit.
+  it("uses a minus sign rather than a hyphen", () => {
+    expect(formatSignedLb(-2.6).startsWith("−")).toBe(true);
+    expect(formatSignedLb(-2.6).startsWith("-")).toBe(false);
   });
 });

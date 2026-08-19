@@ -13,6 +13,11 @@
   // same colour here as in the trend chart above it. Lifts that the trend chart
   // could not draw — a single session gives no trend — get a neutral bar rather
   // than a colour that would imply a line exists somewhere.
+  //
+  // Assistance is tagged rather than sorted away or given a bar of its own.
+  // These bars answer "where did the month's weight go", and a lifter who spent
+  // a fifth of it on accessories wants to see that fifth in the same ranking as
+  // the rest — moving it to a separate list would answer a different question.
 
   type Row = {
     exerciseId: number;
@@ -21,6 +26,7 @@
     sets: number;
     share: number;
     color: string | null;
+    isAssistance: boolean;
   };
 
   let { rows }: { rows: Row[] } = $props();
@@ -32,7 +38,14 @@
   {#each rows as row (row.exerciseId)}
     <li>
       <div class="flex items-baseline justify-between gap-2 text-xs">
-        <span class="truncate font-semibold text-foreground">{row.exerciseName}</span>
+        <span class="truncate font-semibold text-foreground">
+          {row.exerciseName}
+          {#if row.isAssistance}
+            <span class="ml-1 align-[1px] text-[10px] font-normal uppercase tracking-wider text-muted-foreground">
+              assistance
+            </span>
+          {/if}
+        </span>
         <span class="shrink-0 tabular-nums text-muted-foreground">
           {formatVolume(row.volumeLb)} lb · {formatPercent(row.share)}
         </span>

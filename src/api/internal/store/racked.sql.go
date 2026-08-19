@@ -92,11 +92,14 @@ SELECT s.id AS session_id,
        ss.set_number,
        ss.actual_reps,
        ss.weight_lb,
-       ss.completed
+       ss.completed,
+       (pde.id IS NULL)::bool AS is_assistance
 FROM session_sets ss
 JOIN sessions s ON s.id = ss.session_id
 JOIN program_days pd ON pd.id = s.program_day_id
 JOIN exercises e ON e.id = ss.exercise_id
+LEFT JOIN program_day_exercises pde
+  ON pde.program_day_id = s.program_day_id AND pde.exercise_id = ss.exercise_id
 WHERE s.user_id = $1::int
   AND s.performed_on >= $2
   AND s.performed_on <= $3
@@ -123,6 +126,7 @@ type RackedPeriodSetsRow struct {
 	ActualReps     *int32             `json:"actual_reps"`
 	WeightLb       pgtype.Numeric     `json:"weight_lb"`
 	Completed      bool               `json:"completed"`
+	IsAssistance   bool               `json:"is_assistance"`
 }
 
 // Racked is the monthly/yearly recap: a headline volume, a few hero moments and
@@ -135,9 +139,9 @@ type RackedPeriodSetsRow struct {
 // not be exercised often. The second is that sqlc cannot be run in the
 // development sandbox, so every query here has to be hand-carried into
 // internal/store and kept byte-compatible with the generator — a cost paid per
-// query, and paid again on every edit. Three plain queries is a surface worth
-// maintaining; the dozen window functions the full stat list would otherwise
-// need is not.
+// query, and paid again on every edit. A handful of plain queries is a surface
+// worth maintaining; the dozen window functions the full stat list would
+// otherwise need is not.
 //
 // A period's row count is small enough that the trade costs nothing: three
 // sessions a week of five sets across three lifts is roughly 2,300 rows a year,
@@ -162,6 +166,22 @@ type RackedPeriodSetsRow struct {
 // relies on sets arriving grouped by session in chronological order, so PRs are
 // detected against the state of the history at that moment rather than at the
 // end of it.
+//
+// is_assistance is derived exactly as ListSessionSets and GetSessionSet derive
+// it — the absence of a program_day_exercises row for the session's day — and
+// not stored on the set. Keeping the three in agreement matters: a lift the
+// session screen prints under "assistance" and the recap counts as prescribed
+// work is one feature disagreeing with itself about the same row.
+//
+// The join cannot fan a set out into two, because program_day_exercises carries
+// UNIQUE (program_day_id, exercise_id). That is load-bearing here in a way it is
+// not in sessions.sql: a duplicate row there would repeat a set in a list, where
+// here it would silently double the lifter's tonnage for the month.
+//
+// Note what this does NOT filter. Assistance is real work and counts toward
+// every total, exactly as it did before the flag existed; the column only lets
+// the report say which is which. Anything that reads it to exclude work is
+// making a judgement, and internal/racked is where judgements are made.
 func (q *Queries) RackedPeriodSets(ctx context.Context, arg RackedPeriodSetsParams) ([]RackedPeriodSetsRow, error) {
 	rows, err := q.db.Query(ctx, rackedPeriodSets, arg.UserID, arg.StartOn, arg.EndOn)
 	if err != nil {
@@ -184,6 +204,7 @@ func (q *Queries) RackedPeriodSets(ctx context.Context, arg RackedPeriodSetsPara
 			&i.ActualReps,
 			&i.WeightLb,
 			&i.Completed,
+			&i.IsAssistance,
 		); err != nil {
 			return nil, err
 		}
@@ -239,4 +260,68 @@ func (q *Queries) RackedVolumeBefore(ctx context.Context, arg RackedVolumeBefore
 	var volume_lb pgtype.Numeric
 	err := row.Scan(&volume_lb)
 	return volume_lb, err
+}
+
+const rackedWeighIns = `-- name: RackedWeighIns :many
+SELECT s.performed_on,
+       s.bodyweight_lb
+FROM sessions s
+WHERE s.user_id = $1::int
+  AND s.performed_on >= $2
+  AND s.performed_on <= $3
+  AND s.bodyweight_lb IS NOT NULL
+ORDER BY s.performed_on, s.id
+`
+
+type RackedWeighInsParams struct {
+	UserID  int32       `json:"user_id"`
+	StartOn pgtype.Date `json:"start_on"`
+	EndOn   pgtype.Date `json:"end_on"`
+}
+
+type RackedWeighInsRow struct {
+	PerformedOn  pgtype.Date    `json:"performed_on"`
+	BodyweightLb pgtype.Numeric `json:"bodyweight_lb"`
+}
+
+// RackedWeighIns returns the bodyweight recorded against each session in
+// [start_on, end_on], oldest first — the series the recap's bodyweight chart
+// draws and the two ends it measures a change between.
+//
+// Reads sessions.bodyweight_lb directly rather than going through LastWeighIn,
+// as that query's own comment instructs: it answers "what does the lifter weigh
+// now", carrying today's number backwards onto a back-dated session, which is
+// right for pre-filling a box and wrong for a chart. Here every point has to sit
+// on the day it was actually measured.
+//
+// IS NOT NULL is the whole point and not a tidy-up. A NULL bodyweight_lb means
+// no weigh-in happened, which 0010 chose over carrying the last value forward
+// precisely so that a chart could tell the days somebody stood on a scale from
+// the days they did not. Dropping those rows here is what honours that; reading
+// them as zero, or filling them in, would draw a line through days that hold no
+// measurement. It also means this returns nothing at all for most lifters, and
+// the report treats an empty series as "no bodyweight to report" rather than as
+// a lifter who weighs nothing.
+//
+// Sessions are not filtered on having logged sets, unlike RackedPeriodSets: a
+// weigh-in is a fact about the day whether or not the session it was entered on
+// ever got off the ground.
+func (q *Queries) RackedWeighIns(ctx context.Context, arg RackedWeighInsParams) ([]RackedWeighInsRow, error) {
+	rows, err := q.db.Query(ctx, rackedWeighIns, arg.UserID, arg.StartOn, arg.EndOn)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RackedWeighInsRow
+	for rows.Next() {
+		var i RackedWeighInsRow
+		if err := rows.Scan(&i.PerformedOn, &i.BodyweightLb); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

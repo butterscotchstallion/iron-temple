@@ -259,11 +259,15 @@ type rackedReportDTO struct {
 	Totals     rackedTotalsDTO      `json:"totals"`
 	Change     *rackedChangeDTO     `json:"change"`
 	Comparison rackedComparisonDTO  `json:"comparison"`
+	Split      rackedSplitDTO       `json:"split"`
 	Lifts      []rackedLiftSliceDTO `json:"lifts"`
 	Series     []rackedSeriesDTO    `json:"series"`
 	// MostImproved is nil until some lift has been performed twice in the period.
 	MostImproved *rackedImprovementDTO `json:"mostImproved"`
-	Days         []rackedDayVolumeDTO  `json:"days"`
+	// Bodyweight is nil when the period holds no weigh-in, which is the common
+	// case — recording one is optional on every session.
+	Bodyweight *rackedBodyweightDTO `json:"bodyweight"`
+	Days       []rackedDayVolumeDTO `json:"days"`
 	// Weekdays is indexed 0 = Sunday, matching programDay.weekday.
 	Weekdays    []float64 `json:"weekdays"`
 	BestWeekday int       `json:"bestWeekday"`
@@ -319,6 +323,40 @@ type rackedComparisonDTO struct {
 	UnitLb float64 `json:"unitLb"`
 }
 
+// rackedSplitDTO divides volumeLb rather than subtracting from it: main plus
+// assistance is the headline total, and the two shares sum to 1.
+type rackedSplitDTO struct {
+	Main       rackedWorkDTO `json:"main"`
+	Assistance rackedWorkDTO `json:"assistance"`
+}
+
+type rackedWorkDTO struct {
+	VolumeLb float64 `json:"volumeLb"`
+	Sets     int     `json:"sets"`
+	Reps     int     `json:"reps"`
+	Lifts    int     `json:"lifts"`
+	// Share is of the period's whole volume, not of this class.
+	Share float64 `json:"share"`
+}
+
+// rackedBodyweightDTO carries the period's weigh-ins. changeLb and changePct are
+// nil with a single reading, following rackedChangeDTO: one weigh-in is a fact,
+// not a trend.
+type rackedBodyweightDTO struct {
+	Points    []rackedWeighInDTO `json:"points"`
+	StartLb   float64            `json:"startLb"`
+	EndLb     float64            `json:"endLb"`
+	LowLb     float64            `json:"lowLb"`
+	HighLb    float64            `json:"highLb"`
+	ChangeLb  *float64           `json:"changeLb"`
+	ChangePct *float64           `json:"changePct"`
+}
+
+type rackedWeighInDTO struct {
+	PerformedOn string  `json:"performedOn"`
+	WeightLb    float64 `json:"weightLb"`
+}
+
 type rackedLiftSliceDTO struct {
 	ExerciseID   int32   `json:"exerciseId"`
 	ExerciseName string  `json:"exerciseName"`
@@ -326,6 +364,9 @@ type rackedLiftSliceDTO struct {
 	Sets         int     `json:"sets"`
 	Reps         int     `json:"reps"`
 	Share        float64 `json:"share"`
+	// IsAssistance is true only when every set of the lift in the period was
+	// assistance. Read split for figures that have to add up.
+	IsAssistance bool `json:"isAssistance"`
 }
 
 type rackedSeriesPointDTO struct {
@@ -337,6 +378,7 @@ type rackedSeriesPointDTO struct {
 type rackedSeriesDTO struct {
 	ExerciseID   int32                  `json:"exerciseId"`
 	ExerciseName string                 `json:"exerciseName"`
+	IsAssistance bool                   `json:"isAssistance"`
 	Points       []rackedSeriesPointDTO `json:"points"`
 }
 

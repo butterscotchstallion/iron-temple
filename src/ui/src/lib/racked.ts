@@ -115,6 +115,32 @@ export function formatDelta(fraction: number): string {
   return pct > 0 ? `+${pct}%` : `−${Math.abs(pct)}%`;
 }
 
+/**
+ * A scale reading: 181.4 -> "181.4", 181 -> "181".
+ *
+ * One decimal, and volume.ts's formatVolume deliberately not reused — that
+ * rounds to whole pounds, which is right for a five-figure tonnage where nobody
+ * reads the half-pound, and wrong here, where the half-pound is most of what
+ * moved. A careful month rounds to no change at all.
+ */
+export function formatWeighIn(lb: number): string {
+  if (!Number.isFinite(lb) || lb <= 0) return "—";
+  return lb.toFixed(1).replace(/\.0$/, "");
+}
+
+/**
+ * A signed weight in pounds: -2.6 -> "−2.6", 1 -> "+1". A real minus sign, for
+ * the reason formatDelta uses one — these sit in tabular-nums columns, where a
+ * hyphen is narrower than a digit and pulls the figure out of line.
+ */
+export function formatSignedLb(lb: number): string {
+  if (!Number.isFinite(lb)) return "—";
+  const body = Math.abs(lb).toFixed(1).replace(/\.0$/, "");
+  if (lb > 0) return `+${body}`;
+  if (lb < 0) return `−${body}`;
+  return "0";
+}
+
 /** An unsigned percentage from a fraction: 0.86 -> "86%". */
 export function formatPercent(fraction: number): string {
   if (!Number.isFinite(fraction) || fraction < 0) return "0%";

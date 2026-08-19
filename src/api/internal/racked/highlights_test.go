@@ -169,3 +169,44 @@ func TestDeloads(t *testing.T) {
 		}
 	})
 }
+
+// A deload is a claim about a progression, and assistance has no progression
+// behind it — program_day_assistance carries a plain weight column with no
+// engine on it. Picking up the 15s because the 20s were taken is not stalling
+// out, and calling it one tells the lifter something untrue about a fine month.
+func TestDeloadsIgnoreAssistanceWork(t *testing.T) {
+	var sets []Set
+	sets = append(sets, assist(mkSets(1, day(2026, time.March, 2), 9, "Lateral Raise", 1, 10, 20))...)
+	sets = append(sets, assist(mkSets(2, day(2026, time.March, 9), 9, "Lateral Raise", 1, 10, 10))...)
+
+	if got := deloads(groupSessions(sets)); len(got) != 0 {
+		t.Fatalf("deloads = %+v, want none from assistance work", got)
+	}
+}
+
+// The exclusion is on the work, not on the session: a main lift that stalls in
+// the same period is still reported.
+func TestDeloadsStillCatchMainLiftsAlongsideAssistance(t *testing.T) {
+	var sets []Set
+	sets = append(sets, mkSets(1, day(2026, time.March, 2), 1, "Squat", 1, 5, 225)...)
+	sets = append(sets, assist(mkSets(1, day(2026, time.March, 2), 9, "Lateral Raise", 1, 10, 20))...)
+	sets = append(sets, mkSets(2, day(2026, time.March, 9), 1, "Squat", 1, 5, 200)...)
+	sets = append(sets, assist(mkSets(2, day(2026, time.March, 9), 9, "Lateral Raise", 1, 10, 10))...)
+
+	got := deloads(groupSessions(sets))
+	if len(got) != 1 || got[0].ExerciseName != "Squat" {
+		t.Fatalf("deloads = %+v, want only the squat's", got)
+	}
+}
+
+// A lift prescribed on one day and bolted onto another keeps its prescription,
+// so a drop in it is still a stall worth reporting.
+func TestDeloadsCatchAMixedLift(t *testing.T) {
+	var sets []Set
+	sets = append(sets, mkSets(1, day(2026, time.March, 2), 1, "Squat", 1, 5, 225)...)
+	sets = append(sets, assist(mkSets(2, day(2026, time.March, 9), 1, "Squat", 1, 5, 200))...)
+
+	if got := deloads(groupSessions(sets)); len(got) != 1 {
+		t.Fatalf("deloads = %+v, want one from a lift the program prescribes", got)
+	}
+}

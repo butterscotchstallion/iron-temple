@@ -229,3 +229,123 @@ func TestRenderEmailFooterMatchesTheAttendanceBasis(t *testing.T) {
 		}
 	})
 }
+
+// The bodyweight section appears only where there is a bodyweight, and quotes
+// both ends and the delta — the email has no chart to show a trend with, so the
+// numbers have to carry it.
+func TestRenderEmailBodyweight(t *testing.T) {
+	rep := marchReport(t)
+	rep.Bodyweight = bodyweight([]WeighIn{
+		{PerformedOn: day(2026, time.March, 2), WeightLb: 184},
+		{PerformedOn: day(2026, time.March, 16), WeightLb: 181.4},
+	})
+
+	html, err := RenderEmail("Ada Lovelace", rep)
+	if err != nil {
+		t.Fatalf("RenderEmail: %v", err)
+	}
+	for _, want := range []string{"Bodyweight", "184", "181.4", "-2.6 lb"} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("email is missing %q", want)
+		}
+	}
+}
+
+// A single reading has a number and no trend, so the section says the number and
+// makes no claim about a change.
+func TestRenderEmailBodyweightWithOneWeighIn(t *testing.T) {
+	rep := marchReport(t)
+	rep.Bodyweight = bodyweight([]WeighIn{{PerformedOn: day(2026, time.March, 2), WeightLb: 181}})
+
+	html, err := RenderEmail("Ada Lovelace", rep)
+	if err != nil {
+		t.Fatalf("RenderEmail: %v", err)
+	}
+	if !strings.Contains(html, "Weighed in at") || !strings.Contains(html, "181") {
+		t.Fatal("email does not report the single weigh-in")
+	}
+	if strings.Contains(html, "Start to end") {
+		t.Fatal("email quotes a change from one reading")
+	}
+}
+
+// Most lifters never fill the box in, and their recap should not carry an empty
+// heading for a section with nothing under it.
+func TestRenderEmailOmitsBodyweightWhenThereIsNone(t *testing.T) {
+	html, err := RenderEmail("Ada Lovelace", marchReport(t))
+	if err != nil {
+		t.Fatalf("RenderEmail: %v", err)
+	}
+	if strings.Contains(html, "Bodyweight") {
+		t.Fatal("email carries a bodyweight section for a period with no weigh-in")
+	}
+}
+
+// The split line states the division and names the assistance rows, so a reader
+// of the email can tell a lat pulldown from a squat the way a reader of the page
+// can.
+func TestRenderEmailReportsTheAssistanceSplit(t *testing.T) {
+	start, end := Bounds(PeriodMonth, day(2026, time.March, 15))
+	var sets []Set
+	sets = append(sets, mkSets(1, day(2026, time.March, 2), 1, "Squat", 5, 5, 200)...)
+	sets = append(sets, assist(mkSets(1, day(2026, time.March, 2), 9, "Barbell Curl", 3, 10, 40))...)
+
+	html, err := RenderEmail("Ada Lovelace", Build(Input{
+		Kind: PeriodMonth, Start: start, End: end, Sets: sets,
+	}))
+	if err != nil {
+		t.Fatalf("RenderEmail: %v", err)
+	}
+	for _, want := range []string{"Main lifts", "assistance", "1 movement"} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("email is missing %q", want)
+		}
+	}
+}
+
+// A lifter who does no assistance should not be told that all of their work was
+// the program's. That is not news, it is the default.
+func TestRenderEmailOmitsTheSplitWithoutAssistance(t *testing.T) {
+	html, err := RenderEmail("Ada Lovelace", marchReport(t))
+	if err != nil {
+		t.Fatalf("RenderEmail: %v", err)
+	}
+	if strings.Contains(html, "Main lifts") {
+		t.Fatal("email states a split for a lifter with no assistance work")
+	}
+}
+
+func TestFormatWeightLb(t *testing.T) {
+	cases := []struct {
+		in   float64
+		want string
+	}{
+		{181.4, "181.4"},
+		// The trailing ".0" goes: a scale that read exactly 181 should say so.
+		{181, "181"},
+		{0, "0"},
+	}
+	for _, tc := range cases {
+		if got := formatWeightLb(tc.in); got != tc.want {
+			t.Fatalf("formatWeightLb(%v) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestSignedWeightLb(t *testing.T) {
+	cases := []struct {
+		in   float64
+		want string
+	}{
+		{-2.6, "-2.6"},
+		{1.5, "+1.5"},
+		{2, "+2"},
+		// Held steady is a real answer and reads as one, not as "+0".
+		{0, "0"},
+	}
+	for _, tc := range cases {
+		if got := signedWeightLb(tc.in); got != tc.want {
+			t.Fatalf("signedWeightLb(%v) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

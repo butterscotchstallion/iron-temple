@@ -38,6 +38,16 @@ func finish(sets []Set, d time.Duration) []Set {
 	return sets
 }
 
+// assist marks sets as work the lifter bolted onto the day rather than work the
+// program prescribed — what RackedPeriodSets derives from a missing
+// program_day_exercises row.
+func assist(sets []Set) []Set {
+	for i := range sets {
+		sets[i].IsAssistance = true
+	}
+	return sets
+}
+
 func TestSetVolumeAndE1RM(t *testing.T) {
 	s := Set{Reps: 3, WeightLb: 185}
 	if got := s.VolumeLb(); got != 555 {
@@ -455,4 +465,137 @@ func TestEdgeWindowBests(t *testing.T) {
 			t.Fatalf("edgeWindowBests(nil) = %v, %v; want 0, 0", from, to)
 		}
 	})
+}
+
+// The split divides the headline rather than qualifying it. Assistance counted
+// toward the recap's tonnage from the day assistance shipped — it simply could
+// not be named — so the two halves have to add back up to the total, or a
+// lifter reading the page finds a page that disagrees with itself.
+func TestSplitDividesTheHeadlineVolume(t *testing.T) {
+	on := day(2026, time.March, 2)
+	var sets []Set
+	sets = append(sets, mkSets(1, on, 1, "Squat", 5, 5, 200)...)                // 5,000
+	sets = append(sets, assist(mkSets(1, on, 9, "Barbell Curl", 3, 10, 40))...) // 1,200
+
+	rep := Build(Input{Kind: PeriodMonth, Start: on, End: day(2026, time.March, 31), Sets: sets})
+
+	if got := rep.Split.Main.VolumeLb; got != 5_000 {
+		t.Fatalf("main volume = %v, want 5000", got)
+	}
+	if got := rep.Split.Assistance.VolumeLb; got != 1_200 {
+		t.Fatalf("assistance volume = %v, want 1200", got)
+	}
+	if got := rep.Split.Main.VolumeLb + rep.Split.Assistance.VolumeLb; got != rep.Totals.VolumeLb {
+		t.Fatalf("split sums to %v, want the headline %v", got, rep.Totals.VolumeLb)
+	}
+	if got := rep.Split.Main.Share + rep.Split.Assistance.Share; math.Abs(got-1) > 1e-9 {
+		t.Fatalf("shares sum to %v, want 1", got)
+	}
+	if rep.Split.Main.Sets != 5 || rep.Split.Assistance.Sets != 3 {
+		t.Fatalf("sets = %d main, %d assistance; want 5 and 3",
+			rep.Split.Main.Sets, rep.Split.Assistance.Sets)
+	}
+	if rep.Split.Main.Reps != 25 || rep.Split.Assistance.Reps != 30 {
+		t.Fatalf("reps = %d main, %d assistance; want 25 and 30",
+			rep.Split.Main.Reps, rep.Split.Assistance.Reps)
+	}
+	if rep.Split.Main.Lifts != 1 || rep.Split.Assistance.Lifts != 1 {
+		t.Fatalf("lifts = %d main, %d assistance; want 1 each",
+			rep.Split.Main.Lifts, rep.Split.Assistance.Lifts)
+	}
+}
+
+// A period with no assistance is the common case and reports a clean 100/0
+// rather than a zeroed struct that a surface would have to guess at.
+func TestSplitWithoutAssistance(t *testing.T) {
+	on := day(2026, time.March, 2)
+	rep := Build(Input{
+		Kind:  PeriodMonth,
+		Start: on,
+		End:   day(2026, time.March, 31),
+		Sets:  mkSets(1, on, 1, "Squat", 5, 5, 200),
+	})
+
+	if rep.Split.Main.Share != 1 || rep.Split.Assistance.Share != 0 {
+		t.Fatalf("shares = %v main, %v assistance; want 1 and 0",
+			rep.Split.Main.Share, rep.Split.Assistance.Share)
+	}
+	if rep.Split.Assistance.Lifts != 0 {
+		t.Fatalf("assistance lifts = %d, want 0", rep.Split.Assistance.Lifts)
+	}
+}
+
+// An empty period divides nothing, and dividing nothing must not produce a NaN
+// share that renders as "NaN%" on the page.
+func TestSplitOfAnEmptyPeriod(t *testing.T) {
+	rep := Build(Input{
+		Kind: PeriodMonth, Start: day(2026, time.March, 1), End: day(2026, time.March, 31),
+	})
+	if rep.Split.Main.Share != 0 || rep.Split.Assistance.Share != 0 {
+		t.Fatalf("shares = %v, %v; want 0, 0", rep.Split.Main.Share, rep.Split.Assistance.Share)
+	}
+}
+
+// A lift can sit on two program days — prescribed on one, bolted onto the
+// other. The label goes to the prescription, and the split still counts the sets
+// where they were actually performed, so nothing that has to add up depends on
+// how the lift is called.
+func TestMixedLiftLabelledAsMainAndSplitPerSet(t *testing.T) {
+	var sets []Set
+	sets = append(sets, mkSets(1, day(2026, time.March, 2), 1, "Squat", 2, 5, 200)...)
+	sets = append(sets, assist(mkSets(2, day(2026, time.March, 4), 1, "Squat", 2, 5, 100))...)
+
+	rep := Build(Input{
+		Kind: PeriodMonth, Start: day(2026, time.March, 1), End: day(2026, time.March, 31),
+		Sets: sets,
+	})
+
+	if len(rep.Lifts) != 1 {
+		t.Fatalf("got %d lifts, want 1", len(rep.Lifts))
+	}
+	if rep.Lifts[0].IsAssistance {
+		t.Fatal("a lift prescribed on one day reads as assistance; want main")
+	}
+	if rep.Split.Main.VolumeLb != 2_000 || rep.Split.Assistance.VolumeLb != 1_000 {
+		t.Fatalf("split = %v main, %v assistance; want 2000 and 1000",
+			rep.Split.Main.VolumeLb, rep.Split.Assistance.VolumeLb)
+	}
+}
+
+// A lift performed only as assistance is labelled so, in both the volume list
+// and the series the charts read.
+func TestPureAssistanceLiftIsLabelled(t *testing.T) {
+	sets := assist(mkSets(1, day(2026, time.March, 2), 9, "Barbell Curl", 3, 10, 40))
+
+	rep := Build(Input{
+		Kind: PeriodMonth, Start: day(2026, time.March, 1), End: day(2026, time.March, 31),
+		Sets: sets,
+	})
+
+	if len(rep.Lifts) != 1 || !rep.Lifts[0].IsAssistance {
+		t.Fatalf("lifts = %+v, want one marked assistance", rep.Lifts)
+	}
+	if len(rep.Series) != 1 || !rep.Series[0].IsAssistance {
+		t.Fatalf("series = %+v, want one marked assistance", rep.Series)
+	}
+}
+
+// Assistance stays eligible for the judgements that are claims about what was
+// lifted. A curl that went from 30 to 40 lb improved, and the recap says so.
+func TestAssistanceCanWinMostImprovedAndSetRecords(t *testing.T) {
+	var sets []Set
+	sets = append(sets, assist(mkSets(1, day(2026, time.March, 2), 9, "Barbell Curl", 3, 10, 30))...)
+	sets = append(sets, assist(mkSets(2, day(2026, time.March, 16), 9, "Barbell Curl", 3, 10, 40))...)
+
+	rep := Build(Input{
+		Kind: PeriodMonth, Start: day(2026, time.March, 1), End: day(2026, time.March, 31),
+		Sets: sets,
+	})
+
+	if rep.MostImproved == nil || rep.MostImproved.ExerciseName != "Barbell Curl" {
+		t.Fatalf("mostImproved = %+v, want the curl", rep.MostImproved)
+	}
+	if len(rep.PRs) == 0 {
+		t.Fatal("no records from assistance work; want the curl's")
+	}
 }

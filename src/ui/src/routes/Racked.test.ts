@@ -31,9 +31,14 @@ function emptyReport(): RackedReport {
     totals: { volumeLb: 0, sessions: 0, sets: 0, reps: 0 },
     change: null,
     comparison: { count: 0, label: "", unitLb: 0 },
+    split: {
+      main: { volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0 },
+      assistance: { volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0 },
+    },
     lifts: [],
     series: [],
     mostImproved: null,
+    bodyweight: null,
     days: [],
     weekdays: [0, 0, 0, 0, 0, 0, 0],
     bestWeekday: -1,
@@ -58,20 +63,63 @@ function fullReport(): RackedReport {
     totals: { volumeLb: 84_000, sessions: 12, sets: 180, reps: 900 },
     change: { volumeLb: 9_000, volumePct: 0.12, sessions: 2, sessionsPct: 0.2 },
     comparison: { count: 3, label: "school buses", unitLb: 24_000 },
+    split: {
+      main: { volumeLb: 76_000, sets: 160, reps: 800, lifts: 2, share: 0.905 },
+      assistance: { volumeLb: 8_000, sets: 20, reps: 100, lifts: 1, share: 0.095 },
+    },
     lifts: [
-      { exerciseId: 1, exerciseName: "Squat", volumeLb: 50_000, sets: 90, reps: 450, share: 0.6 },
-      { exerciseId: 2, exerciseName: "Bench Press", volumeLb: 34_000, sets: 90, reps: 450, share: 0.4 },
+      {
+        exerciseId: 1,
+        exerciseName: "Squat",
+        volumeLb: 50_000,
+        sets: 90,
+        reps: 450,
+        share: 0.6,
+        isAssistance: false,
+      },
+      {
+        exerciseId: 2,
+        exerciseName: "Bench Press",
+        volumeLb: 34_000,
+        sets: 90,
+        reps: 450,
+        share: 0.4,
+        isAssistance: false,
+      },
+      {
+        exerciseId: 3,
+        exerciseName: "Barbell Curl",
+        volumeLb: 8_000,
+        sets: 20,
+        reps: 100,
+        share: 0.095,
+        isAssistance: true,
+      },
     ],
     series: [
       {
         exerciseId: 1,
         exerciseName: "Squat",
+        isAssistance: false,
         points: [
           { performedOn: "2026-03-02", topWeightLb: 200, e1rmLb: 233 },
           { performedOn: "2026-03-16", topWeightLb: 220, e1rmLb: 256 },
         ],
       },
     ],
+    bodyweight: {
+      points: [
+        { performedOn: "2026-03-02", weightLb: 184 },
+        { performedOn: "2026-03-09", weightLb: 182.5 },
+        { performedOn: "2026-03-16", weightLb: 181.4 },
+      ],
+      startLb: 184,
+      endLb: 181.4,
+      lowLb: 181.4,
+      highLb: 184,
+      changeLb: -2.6,
+      changePct: -0.0141,
+    },
     mostImproved: {
       exerciseId: 1,
       exerciseName: "Squat",
@@ -171,7 +219,93 @@ describe("Racked", () => {
     expect(screen.getByRole("heading", { name: "1 personal record" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Milestones" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Stalls and comebacks" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Bodyweight" })).toBeInTheDocument();
     expect(screen.getByText("48m")).toBeInTheDocument();
+  });
+
+  // The split divides the headline rather than qualifying it, so the page has to
+  // show both halves against the same total the card above it prints.
+  it("breaks the headline volume into main work and assistance", async () => {
+    getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
+    render(Racked);
+
+    const split = await screen.findByTestId("work-split");
+    expect(split).toHaveTextContent("91%");
+    expect(split).toHaveTextContent("main lifts");
+    expect(split).toHaveTextContent("10%");
+    expect(split).toHaveTextContent("across 1 movement");
+  });
+
+  // A lifter who does no assistance should not read a line telling them all
+  // their work was the program's. That is the default, not news.
+  it("says nothing about a split when there is no assistance", async () => {
+    const report = fullReport();
+    report.split = {
+      main: { volumeLb: 84_000, sets: 180, reps: 900, lifts: 2, share: 1 },
+      assistance: { volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0 },
+    };
+    getRacked.mockResolvedValue({ data: report, error: undefined });
+    render(Racked);
+
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Where the weight went" })).toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId("work-split")).not.toBeInTheDocument();
+  });
+
+  it("tags the assistance rows in the volume breakdown", async () => {
+    getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
+    render(Racked);
+
+    await waitFor(() => expect(screen.getByText("Barbell Curl")).toBeInTheDocument());
+    // One tag, on the one lift that was only ever assistance.
+    expect(screen.getAllByText("assistance")).toHaveLength(1);
+  });
+
+  it("reports bodyweight as an end value and a change", async () => {
+    getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
+    render(Racked);
+
+    const card = await screen.findByTestId("stat-bodyweight");
+    expect(card).toHaveTextContent("181.4");
+    // A real minus sign, and the whole-number pound trimmed of its ".0".
+    expect(card).toHaveTextContent("−2.6 lb");
+    expect(card).toHaveTextContent("from 184 lb");
+    expect(card).toHaveTextContent("Range 181.4–184 lb");
+  });
+
+  // Recording a bodyweight is optional on every session, so most periods hold
+  // none — and an absent card is the right answer, not an empty one.
+  it("omits the bodyweight card when the period holds no weigh-in", async () => {
+    const report = fullReport();
+    report.bodyweight = null;
+    getRacked.mockResolvedValue({ data: report, error: undefined });
+    render(Racked);
+
+    await waitFor(() => expect(screen.getByText("84,000")).toBeInTheDocument());
+    expect(screen.queryByTestId("stat-bodyweight")).not.toBeInTheDocument();
+  });
+
+  // One reading is a fact, not a trend. The card says the number and declines to
+  // quote a change — reading changeLb as 0 here would claim a stability nobody
+  // measured, and reading points[0] off an empty array would throw.
+  it("quotes no change from a single weigh-in", async () => {
+    const report = fullReport();
+    report.bodyweight = {
+      points: [{ performedOn: "2026-03-02", weightLb: 181 }],
+      startLb: 181,
+      endLb: 181,
+      lowLb: 181,
+      highLb: 181,
+      changeLb: null,
+      changePct: null,
+    };
+    getRacked.mockResolvedValue({ data: report, error: undefined });
+    render(Racked);
+
+    const card = await screen.findByTestId("stat-bodyweight");
+    expect(card).toHaveTextContent("Weighed in once");
+    expect(card).not.toHaveTextContent("Range");
   });
 
   // The branch that would throw if any of the nullable sections were read
@@ -407,6 +541,7 @@ describe("Racked with two sessions of one lift on the same day", () => {
       {
         exerciseId: 1,
         exerciseName: "Squat",
+        isAssistance: false,
         points: [
           { performedOn: day, topWeightLb: 200, e1rmLb: 233 },
           { performedOn: day, topWeightLb: 205, e1rmLb: 239 },

@@ -49,10 +49,10 @@ func (s *Server) getRacked(w http.ResponseWriter, r *http.Request) {
 
 // buildRacked gathers a period's rows and reduces them to a report.
 //
-// Four reads, none of them clever: the period's sets, the preceding period's
-// sets for the comparison, and the two baselines that let a maximum inside the
-// period be recognised as a record. Everything that looks like a statistic
-// happens in internal/racked, over plain Go values.
+// Five reads, none of them clever: the period's sets, the preceding period's
+// sets for the comparison, the two baselines that let a maximum inside the
+// period be recognised as a record, and the period's weigh-ins. Everything that
+// looks like a statistic happens in internal/racked, over plain Go values.
 //
 // It is exported through the Server rather than inlined into the handler
 // because the recap email needs exactly this, for a user with no request in
@@ -75,6 +75,10 @@ func (s *Server) buildRacked(
 	if err != nil {
 		return racked.Report{}, err
 	}
+	weighIns, err := s.rackedWeighIns(ctx, userID, start, end)
+	if err != nil {
+		return racked.Report{}, err
+	}
 	days, programStarted, err := s.rackedProgramDays(ctx, userID)
 	if err != nil {
 		return racked.Report{}, err
@@ -92,6 +96,7 @@ func (s *Server) buildRacked(
 		AsOf:           asOf,
 		Loc:            s.reportLocation(),
 		Sets:           current,
+		WeighIns:       weighIns,
 		PreviousSets:   previous,
 		PreviousStart:  prevStart,
 		Baseline:       baseline,
@@ -128,6 +133,31 @@ func (s *Server) rackedSets(
 			Reps:           reps,
 			WeightLb:       numericToFloat(row.WeightLb),
 			Completed:      row.Completed,
+			IsAssistance:   row.IsAssistance,
+		})
+	}
+	return out, nil
+}
+
+// rackedWeighIns reads the period's recorded bodyweights. An empty result is the
+// normal case and not an absence to paper over: most lifters never fill the box
+// in, and racked reports no bodyweight section at all for them.
+func (s *Server) rackedWeighIns(
+	ctx context.Context, userID int32, start, end time.Time,
+) ([]racked.WeighIn, error) {
+	rows, err := s.q.RackedWeighIns(ctx, store.RackedWeighInsParams{
+		UserID:  userID,
+		StartOn: pgtype.Date{Time: start, Valid: true},
+		EndOn:   pgtype.Date{Time: end, Valid: true},
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]racked.WeighIn, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, racked.WeighIn{
+			PerformedOn: row.PerformedOn.Time,
+			WeightLb:    numericToFloat(row.BodyweightLb),
 		})
 	}
 	return out, nil
@@ -223,6 +253,16 @@ func (s *Server) rackedProgramDays(
 
 // ---- wire conversion ----
 
+func rackedWorkToDTO(w racked.Work) rackedWorkDTO {
+	return rackedWorkDTO{
+		VolumeLb: w.VolumeLb,
+		Sets:     w.Sets,
+		Reps:     w.Reps,
+		Lifts:    w.Lifts,
+		Share:    w.Share,
+	}
+}
+
 func rackedReportToDTO(rep racked.Report) rackedReportDTO {
 	out := rackedReportDTO{
 		Period: rackedPeriodDTO{
@@ -242,6 +282,10 @@ func rackedReportToDTO(rep racked.Report) rackedReportDTO {
 			Count:  rep.Comparison.Count,
 			Label:  rep.Comparison.Label,
 			UnitLb: rep.Comparison.UnitLb,
+		},
+		Split: rackedSplitDTO{
+			Main:       rackedWorkToDTO(rep.Split.Main),
+			Assistance: rackedWorkToDTO(rep.Split.Assistance),
 		},
 		Lifts:       make([]rackedLiftSliceDTO, 0, len(rep.Lifts)),
 		Series:      make([]rackedSeriesDTO, 0, len(rep.Series)),
@@ -279,6 +323,24 @@ func rackedReportToDTO(rep racked.Report) rackedReportDTO {
 			SessionsPct: c.SessionsPct,
 		}
 	}
+	if b := rep.Bodyweight; b != nil {
+		points := make([]rackedWeighInDTO, 0, len(b.Points))
+		for _, p := range b.Points {
+			points = append(points, rackedWeighInDTO{
+				PerformedOn: p.PerformedOn.Format(dateLayout),
+				WeightLb:    p.WeightLb,
+			})
+		}
+		out.Bodyweight = &rackedBodyweightDTO{
+			Points:    points,
+			StartLb:   b.StartLb,
+			EndLb:     b.EndLb,
+			LowLb:     b.LowLb,
+			HighLb:    b.HighLb,
+			ChangeLb:  b.ChangeLb,
+			ChangePct: b.ChangePct,
+		}
+	}
 	for _, l := range rep.Lifts {
 		out.Lifts = append(out.Lifts, rackedLiftSliceDTO{
 			ExerciseID:   l.ExerciseID,
@@ -287,6 +349,7 @@ func rackedReportToDTO(rep racked.Report) rackedReportDTO {
 			Sets:         l.Sets,
 			Reps:         l.Reps,
 			Share:        l.Share,
+			IsAssistance: l.IsAssistance,
 		})
 	}
 	for _, s := range rep.Series {
@@ -301,6 +364,7 @@ func rackedReportToDTO(rep racked.Report) rackedReportDTO {
 		out.Series = append(out.Series, rackedSeriesDTO{
 			ExerciseID:   s.ExerciseID,
 			ExerciseName: s.ExerciseName,
+			IsAssistance: s.IsAssistance,
 			Points:       points,
 		})
 	}
