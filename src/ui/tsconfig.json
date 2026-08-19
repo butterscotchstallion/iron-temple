@@ -20,6 +20,7 @@
     }
   },
   "include": [
+    "e2e/**/*.ts",
     "src/**/*.ts",
     "src/**/*.svelte",
     "vite.config.ts",
