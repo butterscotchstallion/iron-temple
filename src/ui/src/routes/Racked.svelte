@@ -349,7 +349,7 @@
     {/if}
 
     {#if liftRows.length > 0}
-      <Card class="p-4">
+      <Card class="p-4" data-testid="stat-lifts">
         <h3 class="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
           Where the weight went
         </h3>

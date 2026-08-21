@@ -847,8 +847,12 @@ test("Racked charts every lift and names what it cannot draw", async ({ page }) 
   const chart = page.getByRole("img", { name: /Improvement for 2 lifts/ });
   await expect(chart).toBeVisible();
 
-  await expect(page.getByRole("heading", { name: "Where the weight went" })).toBeVisible();
-  await expect(page.getByText("50,000 lb · 60%")).toBeVisible();
+  // Scoped to the lift breakdown, not the page. The muscle card below states
+  // the same figure whenever one movement is all of its group's volume — which
+  // for the squat and legs is the normal case, not a quirk of this fixture.
+  const lifts = page.getByTestId("stat-lifts");
+  await expect(lifts.getByRole("heading", { name: "Where the weight went" })).toBeVisible();
+  await expect(lifts.getByText("50,000 lb · 60%")).toBeVisible();
 
   await expect(page.getByRole("img", { name: /by day of the week/ })).toBeVisible();
   // Targets the value, not the card: the card also holds this chart's data table,
@@ -888,6 +892,17 @@ const rackedWithAssistanceAndBodyweight: RackedReport = {
       isAssistance: true,
     },
   ],
+  // Inherited muscles would say arms went untrained in a month that includes a
+  // curl. The slices divide the same total the split does, so they move with it.
+  muscles: [
+    { group: "legs", volumeLb: 50000, sets: 90, reps: 450, lifts: 1, share: 0.595, trained: true },
+    { group: "chest", volumeLb: 26000, sets: 70, reps: 350, lifts: 1, share: 0.31, trained: true },
+    { group: "arms", volumeLb: 8000, sets: 20, reps: 100, lifts: 1, share: 0.095, trained: true },
+    { group: "back", volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0, trained: false },
+    { group: "shoulders", volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0, trained: false },
+    { group: "core", volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0, trained: false },
+    { group: "other", volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0, trained: false },
+  ],
   bodyweight: {
     points: [
       { performedOn: "2026-03-02", weightLb: 184 },
@@ -921,6 +936,26 @@ test("Racked splits the volume into main work and assistance", async ({ page }) 
   // there, rather than being moved into a list of its own.
   await expect(page.getByText("Barbell Curl")).toBeVisible();
   await expect(page.getByText("assistance", { exact: true })).toBeVisible();
+});
+
+// The muscle card is the one section whose most useful rows are the empty ones,
+// so what this checks is mostly that they are still there.
+test("Racked accounts for every muscle group, trained or not", async ({ page }) => {
+  await page.route("**/api/v1/racked**", (route) =>
+    route.fulfill({ json: rackedWithAssistanceAndBodyweight }),
+  );
+  await page.goto("/#/racked");
+
+  const card = page.getByTestId("stat-muscles");
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("Legs");
+  await expect(card).toContainText("Arms");
+  // Kept and labelled rather than dropped or drawn as a very short bar.
+  await expect(card).toContainText("Core");
+  await expect(card).toContainText("not trained");
+  // And named in prose, since a column of empty tracks is the easiest thing on
+  // the page to skim past.
+  await expect(card).toContainText("Nothing logged for back, shoulders, core and other");
 });
 
 // The bodyweight chart is plain SVG, so this is the only suite that lays it out
