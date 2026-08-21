@@ -14,8 +14,10 @@
   import SignIn from "./routes/SignIn.svelte";
   import NavBar from "./lib/NavBar.svelte";
   import HeaderBar from "./lib/HeaderBar.svelte";
+  import UpdatePrompt from "./lib/UpdatePrompt.svelte";
   import ErrorBoundary from "./lib/ErrorBoundary.svelte";
   import { auth, loadMe } from "./lib/auth.svelte";
+  import { startPolling } from "./lib/version.svelte";
 
   // Hash-based routes (svelte-spa-router). "/" lands on the current program's
   // workout; "/programs" is the picker for switching.
@@ -39,6 +41,11 @@
   };
 
   onMount(loadMe);
+
+  // Watch for a release landing under an open tab. Owned by the shell rather
+  // than by the header that displays the version, because what it feeds is the
+  // update prompt — and the first poll also fills in the header's label.
+  $effect(() => startPolling());
 </script>
 
 <!-- Outside <main> so the bar spans the viewport while the content below stays
@@ -46,6 +53,12 @@
      footer. Outside the ErrorBoundary too: whatever throws below, the account
      menu stays reachable. -->
 <HeaderBar />
+
+<!-- Also outside the boundary, and outside <main>: a new build is worth
+     offering whatever state the routed content got itself into — not least
+     because a route that throws is one of the better reasons to take an
+     update. -->
+<UpdatePrompt />
 
 <main class="mx-auto flex max-w-3xl flex-col gap-8 px-5 py-10">
   <header class="text-center">

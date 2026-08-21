@@ -651,6 +651,124 @@ test("toggles the changelog when the header version is clicked", async ({ page }
   await expect(panel).toBeHidden();
 });
 
+// Detecting a release landing under an open tab, and taking it without losing
+// the workout. Two things here can only be exercised in a real browser: the
+// clock driving the poll interval, and the reload itself — jsdom has no
+// navigation, so UpdatePrompt.test.ts stubs it and this is where it's real.
+
+/** Serve /health a version per call, sticking on the last one thereafter. */
+async function routeHealth(page: import("@playwright/test").Page, versions: string[]) {
+  let call = 0;
+  await page.route("**/api/v1/health", (route) => {
+    const version = versions[Math.min(call, versions.length - 1)];
+    call += 1;
+    return route.fulfill({ json: { status: "ok", version, environment: "production" } });
+  });
+}
+
+/**
+ * Deploy a new version under an already-open tab, and wait for the prompt.
+ *
+ * The clock is frozen only long enough to jump the five-minute poll interval —
+ * waiting it out for real is not an option — and then handed straight back with
+ * resume(), so the dialog's own open/close behaviour runs on ordinary time
+ * rather than on timers this test has to remember to advance.
+ */
+async function deployUnderTab(page: import("@playwright/test").Page) {
+  await routeHealth(page, ["v1.0.0", "v2.0.0"]);
+  await page.clock.install();
+}
+
+test("offers a new version, and stops asking once it's declined", async ({ page }) => {
+  await deployUnderTab(page);
+
+  await page.goto("/");
+  await expect(page.getByTestId("version")).toContainText("iron-temple v1.0.0");
+
+  const prompt = page.getByTestId("update-prompt");
+  await expect(prompt).toBeHidden();
+
+  // A release lands: the next poll sees a version this page isn't running.
+  await page.clock.runFor("06:00");
+  await page.clock.resume();
+
+  await expect(prompt).toBeVisible();
+  await expect(prompt).toContainText("v2.0.0");
+  await expect(prompt).toContainText("every set you've logged is already saved");
+
+  // The header keeps naming the build actually on screen, not the new one.
+  await expect(page.getByTestId("version")).toContainText("iron-temple v1.0.0");
+
+  await page.getByRole("button", { name: "Not now" }).click();
+  await expect(prompt).toBeHidden();
+
+  // Declining is per-version: later polls returning the same v2.0.0 must not
+  // put it back up, or every five minutes becomes an interruption.
+  await page.clock.fastForward("06:00");
+  await expect(prompt).toBeHidden();
+});
+
+test("loads the new version when the update is accepted", async ({ page }) => {
+  await deployUnderTab(page);
+
+  await page.goto("/");
+  const prompt = page.getByTestId("update-prompt");
+  await page.clock.runFor("06:00");
+  await page.clock.resume();
+  await expect(prompt).toBeVisible();
+
+  await page.getByRole("button", { name: "Load it" }).click();
+
+  // Reloaded onto the new build — and re-baselined on it, so it does not
+  // immediately offer the update it has just taken.
+  await expect(page.getByTestId("version")).toContainText("iron-temple v2.0.0");
+  await expect(prompt).toBeHidden();
+});
+
+// The promise the dialog makes. A reload mid-workout is only safe to offer if
+// the session comes back as it was — and the rest countdown is the one piece of
+// it that never reaches the server, so it's the piece that has to be proven.
+//
+// Driven with a plain reload rather than the dialog: this is about what survives
+// the navigation, and the tests above already cover how one gets triggered. No
+// fake clock either — the exact arithmetic is restStorage.test.ts's job, and
+// real time keeps this test honest about a real page load.
+test("carries a running rest timer through a reload", async ({ page }) => {
+  // One set logged, one not: started (so the timer is on screen) but not over.
+  await page.route("**/api/v1/sessions/1", (route) =>
+    route.fulfill({
+      json: sessionDetail({ actualReps: 5, completed: true, loggedSets: 1 }),
+    }),
+  );
+  await page.route("**/api/v1/exercises/1/history", (route) => route.fulfill({ json: [] }));
+
+  await page.goto("/#/sessions/1");
+  const remaining = page.getByTestId("rest-remaining");
+  const start = page.getByRole("button", { name: "Start" });
+  await expect(remaining).toHaveText("3:00");
+
+  await start.click();
+  // Ticking, so the reload below has a rest actually in progress to preserve.
+  await expect(remaining).not.toHaveText("3:00");
+  const before = seconds(await remaining.textContent());
+
+  await page.reload();
+
+  // Picked up where it left off: still running, still counting down from where
+  // it was — not restarted at a stopped 3:00, which is what a reload used to
+  // cost. The exact arithmetic is restStorage.test.ts's; this is the guarantee.
+  await expect(start).toBeDisabled();
+  const after = seconds(await remaining.textContent());
+  expect(after).toBeGreaterThan(0);
+  expect(after).toBeLessThanOrEqual(before);
+});
+
+/** "2:57" → 177. The inverse of the countdown's own formatting. */
+function seconds(display: string | null): number {
+  const [minutes, secs] = (display ?? "").split(":").map(Number);
+  return (minutes || 0) * 60 + (secs || 0);
+}
+
 // The Racked recap. Every figure here is computed by the API, so these assert
 // that the page renders the report faithfully — not that the statistics are
 // right, which is internal/racked's own test suite.

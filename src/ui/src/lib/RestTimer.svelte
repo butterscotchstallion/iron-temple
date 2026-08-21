@@ -3,20 +3,45 @@
   import Play from "@lucide/svelte/icons/play";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import { formatTime } from "./time";
+  import { saveRest, loadRest, clearRest } from "./restStorage";
 
   // The design specifies a 3-minute rest between sets; default accordingly.
   // autoStartKey: increment it to reset + auto-start the countdown (the active
   // session bumps it each time a set is completed).
+  //
+  // storageKey: when given, a running countdown survives a reload. It's what
+  // makes taking a mid-workout update free — see restStorage.ts. Optional, so a
+  // timer with no session to belong to stays purely in-memory.
   let {
     seconds = 180,
     autoStartKey = 0,
-  }: { seconds?: number; autoStartKey?: number } = $props();
+    storageKey,
+  }: { seconds?: number; autoStartKey?: number; storageKey?: string } =
+    $props();
+
+  // A countdown left running by the previous page load, if there is one. Read
+  // during init so the first paint is already the resumed time rather than a
+  // flash of 3:00 — and untracked for the same reason `seconds` is.
+  const resumed = untrack(() =>
+    storageKey ? loadRest(storageKey, Date.now()) : null,
+  );
 
   // Seed the countdown from the prop once; it's mutable state from here on, so
   // untrack the initial read to make that intent explicit.
-  let remaining = $state(untrack(() => seconds));
+  let remaining = $state(resumed ?? untrack(() => seconds));
   let running = $state(false);
   let handle: ReturnType<typeof setInterval> | undefined;
+
+  // Persist the deadline rather than the remaining seconds: it doesn't move
+  // while the clock runs, so ticking costs no writes, and time that passes with
+  // the tab closed is correctly counted as rest taken.
+  function remember() {
+    if (storageKey) saveRest(storageKey, Date.now() + remaining * 1000);
+  }
+
+  function forget() {
+    if (storageKey) clearRest(storageKey);
+  }
 
   function tick() {
     remaining = Math.max(0, remaining - 1);
@@ -26,19 +51,36 @@
   function start() {
     if (running || remaining === 0) return;
     running = true;
+    remember();
     handle = setInterval(tick, 1000);
   }
 
-  function stop() {
+  // Take the countdown off the clock without touching what's stored. This is
+  // unmounting, not stopping: navigating to History mid-rest and coming back
+  // should find the rest still running, and a reload must obviously not erase
+  // the very snapshot it's about to restore from.
+  function halt() {
     running = false;
     if (handle) clearInterval(handle);
     handle = undefined;
+  }
+
+  function stop() {
+    halt();
+    // Only a running countdown is stored, so stopping — by hand or by hitting
+    // zero — drops it. A paused timer is not a rest in progress.
+    forget();
   }
 
   function reset() {
     stop();
     remaining = seconds;
   }
+
+  // Pick a resumed countdown back up where the last page load left it. Runs
+  // once on mount, before the autoStartKey effect below can matter (that one
+  // no-ops at key 0, which is where every mount starts).
+  if (resumed !== null) start();
 
   // Reset + auto-start whenever the parent bumps autoStartKey (a set was
   // completed). Only autoStartKey is tracked; the reset/start mutations are
@@ -55,8 +97,9 @@
 
   // Clear the interval if the component is destroyed mid-countdown. Unmounting
   // is also how the active session stops the timer once the workout is over —
-  // it drops the whole widget rather than resetting it in place.
-  $effect(() => () => stop());
+  // it drops the whole widget rather than resetting it in place. halt() rather
+  // than stop(): see above, a teardown is not the lifter ending their rest.
+  $effect(() => () => halt());
 </script>
 
 <!-- A floating pill rather than a card in the page flow: the countdown matters
