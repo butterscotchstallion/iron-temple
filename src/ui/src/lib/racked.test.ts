@@ -10,6 +10,7 @@ import {
   formatSignedLb,
   formatWeighIn,
   indexedSeries,
+  joinNames,
   seriesColor,
   type LiftSeries,
 } from "./racked";
@@ -288,5 +289,17 @@ describe("formatSignedLb", () => {
   it("uses a minus sign rather than a hyphen", () => {
     expect(formatSignedLb(-2.6).startsWith("−")).toBe(true);
     expect(formatSignedLb(-2.6).startsWith("-")).toBe(false);
+  });
+});
+
+// The recap email builds the same sentence in Go (joinNames in template.go).
+// Both are hand-rolled so the two surfaces punctuate a lifter's month
+// identically — Intl.ListFormat would put an Oxford comma on only one of them.
+describe("joinNames", () => {
+  it("reads a list the way a person says it", () => {
+    expect(joinNames([])).toBe("");
+    expect(joinNames(["core"])).toBe("core");
+    expect(joinNames(["core", "arms"])).toBe("core and arms");
+    expect(joinNames(["core", "arms", "chest"])).toBe("core, arms and chest");
   });
 });

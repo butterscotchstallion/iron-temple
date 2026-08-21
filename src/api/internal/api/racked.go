@@ -130,6 +130,7 @@ func (s *Server) rackedSets(
 			ProgramDayName: row.ProgramDayName,
 			ExerciseID:     row.ExerciseID,
 			ExerciseName:   row.ExerciseName,
+			MuscleGroup:    row.MuscleGroup,
 			Reps:           reps,
 			WeightLb:       numericToFloat(row.WeightLb),
 			Completed:      row.Completed,
@@ -340,6 +341,17 @@ func rackedReportToDTO(rep racked.Report) rackedReportDTO {
 			ChangeLb:  b.ChangeLb,
 			ChangePct: b.ChangePct,
 		}
+	}
+	for _, m := range rep.Muscles {
+		out.Muscles = append(out.Muscles, rackedMuscleSliceDTO{
+			Group:    m.Group,
+			VolumeLb: m.VolumeLb,
+			Sets:     m.Sets,
+			Reps:     m.Reps,
+			Lifts:    m.Lifts,
+			Share:    m.Share,
+			Trained:  m.Trained,
+		})
 	}
 	for _, l := range rep.Lifts {
 		out.Lifts = append(out.Lifts, rackedLiftSliceDTO{

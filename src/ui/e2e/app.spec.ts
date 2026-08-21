@@ -677,6 +677,15 @@ const rackedMarch: RackedReport = {
     main: { volumeLb: 84000, sets: 180, reps: 900, lifts: 2, share: 1 },
     assistance: { volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0 },
   },
+  muscles: [
+    { group: "legs", volumeLb: 50000, sets: 90, reps: 450, lifts: 1, share: 0.6, trained: true },
+    { group: "chest", volumeLb: 34000, sets: 90, reps: 450, lifts: 1, share: 0.4, trained: true },
+    { group: "back", volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0, trained: false },
+    { group: "shoulders", volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0, trained: false },
+    { group: "arms", volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0, trained: false },
+    { group: "core", volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0, trained: false },
+    { group: "other", volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0, trained: false },
+  ],
   lifts: [
     {
       exerciseId: 1,

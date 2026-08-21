@@ -12,12 +12,14 @@
   import CalendarHeatmap from "../lib/CalendarHeatmap.svelte";
   import LiftTrendChart from "../lib/LiftTrendChart.svelte";
   import LiftVolumeBars from "../lib/LiftVolumeBars.svelte";
+  import MuscleVolumeBars from "../lib/MuscleVolumeBars.svelte";
   import RackedBars from "../lib/RackedBars.svelte";
   import ChartTable from "../lib/ChartTable.svelte";
   import BodyweightChart from "../lib/BodyweightChart.svelte";
   import { formatVolume } from "../lib/volume";
   import { formatLongDate } from "../lib/date";
   import { WEEKDAYS } from "../lib/weekday";
+  import { muscleGroupLabel } from "../lib/library";
   import {
     formatDelta,
     formatHour,
@@ -27,6 +29,7 @@
     formatSignedLb,
     formatWeighIn,
     indexedSeries,
+    joinNames,
   } from "../lib/racked";
 
   // Racked — the month or year in review. Every figure on this page is computed
@@ -88,6 +91,15 @@
       isAssistance: l.isAssistance,
     })),
   );
+  // Every group the report carries, trained or not — the API sends the whole
+  // taxonomy precisely so the empty ones are visible, so nothing is filtered
+  // here. The names of the empty ones are pulled out for the sentence under the
+  // chart, which is the part a lifter actually acts on.
+  const muscleRows = $derived(report?.muscles ?? []);
+  const untrainedMuscles = $derived(
+    muscleRows.filter((m) => !m.trained).map((m) => muscleGroupLabel(m.group)),
+  );
+
   // Only worth stating where there is assistance to account for. Telling a
   // lifter who does none that all their work was the program's is not news.
   const assistance = $derived(report?.split.assistance ?? null);
@@ -372,6 +384,30 @@
           </div>
         {/if}
         <LiftVolumeBars rows={liftRows} />
+      </Card>
+    {/if}
+
+    <!-- What the work actually trained. Sits under "where the weight went"
+         because it answers the same question from the other side: that card
+         ranks the lifts, this one accounts for the body. -->
+    {#if muscleRows.length > 0}
+      <Card class="p-4" data-testid="stat-muscles">
+        <h3 class="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+          What you trained
+        </h3>
+        <MuscleVolumeBars rows={muscleRows} />
+        {#if untrainedMuscles.length > 0}
+          <!-- Named rather than left to be inferred from a row of empty tracks.
+               A gap is the one thing on this page worth doing something about,
+               and it is also the easiest thing to skim past. -->
+          <p class="mt-3 text-xs text-muted-foreground">
+            Nothing logged for
+            <span class="font-semibold text-foreground">
+              {joinNames(untrainedMuscles.map((m) => m.toLowerCase()))}
+            </span>
+            this {report.period.kind}.
+          </p>
+        {/if}
       </Card>
     {/if}
 

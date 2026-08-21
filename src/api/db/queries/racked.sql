@@ -52,6 +52,12 @@
 -- every total, exactly as it did before the flag existed; the column only lets
 -- the report say which is which. Anything that reads it to exclude work is
 -- making a judgement, and internal/racked is where judgements are made.
+--
+-- muscle_group rides along for the same reason exercise_name does: it is a
+-- property of the movement the report needs per set, and joining it here costs
+-- nothing over a join that already exists. One group per exercise — its primary
+-- mover — which is all the library records; see internal/racked/muscles.go for
+-- what that does and does not let the recap claim.
 -- name: RackedPeriodSets :many
 SELECT s.id AS session_id,
        s.performed_on,
@@ -61,6 +67,7 @@ SELECT s.id AS session_id,
        pd.name AS program_day_name,
        ss.exercise_id,
        e.name  AS exercise_name,
+       e.muscle_group,
        ss.set_number,
        ss.actual_reps,
        ss.weight_lb,

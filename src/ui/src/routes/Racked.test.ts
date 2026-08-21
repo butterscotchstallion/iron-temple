@@ -35,6 +35,15 @@ function emptyReport(): RackedReport {
       main: { volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0 },
       assistance: { volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0 },
     },
+    muscles: [
+    { group: "chest", volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0, trained: false },
+    { group: "back", volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0, trained: false },
+    { group: "legs", volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0, trained: false },
+    { group: "shoulders", volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0, trained: false },
+    { group: "arms", volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0, trained: false },
+    { group: "core", volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0, trained: false },
+    { group: "other", volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0, trained: false },
+    ],
     lifts: [],
     series: [],
     mostImproved: null,
@@ -67,6 +76,15 @@ function fullReport(): RackedReport {
       main: { volumeLb: 76_000, sets: 160, reps: 800, lifts: 2, share: 0.905 },
       assistance: { volumeLb: 8_000, sets: 20, reps: 100, lifts: 1, share: 0.095 },
     },
+    muscles: [
+      { group: "legs", volumeLb: 50_000, sets: 90, reps: 450, lifts: 1, share: 0.6, trained: true },
+      { group: "chest", volumeLb: 26_000, sets: 70, reps: 350, lifts: 1, share: 0.31, trained: true },
+      { group: "arms", volumeLb: 8_000, sets: 20, reps: 100, lifts: 1, share: 0.09, trained: true },
+      { group: "back", volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0, trained: false },
+      { group: "shoulders", volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0, trained: false },
+      { group: "core", volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0, trained: false },
+      { group: "other", volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0, trained: false },
+    ],
     lifts: [
       {
         exerciseId: 1,
@@ -260,6 +278,61 @@ describe("Racked", () => {
     await waitFor(() => expect(screen.getByText("Barbell Curl")).toBeInTheDocument());
     // One tag, on the one lift that was only ever assistance.
     expect(screen.getAllByText("assistance")).toHaveLength(1);
+  });
+
+  // The muscle card answers "where the weight went" from the other side: that
+  // one ranks the lifts, this one accounts for the body — including the parts of
+  // it that went untouched, which no ranking of lifts can show.
+  it("accounts for every muscle group, trained or not", async () => {
+    getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
+    render(Racked);
+
+    const card = await screen.findByTestId("stat-muscles");
+    expect(card).toHaveTextContent("Legs");
+    expect(card).toHaveTextContent("60%");
+    // The groups with nothing against them keep their row and say so, rather
+    // than being dropped or drawn as a very short bar.
+    expect(card).toHaveTextContent("Core");
+    expect(card).toHaveTextContent("not trained");
+  });
+
+  it("names the untrained groups in a sentence", async () => {
+    getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
+    render(Racked);
+
+    const card = await screen.findByTestId("stat-muscles");
+    expect(card).toHaveTextContent(
+      "Nothing logged for back, shoulders, core and other this month",
+    );
+  });
+
+  // Every group trained is a good month, not an occasion for an empty sentence.
+  it("says nothing about gaps when there are none", async () => {
+    const report = fullReport();
+    report.muscles = report.muscles.map((m) => ({
+      ...m,
+      trained: true,
+      volumeLb: m.volumeLb || 1_000,
+      sets: m.sets || 1,
+    }));
+    getRacked.mockResolvedValue({ data: report, error: undefined });
+    render(Racked);
+
+    const card = await screen.findByTestId("stat-muscles");
+    expect(card).not.toHaveTextContent("Nothing logged for");
+  });
+
+  // A period with no work has no body to account for. The API sends null there
+  // rather than seven groups the lifter failed to train, and the card goes with
+  // it — telling a quiet month it trained none of seven things is piling on.
+  it("drops the card entirely for a period with no work", async () => {
+    getRacked.mockResolvedValue({ data: emptyReport(), error: undefined });
+    render(Racked);
+
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Racked" })).toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId("stat-muscles")).not.toBeInTheDocument();
   });
 
   it("reports bodyweight as an end value and a change", async () => {
