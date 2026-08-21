@@ -446,7 +446,7 @@ func (s *Server) updateSessionSet(w http.ResponseWriter, r *http.Request) {
 		ActualReps:   updated.ActualReps,
 		WeightLb:     numericToFloat(updated.WeightLb),
 		Completed:    updated.Completed,
-		RestSeconds:  restSecondsDefault,
+		RestSeconds:  current.RestSeconds,
 	})
 }
 
@@ -496,7 +496,7 @@ func (s *Server) buildSession(ctx context.Context, id, userID int32) (sessionDTO
 			ActualReps:   set.ActualReps,
 			WeightLb:     numericToFloat(set.WeightLb),
 			Completed:    set.Completed,
-			RestSeconds:  restSecondsDefault,
+			RestSeconds:  set.RestSeconds,
 		})
 	}
 

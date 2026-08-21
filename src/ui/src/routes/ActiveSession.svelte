@@ -37,6 +37,12 @@
 
   // Bumped on each set completion to auto-restart the rest timer.
   let restTimerKey = $state(0);
+  // How long the timer counts down, taken from the lift whose set was just
+  // logged rather than from the session as a whole — the point of the
+  // prescription is that a deadlift and a curl disagree about it. Seeded from
+  // the day's first exercise so the pill reads correctly before anything is
+  // tapped, and replaced on every rep from then on.
+  let restSeconds = $state(180);
   // Controls the end-of-workout celebration dialog.
   let showComplete = $state(false);
   // Controls the "some sets aren't logged" confirmation before finishing.
@@ -60,6 +66,7 @@
       return;
     }
     session = data;
+    restSeconds = data.sets[0]?.restSeconds ?? restSeconds;
     await loadPRs(); // resolve PRs before the session is interactive
     loading = false;
   }
@@ -177,6 +184,10 @@
 
     // Clearing a set (wrap back to 0) doesn't touch the timer.
     if (reps == null) return;
+
+    // Set before the key is bumped, so the restart below already counts down
+    // this lift's rest rather than the previous exercise's.
+    restSeconds = set.restSeconds;
 
     // New PR: a completed set above this lift's prior best.
     if (completed && prReady && set.weightLb > (prBest[set.exerciseId] ?? 0)) {
@@ -362,7 +373,7 @@
            update mid-workout, or a stray refresh — without one workout's rest
            ever being restored into the next. -->
       <RestTimer
-        seconds={180}
+        seconds={restSeconds}
         autoStartKey={restTimerKey}
         storageKey={String(sessionId)}
       />

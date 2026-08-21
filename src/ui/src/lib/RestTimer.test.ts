@@ -3,11 +3,27 @@ import { flushSync } from "svelte";
 import { render, screen, fireEvent } from "@testing-library/svelte";
 import RestTimer from "./RestTimer.svelte";
 
-// Interval-driven countdown, so most tests drive time with fake timers. We
-// switch to fake timers *after* render so component mount runs on real timers,
-// then flushSync() after each advance to push reactive state into the DOM.
+// The alert is stubbed rather than exercised: what matters here is *when* the
+// timer decides the rest is over, not what noise that makes. restAlert.test.ts
+// covers the noise.
+const alert = vi.hoisted(() => ({
+  fire: vi.fn(),
+  prime: vi.fn(),
+  isMuted: vi.fn(() => false),
+  setMuted: vi.fn(),
+}));
+vi.mock("./restAlert", () => alert);
+
+// The countdown is driven off a deadline and painted by an interval, so most
+// tests drive time with fake timers. We switch to fake timers *after* render so
+// component mount runs on real timers, then flushSync() after each advance to
+// push reactive state into the DOM.
 beforeEach(() => {
   sessionStorage.clear();
+  alert.fire.mockClear();
+  alert.prime.mockClear();
+  alert.setMuted.mockClear();
+  alert.isMuted.mockReturnValue(false);
 });
 
 afterEach(() => {
@@ -19,6 +35,10 @@ const KEY = "iron-temple:rest:s1";
 const remaining = () => screen.getByTestId("rest-remaining");
 const startButton = () => screen.getByRole("button", { name: "Start" });
 const resetButton = () => screen.getByRole("button", { name: "Reset" });
+const skipButton = () => screen.getByRole("button", { name: "Skip" });
+const plusButton = () => screen.getByRole("button", { name: "Add 30 seconds" });
+const minusButton = () =>
+  screen.getByRole("button", { name: "Subtract 30 seconds" });
 
 describe("RestTimer", () => {
   it("defaults to a 3-minute rest", () => {
@@ -48,16 +68,21 @@ describe("RestTimer", () => {
     expect(remaining()).toHaveTextContent("0:02");
   });
 
-  it("ignores a second Start (no double interval)", async () => {
-    render(RestTimer, { seconds: 5 });
+  // The guard used to matter because a second interval meant a second
+  // decrement. It still matters, for a different reason: a second start() would
+  // stamp a fresh deadline and quietly hand back the seconds already rested.
+  it("ignores a second Start (the deadline does not move)", async () => {
+    render(RestTimer, { seconds: 5, storageKey: "s1" });
     vi.useFakeTimers();
 
     await fireEvent.click(startButton());
-    await fireEvent.click(startButton()); // guarded: running === true
+    const deadline = sessionStorage.getItem(KEY);
 
     vi.advanceTimersByTime(1000);
     flushSync();
-    // A doubled interval would have decremented twice (0:03).
+    await fireEvent.click(startButton()); // guarded: running === true
+
+    expect(sessionStorage.getItem(KEY)).toBe(deadline);
     expect(remaining()).toHaveTextContent("0:04");
   });
 
@@ -71,6 +96,7 @@ describe("RestTimer", () => {
 
     expect(remaining()).toHaveTextContent("0:00");
     expect(startButton()).toBeDisabled();
+    expect(alert.fire).toHaveBeenCalledOnce();
 
     // Never goes negative even if the interval somehow fired again.
     vi.advanceTimersByTime(5000);
@@ -123,6 +149,20 @@ describe("RestTimer", () => {
     vi.advanceTimersByTime(1000);
     flushSync();
     expect(remaining()).toHaveTextContent("0:09");
+  });
+
+  // A rest is prescribed per lift (migration 0011), so the prop changes as the
+  // session moves from the squat to the accessory that follows it. The bump has
+  // to pick up the new number, not restart the previous exercise's.
+  it("counts down the new prescription when the lift changes", async () => {
+    const { rerender } = render(RestTimer, { seconds: 300, autoStartKey: 0 });
+    vi.useFakeTimers();
+
+    await rerender({ seconds: 300, autoStartKey: 1 });
+    expect(remaining()).toHaveTextContent("5:00");
+
+    await rerender({ seconds: 90, autoStartKey: 2 });
+    expect(remaining()).toHaveTextContent("1:30");
   });
 
   // The countdown is a floating overlay, not a card in the page flow — the
@@ -205,5 +245,159 @@ describe("RestTimer persistence", () => {
     await fireEvent.click(startButton());
 
     expect(sessionStorage.length).toBe(0);
+  });
+});
+
+// A rest you have to hold your phone through is a rest you stop taking. These
+// are the controls that make one usable one-handed, mid-set.
+describe("RestTimer controls", () => {
+  it("+30 buys thirty more seconds of real time", async () => {
+    render(RestTimer, { seconds: 60 });
+    vi.useFakeTimers();
+
+    await fireEvent.click(startButton());
+    vi.advanceTimersByTime(5000);
+    flushSync();
+    expect(remaining()).toHaveTextContent("0:55");
+
+    await fireEvent.click(plusButton());
+    flushSync();
+    expect(remaining()).toHaveTextContent("1:25");
+
+    // And it is genuinely on the clock, not just on the display.
+    vi.advanceTimersByTime(5000);
+    flushSync();
+    expect(remaining()).toHaveTextContent("1:20");
+  });
+
+  it("−30 takes thirty off, and the stored deadline follows", async () => {
+    render(RestTimer, { seconds: 120, storageKey: "s1" });
+    vi.useFakeTimers();
+
+    await fireEvent.click(startButton());
+    const before = Number(sessionStorage.getItem(KEY));
+
+    await fireEvent.click(minusButton());
+    flushSync();
+    expect(remaining()).toHaveTextContent("1:30");
+    expect(Number(sessionStorage.getItem(KEY))).toBe(before - 30_000);
+  });
+
+  // Trimming the rest to nothing is the lifter saying they're done, not the
+  // clock running out — so it ends the countdown without announcing it.
+  it("−30 past zero ends the rest without a chime", async () => {
+    render(RestTimer, { seconds: 20, storageKey: "s1" });
+    vi.useFakeTimers();
+
+    await fireEvent.click(startButton());
+    await fireEvent.click(minusButton());
+    flushSync();
+
+    expect(remaining()).toHaveTextContent("0:00");
+    expect(alert.fire).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(KEY)).toBeNull();
+
+    // And it stays quiet: a countdown left ticking at zero would reach the
+    // chime on its very next pass.
+    vi.advanceTimersByTime(5000);
+    flushSync();
+    expect(alert.fire).not.toHaveBeenCalled();
+  });
+
+  it("adjusts a stopped countdown without starting it", async () => {
+    render(RestTimer, { seconds: 60 });
+    vi.useFakeTimers();
+
+    await fireEvent.click(plusButton());
+    flushSync();
+
+    expect(remaining()).toHaveTextContent("1:30");
+    expect(startButton()).toBeEnabled(); // still stopped
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  // Skip is not Reset: the rest is over, so the clock reads zero rather than
+  // going back to the top. Only the next logged rep restarts it.
+  it("Skip ends the rest at zero, quietly", async () => {
+    render(RestTimer, { seconds: 60, storageKey: "s1" });
+    vi.useFakeTimers();
+
+    await fireEvent.click(startButton());
+    vi.advanceTimersByTime(5000);
+    flushSync();
+
+    await fireEvent.click(skipButton());
+    flushSync();
+
+    expect(remaining()).toHaveTextContent("0:00");
+    expect(startButton()).toBeDisabled();
+    expect(skipButton()).toBeDisabled();
+    expect(alert.fire).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(KEY)).toBeNull();
+  });
+
+  it("mutes and unmutes, remembering which", async () => {
+    render(RestTimer, { seconds: 60 });
+    const mute = () => screen.getByRole("button", { name: /the rest alert$/ });
+
+    expect(mute()).toHaveAttribute("aria-pressed", "false");
+    await fireEvent.click(mute());
+
+    expect(alert.setMuted).toHaveBeenCalledWith(true);
+    expect(mute()).toHaveAttribute("aria-pressed", "true");
+
+    await fireEvent.click(mute());
+    expect(alert.setMuted).toHaveBeenLastCalledWith(false);
+    // Unmuting is a gesture, so it is also the moment to open the audio device.
+    expect(alert.prime).toHaveBeenCalled();
+  });
+});
+
+// A phone goes in a pocket the moment a set starts, and a backgrounded tab has
+// its interval throttled — or suspended outright on a locked screen. The
+// deadline is what survives that; the interval only paints.
+describe("RestTimer while the tab is away", () => {
+  function returnToTab() {
+    document.dispatchEvent(new Event("visibilitychange"));
+    flushSync();
+  }
+
+  it("recomputes from the deadline when the tab comes back", async () => {
+    render(RestTimer, { seconds: 180 });
+    vi.useFakeTimers();
+
+    await fireEvent.click(startButton());
+    // Wall-clock time passes with no interval firing at all — the worst case a
+    // throttled tab produces.
+    vi.setSystemTime(Date.now() + 45_000);
+    returnToTab();
+
+    expect(remaining()).toHaveTextContent("2:15");
+  });
+
+  it("finds a rest that ran out while away, and announces it", async () => {
+    render(RestTimer, { seconds: 60, storageKey: "s1" });
+    vi.useFakeTimers();
+
+    await fireEvent.click(startButton());
+    vi.setSystemTime(Date.now() + 90_000);
+    returnToTab();
+
+    expect(remaining()).toHaveTextContent("0:00");
+    expect(alert.fire).toHaveBeenCalledOnce();
+    expect(sessionStorage.getItem(KEY)).toBeNull();
+  });
+
+  // Nothing to resync when no rest is running, and a stray chime on a tab
+  // switch would be worse than a stale one.
+  it("stays quiet on a tab switch with the clock stopped", async () => {
+    render(RestTimer, { seconds: 60 });
+    vi.useFakeTimers();
+
+    vi.setSystemTime(Date.now() + 90_000);
+    returnToTab();
+
+    expect(remaining()).toHaveTextContent("1:00");
+    expect(alert.fire).not.toHaveBeenCalled();
   });
 });

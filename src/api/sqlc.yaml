@@ -14,6 +14,9 @@ sql:
       # in the middle is DML. sqlc ignores the INSERT/UPDATE statements.
       - "db/migrations/0009_exercise_library.up.sql"
       - "db/migrations/0010_session_bodyweight.up.sql"
+      # 0011 is mixed the same way 0009 is: the ALTER at the top is schema, the
+      # three tier UPDATEs below it are DML that sqlc ignores.
+      - "db/migrations/0011_exercise_rest_seconds.up.sql"
     queries: "db/queries"
     gen:
       go:

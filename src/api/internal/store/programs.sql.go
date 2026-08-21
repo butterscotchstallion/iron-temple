@@ -129,7 +129,8 @@ SELECT pde.id,
        pde.position,
        pde.sets,
        pde.reps,
-       pde.starting_weight_lb
+       pde.starting_weight_lb,
+       e.rest_seconds
 FROM program_day_exercises pde
 JOIN exercises e ON e.id = pde.exercise_id
 WHERE pde.program_day_id = $1
@@ -145,6 +146,7 @@ type ListPrescriptionsByDayRow struct {
 	Sets             int32          `json:"sets"`
 	Reps             int32          `json:"reps"`
 	StartingWeightLb pgtype.Numeric `json:"starting_weight_lb"`
+	RestSeconds      int32          `json:"rest_seconds"`
 }
 
 // ListPrescriptionsByDay returns the prescribed exercises for a single day.
@@ -166,6 +168,7 @@ func (q *Queries) ListPrescriptionsByDay(ctx context.Context, programDayID int32
 			&i.Sets,
 			&i.Reps,
 			&i.StartingWeightLb,
+			&i.RestSeconds,
 		); err != nil {
 			return nil, err
 		}
@@ -185,7 +188,8 @@ SELECT pde.id,
        pde.position,
        pde.sets,
        pde.reps,
-       pde.starting_weight_lb
+       pde.starting_weight_lb,
+       e.rest_seconds
 FROM program_day_exercises pde
 JOIN program_days pd ON pd.id = pde.program_day_id
 JOIN exercises e ON e.id = pde.exercise_id
@@ -202,10 +206,15 @@ type ListPrescriptionsByProgramRow struct {
 	Sets             int32          `json:"sets"`
 	Reps             int32          `json:"reps"`
 	StartingWeightLb pgtype.Numeric `json:"starting_weight_lb"`
+	RestSeconds      int32          `json:"rest_seconds"`
 }
 
 // ListPrescriptionsByProgram returns every prescribed exercise across all of a
 // program's days, joined to the exercise name, ordered for assembly in Go.
+//
+// rest_seconds comes off the exercise rather than the prescription: rest is a
+// property of the movement, so a squat rests the same on Workout A and B. See
+// 0011 for the tiers.
 func (q *Queries) ListPrescriptionsByProgram(ctx context.Context, programID int32) ([]ListPrescriptionsByProgramRow, error) {
 	rows, err := q.db.Query(ctx, listPrescriptionsByProgram, programID)
 	if err != nil {
@@ -224,6 +233,7 @@ func (q *Queries) ListPrescriptionsByProgram(ctx context.Context, programID int3
 			&i.Sets,
 			&i.Reps,
 			&i.StartingWeightLb,
+			&i.RestSeconds,
 		); err != nil {
 			return nil, err
 		}

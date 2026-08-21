@@ -27,6 +27,10 @@ RETURNING id, program_id, name, position, weekday;
 
 -- ListPrescriptionsByProgram returns every prescribed exercise across all of a
 -- program's days, joined to the exercise name, ordered for assembly in Go.
+--
+-- rest_seconds comes off the exercise rather than the prescription: rest is a
+-- property of the movement, so a squat rests the same on Workout A and B. See
+-- 0011 for the tiers.
 -- name: ListPrescriptionsByProgram :many
 SELECT pde.id,
        pde.program_day_id,
@@ -35,7 +39,8 @@ SELECT pde.id,
        pde.position,
        pde.sets,
        pde.reps,
-       pde.starting_weight_lb
+       pde.starting_weight_lb,
+       e.rest_seconds
 FROM program_day_exercises pde
 JOIN program_days pd ON pd.id = pde.program_day_id
 JOIN exercises e ON e.id = pde.exercise_id
@@ -51,7 +56,8 @@ SELECT pde.id,
        pde.position,
        pde.sets,
        pde.reps,
-       pde.starting_weight_lb
+       pde.starting_weight_lb,
+       e.rest_seconds
 FROM program_day_exercises pde
 JOIN exercises e ON e.id = pde.exercise_id
 WHERE pde.program_day_id = $1

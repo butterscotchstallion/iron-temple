@@ -77,6 +77,33 @@ func TestMigrateAppliesSchemaAndSeed(t *testing.T) {
 	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE is_accessory", 43)
 	// Nothing seeded belongs to a user; every seeded row is shared.
 	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE created_by_user_id IS NOT NULL", 0)
+
+	// 0011's three rest tiers. Asserted as a partition — the three counts sum to
+	// the 53 above — because the tiers are applied as successive UPDATEs that
+	// narrow one another, and the failure mode worth catching is a lift left
+	// behind in the tier before, which a spot check of one row would miss.
+	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE rest_seconds = 300", 6)
+	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE rest_seconds = 180", 23)
+	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE rest_seconds = 90", 24)
+	// The two ends of the range, named: the lift a five-minute rest exists for,
+	// and an isolation movement that must not have inherited one.
+	assertRest(t, sqlDB, "Deadlift", 300)
+	assertRest(t, sqlDB, "Lateral Raise", 90)
+	// An accessory promoted back up to a prescribed lift's rest, which is the
+	// tier that only exists because is_accessory alone gets it wrong.
+	assertRest(t, sqlDB, "Leg Press", 180)
+}
+
+func assertRest(t *testing.T, db *sql.DB, name string, want int) {
+	t.Helper()
+	var got int
+	err := db.QueryRow("SELECT rest_seconds FROM exercises WHERE name = $1", name).Scan(&got)
+	if err != nil {
+		t.Fatalf("rest_seconds for %q: %v", name, err)
+	}
+	if got != want {
+		t.Errorf("rest_seconds for %q = %d, want %d", name, got, want)
+	}
 }
 
 func assertCount(t *testing.T, db *sql.DB, query string, want int) {

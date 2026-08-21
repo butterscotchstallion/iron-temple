@@ -208,7 +208,8 @@ SELECT ss.id,
        ss.actual_reps,
        ss.weight_lb,
        ss.completed,
-       (pde.id IS NULL)::bool AS is_assistance
+       (pde.id IS NULL)::bool AS is_assistance,
+       e.rest_seconds
 FROM session_sets ss
 JOIN exercises e ON e.id = ss.exercise_id
 JOIN sessions s ON s.id = ss.session_id
@@ -239,7 +240,8 @@ SELECT ss.id,
        ss.actual_reps,
        ss.weight_lb,
        ss.completed,
-       (pde.id IS NULL)::bool AS is_assistance
+       (pde.id IS NULL)::bool AS is_assistance,
+       e.rest_seconds
 FROM session_sets ss
 JOIN exercises e ON e.id = ss.exercise_id
 JOIN sessions s ON s.id = ss.session_id
