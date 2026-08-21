@@ -25,6 +25,10 @@ import (
 type PeriodKind string
 
 const (
+	// PeriodWeek recaps one Monday-to-Sunday week. The shortest period, and the
+	// one a lifter can still act on: a month is something to reflect on, a week
+	// is something to correct.
+	PeriodWeek PeriodKind = "week"
 	// PeriodMonth recaps one calendar month.
 	PeriodMonth PeriodKind = "month"
 	// PeriodYear recaps one calendar year.
@@ -1003,10 +1007,39 @@ func attendance(
 }
 
 func periodLabel(kind PeriodKind, start time.Time) string {
-	if kind == PeriodYear {
+	switch kind {
+	case PeriodYear:
 		return fmt.Sprintf("%d", start.Year())
+	case PeriodWeek:
+		return weekLabel(start, start.AddDate(0, 0, 6))
+	default:
+		return fmt.Sprintf("%s %d", start.Month().String(), start.Year())
 	}
-	return fmt.Sprintf("%s %d", start.Month().String(), start.Year())
+}
+
+// weekLabel names a week by the days it actually covers rather than by a number
+// nobody counts in ("week 12"). Three forms, because a week is the one period
+// that routinely straddles a boundary — roughly a month a year end mid-week, and
+// one a year ends mid-year:
+//
+//	March 16–22 2026                     within one month
+//	March 30 – April 5 2026              across two
+//	December 29 2025 – January 4 2026    across two years
+//
+// Month-first and no comma before the year, matching formatLongDate in the UI
+// and formatEmailDate here — this string is a page heading, an email subject and
+// the share card's eyebrow, so it has to sit beside all three.
+func weekLabel(start, end time.Time) string {
+	switch {
+	case start.Year() != end.Year():
+		return fmt.Sprintf("%s %d %d – %s %d %d",
+			start.Month(), start.Day(), start.Year(), end.Month(), end.Day(), end.Year())
+	case start.Month() != end.Month():
+		return fmt.Sprintf("%s %d – %s %d %d",
+			start.Month(), start.Day(), end.Month(), end.Day(), end.Year())
+	default:
+		return fmt.Sprintf("%s %d–%d %d", start.Month(), start.Day(), end.Day(), end.Year())
+	}
 }
 
 // Title is the recap's headline, used as the page heading and email subject.

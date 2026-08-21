@@ -575,12 +575,18 @@ paths:
     get:
       tags: [racked]
       operationId: getRacked
-      summary: Statistics recap for one month or year
+      summary: Statistics recap for one week, month or year
       description: >
         The Racked recap: headline volume, hero moments and the series behind
-        each chart, for the calendar month or year containing `on`. The same
-        report is rendered into the monthly and yearly recap email, so the two
-        can never disagree.
+        each chart, for the week, calendar month or year containing `on`. The
+        same report is rendered into the monthly and yearly recap email, so the
+        two can never disagree.
+
+        A week runs Monday to Sunday and is not clipped to a month or a year —
+        the last week of March runs into April, and the week containing New
+        Year's Day starts in the year before. Note that the email is monthly and
+        yearly only: a weekly recap is a page a lifter opens, not something the
+        server puts in their inbox 52 times a year.
       parameters:
         - name: period
           in: query
@@ -588,15 +594,15 @@ paths:
           description: Granularity of the recap. Defaults to month.
           schema:
             type: string
-            enum: [month, year]
+            enum: [week, month, year]
             default: month
         - name: on
           in: query
           required: false
           description: >
             Any date inside the wanted period; the server expands it to the
-            whole month or year. Defaults to today, so the recap opens on the
-            period in progress.
+            whole week, month or year. Defaults to today, so the recap opens on
+            the period in progress.
           schema:
             type: string
             format: date
@@ -1710,7 +1716,7 @@ components:
       properties:
         kind:
           type: string
-          enum: [month, year]
+          enum: [week, month, year]
         start:
           type: string
           format: date
@@ -1720,6 +1726,12 @@ components:
           description: Inclusive last day of the period.
         label:
           type: string
+          description: >
+            The period as a person would name it: "2026", "March 2026", or for a
+            week the days it covers — "March 16–22 2026", widening to
+            "March 30 – April 5 2026" or "December 29 2025 – January 4 2026"
+            where the week straddles a boundary. Weeks are not numbered; nobody
+            counts in them.
           example: March 2026
         inProgress:
           type: boolean

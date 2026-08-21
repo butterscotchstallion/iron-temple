@@ -13,14 +13,14 @@ import (
 	"gitea.homelab/gitadmin/iron-temple/api/internal/store"
 )
 
-// getRacked serves the recap for the month or year containing the `on` query
-// parameter, defaulting to the period in progress.
+// getRacked serves the recap for the week, month or year containing the `on`
+// query parameter, defaulting to the month in progress.
 func (s *Server) getRacked(w http.ResponseWriter, r *http.Request) {
 	kind := racked.PeriodMonth
 	if v := r.URL.Query().Get("period"); v != "" {
 		parsed, ok := racked.ParsePeriodKind(v)
 		if !ok {
-			badRequest(w, "period must be month or year")
+			badRequest(w, "period must be week, month or year")
 			return
 		}
 		kind = parsed

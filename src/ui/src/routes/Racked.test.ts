@@ -400,6 +400,55 @@ describe("Racked", () => {
     );
   });
 
+  // Week is the cadence a lifter can still act on — a month is something to
+  // reflect on, a week is something to correct.
+  it("asks for the week when the week is selected", async () => {
+    getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
+    const { getByRole } = render(Racked);
+
+    await waitFor(() => expect(getRacked).toHaveBeenCalled());
+
+    getByRole("radio", { name: "This week" }).click();
+    await waitFor(() =>
+      expect(getRacked).toHaveBeenLastCalledWith({ query: { period: "week" } }),
+    );
+  });
+
+  // Two sections say nothing inside a one-week period, and one of them would
+  // say it wrongly: the heatmap's columns are anchored on Sunday while a Racked
+  // week runs Monday to Sunday, so a single column is the wrong seven days.
+  it("drops the heatmap for a week and counts days trained instead", async () => {
+    const report = fullReport();
+    report.period = {
+      kind: "week",
+      start: "2026-03-16",
+      end: "2026-03-22",
+      label: "March 16–22 2026",
+      inProgress: false,
+    };
+    getRacked.mockResolvedValue({ data: report, error: undefined });
+    const { getByRole } = render(Racked);
+
+    await waitFor(() => expect(getRacked).toHaveBeenCalled());
+    getByRole("radio", { name: "This week" }).click();
+
+    await waitFor(() =>
+      expect(screen.queryByTestId("stat-training-days")).not.toBeInTheDocument(),
+    );
+    // "Week streak" inside one week reads 1 for anyone who trained at all.
+    expect(screen.queryByText("Week streak")).not.toBeInTheDocument();
+    expect(screen.getByText("Days trained")).toBeInTheDocument();
+  });
+
+  // The month and the year keep it — that is what it is for.
+  it("keeps the heatmap and the streak for a month", async () => {
+    getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
+    render(Racked);
+
+    await screen.findByTestId("stat-training-days");
+    expect(screen.getByText("Week streak")).toBeInTheDocument();
+  });
+
   // Accuracy fixes from the recap audit — each pins a figure the page used to
   // read wrong off a report that was already right, or say more than it knew.
 
