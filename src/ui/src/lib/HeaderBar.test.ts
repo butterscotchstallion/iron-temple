@@ -1,16 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/svelte";
+import { render, screen } from "@testing-library/svelte";
 import HeaderBar from "./HeaderBar.svelte";
 import { auth } from "./auth.svelte";
+import { version } from "./version.svelte";
 import type { User } from "./api";
 
-// The bar reads the version from /health, so stub the generated client rather
-// than the network.
-const getHealth = vi.hoisted(() => vi.fn());
-vi.mock("./api", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./api")>()),
-  getHealth,
-}));
+// The bar only renders the version store now — App.svelte owns the polling that
+// fills it, and version.svelte.test.ts covers the fetching. So drive the store
+// directly rather than stubbing /health at one remove.
 
 const ada: User = {
   id: 1,
@@ -22,9 +19,10 @@ const ada: User = {
 };
 
 beforeEach(() => {
-  getHealth.mockResolvedValue({
-    data: { status: "ok", version: "v1.2.3", environment: "production" },
-  });
+  version.running = "v1.2.3";
+  version.latest = "v1.2.3";
+  version.environment = "production";
+  version.dismissed = "";
   auth.me = null;
   auth.loaded = true;
   auth.registrationOpen = false;
@@ -37,29 +35,37 @@ afterEach(() => {
 describe("HeaderBar", () => {
   // The version moved here from the footer; this is the test that it actually
   // arrived.
-  it("shows the version reported by the API", async () => {
+  it("shows the version reported by the API", () => {
     render(HeaderBar);
-    await waitFor(() =>
-      expect(screen.getByTestId("version")).toHaveTextContent(
-        "iron-temple v1.2.3-production",
-      ),
+    expect(screen.getByTestId("version")).toHaveTextContent(
+      "iron-temple v1.2.3-production",
     );
   });
 
-  it("omits the environment suffix when the API doesn't report one", async () => {
-    getHealth.mockResolvedValue({ data: { status: "ok", version: "v1.2.3" } });
+  it("omits the environment suffix when the API doesn't report one", () => {
+    version.environment = "";
     render(HeaderBar);
-    await waitFor(() =>
-      expect(screen.getByTestId("version")).toHaveTextContent("iron-temple v1.2.3"),
+    expect(screen.getByTestId("version")).toHaveTextContent("iron-temple v1.2.3");
+  });
+
+  // The label names the build you are looking at, not the newest one deployed —
+  // that's the update prompt's job. Showing `latest` here would claim you were
+  // running a bundle you haven't loaded yet.
+  it("keeps naming the running build when a newer one is available", () => {
+    version.latest = "v1.3.0";
+    render(HeaderBar);
+    expect(screen.getByTestId("version")).toHaveTextContent(
+      "iron-temple v1.2.3-production",
     );
   });
 
   // The version is decoration; an unreachable /health must not blank the bar or
   // surface an error to the user.
-  it("renders nothing for the version when /health fails", async () => {
-    getHealth.mockRejectedValue(new Error("network down"));
+  it("renders nothing for the version when /health hasn't answered", () => {
+    version.running = "";
+    version.environment = "";
     render(HeaderBar);
-    await waitFor(() => expect(screen.getByTestId("version")).toHaveTextContent(""));
+    expect(screen.getByTestId("version")).toHaveTextContent("");
     // The account side is unaffected.
     expect(screen.getByRole("button", { name: /sign in/i })).toBeInTheDocument();
   });

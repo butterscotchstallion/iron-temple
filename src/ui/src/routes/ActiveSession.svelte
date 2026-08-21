@@ -24,6 +24,7 @@
   import * as AlertDialog from "$lib/components/ui/alert-dialog";
   import ErrorCard from "../lib/ErrorCard.svelte";
   import ErrorBanner from "../lib/ErrorBanner.svelte";
+  import { track } from "../lib/pendingWrites.svelte";
 
   let { params }: { params?: { id?: string } } = $props();
   let sessionId = $derived(Number(params?.id));
@@ -160,10 +161,15 @@
     const reps = nextReps(set);
     const completed = reps != null && reps >= set.targetReps;
 
-    const { data, error } = await updateSessionSet({
-      path: { sessionId, setId: set.id },
-      body: { actualReps: reps, completed },
-    });
+    // track() here, and on the three writes below, is what lets the update
+    // prompt reload safely: it holds the reload until every request in the air
+    // has landed, so a rep can't be lost between the tap and the response.
+    const { data, error } = await track(
+      updateSessionSet({
+        path: { sessionId, setId: set.id },
+        body: { actualReps: reps, completed },
+      }),
+    );
     if (error) actionError = "Couldn't save that set.";
     if (!data || !session) return;
     actionError = null;
@@ -204,7 +210,7 @@
   async function finish() {
     if (finishing) return;
     finishing = true;
-    const { data, error } = await finishSession({ path: { sessionId } });
+    const { data, error } = await track(finishSession({ path: { sessionId } }));
     finishing = false;
     confirmFinish = false;
     if (error || !data) {
@@ -221,10 +227,12 @@
   // the whole session, so it also refreshes lastWeighIn — no second request to
   // find out what the box should carry next time.
   async function saveBodyweight(weightLb: number | null) {
-    const { data, error } = await updateSession({
-      path: { sessionId },
-      body: { bodyweightLb: weightLb },
-    });
+    const { data, error } = await track(
+      updateSession({
+        path: { sessionId },
+        body: { bodyweightLb: weightLb },
+      }),
+    );
     if (error || !data) {
       actionError = "Couldn't save your weight.";
       return;
@@ -239,12 +247,16 @@
     const current = sets[0]?.weightLb ?? 0;
     const weightLb = Math.max(0, current + delta);
     if (weightLb === current) return;
+    // Each leg is tracked separately rather than the Promise.all as a whole, so
+    // the count reflects what's actually outstanding if some land first.
     const results = await Promise.all(
       sets.map((set) =>
-        updateSessionSet({
-          path: { sessionId, setId: set.id },
-          body: { weightLb },
-        }),
+        track(
+          updateSessionSet({
+            path: { sessionId, setId: set.id },
+            body: { weightLb },
+          }),
+        ),
       ),
     );
     if (!session) return;
@@ -346,7 +358,14 @@
     />
 
     {#if showRestTimer}
-      <RestTimer seconds={180} autoStartKey={restTimerKey} />
+      <!-- Keyed by session so the countdown survives a reload — taking an
+           update mid-workout, or a stray refresh — without one workout's rest
+           ever being restored into the next. -->
+      <RestTimer
+        seconds={180}
+        autoStartKey={restTimerKey}
+        storageKey={String(sessionId)}
+      />
     {/if}
 
     {#each groups as group (group.name)}
