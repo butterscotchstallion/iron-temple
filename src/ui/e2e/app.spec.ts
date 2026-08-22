@@ -1152,6 +1152,42 @@ test("Racked switches to the year", async ({ page }) => {
   expect(asked).toContain("year");
 });
 
+test("Racked switches to the week", async ({ page }) => {
+  const asked: string[] = [];
+  // Same shape as the year test above, and for the same reason: answer the
+  // period actually asked for, or the assertion passes before the click.
+  await page.route("**/api/v1/racked**", (route) => {
+    const period = new URL(route.request().url()).searchParams.get("period") ?? "month";
+    asked.push(period);
+    route.fulfill({
+      json:
+        period === "week"
+          ? {
+              ...rackedMarch,
+              period: {
+                kind: "week",
+                start: "2026-03-16",
+                end: "2026-03-22",
+                label: "March 16–22 2026",
+                inProgress: false,
+              },
+            }
+          : rackedMarch,
+    });
+  });
+  await page.goto("/#/racked");
+  await expect(page.getByText("March 2026")).toBeVisible();
+
+  await page.getByRole("radio", { name: "This week" }).click();
+  await expect(page.getByText("March 16–22 2026")).toBeVisible();
+  expect(asked).toContain("week");
+
+  // A week has no rhythm for the heatmap to draw, and its columns would be the
+  // wrong seven days anyway — see the note in Racked.svelte.
+  await expect(page.getByRole("heading", { name: "Every training day" })).toHaveCount(0);
+  await expect(page.getByText("Days trained")).toBeVisible();
+});
+
 test("Racked offers a retry when the report fails to load", async ({ page }) => {
   await page.route("**/api/v1/racked**", (route) =>
     route.fulfill({ status: 500, json: { code: "internal", message: "internal server error" } }),

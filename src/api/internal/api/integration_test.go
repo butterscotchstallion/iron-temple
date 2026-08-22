@@ -744,9 +744,33 @@ func TestRackedYearPeriod(t *testing.T) {
 		HasValue("end", "1970-12-31")
 }
 
+// A week runs Monday to Sunday and is not clipped to the month it starts in.
+// 1970-06-17 is a Wednesday, so its week opens on the 15th; 1970-04-01 is also a
+// Wednesday, and its week opens back in March.
+func TestRackedWeekPeriod(t *testing.T) {
+	e := expect(t)
+	e.GET("/racked").WithQuery("period", "week").WithQuery("on", "1970-06-17").
+		Expect().Status(http.StatusOK).JSON().Object().
+		Value("period").Object().
+		HasValue("kind", "week").
+		HasValue("label", "June 15–21 1970").
+		HasValue("start", "1970-06-15").
+		HasValue("end", "1970-06-21")
+
+	// Across a month boundary, where the label widens and the bounds must not
+	// be trimmed back to the 1st.
+	e.GET("/racked").WithQuery("period", "week").WithQuery("on", "1970-04-01").
+		Expect().Status(http.StatusOK).JSON().Object().
+		Value("period").Object().
+		HasValue("label", "March 30 – April 5 1970").
+		HasValue("start", "1970-03-30").
+		HasValue("end", "1970-04-05")
+}
+
 func TestRackedRejectsBadParameters(t *testing.T) {
 	e := expect(t)
-	e.GET("/racked").WithQuery("period", "week").Expect().Status(http.StatusBadRequest)
+	e.GET("/racked").WithQuery("period", "day").Expect().Status(http.StatusBadRequest)
+	e.GET("/racked").WithQuery("period", "WEEK").Expect().Status(http.StatusBadRequest)
 	e.GET("/racked").WithQuery("on", "last-tuesday").Expect().Status(http.StatusBadRequest)
 }
 

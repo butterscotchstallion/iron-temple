@@ -36,7 +36,7 @@
   // by the API (internal/racked) and rendered here as-is; the recap email reads
   // the same report, so the two cannot drift apart.
 
-  type Period = "month" | "year";
+  type Period = "week" | "month" | "year";
 
   let period = $state<Period>("month");
   let report = $state<RackedReport | null>(null);
@@ -119,6 +119,17 @@
   );
   // Enough columns to cover the period, plus a little air either side.
   const heatmapWeeks = $derived(period === "year" ? 53 : 6);
+  // The heatmap is a picture of a rhythm, and one week has no rhythm to show.
+  // It is also the wrong seven days: buildCalendar anchors its columns on
+  // Sunday and a Racked week runs Monday to Sunday, so a single-column grid
+  // would draw the period's last day and the six that follow it. The weekday
+  // chart below is the same information for a week, correctly aligned, so the
+  // card stands down rather than being fudged into place.
+  const showHeatmap = $derived(period !== "week");
+  // "Week streak" inside a one-week period reads 1 for anyone who trained and 0
+  // for anyone who did not, which is not a statistic. How many of the seven days
+  // carried a session is, and it is the figure a week is actually judged on.
+  const daysTrained = $derived((report?.days ?? []).length);
   // Taken from the report rather than worked out again here. Two readers of the
   // same hours array broke a tie differently — this page took the earliest hour
   // holding the maximum, the API took whichever reached it first — so the label
@@ -172,7 +183,7 @@
       <!-- A radiogroup rather than tabs: it selects which data the page shows,
            it does not switch between panels that both exist. -->
       <div class="flex gap-1 rounded-full bg-muted/40 p-1" role="radiogroup" aria-label="Period">
-        {#each [{ id: "month", label: "This month" }, { id: "year", label: "This year" }] as opt (opt.id)}
+        {#each [{ id: "week", label: "This week" }, { id: "month", label: "This month" }, { id: "year", label: "This year" }] as opt (opt.id)}
           <button
             type="button"
             role="radio"
@@ -271,10 +282,17 @@
         <p class="text-2xl font-black tabular-nums text-foreground">{report.totals.reps}</p>
       </Card>
       <Card class="p-4 text-center">
-        <h3 class="text-xs uppercase tracking-[0.2em] text-muted-foreground">Week streak</h3>
-        <p class="text-2xl font-black tabular-nums text-foreground">
-          {report.streak.longestWeeks}
-        </p>
+        {#if period === "week"}
+          <h3 class="text-xs uppercase tracking-[0.2em] text-muted-foreground">Days trained</h3>
+          <p class="text-2xl font-black tabular-nums text-foreground">
+            {daysTrained}
+          </p>
+        {:else}
+          <h3 class="text-xs uppercase tracking-[0.2em] text-muted-foreground">Week streak</h3>
+          <p class="text-2xl font-black tabular-nums text-foreground">
+            {report.streak.longestWeeks}
+          </p>
+        {/if}
       </Card>
     </section>
 
@@ -452,18 +470,20 @@
       </Card>
     {/if}
 
-    <Card class="p-4">
-      <h3 class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-        Every training day
-      </h3>
-      <CalendarHeatmap
-        sessions={heatmapSessions}
-        volumes={volumesByDate}
-        endDate={report.period.end}
-        weeks={heatmapWeeks}
-      />
-      <ChartTable label="Training days" columns={["Date", "Volume"]} rows={dayRows} />
-    </Card>
+    {#if showHeatmap}
+      <Card class="p-4" data-testid="stat-training-days">
+        <h3 class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+          Every training day
+        </h3>
+        <CalendarHeatmap
+          sessions={heatmapSessions}
+          volumes={volumesByDate}
+          endDate={report.period.end}
+          weeks={heatmapWeeks}
+        />
+        <ChartTable label="Training days" columns={["Date", "Volume"]} rows={dayRows} />
+      </Card>
+    {/if}
 
     <section class="grid gap-4 sm:grid-cols-2">
       <Card class="p-4">
