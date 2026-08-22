@@ -4,10 +4,6 @@ package api
 // scalar types), keeping the generated sqlc row structs — with their snake_case
 // tags and pgtype columns — out of the wire contract.
 
-// restSecondsDefault is the prescribed rest between sets. There is no column for
-// it in the schema; the spec exposes it with a fixed 3-minute default.
-const restSecondsDefault int32 = 180
-
 type errorDTO struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`

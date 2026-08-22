@@ -17,6 +17,10 @@
 -- assistance row has since gone.
 
 -- ListAssistanceByDay returns one day's assistance in display order.
+--
+-- rest_seconds rides along from the exercise so a prescribed session can carry a
+-- rest for assistance work too, without this table needing a column for it — the
+-- same reason 0011 put it on exercises in the first place.
 -- name: ListAssistanceByDay :many
 SELECT pda.id,
        pda.program_day_id,
@@ -25,7 +29,8 @@ SELECT pda.id,
        pda.position,
        pda.sets,
        pda.reps,
-       pda.weight_lb
+       pda.weight_lb,
+       e.rest_seconds
 FROM program_day_assistance pda
 JOIN exercises e ON e.id = pda.exercise_id
 WHERE pda.program_day_id = sqlc.arg('program_day_id')

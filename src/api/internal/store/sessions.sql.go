@@ -218,7 +218,8 @@ SELECT ss.id,
        ss.actual_reps,
        ss.weight_lb,
        ss.completed,
-       (pde.id IS NULL)::bool AS is_assistance
+       (pde.id IS NULL)::bool AS is_assistance,
+       e.rest_seconds
 FROM session_sets ss
 JOIN exercises e ON e.id = ss.exercise_id
 JOIN sessions s ON s.id = ss.session_id
@@ -244,6 +245,7 @@ type GetSessionSetRow struct {
 	WeightLb     pgtype.Numeric `json:"weight_lb"`
 	Completed    bool           `json:"completed"`
 	IsAssistance bool           `json:"is_assistance"`
+	RestSeconds  int32          `json:"rest_seconds"`
 }
 
 // GetSessionSet reaches the owner through session_sets -> sessions, so a set id
@@ -267,6 +269,7 @@ func (q *Queries) GetSessionSet(ctx context.Context, arg GetSessionSetParams) (G
 		&i.WeightLb,
 		&i.Completed,
 		&i.IsAssistance,
+		&i.RestSeconds,
 	)
 	return i, err
 }
@@ -395,7 +398,8 @@ SELECT ss.id,
        ss.actual_reps,
        ss.weight_lb,
        ss.completed,
-       (pde.id IS NULL)::bool AS is_assistance
+       (pde.id IS NULL)::bool AS is_assistance,
+       e.rest_seconds
 FROM session_sets ss
 JOIN exercises e ON e.id = ss.exercise_id
 JOIN sessions s ON s.id = ss.session_id
@@ -426,6 +430,7 @@ type ListSessionSetsRow struct {
 	WeightLb     pgtype.Numeric `json:"weight_lb"`
 	Completed    bool           `json:"completed"`
 	IsAssistance bool           `json:"is_assistance"`
+	RestSeconds  int32          `json:"rest_seconds"`
 }
 
 // ListSessionSets returns a session's logged sets in prescription order (the
@@ -472,6 +477,7 @@ func (q *Queries) ListSessionSets(ctx context.Context, arg ListSessionSetsParams
 			&i.WeightLb,
 			&i.Completed,
 			&i.IsAssistance,
+			&i.RestSeconds,
 		); err != nil {
 			return nil, err
 		}

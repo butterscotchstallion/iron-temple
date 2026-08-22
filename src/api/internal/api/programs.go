@@ -81,7 +81,7 @@ func (s *Server) getProgram(w http.ResponseWriter, r *http.Request) {
 			Sets:             pr.Sets,
 			Reps:             pr.Reps,
 			StartingWeightLb: numericToFloat(pr.StartingWeightLb),
-			RestSeconds:      restSecondsDefault,
+			RestSeconds:      pr.RestSeconds,
 		})
 	}
 
@@ -239,7 +239,7 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32) 
 			Sets:         p.Sets,
 			Reps:         p.Reps,
 			WeightLb:     plan.WeightLb,
-			RestSeconds:  restSecondsDefault,
+			RestSeconds:  p.RestSeconds,
 			Progression: progressionInfoDTO{
 				Status:               string(plan.Status),
 				FailureCount:         plan.FailureCount,
@@ -291,7 +291,7 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32) 
 			Sets:         a.Sets,
 			Reps:         a.Reps,
 			WeightLb:     weight,
-			RestSeconds:  restSecondsDefault,
+			RestSeconds:  a.RestSeconds,
 			Progression: progressionInfoDTO{
 				Status:               progressionFixed,
 				FailuresBeforeDeload: progression.FailuresBeforeDeload,

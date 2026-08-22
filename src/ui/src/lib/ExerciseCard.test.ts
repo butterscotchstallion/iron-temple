@@ -12,11 +12,16 @@ type SetFixture = {
   targetReps: number;
   actualReps: number | null;
   completed: boolean;
+  restSeconds?: number;
 };
 function set(p: SetFixture): SessionSet {
   return p as unknown as SessionSet;
 }
-function workSets(weightLb: number, count: number): SessionSet[] {
+function workSets(
+  weightLb: number,
+  count: number,
+  restSeconds?: number,
+): SessionSet[] {
   return Array.from({ length: count }, (_, i) =>
     set({
       id: i + 1,
@@ -25,6 +30,7 @@ function workSets(weightLb: number, count: number): SessionSet[] {
       targetReps: 5,
       actualReps: null,
       completed: false,
+      restSeconds,
     }),
   );
 }
@@ -40,6 +46,18 @@ describe("ExerciseCard", () => {
     expect(screen.getByRole("heading", { name: "Squat" })).toBeInTheDocument();
     expect(screen.getByText("5 reps")).toBeInTheDocument();
     expect(screen.getByText("80 lb", { exact: true })).toBeInTheDocument();
+  });
+
+  // Rest is half the prescription, and the countdown that enforces it lives in
+  // an unlabelled corner of the screen — so the number belongs next to the reps.
+  it("shows the lift's prescribed rest alongside the rep target", () => {
+    render(ExerciseCard, {
+      name: "Deadlift",
+      sets: workSets(80, 1, 300),
+      onCycle: vi.fn(),
+      onChangeWeight: vi.fn(),
+    });
+    expect(screen.getByText(/5 reps · 5:00 rest/)).toBeInTheDocument();
   });
 
   it("adjusts weight by ±5 via the stepper buttons", async () => {

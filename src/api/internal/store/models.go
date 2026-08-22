@@ -16,6 +16,7 @@ type Exercise struct {
 	Equipment       string             `json:"equipment"`
 	IsAccessory     bool               `json:"is_accessory"`
 	CreatedByUserID *int32             `json:"created_by_user_id"`
+	RestSeconds     int32              `json:"rest_seconds"`
 }
 
 type Program struct {

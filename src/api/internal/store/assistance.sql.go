@@ -150,7 +150,8 @@ SELECT pda.id,
        pda.position,
        pda.sets,
        pda.reps,
-       pda.weight_lb
+       pda.weight_lb,
+       e.rest_seconds
 FROM program_day_assistance pda
 JOIN exercises e ON e.id = pda.exercise_id
 WHERE pda.program_day_id = $1
@@ -172,6 +173,7 @@ type ListAssistanceByDayRow struct {
 	Sets         int32          `json:"sets"`
 	Reps         int32          `json:"reps"`
 	WeightLb     pgtype.Numeric `json:"weight_lb"`
+	RestSeconds  int32          `json:"rest_seconds"`
 }
 
 // Assistance work: the exercises a lifter bolts onto the end of a program day.
@@ -192,6 +194,10 @@ type ListAssistanceByDayRow struct {
 // records — which is why ListSessionSets orders with a fallback for sets whose
 // assistance row has since gone.
 // ListAssistanceByDay returns one day's assistance in display order.
+//
+// rest_seconds rides along from the exercise so a prescribed session can carry a
+// rest for assistance work too, without this table needing a column for it — the
+// same reason 0011 put it on exercises in the first place.
 func (q *Queries) ListAssistanceByDay(ctx context.Context, arg ListAssistanceByDayParams) ([]ListAssistanceByDayRow, error) {
 	rows, err := q.db.Query(ctx, listAssistanceByDay, arg.ProgramDayID, arg.UserID)
 	if err != nil {
@@ -210,6 +216,7 @@ func (q *Queries) ListAssistanceByDay(ctx context.Context, arg ListAssistanceByD
 			&i.Sets,
 			&i.Reps,
 			&i.WeightLb,
+			&i.RestSeconds,
 		); err != nil {
 			return nil, err
 		}

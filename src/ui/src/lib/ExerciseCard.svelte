@@ -6,6 +6,7 @@
   import PlateBar from "./PlateBar.svelte";
   import { plateLabel } from "./plates";
   import { warmupSets } from "./warmup";
+  import { formatTime } from "./time";
   import type { SessionSet } from "./api";
 
   let {
@@ -25,6 +26,10 @@
 
   const workWeight = $derived(sets[0]?.weightLb ?? 0);
   const targetReps = $derived(sets[0]?.targetReps ?? 0);
+  // The rest this lift asks for, shown alongside the rep target because it is
+  // half of the prescription and the countdown that enforces it lives in a
+  // corner of the screen with no name on it.
+  const restSeconds = $derived(sets[0]?.restSeconds ?? 0);
 
   // Warm-up ramp expanded to one entry per set (the empty bar is done twice).
   const warmups = $derived.by(() => {
@@ -123,6 +128,9 @@
     <div class="flex items-center gap-3">
       <span class="text-sm tabular-nums text-muted-foreground">
         {targetReps} reps
+        {#if restSeconds > 0}
+          · {formatTime(restSeconds)} rest
+        {/if}
       </span>
       <div class="flex items-center gap-1.5">
         <Button
