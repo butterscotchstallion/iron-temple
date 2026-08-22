@@ -147,6 +147,21 @@ export function formatPercent(fraction: number): string {
   return `${Math.round(fraction * 100)}%`;
 }
 
+/**
+ * A list read the way a person says it: "core", "core and arms", "core, arms
+ * and chest".
+ *
+ * Hand-rolled rather than Intl.ListFormat, which inserts an Oxford comma — the
+ * recap email builds the same sentence in Go (joinNames in template.go), and the
+ * page and the email quoting one lifter's month back at them with different
+ * punctuation is the sort of drift this whole feature is arranged to avoid.
+ */
+export function joinNames(names: string[]): string {
+  if (names.length === 0) return "";
+  if (names.length === 1) return names[0];
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
 /** An hour of the day as a label: 0 -> "12am", 6 -> "6am", 18 -> "6pm". */
 export function formatHour(hour: number): string {
   const h = ((Math.round(hour) % 24) + 24) % 24;

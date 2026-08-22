@@ -1605,9 +1605,9 @@ components:
     RackedReport:
       type: object
       required:
-        [period, totals, change, comparison, split, lifts, series, mostImproved, bodyweight, days,
-         weekdays, bestWeekday, hours, peakHour, hourLabel, streak, attendance, prs, milestones,
-         heaviestSet, fastestSession, deloads, archetype]
+        [period, totals, change, comparison, split, muscles, lifts, series, mostImproved,
+         bodyweight, days, weekdays, bestWeekday, hours, peakHour, hourLabel, streak, attendance,
+         prs, milestones, heaviestSet, fastestSession, deloads, archetype]
       properties:
         period:
           $ref: "#/components/schemas/RackedPeriod"
@@ -1624,6 +1624,22 @@ components:
           $ref: "#/components/schemas/RackedComparison"
         split:
           $ref: "#/components/schemas/RackedSplit"
+        muscles:
+          type: array
+          description: >
+            Volume split by the muscle group each movement trains, heaviest
+            first — and unlike `lifts`, EVERY group in the taxonomy is present,
+            including the ones with nothing logged against them. That is the
+            point of the section: a lifter who trained no core all month sees
+            nothing about it in a ranking of what they did train.
+
+            A period that logged no work at all sends `null` here rather than
+            seven empty groups — there is no body to account for, and the
+            surfaces drop the section instead of reporting seven failures to
+            train. Same convention as `lifts` and `series`; read it as
+            `muscles ?? []`.
+          items:
+            $ref: "#/components/schemas/RackedMuscleSlice"
         lifts:
           type: array
           description: Volume split by lift, heaviest first.
@@ -1870,6 +1886,43 @@ components:
           format: date
         weightLb:
           type: number
+
+    RackedMuscleSlice:
+      type: object
+      required: [group, volumeLb, sets, reps, lifts, share, trained]
+      description: >
+        One muscle group's share of the period. A movement has exactly one
+        group — its primary mover, as recorded in the exercise library — so
+        nothing is double-counted and the slices sum to totals.volumeLb. The
+        corollary is that a bench press is credited to the chest alone; the
+        triceps and front delts it also trains are credited nowhere. That is
+        coarse on purpose: contribution weights per exercise are not something
+        the library holds or that anyone would maintain by hand, and the coarse
+        answer still tells a lifter whether a region of the body went untouched.
+      properties:
+        group:
+          $ref: "#/components/schemas/MuscleGroup"
+        volumeLb:
+          type: number
+        sets:
+          type: integer
+        reps:
+          type: integer
+        lifts:
+          type: integer
+          description: >
+            Distinct movements the group covered — a third of a month all of it
+            squats and a third across five leg movements are different months.
+        share:
+          type: number
+          minimum: 0
+          maximum: 1
+        trained:
+          type: boolean
+          description: >
+            False for a group with nothing logged against it. Equivalent to
+            `sets == 0`, and named because it is what the surfaces branch on: an
+            untrained group is a different kind of row, not a short bar.
 
     RackedLiftSlice:
       type: object

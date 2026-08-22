@@ -251,13 +251,17 @@ type sessionListDTO struct {
 // email render the same numbers. Nothing here is re-aggregated by the client.
 
 type rackedReportDTO struct {
-	Period     rackedPeriodDTO      `json:"period"`
-	Totals     rackedTotalsDTO      `json:"totals"`
-	Change     *rackedChangeDTO     `json:"change"`
-	Comparison rackedComparisonDTO  `json:"comparison"`
-	Split      rackedSplitDTO       `json:"split"`
-	Lifts      []rackedLiftSliceDTO `json:"lifts"`
-	Series     []rackedSeriesDTO    `json:"series"`
+	Period     rackedPeriodDTO     `json:"period"`
+	Totals     rackedTotalsDTO     `json:"totals"`
+	Change     *rackedChangeDTO    `json:"change"`
+	Comparison rackedComparisonDTO `json:"comparison"`
+	Split      rackedSplitDTO      `json:"split"`
+	// Muscles carries every group in the taxonomy, trained or not — a group with
+	// nothing against it is the row worth reading. Always present, and empty
+	// only for a period that logged no work at all.
+	Muscles []rackedMuscleSliceDTO `json:"muscles"`
+	Lifts   []rackedLiftSliceDTO   `json:"lifts"`
+	Series  []rackedSeriesDTO      `json:"series"`
 	// MostImproved is nil until some lift has been performed twice in the period.
 	MostImproved *rackedImprovementDTO `json:"mostImproved"`
 	// Bodyweight is nil when the period holds no weigh-in, which is the common
@@ -351,6 +355,21 @@ type rackedBodyweightDTO struct {
 type rackedWeighInDTO struct {
 	PerformedOn string  `json:"performedOn"`
 	WeightLb    float64 `json:"weightLb"`
+}
+
+// rackedMuscleSliceDTO is one muscle group's share of the period. The counters
+// match rackedLiftSliceDTO's, and summed over the list they are the headline —
+// a lift belongs to exactly one group, so nothing is double-counted.
+type rackedMuscleSliceDTO struct {
+	// Group is a taxonomy key ("chest", "back", …), not a label: the page and
+	// the email capitalise it themselves rather than being handed prose.
+	Group    string  `json:"group"`
+	VolumeLb float64 `json:"volumeLb"`
+	Sets     int     `json:"sets"`
+	Reps     int     `json:"reps"`
+	Lifts    int     `json:"lifts"`
+	Share    float64 `json:"share"`
+	Trained  bool    `json:"trained"`
 }
 
 type rackedLiftSliceDTO struct {

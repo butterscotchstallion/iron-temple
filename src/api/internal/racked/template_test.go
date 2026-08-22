@@ -349,3 +349,67 @@ func TestSignedWeightLb(t *testing.T) {
 		}
 	}
 }
+
+// The recap's muscle section, which is the only part of the email whose most
+// useful rows are the empty ones.
+func TestRenderEmailNamesTheMuscleGaps(t *testing.T) {
+	// marchReport's sets carry no muscle group, so tag a fresh set of them: a
+	// month of squats and bench, and nothing else.
+	start, end := Bounds(PeriodMonth, day(2026, time.March, 15))
+	var sets []Set
+	sets = append(sets,
+		muscle(mkSets(1, day(2026, time.March, 2), 1, "Squat", 5, 5, 200), "legs")...)
+	sets = append(sets,
+		muscle(mkSets(2, day(2026, time.March, 9), 2, "Bench Press", 5, 5, 135), "chest")...)
+	rep := Build(Input{Kind: PeriodMonth, Start: start, End: end, Sets: sets})
+
+	html, err := RenderEmail("Ada Lovelace", rep)
+	if err != nil {
+		t.Fatalf("RenderEmail: %v", err)
+	}
+
+	if !strings.Contains(html, "What you trained") {
+		t.Error("email is missing the muscle section")
+	}
+	// Every group has a row, trained or not — the untrained ones are the point.
+	for _, group := range []string{"Legs", "Chest", "Back", "Shoulders", "Arms", "Core"} {
+		if !strings.Contains(html, ">"+group+"</td>") {
+			t.Errorf("email has no row for %q", group)
+		}
+	}
+	// And the gaps are named in prose, not left to be inferred from a column of
+	// empty bars.
+	if !strings.Contains(html, "Nothing logged for back, shoulders, arms, core and other.") {
+		t.Error("email does not name the untrained groups")
+	}
+}
+
+// A period with no work has no muscle section at all — a recap that told a
+// lifter they trained none of seven groups would be piling on.
+func TestRenderEmailOmitsMusclesForAQuietPeriod(t *testing.T) {
+	start, end := Bounds(PeriodMonth, day(2026, time.March, 15))
+	html, err := RenderEmail("Ada Lovelace",
+		Build(Input{Kind: PeriodMonth, Start: start, End: end}))
+	if err != nil {
+		t.Fatalf("RenderEmail: %v", err)
+	}
+	if strings.Contains(html, "What you trained") {
+		t.Error("an empty period rendered the muscle section")
+	}
+}
+
+func TestJoinNames(t *testing.T) {
+	for _, tc := range []struct {
+		in   []string
+		want string
+	}{
+		{nil, ""},
+		{[]string{"core"}, "core"},
+		{[]string{"core", "arms"}, "core and arms"},
+		{[]string{"core", "arms", "chest"}, "core, arms and chest"},
+	} {
+		if got := joinNames(tc.in); got != tc.want {
+			t.Errorf("joinNames(%v) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

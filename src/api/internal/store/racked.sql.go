@@ -89,6 +89,7 @@ SELECT s.id AS session_id,
        pd.name AS program_day_name,
        ss.exercise_id,
        e.name  AS exercise_name,
+       e.muscle_group,
        ss.set_number,
        ss.actual_reps,
        ss.weight_lb,
@@ -122,6 +123,7 @@ type RackedPeriodSetsRow struct {
 	ProgramDayName string             `json:"program_day_name"`
 	ExerciseID     int32              `json:"exercise_id"`
 	ExerciseName   string             `json:"exercise_name"`
+	MuscleGroup    string             `json:"muscle_group"`
 	SetNumber      int32              `json:"set_number"`
 	ActualReps     *int32             `json:"actual_reps"`
 	WeightLb       pgtype.Numeric     `json:"weight_lb"`
@@ -182,6 +184,12 @@ type RackedPeriodSetsRow struct {
 // every total, exactly as it did before the flag existed; the column only lets
 // the report say which is which. Anything that reads it to exclude work is
 // making a judgement, and internal/racked is where judgements are made.
+//
+// muscle_group rides along for the same reason exercise_name does: it is a
+// property of the movement the report needs per set, and joining it here costs
+// nothing over a join that already exists. One group per exercise — its primary
+// mover — which is all the library records; see internal/racked/muscles.go for
+// what that does and does not let the recap claim.
 func (q *Queries) RackedPeriodSets(ctx context.Context, arg RackedPeriodSetsParams) ([]RackedPeriodSetsRow, error) {
 	rows, err := q.db.Query(ctx, rackedPeriodSets, arg.UserID, arg.StartOn, arg.EndOn)
 	if err != nil {
@@ -200,6 +208,7 @@ func (q *Queries) RackedPeriodSets(ctx context.Context, arg RackedPeriodSetsPara
 			&i.ProgramDayName,
 			&i.ExerciseID,
 			&i.ExerciseName,
+			&i.MuscleGroup,
 			&i.SetNumber,
 			&i.ActualReps,
 			&i.WeightLb,

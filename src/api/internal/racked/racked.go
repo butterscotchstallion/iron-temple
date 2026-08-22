@@ -53,6 +53,10 @@ type Set struct {
 	Reps           int
 	WeightLb       float64
 	Completed      bool
+	// MuscleGroup is the movement's primary mover, from the exercise library's
+	// taxonomy (see 0009). One group per lift, not a split across several — see
+	// muscles.go for why that is enough for the question it answers.
+	MuscleGroup string
 	// IsAssistance is true for work the lifter bolted onto the program day
 	// rather than work the program prescribed — the same distinction the session
 	// screen draws, derived in SQL from the absence of a prescription.
@@ -139,7 +143,11 @@ type Report struct {
 	Change     *Change
 	Comparison Comparison
 	// Split is Totals.VolumeLb divided between prescribed work and assistance.
-	Split        Split
+	Split Split
+	// Muscles is Totals.VolumeLb divided between the muscle groups it trained,
+	// every group in the taxonomy included — a group with nothing against it is
+	// the section's most useful row. See muscles.go.
+	Muscles      []MuscleSlice
 	Lifts        []LiftSlice
 	Series       []LiftSeries
 	MostImproved *Improvement
@@ -404,6 +412,7 @@ func Build(in Input) Report {
 		},
 		Totals:      totals(in.Sets, sessions),
 		Split:       split(in.Sets),
+		Muscles:     muscleSlices(in.Sets),
 		Lifts:       liftSlices(in.Sets),
 		Series:      liftSeries(sessions),
 		Bodyweight:  bodyweight(in.WeighIns),

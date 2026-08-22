@@ -37,6 +37,8 @@ var emailTemplate = template.Must(template.New("racked").Funcs(template.FuncMap{
 	"weekday":  weekdayName,
 	"signed":   signedPercent,
 	"perWeek":  formatPerWeek,
+	"muscle":   muscleName,
+	"names":    joinNames,
 }).Parse(emailHTML))
 
 // emailData is the template's view of a report, plus the few strings the report
@@ -49,6 +51,12 @@ type emailData struct {
 	Weekdays    []float64
 	MaxWeekday  float64
 	BestWeekday int
+	// Muscles is every group, trained or not — unlike Lifts, which is truncated
+	// to the top few. Seven rows is a short table, and the rows worth reading
+	// are the empty ones at the bottom, so there is nothing here to trim.
+	Muscles   []MuscleSlice
+	MaxMuscle float64
+	Untrained []string
 }
 
 // Subject is the recap's subject line, naming the lifter because every recap
@@ -66,6 +74,8 @@ func RenderEmail(displayName string, rep Report) (string, error) {
 		Lifts:       rep.Lifts,
 		Weekdays:    rep.Weekdays,
 		BestWeekday: rep.BestWeekday,
+		Muscles:     rep.Muscles,
+		Untrained:   rep.UntrainedMuscles(),
 	}
 	// Only the top few lifts: an email is skimmed once, and a lift that carried
 	// two percent of the month is not what the reader opened it for.
@@ -77,6 +87,9 @@ func RenderEmail(displayName string, rep Report) (string, error) {
 	}
 	for _, v := range data.Weekdays {
 		data.MaxWeekday = math.Max(data.MaxWeekday, v)
+	}
+	for _, m := range data.Muscles {
+		data.MaxMuscle = math.Max(data.MaxMuscle, m.VolumeLb)
 	}
 
 	var buf bytes.Buffer
@@ -124,6 +137,33 @@ func plural(n int, one, many string) string {
 		return one
 	}
 	return many
+}
+
+// muscleName turns a taxonomy key into a label. The keys are lower-case single
+// words by construction (the CHECK constraint in 0009 lists them), so this is
+// the whole of the transformation and not a first pass at one.
+func muscleName(group string) string {
+	if group == "" {
+		return ""
+	}
+	return strings.ToUpper(group[:1]) + group[1:]
+}
+
+// joinNames reads a list the way a person would say it: "core", "core and
+// arms", "core, arms and chest".
+func joinNames(names []string) string {
+	labels := make([]string, 0, len(names))
+	for _, n := range names {
+		labels = append(labels, strings.ToLower(muscleName(n)))
+	}
+	switch len(labels) {
+	case 0:
+		return ""
+	case 1:
+		return labels[0]
+	default:
+		return strings.Join(labels[:len(labels)-1], ", ") + " and " + labels[len(labels)-1]
+	}
 }
 
 func weekdayName(i int) string {
@@ -289,6 +329,32 @@ var emailHTML = strings.TrimSpace(`
       </tr>
       {{ end }}
     </table>
+    {{ end }}
+
+    {{ if .Muscles }}
+    <div style="font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#94a3b8;margin-bottom:10px;padding-bottom:5px;border-bottom:1px solid #f1f5f9;">What you trained</div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      {{ range .Muscles }}
+      <tr>
+        <td style="padding:4px 8px 4px 0;color:{{ if .Trained }}#1e293b{{ else }}#cbd5e1{{ end }};white-space:nowrap;">{{ muscle .Group }}</td>
+        <td style="padding:4px 0;width:100%;">
+          <!-- An untrained group keeps its row and loses its bar. A zero-width
+               div is not nothing: it is the empty shelf that makes the gap
+               legible, which is the whole reason this table lists the groups
+               nobody touched. -->
+          <div style="background:#05d9e8;height:10px;border-radius:5px;width:{{ barPct .VolumeLb $.MaxMuscle }}%;"></div>
+        </td>
+        <td style="padding:4px 0 4px 8px;color:#94a3b8;text-align:right;white-space:nowrap;">{{ if .Trained }}{{ lb .VolumeLb }} lb{{ else }}&mdash;{{ end }}</td>
+      </tr>
+      {{ end }}
+    </table>
+    {{ if .Untrained }}
+    <div style="font-size:12px;color:#64748b;margin:8px 0 24px;">
+      Nothing logged for {{ names .Untrained }}.
+    </div>
+    {{ else }}
+    <div style="height:24px;"></div>
+    {{ end }}
     {{ end }}
 
     {{ if ge .BestWeekday 0 }}
