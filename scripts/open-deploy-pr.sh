@@ -62,6 +62,7 @@ branch_exists() {
 # and a deploy PR pushed past the first page would silently go un-superseded — the
 # exact two-open-PRs state this guards against, minus the evidence.
 superseded=()
+still_open=()
 open_prs="[]"
 page=1
 while :; do
@@ -86,11 +87,17 @@ while read -r num ref ver; do
   fi
   echo "Superseding gitops#${num} (v${ver})"
   jq -n '{state:"closed"}' > /tmp/close.json
-  req PATCH "${API}/pulls/${num}" /tmp/close.json >/dev/null \
-    || echo "warning: could not close gitops#${num} (continuing)" >&2
-  req DELETE "${API}/branches/${ref}" >/dev/null \
-    || echo "warning: could not delete ${ref} (continuing)" >&2
-  superseded+=("v${ver} (gitops#${num})")
+  # Only claim the supersede once the close actually took. Recording it either way
+  # would put "Supersedes vX" on a PR that still has vX open next to it, telling the
+  # operator the queue is at depth one at the moment it isn't.
+  if req PATCH "${API}/pulls/${num}" /tmp/close.json >/dev/null; then
+    req DELETE "${API}/branches/${ref}" >/dev/null \
+      || echo "warning: could not delete ${ref} (continuing)" >&2
+    superseded+=("v${ver} (gitops#${num})")
+  else
+    echo "warning: could not close gitops#${num} — it stays open and will conflict." >&2
+    still_open+=("v${ver} (gitops#${num})")
+  fi
 done < <(printf '%s' "$open_prs" | jq -r '
   .[] | select(.base.ref == "main")
       | select(.head.ref | startswith("deploy/iron-temple-v"))
@@ -143,6 +150,15 @@ fi
     sup="$(printf '%s, ' "${superseded[@]}")"
     echo
     echo "Supersedes ${sup%, } — this release's images already include those commits."
+  fi
+  # On the PR rather than only in the release job's stderr, which nobody reads once
+  # the run is green: a supersede that didn't take is exactly the two-open-PRs state
+  # that needs a human, so it has to be visible where the human is looking.
+  if [ ${#still_open[@]} -gt 0 ]; then
+    sto="$(printf '%s, ' "${still_open[@]}")"
+    echo
+    echo "⚠️ Could not close ${sto%, } — still open and will conflict with this PR."
+    echo "Close those by hand before merging this one."
   fi
 } > /tmp/pr-body.md
 
