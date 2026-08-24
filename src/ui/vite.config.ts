@@ -1,7 +1,7 @@
 import { execFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, mkdirSync, readFileSync, watch, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Plugin } from "vite";
 import { defineConfig } from "vitest/config";
@@ -213,6 +213,37 @@ function readChangelog(): Changelog {
 }
 
 /**
+ * The git directories holding the refs readChangelog() reads through
+ * scripts/changelog.sh: HEAD says which commits this checkout has, and the tags
+ * say which of them have been released.
+ *
+ * Asked of git rather than assumed to be `<root>/.git`, because that is only
+ * true of a plain clone. In a worktree `.git` is a file, HEAD lives in the
+ * worktree's own directory, and the tags live in the main checkout's — so both
+ * paths are needed and only git knows them.
+ */
+function gitRefDirs(): string[] {
+  try {
+    const out = execFileSync("git", ["rev-parse", "--git-dir", "--git-common-dir"], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const dirs = out
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "")
+      // Both are printed relative to REPO_ROOT when they sit inside it.
+      .map((dir) => resolve(REPO_ROOT, dir));
+    return [...new Set(dirs)];
+  } catch {
+    // Not a checkout (the UI image build, where .dockerignore drops .git). The
+    // JSON is the source there and it cannot change under a running server.
+    return [];
+  }
+}
+
+/**
  * Serve the release notes to the app as `virtual:iron-temple/changelog`.
  *
  * A virtual module rather than a generated file on disk: nothing needs to be
@@ -231,6 +262,60 @@ function changelogVirtualModule(): Plugin {
     load(id) {
       if (id !== resolvedId) return null;
       return `export default ${JSON.stringify(readChangelog())};`;
+    },
+    // Recompute when the checkout moves. load() runs once and Vite caches the
+    // result for the life of the dev server, so without this the panel is
+    // frozen at whatever git said when `pnpm dev` started: pull a release and
+    // the header still shows the previous one's notes — or, if the release tag
+    // hasn't been fetched yet, labels the new commits "unreleased" — until the
+    // server is restarted. Nobody restarts a dev server to check a changelog,
+    // so it just reads as broken.
+    configureServer(server) {
+      const dirs = gitRefDirs();
+      if (dirs.length === 0) return;
+
+      let timer: ReturnType<typeof setTimeout> | undefined;
+
+      const refresh = () => {
+        // A fetch or a checkout rewrites a burst of refs. Recompute once when
+        // it settles rather than once per file, since each recompute shells out
+        // to changelog.sh and ends in a page reload.
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          const mod = server.moduleGraph.getModuleById(resolvedId);
+          if (!mod) return;
+          server.moduleGraph.invalidateModule(mod);
+          // Plain data with no HMR accept handler, so the panel only picks the
+          // new notes up on a reload.
+          server.ws.send({ type: "full-reload" });
+        }, 200);
+      };
+
+      // node's fs.watch rather than server.watcher: Vite ignores **/.git/** by
+      // default, and lifting that would put every object git writes into the
+      // dev server's watch set to catch the handful of files that matter.
+      const watchers = dirs.flatMap((dir) =>
+        // HEAD covers commit and branch moves; the other three cover a tag or
+        // branch arriving, loose (refs/…) or packed (packed-refs).
+        ["HEAD", "packed-refs", "refs/heads", "refs/tags"].flatMap((entry) => {
+          try {
+            const w = watch(join(dir, entry), { persistent: false }, refresh);
+            // packed-refs comes and goes with `git gc`, and a watch whose path
+            // is removed reports it here rather than throwing above.
+            w.on("error", () => {});
+            return [w];
+          } catch {
+            // Absent — packed-refs in a freshly cloned repo, or refs/tags in one
+            // with no tags yet. The remaining watches still see it appear.
+            return [];
+          }
+        }),
+      );
+
+      server.httpServer?.on("close", () => {
+        clearTimeout(timer);
+        for (const w of watchers) w.close();
+      });
     },
   };
 }

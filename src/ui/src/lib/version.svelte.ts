@@ -43,17 +43,40 @@ let inFlight = false;
 let lastPollAt = 0;
 
 /**
+ * Whether a version string names a local build rather than a release.
+ *
+ * Only the release pipeline stamps a version, via -ldflags (release.yml). A
+ * plain `go build` — which is what air runs on every save in `make dev` — leaves
+ * main.version as "dev", and the API answers /health with "dev-<sha>", plus a
+ * "-dirty" suffix while the tree has uncommitted changes.
+ */
+function isDevBuild(v: string): boolean {
+  return v === "dev" || v.startsWith("dev-");
+}
+
+/**
  * Whether to offer the update. Reads reactive state, so calling it from a
  * template or a `$derived` re-evaluates when a poll lands.
  *
  * Both versions must be known: an unanswered /health leaves `latest` empty, and
  * "" !== "v1.2.3" would otherwise read as a new release every time the API is
  * briefly unreachable.
+ *
+ * Dev builds are never offered, on either side of the comparison. The prompt
+ * exists because a static bundle behind nginx cannot update itself; in
+ * development Vite serves the bundle and reloads it itself, while the version
+ * the API reports moves on every rebuild — a commit, a checkout, or merely
+ * dirtying the tree flips the string. Comparing those two strings turned every
+ * `air` rebuild into "a new version has been deployed", which was never true:
+ * nothing local is deployed. A release never reports "dev", so this cannot
+ * suppress a real one.
  */
 export function hasUpdate(): boolean {
   return (
     version.running !== "" &&
     version.latest !== "" &&
+    !isDevBuild(version.running) &&
+    !isDevBuild(version.latest) &&
     version.latest !== version.running &&
     version.latest !== version.dismissed
   );
