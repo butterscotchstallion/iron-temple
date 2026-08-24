@@ -63,11 +63,23 @@ branch_exists() {
 # exact two-open-PRs state this guards against, minus the evidence.
 superseded=()
 still_open=()
+scan_gap=""
 open_prs="[]"
 page=1
 while :; do
-  batch="$(req GET "${API}/pulls?state=open&limit=${PAGE_LIMIT}&page=${page}" || echo '[]')"
-  batch="$(printf '%s' "$batch" | jq -c 'if type == "array" then . else [] end' 2>/dev/null || echo '[]')"
+  # A fetch that fails must not look like the end of the list. Folding an error
+  # into an empty array would end the scan believing it had seen everything, so a
+  # blip on page one supersedes nothing at all and reports no reason — the failure
+  # mode this whole block exists to prevent, arriving silently.
+  if ! raw="$(req GET "${API}/pulls?state=open&limit=${PAGE_LIMIT}&page=${page}")"; then
+    scan_gap="the request for page ${page} failed"
+    break
+  fi
+  batch="$(printf '%s' "$raw" | jq -c 'if type == "array" then . else empty end' 2>/dev/null)" || batch=""
+  if [ -z "$batch" ]; then
+    scan_gap="page ${page} came back in an unexpected shape"
+    break
+  fi
   # Stop on an empty page, not on a short one. PAGE_LIMIT is what we ask for, not
   # what we get: Gitea's page size is admin-configurable (MAX_RESPONSE_ITEMS, and
   # DEFAULT_PAGING_NUM is only 30), so a server capping below 50 would make a full
@@ -77,11 +89,13 @@ while :; do
   open_prs="$(jq -nc --argjson a "$open_prs" --argjson b "$batch" '$a + $b')"
   page=$((page + 1))
   if [ "$page" -gt 20 ]; then
-    echo "warning: stopped scanning open PRs at page 20 — a pending deploy PR past" \
-         "that point will not be superseded." >&2
+    scan_gap="the scan hit its 20-page cap"
     break
   fi
 done
+if [ -n "$scan_gap" ]; then
+  echo "warning: ${scan_gap} — a pending deploy PR may have been missed." >&2
+fi
 while read -r num ref ver; do
   [ -n "${num}" ] || continue
   # A forced workflow_dispatch can re-release an old version out of order; never
@@ -165,6 +179,11 @@ fi
     echo
     echo "⚠️ Could not close ${sto%, } — still open and will conflict with this PR."
     echo "Close those by hand before merging this one."
+  fi
+  if [ -n "${scan_gap}" ]; then
+    echo
+    echo "⚠️ Incomplete supersede scan — ${scan_gap}. An older deploy PR may still be"
+    echo "open; check the deploy PR list before merging this one."
   fi
 } > /tmp/pr-body.md
 
