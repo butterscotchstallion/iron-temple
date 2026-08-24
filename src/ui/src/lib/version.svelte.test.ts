@@ -110,6 +110,67 @@ describe("version store", () => {
     expect(version.latest).toBe("v1.2.3");
   });
 
+  // `air` rebuilds the API on every save in `make dev`, and an unstamped build
+  // reports "dev-<sha>" — so the string moves on a commit, a checkout, or merely
+  // dirtying the tree. None of those is a deployment, and offering to reload for
+  // one is both wrong and constant.
+  it("never offers an update between dev builds", async () => {
+    getHealth.mockResolvedValue(health("dev-0965a2e"));
+    await poll();
+
+    getHealth.mockResolvedValue(health("dev-55bdb2d"));
+    await poll();
+
+    expect(hasUpdate()).toBe(false);
+    expect(version.running).toBe("dev-0965a2e");
+    expect(version.latest).toBe("dev-55bdb2d");
+  });
+
+  it("ignores the dirty marker a local edit adds", async () => {
+    getHealth.mockResolvedValue(health("dev-55bdb2d"));
+    await poll();
+
+    getHealth.mockResolvedValue(health("dev-55bdb2d-dirty"));
+    await poll();
+
+    expect(hasUpdate()).toBe(false);
+  });
+
+  // A build carrying no VCS info at all reports the bare fallback.
+  it("treats a bare dev build as local too", async () => {
+    getHealth.mockResolvedValue(health("dev"));
+    await poll();
+
+    getHealth.mockResolvedValue(health("dev-55bdb2d"));
+    await poll();
+
+    expect(hasUpdate()).toBe(false);
+  });
+
+  // Pointing a released bundle at a dev API is a misconfiguration, and reloading
+  // would not fix it — so that direction is silent as well.
+  it("does not offer a dev build to a release", async () => {
+    getHealth.mockResolvedValue(health("v1.2.3"));
+    await poll();
+
+    getHealth.mockResolvedValue(health("dev-55bdb2d"));
+    await poll();
+
+    expect(hasUpdate()).toBe(false);
+  });
+
+  // The guard keys on "dev", not on "doesn't look like a tag" — a real release
+  // must still be offered.
+  it("still offers a real release", async () => {
+    getHealth.mockResolvedValue(health("v0.27.0"));
+    await poll();
+
+    getHealth.mockResolvedValue(health("v0.28.0"));
+    await poll();
+
+    expect(hasUpdate()).toBe(true);
+  });
+
   it("ignores an answer with no version in it", async () => {
     getHealth.mockResolvedValue({ data: { status: "ok" } });
     await poll();
