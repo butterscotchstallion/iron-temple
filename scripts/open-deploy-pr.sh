@@ -3,6 +3,16 @@
 # API-only (no git checkout of gitops); auth via GITOPS_TOKEN (write:repository on
 # homelab-gitops, non-admin iron-temple-deployer bot).
 #   $1 = version (e.g. 0.1.0)   $2 = api image ref   $3 = ui image ref
+#
+# Only ever one deploy PR open at a time: a repin overwrites both image lines
+# wholesale rather than patching them, so the newest release is the only one worth
+# merging — its images already contain every commit the pending older ones carry.
+# Leaving two open is what breaks them. Both get cut from the same main and touch
+# the same two lines, so whichever merges second is left conflicting (this stranded
+# v0.29.0 in gitops#437 behind v0.28.1). Superseding the older PR here keeps the
+# queue at depth one, and re-cutting our own branch from current main on every run
+# makes a repeat release of one version idempotent instead of a 409 against the
+# branch it left behind.
 set -euo pipefail
 VERSION="$1"; API_REF="$2"; UI_REF="$3"
 : "${GITOPS_TOKEN:?GITOPS_TOKEN required}"
@@ -10,6 +20,7 @@ VERSION="$1"; API_REF="$2"; UI_REF="$3"
 API="http://gitea-http.gitea.svc.cluster.local:3000/api/v1/repos/gitadmin/homelab-gitops"
 FILE="services/iron-temple/deployment.yaml"
 BRANCH="deploy/iron-temple-v${VERSION}"
+PAGE_LIMIT=50 # requested page size; the server may hand back fewer
 
 # req METHOD URL [json-datafile] — prints the response body; on HTTP >= 400 prints
 # the method/path/status AND the API's error message (so a 403 says *why*), then fails.
@@ -34,6 +45,103 @@ req() {
   printf '%s' "${body}"
 }
 
+# Existence probe that doesn't go through req(), whose 404 diagnostics would read
+# as a failure when the answer we want is just "no".
+branch_exists() {
+  [ "$(curl -sS -o /dev/null -w '%{http_code}' \
+        -H "Authorization: token ${GITOPS_TOKEN}" "${API}/branches/$1")" = "200" ]
+}
+
+# 0. supersede whatever is still pending. A stale branch can't be salvaged by
+# rewriting its content: git merges by ancestry, so a branch cut from an older main
+# still conflicts on the image lines even once its file matches byte for byte. It
+# has to be re-cut from current main, which means retiring the PR pointing at it.
+# Best-effort throughout — the images and tag are already pushed by this point, so
+# a hiccup here should cost us a conflict to clean up by hand, not the whole PR.
+#
+# Closing happens BEFORE the new branch and PR are created, which means a failure in
+# steps 1-3 leaves the old PR closed and no new one open. That ordering is deliberate.
+# Closing afterwards would instead leave a window with two conflicting deploy PRs
+# open, and an operator who merges the older one during it ships stale images; the
+# window this way ships nothing. Both states are recovered by re-running the release
+# — the flow is idempotent — and both are loud, since anything failing here exits
+# non-zero and trips the notify step. Given a forced choice, fail toward deploying
+# nothing rather than toward deploying the wrong thing.
+# Paged through rather than read off page one: gitops carries a long renovate tail,
+# and a deploy PR pushed past the first page would silently go un-superseded — the
+# exact two-open-PRs state this guards against, minus the evidence.
+superseded=()
+still_open=()
+left_open=()
+scan_gap=""
+open_prs="[]"
+page=1
+while :; do
+  # A fetch that fails must not look like the end of the list. Folding an error
+  # into an empty array would end the scan believing it had seen everything, so a
+  # blip on page one supersedes nothing at all and reports no reason — the failure
+  # mode this whole block exists to prevent, arriving silently.
+  if ! raw="$(req GET "${API}/pulls?state=open&limit=${PAGE_LIMIT}&page=${page}")"; then
+    scan_gap="the request for page ${page} failed"
+    break
+  fi
+  batch="$(printf '%s' "$raw" | jq -c 'if type == "array" then . else empty end' 2>/dev/null)" || batch=""
+  if [ -z "$batch" ]; then
+    scan_gap="page ${page} came back in an unexpected shape"
+    break
+  fi
+  # Stop on an empty page, not on a short one. PAGE_LIMIT is what we ask for, not
+  # what we get: Gitea's page size is admin-configurable (MAX_RESPONSE_ITEMS, and
+  # DEFAULT_PAGING_NUM is only 30), so a server capping below 50 would make a full
+  # page look like the last one and hide every PR behind it. One extra request buys
+  # a termination condition that doesn't care how the server is tuned.
+  [ "$(printf '%s' "$batch" | jq 'length')" -eq 0 ] && break
+  open_prs="$(jq -nc --argjson a "$open_prs" --argjson b "$batch" '$a + $b')"
+  page=$((page + 1))
+  if [ "$page" -gt 20 ]; then
+    scan_gap="the scan hit its 20-page cap"
+    break
+  fi
+done
+if [ -n "$scan_gap" ]; then
+  echo "warning: ${scan_gap} — a pending deploy PR may have been missed." >&2
+fi
+while read -r num ref ver; do
+  [ -n "${num}" ] || continue
+  # A forced workflow_dispatch can re-release an old version out of order; never
+  # let that retire a newer deploy that legitimately supersedes *us*.
+  if [ "$(printf '%s\n%s\n' "${ver}" "${VERSION}" | sort -V | head -1)" != "${ver}" ]; then
+    echo "warning: gitops#${num} deploys v${ver}, newer than v${VERSION} — leaving it open." >&2
+    left_open+=("v${ver} (gitops#${num})")
+    continue
+  fi
+  echo "Superseding gitops#${num} (v${ver})"
+  jq -n '{state:"closed"}' > /tmp/close.json
+  # Only claim the supersede once the close actually took. Recording it either way
+  # would put "Supersedes vX" on a PR that still has vX open next to it, telling the
+  # operator the queue is at depth one at the moment it isn't.
+  if req PATCH "${API}/pulls/${num}" /tmp/close.json >/dev/null; then
+    req DELETE "${API}/branches/${ref}" >/dev/null \
+      || echo "warning: could not delete ${ref} (continuing)" >&2
+    superseded+=("v${ver} (gitops#${num})")
+  else
+    echo "warning: could not close gitops#${num} — it stays open and will conflict." >&2
+    still_open+=("v${ver} (gitops#${num})")
+  fi
+done < <(printf '%s' "$open_prs" | jq -r '
+  unique_by(.number)[]
+      | select(.base.ref == "main")
+      | select(.head.ref | startswith("deploy/iron-temple-v"))
+      | [.number, .head.ref, (.head.ref | ltrimstr("deploy/iron-temple-v"))] | @tsv')
+
+# Our own branch also outlives a half-finished earlier run — one that pushed the
+# commit but never opened the PR, or whose PR was closed by hand — and the loop
+# above only sees branches that still have one. Drop it so step 3 can re-cut it.
+if branch_exists "${BRANCH}"; then
+  echo "Re-cutting ${BRANCH} from current main"
+  req DELETE "${API}/branches/${BRANCH}" >/dev/null
+fi
+
 # 1. current file (base64 content + blob sha)
 resp="$(req GET "${API}/contents/${FILE}?ref=main")"
 sha="$(printf '%s' "$resp" | jq -r '.sha')"
@@ -44,7 +152,9 @@ sed -i -E "s#( *image: ).*iron-temple-api:.*#\1${API_REF}#" /tmp/dep.yaml
 sed -i -E "s#( *image: ).*iron-temple-ui:.*#\1${UI_REF}#"   /tmp/dep.yaml
 newcontent="$(base64 -w0 < /tmp/dep.yaml)"
 
-# 3. commit onto a fresh branch created from main
+# 3. commit onto a fresh branch created from main. new_branch is what makes the PR
+# mergeable: it parents the commit on main *as of now*, not on whatever main looked
+# like when this release started building.
 jq -n --arg m "deploy(iron-temple): v${VERSION}" --arg c "$newcontent" \
       --arg s "$sha" --arg nb "$BRANCH" \
    '{message:$m, content:$c, sha:$s, branch:"main", new_branch:$nb}' > /tmp/put.json
@@ -65,6 +175,34 @@ fi
   echo
   echo "- api: ${API_REF}"
   echo "- ui: ${UI_REF}"
+  # Recorded here rather than as a comment on the closed PR: GITOPS_TOKEN carries
+  # write:repository, which doesn't cover issue comments.
+  if [ ${#superseded[@]} -gt 0 ]; then
+    sup="$(printf '%s, ' "${superseded[@]}")"
+    echo
+    echo "Supersedes ${sup%, } — this release's images already include those commits."
+  fi
+  # On the PR rather than only in the release job's stderr, which nobody reads once
+  # the run is green: a supersede that didn't take is exactly the two-open-PRs state
+  # that needs a human, so it has to be visible where the human is looking.
+  if [ ${#still_open[@]} -gt 0 ]; then
+    sto="$(printf '%s, ' "${still_open[@]}")"
+    echo
+    echo "⚠️ Could not close ${sto%, } — still open and will conflict with this PR."
+    echo "Close those by hand before merging this one."
+  fi
+  if [ ${#left_open[@]} -gt 0 ]; then
+    lo="$(printf '%s, ' "${left_open[@]}")"
+    echo
+    echo "⚠️ ${lo%, } is newer than this release and was left open, so this PR will"
+    echo "conflict with it. Merge whichever version you actually want and close the"
+    echo "other — this one only exists because the release was forced out of order."
+  fi
+  if [ -n "${scan_gap}" ]; then
+    echo
+    echo "⚠️ Incomplete supersede scan — ${scan_gap}. An older deploy PR may still be"
+    echo "open; check the deploy PR list before merging this one."
+  fi
 } > /tmp/pr-body.md
 
 jq -n --arg h "$BRANCH" --arg t "deploy(iron-temple): v${VERSION}" --rawfile b /tmp/pr-body.md \
