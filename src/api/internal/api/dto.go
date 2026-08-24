@@ -133,6 +133,25 @@ type prescribedSessionDTO struct {
 	ProgramDayID   int32                   `json:"programDayId"`
 	ProgramDayName string                  `json:"programDayName"`
 	Exercises      []prescribedExerciseDTO `json:"exercises"`
+	// Layoff is nil unless the lifter has been away a week or more, so its mere
+	// presence is the client's cue to ask whether to ease back in. Reported
+	// whether or not the deload was applied — the weights above already reflect
+	// the answer, and this says what the question was.
+	Layoff *layoffDTO `json:"layoff"`
+}
+
+// layoffDTO describes time away from training and what easing back in would
+// cost, so the UI can ask a specific question ("it's been 3 weeks — take 30%
+// off?") instead of a vague one.
+type layoffDTO struct {
+	Weeks         int    `json:"weeks"`
+	LastTrainedOn string `json:"lastTrainedOn"`
+	// DeloadPct is a fraction (0.30 is 30%), matching rackedChangeDTO's
+	// convention for percentages on this wire.
+	DeloadPct float64 `json:"deloadPct"`
+	// Applied is whether the weights in this response actually have the cut in
+	// them. False is the default: a layoff deload is offered, never imposed.
+	Applied bool `json:"applied"`
 }
 
 type prescribedExerciseDTO struct {
@@ -149,7 +168,8 @@ type prescribedExerciseDTO struct {
 // progressionInfoDTO explains why the engine chose a lift's weight, so the UI
 // can surface an impending stall or a deload instead of a bare number.
 type progressionInfoDTO struct {
-	// Status is one of the progression.Status values (start|advance|hold|deload).
+	// Status is one of the progression.Status values
+	// (start|advance|hold|deload|layoff), or "fixed" for assistance.
 	Status string `json:"status"`
 	// FailureCount is the consecutive trailing failures at the working weight.
 	//
@@ -164,6 +184,11 @@ type progressionInfoDTO struct {
 	// PreviousWeightLb is the weight just worked (advanced past, repeated, or
 	// deloaded from); 0 when there is no history.
 	PreviousWeightLb float64 `json:"previousWeightLb"`
+	// LayoffPct is the fraction taken off this lift for time away from
+	// training (0.30 is 30%), 0 when none was. Per-lift as well as on the
+	// session, because a layoff does not necessarily reach every lift: one
+	// already deloaded further for a stall keeps its own, deeper cut.
+	LayoffPct float64 `json:"layoffPct"`
 }
 
 type sessionSetDTO struct {

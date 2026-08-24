@@ -17,6 +17,10 @@ Derived from [`design.md`](./design.md), with decisions locked in below.
 ### Progression rules (lb)
 - All three programs are **linear** and share one progression engine: **+5 lb/session** on squat, bench, row, overhead press; **+10 lb/session** on deadlift.
 - Deload **10%** after **3 consecutive failed sessions** on a lift.
+- Deload **10% per full week away**, capped at **50%**, after a layoff — offered on
+  the program screen when the lifter has not trained in a week, never applied
+  unless they say yes. Taken off the weight last actually worked, and it does not
+  stack with the stall deload above: whichever single cut is deeper wins.
 - The programs differ only in set count (5×5, 3×5, or 2×5), not in progression logic.
 
 ## Database strategy

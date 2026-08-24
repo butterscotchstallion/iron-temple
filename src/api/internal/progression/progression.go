@@ -9,6 +9,8 @@
 //   - Repeat the same weight after a failed session.
 //   - After 3 consecutive failed sessions at the same weight, deload to 90%
 //     of that weight (rounded to the nearest 5 lb), giving a fresh run-up.
+//   - After time away from training, optionally deload by 10% per week off,
+//     capped at 50%. This one is the lifter's to ask for; see layoff.go.
 //
 // The engine is pure: it takes a history and returns a number, with no I/O.
 // The data layer supplies the history; the API layer maps exercises to
@@ -70,6 +72,10 @@ const (
 	// StatusDeload means the failure streak hit the threshold and the weight
 	// dropped to a fraction of the stalled working weight.
 	StatusDeload Status = "deload"
+	// StatusLayoff means the weight was cut for time away from training rather
+	// than for anything that happened in a session. Only ApplyLayoff produces
+	// it, and only when the lifter asked for it — see layoff.go.
+	StatusLayoff Status = "layoff"
 )
 
 // Plan is the engine's decision for the next session: the target weight plus the
@@ -87,6 +93,10 @@ type Plan struct {
 	// PreviousLb is the weight just worked — the weight advanced past, repeated,
 	// or deloaded from (0 on StatusStart).
 	PreviousLb float64
+	// LayoffPct is the fraction taken off for time away from training, as a
+	// fraction (0.30 is 30%). 0 unless Status is StatusLayoff; NextPlan never
+	// sets it, because the calendar is not something it is shown.
+	LayoffPct float64
 }
 
 // Next returns the target weight for the upcoming session of a lift. It is a

@@ -163,7 +163,17 @@ func (s *Server) previewNextSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	exercises, err := s.prescribe(ctx, day.ProgramID, day.ID, userFrom(ctx).ID)
+	userID := userFrom(ctx).ID
+	// Measured on every preview, not only when ?deload=true, because this is
+	// where the client learns there is a question to ask at all. Applied only
+	// when asked.
+	lay, err := s.layoffFor(ctx, userID, r.URL.Query().Get("deload") == "true")
+	if err != nil {
+		internalError(w)
+		return
+	}
+
+	exercises, err := s.prescribe(ctx, day.ProgramID, day.ID, userID, lay)
 	if err != nil {
 		internalError(w)
 		return
@@ -174,6 +184,7 @@ func (s *Server) previewNextSession(w http.ResponseWriter, r *http.Request) {
 		ProgramDayID:   day.ID,
 		ProgramDayName: day.Name,
 		Exercises:      exercises,
+		Layoff:         lay.dto(),
 	})
 }
 
@@ -191,7 +202,11 @@ func (s *Server) previewNextSession(w http.ResponseWriter, r *http.Request) {
 // Order matters. Main lifts come first because the session materializes sets in
 // this order and ListSessionSets reads them back in it — assistance is what you
 // do after the barbell work, not instead of it.
-func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32) ([]prescribedExerciseDTO, error) {
+//
+// lay is how long the lifter has been away and whether they asked to ease back
+// in. When it is active every weight below is cut by the same fraction, main
+// lifts and assistance alike — see layoff.go.
+func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32, lay layoffState) ([]prescribedExerciseDTO, error) {
 	pres, err := s.q.ListPrescriptionsByDay(ctx, dayID)
 	if err != nil {
 		return nil, err
@@ -232,6 +247,9 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32) 
 			progression.IncrementFor(p.ExerciseName),
 			history,
 		)
+		if lay.active() {
+			plan = progression.ApplyLayoff(plan, lay.weeks)
+		}
 		out = append(out, prescribedExerciseDTO{
 			ExerciseID:   p.ExerciseID,
 			ExerciseName: p.ExerciseName,
@@ -245,6 +263,7 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32) 
 				FailureCount:         plan.FailureCount,
 				FailuresBeforeDeload: progression.FailuresBeforeDeload,
 				PreviousWeightLb:     plan.PreviousLb,
+				LayoffPct:            plan.LayoffPct,
 			},
 		})
 	}
@@ -284,6 +303,27 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32) 
 			previous = numericToFloat(hist[n-1].WeightLb)
 			weight = previous
 		}
+
+		// A layoff does reach assistance, which is the one thing that overrides
+		// the paragraph above. It is not the engine arriving by the back door:
+		// no progression is being computed here, the same flat fraction is
+		// coming off every lift in the session. Three weeks out of the gym cost
+		// the curl what they cost the squat, and a lifter who agreed to ease
+		// back in did not mean "except the accessories".
+		//
+		// Only for a lift with history, matching ApplyLayoff's StatusStart
+		// guard: a stored fallback weight is what to use the first time, not
+		// something to detrain off.
+		layoffPct := 0.0
+		if lay.active() && previous > 0 {
+			weight = progression.LayoffWeight(previous, lay.weeks)
+			layoffPct = progression.LayoffPct(lay.weeks)
+		}
+
+		status := progressionFixed
+		if layoffPct > 0 {
+			status = string(progression.StatusLayoff)
+		}
 		out = append(out, prescribedExerciseDTO{
 			ExerciseID:   a.ExerciseID,
 			ExerciseName: a.ExerciseName,
@@ -293,9 +333,10 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32) 
 			WeightLb:     weight,
 			RestSeconds:  a.RestSeconds,
 			Progression: progressionInfoDTO{
-				Status:               progressionFixed,
+				Status:               status,
 				FailuresBeforeDeload: progression.FailuresBeforeDeload,
 				PreviousWeightLb:     previous,
+				LayoffPct:            layoffPct,
 			},
 		})
 	}

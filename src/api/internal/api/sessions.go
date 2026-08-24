@@ -127,6 +127,15 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 type createSessionRequest struct {
 	ProgramDayID int32   `json:"programDayId"`
 	PerformedOn  *string `json:"performedOn"`
+	// Deload asks for the layoff cut to be baked into this session's weights —
+	// the lifter's yes to the prompt the preview raised. Absent reads as no,
+	// which is what makes a client that has never heard of the feature behave
+	// exactly as it did before.
+	//
+	// Not a weight or a percentage: how deep the cut goes is the server's to
+	// decide from how long they have actually been away (layoff.go), so this
+	// cannot be used to prescribe an arbitrary number.
+	Deload bool `json:"deload"`
 }
 
 func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
@@ -163,7 +172,15 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := userFrom(ctx).ID
-	prescription, err := s.prescribe(ctx, day.ProgramID, day.ID, userID)
+	// Measured now rather than trusted from the client: the preview that raised
+	// the prompt may be minutes or a reload old, and the length of the layoff
+	// decides the size of the cut.
+	lay, err := s.layoffFor(ctx, userID, req.Deload)
+	if err != nil {
+		internalError(w)
+		return
+	}
+	prescription, err := s.prescribe(ctx, day.ProgramID, day.ID, userID, lay)
 	if err != nil {
 		internalError(w)
 		return
