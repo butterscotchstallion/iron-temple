@@ -1,80 +1,97 @@
 # iron-temple
 
-A fitness tracker for weight-lifting sessions. Go + chi API (`src/api`),
-Svelte + Tailwind UI (`src/ui`), PostgreSQL.
+A fitness tracker for barbell training. You pick a program, it tells you what to
+lift and how much, you tap through the sets, and it works out the next session's
+weights from what you actually did.
 
-## Development
+It is built for one lifter on a phone at the rack — registration closes after the
+first account, there is no feed and no social layer, and every screen is sized for
+a thumb between sets. Go + chi API (`src/api`), Svelte + Tailwind UI (`src/ui`),
+PostgreSQL.
 
-Git hooks are managed with [lefthook](https://github.com/evilmartians/lefthook):
+## Features
 
-```sh
-lefthook install
-```
+### Programs
 
-In the devcontainer sandbox both the binary and the install are handled for you —
-the image bakes lefthook and the launcher runs `lefthook install` per session.
+Six programs ship seeded, all from the StrongLifts family plus Madcow: **StrongLifts
+5x5** and its **Lite**, **Mini** and **Intermediate** variants, **Advanced 3x5** for
+when 5x5 stalls, and **Madcow 5x5**. Each is a set of days (Workout A, B, C) holding
+the prescribed lifts, sets and reps.
 
-On commit, `lefthook.yml` runs one command, `dev/precommit.sh`, which looks at the
-staged paths and runs the matching gates from `scripts/preflight.sh`:
+- **Put the days on a calendar.** Assign a weekday to each program day, and the app
+  knows what you're scheduled to do and when you missed it.
+- **Add your own assistance work.** Accessories attach to a program day as a
+  per-account overlay: the seeded programs stay untouched, so your curls never move
+  anyone else's Workout A — or confuse the progression engine, which only reads the
+  prescription.
+- **See the next session before you start it.** Every day previews its target
+  weights, so you know what's coming without opening a session.
 
-| staged | gates |
-|--------|-------|
-| `src/api/**`, `.gitea/workflows/go.yml` | `go vet`, `golangci-lint`, `gosec`, `go test -short -race`, the integration suite |
-| `src/ui/**`, `src/api/openapi.yaml` | frozen-lockfile install, `generate:api`, `svelte-check`, Vitest |
-| anything | `hadolint`, `gitleaks` |
+### Sessions
 
-Those match what CI enforces, gate for gate and flag for flag — the point is that a
-local pass should mean a CI pass. Four checks are **deliberately CI-only**, each
-because it needs something an air-gapped box can't have: `go mod tidy` and
-`govulncheck` (Go proxy / `vuln.go.dev`), `trivy` (vulnerability DB), and the
-Playwright e2e suite (too slow for a commit hook). See the header of
-`scripts/preflight.sh` for the full reasoning.
+- **Set-by-set logging** — tick sets off as you complete them, or edit reps and
+  weight when the day doesn't go to plan.
+- **A rest timer that knows the lift.** Rest is a property of the movement, not a
+  flat three minutes: a deadlift and a lateral raise get their own lengths, and
+  assistance work inherits one automatically.
+- **Plate math**, drawn as a loaded bar, so you don't do the arithmetic in your head.
+- **Bodyweight weigh-ins** recorded against the session.
+- **Finish the session** to close it out — with confetti when it went well.
 
-If a gate's tooling is missing the commit is **blocked**, not waved through — a hook
-that silently no-ops looks exactly like one that passed. Bypass once with
-`git commit --no-verify`.
+### Progression
 
-Per-project setup lives in `src/api` (see its `Makefile`) and `src/ui`
-(see its `README.md`).
+A single linear engine sets the next weight for every lift from its own history:
+**+5 lb** after a successful session (**+10 lb** on the deadlift), the same weight
+again after a failure, and a **deload to 90%** after three consecutive failures at
+one weight. It also says *why* it picked a number, so a deload or an approaching
+stall reads as a decision rather than a mystery.
 
-### Preflight — check before you push
+### Racked — your training, in review
 
-`scripts/preflight.sh` runs the same gates, so a PR doesn't come back red on
-something you could catch in seconds. Selectors combine; naming none runs everything:
+A recap of **this week, this month or this year**, computed from performed sets:
 
-```sh
-scripts/preflight.sh                  # everything runnable here
-scripts/preflight.sh --api            # backend only
-scripts/preflight.sh --ui             # frontend only
-scripts/preflight.sh --repo           # Dockerfile lint + secret scan only
-scripts/preflight.sh --api --repo     # combined
-scripts/preflight.sh --strict         # missing tooling fails instead of skipping
-```
+- Volume, sessions, sets and reps, with the change against the previous period.
+- Volume split by **muscle group** and by **prescribed vs. assistance** work.
+- **PRs, milestones, heaviest set, fastest session** and your **most improved** lift.
+- **Streaks and attendance** measured against the days you scheduled — and against
+  the days that have actually elapsed, so a month two days in isn't graded as a
+  whole one.
+- Per-lift trend charts, a calendar heatmap, best weekday and peak training hour.
+- Bodyweight trend, when there are weigh-ins to draw.
+- An **archetype** naming how you trained, and a **share card** you can export.
 
-Everything above runs **fully offline** in the sandbox: the Go module is vendored
-(`src/api/vendor`), and the image bakes the Go stack plus a warm pnpm store that
-`pnpm install --offline` rehydrates `node_modules` from in a few seconds.
+Monthly and yearly recaps also go out **by email** when a mail relay is configured.
+The reporter asks the database which completed periods haven't been sent rather than
+waking on the 1st, so downtime delays a recap instead of dropping it.
 
-The script exits non-zero only when a gate that actually ran failed; skipped gates
-never fail it. `--strict` flips that for *missing tooling* specifically: a gate that
-can't run becomes a failure instead of a skip. The pre-commit hook always passes
-`--strict`; interactive runs stay lenient, so a box missing one tool can still check
-the rest. ("Nothing to check here" — no `src/ui`, no `go.mod` — stays a skip either way.)
+### Library, history and progress
 
-### Integration tests
+- **Exercise library** — everything seeded plus your own movements, each with a
+  muscle group and its equipment, grouped so a long list stays navigable.
+- **Per-lift history** with a progress chart and your top set to date.
+- **Session history**, paged, with lifetime volume across everything you've logged.
+- **Home** opens on the program you last used, with your streak and a heatmap of
+  recent training.
 
-The backend's DB-backed suite runs against a **real Postgres**, so it needs one — which
-is why `go test -short` skips it and why the `--api` gate above runs it separately. In
-the sandbox that database is `it-testdb` (baked into the image); in CI it's a throwaway
-pod. Either way the invocation itself lives in one place, `dev/integration-test.sh`, so
-the two can't drift:
+### Accounts
 
-```sh
-scripts/preflight.sh --api                    # the gate, integration suite included
-it-testdb run -- sh dev/integration-test.sh   # just the suite
-```
+Password login on a session cookie, with **registration closing as soon as the first
+account exists** — this is a homelab app that expects exactly one lifter, and an open
+signup form on the public internet is an open door. Profile carries a display name,
+an uploaded avatar or a colour, and a password change.
 
-Don't hand-roll a `go test` line or your own Postgres for these — the flags and the
-database's encoding/collation are both pinned, and a private copy of either is how a
-green local run starts lying about CI. Details, and what the failures look like:
-[`docs/api-integration-tests.md`](docs/api-integration-tests.md).
+## Documentation
+
+| | |
+|--|--|
+| [`docs/development.md`](docs/development.md) | Git hooks, preflight gates, integration tests |
+| [`docs/design.md`](docs/design.md) | Original design brief |
+| [`docs/implementation-plan.md`](docs/implementation-plan.md) | What's built, phase by phase |
+| [`docs/api-integration-tests.md`](docs/api-integration-tests.md) | The DB-backed API suite |
+| [`docs/ci-branch-protection.md`](docs/ci-branch-protection.md) | CI and branch rules |
+| [`docs/sandbox-ui-tooling.md`](docs/sandbox-ui-tooling.md) | Offline UI tooling in the sandbox |
+| [`AGENTS.md`](AGENTS.md) | Commit conventions and generated-code rules |
+
+`src/api/openapi.yaml` is the API contract; the UI's typed client is generated from
+it. Per-project setup lives in `src/api` (see its `Makefile`) and `src/ui` (see its
+`README.md`).
