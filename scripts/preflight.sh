@@ -197,8 +197,14 @@ fi
 if [ "$run_repo" -eq 1 ]; then
   # Same discovery shellcheck.yml uses — dev/list-shell-scripts.sh is shared by both
   # callers, so this gate and CI's can't drift onto different file sets. Default
-  # severity (style and up), matching CI: the tree is clean at that level, and the
+  # severity (style and up) on both sides; the tree is clean at that level, and the
   # cheapest moment to keep it there is before the commit.
+  #
+  # The VERSIONS do differ, deliberately: the devcontainer installs Debian's shellcheck
+  # (0.9.0) and the runner image bakes the current upstream release, which flags more.
+  # So this gate can pass while CI's finds something — the second one-way divergence
+  # here after `pnpm --offline` below, and in the same direction (CI stricter). Such a
+  # finding is real; fix the script rather than reaching for --no-verify.
   shell_scripts=$(sh "$root/dev/list-shell-scripts.sh")
   if [ -z "$shell_scripts" ]; then
     skip "shellcheck" "  no shell scripts — nothing to check."

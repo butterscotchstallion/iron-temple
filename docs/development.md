@@ -31,6 +31,13 @@ because it needs something an air-gapped box can't have: `go mod tidy` and
 Playwright e2e suite (too slow for a commit hook). See the header of
 `scripts/preflight.sh` for the full reasoning.
 
+Two gates are **stricter in one direction**, and both lean the safe way — CI catches
+more than the hook, never less. `pnpm install` uses `--offline` locally against a
+`--prefer-offline` CI, and `shellcheck` is Debian's 0.9.0 in the sandbox against the
+newest release on the runner, which flags more. So a green hook is necessary but not
+quite sufficient; if CI reports a shell finding your commit didn't, the finding is
+real — newer shellcheck simply learned to spot it. Fix the script.
+
 If a gate's tooling is missing the commit is **blocked**, not waved through — a hook
 that silently no-ops looks exactly like one that passed. Bypass once with
 `git commit --no-verify`.

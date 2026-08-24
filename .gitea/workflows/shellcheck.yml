@@ -6,10 +6,25 @@ name: ShellCheck (shell script lint)
 # have no test suite and mostly run once, in anger, on a runner; shellcheck is the
 # only thing standing between an unquoted expansion and a silently mis-skipped job.
 #
-# shellcheck is called from PATH, like the other repo-wide linters here (hadolint,
-# gitleaks, trivy), which the homelab-runner image bakes in. If this step fails with
-# "shellcheck: command not found", the image needs an ARG SHELLCHECK_VERSION next to
-# them — see homelab-gitops services/act-runner/Dockerfile.
+# shellcheck is baked into the homelab-runner image (see homelab-gitops
+# services/act-runner/Dockerfile, ARG SHELLCHECK_VERSION) and called from PATH — same
+# arrangement as hadolint, gitleaks and trivy, and no per-run download. If this step
+# ever reports "shellcheck: command not found", the image lost it; that is a rebuild,
+# not a workflow change.
+#
+# THE IMAGE TRACKS THE NEWEST RELEASE, AND THE SANDBOX DOES NOT
+#
+# The devcontainer installs shellcheck from Debian (0.9.0 at time of writing) while the
+# runner bakes the current upstream release, which flags strictly more. So this gate can
+# fail on a commit that sailed through the pre-commit hook — it is the second deliberate
+# one-way divergence in the gate set, after preflight.sh's `pnpm --offline`, and it runs
+# in the same direction: CI stricter than local, never the reverse. A local pass is
+# still necessary, just not quite sufficient.
+#
+# When that happens the finding is real — a newer shellcheck reports it because it
+# learned to, not because the runner is misconfigured. Fix the script. Closing the gap
+# for good means bumping the devcontainer's shellcheck to match the runner's, not
+# pinning the runner back.
 #
 # NO `on.paths` filter, deliberately. Four of the scripts have no extension
 # (.gitea/scripts/*), so no glob describes the set without going stale the moment
