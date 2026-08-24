@@ -207,7 +207,17 @@ if [ "$run_repo" -eq 1 ]; then
   # finding is real; fix the script rather than reaching for --no-verify.
   shell_scripts=$(sh "$root/dev/list-shell-scripts.sh")
   if [ -z "$shell_scripts" ]; then
-    skip "shellcheck" "  no shell scripts — nothing to check."
+    # NOT a "nothing to check" skip. Unlike Dockerfiles, shell scripts are never absent
+    # here — the discovery script is itself one, so it always finds at least itself. An
+    # empty list therefore means discovery broke, and skip() would pass even under
+    # --strict, leaving the hook green with this gate silently switched off. That is the
+    # no-op gate this whole change exists to prevent, so fail in BOTH modes; the
+    # workflow's `exit 1` on a zero-length list is the same guard on the CI side.
+    printf '\n\033[1m==> shellcheck\033[0m  \033[31m(discovery broken)\033[0m\n'
+    printf '  dev/list-shell-scripts.sh returned no files, which should be impossible.\n'
+    printf '  Refusing to report a pass over zero files.\n'
+    printf 'FAIL\tshellcheck\n' >> "$summary"
+    failed=1
   elif command -v shellcheck >/dev/null 2>&1; then
     # Unquoted for the same reason as hadolint below: gate() runs "$@", so IFS splits
     # the newline-separated list into one argument per file.
