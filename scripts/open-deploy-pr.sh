@@ -3,6 +3,16 @@
 # API-only (no git checkout of gitops); auth via GITOPS_TOKEN (write:repository on
 # homelab-gitops, non-admin iron-temple-deployer bot).
 #   $1 = version (e.g. 0.1.0)   $2 = api image ref   $3 = ui image ref
+#
+# Only ever one deploy PR open at a time: a repin overwrites both image lines
+# wholesale rather than patching them, so the newest release is the only one worth
+# merging — its images already contain every commit the pending older ones carry.
+# Leaving two open is what breaks them. Both get cut from the same main and touch
+# the same two lines, so whichever merges second is left conflicting (this stranded
+# v0.29.0 in gitops#437 behind v0.28.1). Superseding the older PR here keeps the
+# queue at depth one, and re-cutting our own branch from current main on every run
+# makes a repeat release of one version idempotent instead of a 409 against the
+# branch it left behind.
 set -euo pipefail
 VERSION="$1"; API_REF="$2"; UI_REF="$3"
 : "${GITOPS_TOKEN:?GITOPS_TOKEN required}"
@@ -34,6 +44,49 @@ req() {
   printf '%s' "${body}"
 }
 
+# Existence probe that doesn't go through req(), whose 404 diagnostics would read
+# as a failure when the answer we want is just "no".
+branch_exists() {
+  [ "$(curl -sS -o /dev/null -w '%{http_code}' \
+        -H "Authorization: token ${GITOPS_TOKEN}" "${API}/branches/$1")" = "200" ]
+}
+
+# 0. supersede whatever is still pending. A stale branch can't be salvaged by
+# rewriting its content: git merges by ancestry, so a branch cut from an older main
+# still conflicts on the image lines even once its file matches byte for byte. It
+# has to be re-cut from current main, which means retiring the PR pointing at it.
+# Best-effort throughout — the images and tag are already pushed by this point, so
+# a hiccup here should cost us a conflict to clean up by hand, not the whole PR.
+superseded=()
+open_prs="$(req GET "${API}/pulls?state=open&limit=50" || echo '[]')"
+while read -r num ref ver; do
+  [ -n "${num}" ] || continue
+  # A forced workflow_dispatch can re-release an old version out of order; never
+  # let that retire a newer deploy that legitimately supersedes *us*.
+  if [ "$(printf '%s\n%s\n' "${ver}" "${VERSION}" | sort -V | head -1)" != "${ver}" ]; then
+    echo "warning: gitops#${num} deploys v${ver}, newer than v${VERSION} — leaving it open." >&2
+    continue
+  fi
+  echo "Superseding gitops#${num} (v${ver})"
+  jq -n '{state:"closed"}' > /tmp/close.json
+  req PATCH "${API}/pulls/${num}" /tmp/close.json >/dev/null \
+    || echo "warning: could not close gitops#${num} (continuing)" >&2
+  req DELETE "${API}/branches/${ref}" >/dev/null \
+    || echo "warning: could not delete ${ref} (continuing)" >&2
+  superseded+=("v${ver} (gitops#${num})")
+done < <(printf '%s' "$open_prs" | jq -r '
+  .[] | select(.base.ref == "main")
+      | select(.head.ref | startswith("deploy/iron-temple-v"))
+      | [.number, .head.ref, (.head.ref | ltrimstr("deploy/iron-temple-v"))] | @tsv')
+
+# Our own branch also outlives a half-finished earlier run — one that pushed the
+# commit but never opened the PR, or whose PR was closed by hand — and the loop
+# above only sees branches that still have one. Drop it so step 3 can re-cut it.
+if branch_exists "${BRANCH}"; then
+  echo "Re-cutting ${BRANCH} from current main"
+  req DELETE "${API}/branches/${BRANCH}" >/dev/null
+fi
+
 # 1. current file (base64 content + blob sha)
 resp="$(req GET "${API}/contents/${FILE}?ref=main")"
 sha="$(printf '%s' "$resp" | jq -r '.sha')"
@@ -44,7 +97,9 @@ sed -i -E "s#( *image: ).*iron-temple-api:.*#\1${API_REF}#" /tmp/dep.yaml
 sed -i -E "s#( *image: ).*iron-temple-ui:.*#\1${UI_REF}#"   /tmp/dep.yaml
 newcontent="$(base64 -w0 < /tmp/dep.yaml)"
 
-# 3. commit onto a fresh branch created from main
+# 3. commit onto a fresh branch created from main. new_branch is what makes the PR
+# mergeable: it parents the commit on main *as of now*, not on whatever main looked
+# like when this release started building.
 jq -n --arg m "deploy(iron-temple): v${VERSION}" --arg c "$newcontent" \
       --arg s "$sha" --arg nb "$BRANCH" \
    '{message:$m, content:$c, sha:$s, branch:"main", new_branch:$nb}' > /tmp/put.json
@@ -65,6 +120,13 @@ fi
   echo
   echo "- api: ${API_REF}"
   echo "- ui: ${UI_REF}"
+  # Recorded here rather than as a comment on the closed PR: GITOPS_TOKEN carries
+  # write:repository, which doesn't cover issue comments.
+  if [ ${#superseded[@]} -gt 0 ]; then
+    sup="$(printf '%s, ' "${superseded[@]}")"
+    echo
+    echo "Supersedes ${sup%, } — this release's images already include those commits."
+  fi
 } > /tmp/pr-body.md
 
 jq -n --arg h "$BRANCH" --arg t "deploy(iron-temple): v${VERSION}" --rawfile b /tmp/pr-body.md \
