@@ -58,11 +58,21 @@ branch_exists() {
 # has to be re-cut from current main, which means retiring the PR pointing at it.
 # Best-effort throughout — the images and tag are already pushed by this point, so
 # a hiccup here should cost us a conflict to clean up by hand, not the whole PR.
+#
+# Closing happens BEFORE the new branch and PR are created, which means a failure in
+# steps 1-3 leaves the old PR closed and no new one open. That ordering is deliberate.
+# Closing afterwards would instead leave a window with two conflicting deploy PRs
+# open, and an operator who merges the older one during it ships stale images; the
+# window this way ships nothing. Both states are recovered by re-running the release
+# — the flow is idempotent — and both are loud, since anything failing here exits
+# non-zero and trips the notify step. Given a forced choice, fail toward deploying
+# nothing rather than toward deploying the wrong thing.
 # Paged through rather than read off page one: gitops carries a long renovate tail,
 # and a deploy PR pushed past the first page would silently go un-superseded — the
 # exact two-open-PRs state this guards against, minus the evidence.
 superseded=()
 still_open=()
+left_open=()
 scan_gap=""
 open_prs="[]"
 page=1
@@ -102,6 +112,7 @@ while read -r num ref ver; do
   # let that retire a newer deploy that legitimately supersedes *us*.
   if [ "$(printf '%s\n%s\n' "${ver}" "${VERSION}" | sort -V | head -1)" != "${ver}" ]; then
     echo "warning: gitops#${num} deploys v${ver}, newer than v${VERSION} — leaving it open." >&2
+    left_open+=("v${ver} (gitops#${num})")
     continue
   fi
   echo "Superseding gitops#${num} (v${ver})"
@@ -179,6 +190,13 @@ fi
     echo
     echo "⚠️ Could not close ${sto%, } — still open and will conflict with this PR."
     echo "Close those by hand before merging this one."
+  fi
+  if [ ${#left_open[@]} -gt 0 ]; then
+    lo="$(printf '%s, ' "${left_open[@]}")"
+    echo
+    echo "⚠️ ${lo%, } is newer than this release and was left open, so this PR will"
+    echo "conflict with it. Merge whichever version you actually want and close the"
+    echo "other — this one only exists because the release was forced out of order."
   fi
   if [ -n "${scan_gap}" ]; then
     echo
