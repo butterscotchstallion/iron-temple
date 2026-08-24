@@ -9,7 +9,7 @@
 # Aligned with CI (.gitea/workflows/):
 #   --api   go vet, golangci-lint, gosec, go test -short -race      (go.yml)
 #   --ui    frozen-lockfile install, generate:api, check, test:unit (ui.yml)
-#   --repo  hadolint, gitleaks                          (hadolint.yml, secret-scan.yml)
+#   --repo  hadolint, gitleaks, shellcheck   (hadolint.yml, secret-scan.yml, shellcheck.yml)
 #
 # CI-only ON PURPOSE — each needs something this box cannot have:
 #   go mod tidy   ignores vendor/ and re-resolves through the Go proxy, which this box
@@ -193,8 +193,24 @@ if [ "$run_ui" -eq 1 ]; then
   fi
 fi
 
-# ===================== repo-wide (Dockerfiles, secrets) ======================
+# ============== repo-wide (Dockerfiles, secrets, shell scripts) ==============
 if [ "$run_repo" -eq 1 ]; then
+  # Same discovery shellcheck.yml uses — dev/list-shell-scripts.sh is shared by both
+  # callers, so this gate and CI's can't drift onto different file sets. Default
+  # severity (style and up), matching CI: the tree is clean at that level, and the
+  # cheapest moment to keep it there is before the commit.
+  shell_scripts=$(sh "$root/dev/list-shell-scripts.sh")
+  if [ -z "$shell_scripts" ]; then
+    skip "shellcheck" "  no shell scripts — nothing to check."
+  elif command -v shellcheck >/dev/null 2>&1; then
+    # Unquoted for the same reason as hadolint below: gate() runs "$@", so IFS splits
+    # the newline-separated list into one argument per file.
+    # shellcheck disable=SC2086
+    gate "shellcheck" shellcheck $shell_scripts
+  else
+    unavailable "shellcheck" "  shellcheck is not on PATH."
+  fi
+
   # Same discovery hadolint.yml uses: our Dockerfiles only, never vendored ones.
   # node_modules is excluded on top of CI's list because it exists only locally —
   # CI lints a fresh checkout that has none, so skipping it MATCHES CI rather than

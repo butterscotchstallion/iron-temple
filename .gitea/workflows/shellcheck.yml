@@ -1,0 +1,61 @@
+---
+name: ShellCheck (shell script lint)
+
+# Static analysis for every shell script this repo owns — the CI helpers that decide
+# which jobs run, the release/notify scripts, and the local gates themselves. These
+# have no test suite and mostly run once, in anger, on a runner; shellcheck is the
+# only thing standing between an unquoted expansion and a silently mis-skipped job.
+#
+# shellcheck is called from PATH, like the other repo-wide linters here (hadolint,
+# gitleaks, trivy), which the homelab-runner image bakes in. If this step fails with
+# "shellcheck: command not found", the image needs an ARG SHELLCHECK_VERSION next to
+# them — see homelab-gitops services/act-runner/Dockerfile.
+#
+# NO `on.paths` filter, deliberately. Four of the scripts have no extension
+# (.gitea/scripts/*), so no glob describes the set without going stale the moment
+# someone adds another — and a filter that quietly matches nothing turns this
+# workflow into a no-op that still reports green. Discovery is
+# dev/list-shell-scripts.sh's job instead, and the whole run takes about a second.
+# secret-scan.yml runs on every push for the same kind of reason.
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shellcheck:
+    name: ShellCheck scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Lint shell scripts
+        # dev/list-shell-scripts.sh is the SAME discovery scripts/preflight.sh runs,
+        # so a local pass and a CI pass cover the same files. The list is echoed
+        # because a shrinking count is the signal that discovery broke — a green run
+        # over zero files otherwise looks exactly like a green run over all of them.
+        # retry-etxtbsy guards the shared-pod exec race (see the script's header).
+        run: |
+          set -euo pipefail
+          mapfile -t scripts < <(sh dev/list-shell-scripts.sh)
+          if [ "${#scripts[@]}" -eq 0 ]; then
+            echo "::error::no shell scripts found — discovery is broken"
+            exit 1
+          fi
+          echo "Linting ${#scripts[@]} shell script(s):"
+          printf '  %s\n' "${scripts[@]}"
+          bash "$GITHUB_WORKSPACE/.gitea/scripts/retry-etxtbsy" shellcheck "${scripts[@]}"
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          WORKFLOW: "${{ github.workflow }} / ${{ github.job }}"
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: ./scripts/ci-notify.sh

@@ -44,9 +44,11 @@ if matches '^(src/ui/|src/api/openapi\.yaml$|\.gitea/workflows/ui\.yml$)'; then
   args="$args --ui"
 fi
 
-# Repo-wide. hadolint.yml triggers on Dockerfiles; secret-scan.yml runs on EVERY
-# push, so the secret scan is worth running whenever anything is staged — a secret
-# caught here never enters git history, while one caught in CI is already pushed.
+# Repo-wide. hadolint.yml triggers on Dockerfiles; secret-scan.yml and shellcheck.yml
+# run on EVERY push, so both are worth running whenever anything is staged — a secret
+# caught here never enters git history, while one caught in CI is already pushed, and
+# linting a dozen scripts costs well under a second. (Do not open a comment line with
+# the word "shellcheck" — it parses as a directive. This one was caught by the gate.)
 args="$args --repo"
 
 # shellcheck disable=SC2086  # $args is a deliberate list of flags

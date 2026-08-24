@@ -22,7 +22,7 @@ staged paths and runs the matching gates from `scripts/preflight.sh`:
 |--------|-------|
 | `src/api/**`, `.gitea/workflows/go.yml` | `go vet`, `golangci-lint`, `gosec`, `go test -short -race`, the integration suite |
 | `src/ui/**`, `src/api/openapi.yaml` | frozen-lockfile install, `generate:api`, `svelte-check`, Vitest |
-| anything | `hadolint`, `gitleaks` |
+| anything | `hadolint`, `gitleaks`, `shellcheck` |
 
 Those match what CI enforces, gate for gate and flag for flag — the point is that a
 local pass should mean a CI pass. Four checks are **deliberately CI-only**, each
@@ -47,7 +47,7 @@ something you could catch in seconds. Selectors combine; naming none runs everyt
 scripts/preflight.sh                  # everything runnable here
 scripts/preflight.sh --api            # backend only
 scripts/preflight.sh --ui             # frontend only
-scripts/preflight.sh --repo           # Dockerfile lint + secret scan only
+scripts/preflight.sh --repo           # Dockerfile lint + secret scan + shell lint only
 scripts/preflight.sh --api --repo     # combined
 scripts/preflight.sh --strict         # missing tooling fails instead of skipping
 ```
