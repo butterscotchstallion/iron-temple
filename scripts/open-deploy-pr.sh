@@ -20,7 +20,7 @@ VERSION="$1"; API_REF="$2"; UI_REF="$3"
 API="http://gitea-http.gitea.svc.cluster.local:3000/api/v1/repos/gitadmin/homelab-gitops"
 FILE="services/iron-temple/deployment.yaml"
 BRANCH="deploy/iron-temple-v${VERSION}"
-PAGE_LIMIT=50 # Gitea caps /pulls page size here anyway
+PAGE_LIMIT=50 # requested page size; the server may hand back fewer
 
 # req METHOD URL [json-datafile] — prints the response body; on HTTP >= 400 prints
 # the method/path/status AND the API's error message (so a 403 says *why*), then fails.
@@ -68,8 +68,13 @@ page=1
 while :; do
   batch="$(req GET "${API}/pulls?state=open&limit=${PAGE_LIMIT}&page=${page}" || echo '[]')"
   batch="$(printf '%s' "$batch" | jq -c 'if type == "array" then . else [] end' 2>/dev/null || echo '[]')"
+  # Stop on an empty page, not on a short one. PAGE_LIMIT is what we ask for, not
+  # what we get: Gitea's page size is admin-configurable (MAX_RESPONSE_ITEMS, and
+  # DEFAULT_PAGING_NUM is only 30), so a server capping below 50 would make a full
+  # page look like the last one and hide every PR behind it. One extra request buys
+  # a termination condition that doesn't care how the server is tuned.
+  [ "$(printf '%s' "$batch" | jq 'length')" -eq 0 ] && break
   open_prs="$(jq -nc --argjson a "$open_prs" --argjson b "$batch" '$a + $b')"
-  [ "$(printf '%s' "$batch" | jq 'length')" -lt "${PAGE_LIMIT}" ] && break
   page=$((page + 1))
   if [ "$page" -gt 20 ]; then
     echo "warning: stopped scanning open PRs at page 20 — a pending deploy PR past" \
@@ -99,7 +104,8 @@ while read -r num ref ver; do
     still_open+=("v${ver} (gitops#${num})")
   fi
 done < <(printf '%s' "$open_prs" | jq -r '
-  .[] | select(.base.ref == "main")
+  unique_by(.number)[]
+      | select(.base.ref == "main")
       | select(.head.ref | startswith("deploy/iron-temple-v"))
       | [.number, .head.ref, (.head.ref | ltrimstr("deploy/iron-temple-v"))] | @tsv')
 
