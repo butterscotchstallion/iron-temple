@@ -9,6 +9,7 @@
     addAssistance,
     removeAssistance,
     updateMe,
+    type Layoff,
     type Program,
     type ProgramDayAssistance,
   } from "../lib/api";
@@ -20,9 +21,16 @@
   import ErrorBanner from "../lib/ErrorBanner.svelte";
   import AssistancePicker from "../lib/AssistancePicker.svelte";
   import { weekdayOptions, todayWeekday } from "../lib/weekday";
+  import {
+    deloadLabel,
+    layoffHeadline,
+    pctLabel,
+    shouldPrompt,
+  } from "../lib/layoff";
   import Calendar from "@lucide/svelte/icons/calendar";
   import Play from "@lucide/svelte/icons/play";
   import Plus from "@lucide/svelte/icons/plus";
+  import TrendingDown from "@lucide/svelte/icons/trending-down";
   import X from "@lucide/svelte/icons/x";
 
   let { params }: { params?: { id?: string } } = $props();
@@ -46,10 +54,11 @@
       reps: number;
       weightLb: number;
       progression: {
-        status: "start" | "advance" | "hold" | "deload" | "fixed";
+        status: "start" | "advance" | "hold" | "deload" | "layoff" | "fixed";
         failureCount: number;
         failuresBeforeDeload: number;
         previousWeightLb: number;
+        layoffPct: number;
       };
     }[];
     assistance: ProgramDayAssistance[];
@@ -75,6 +84,24 @@
   let failed = $state(false);
   let startingDayId = $state<number | null>(null);
   let startFailed = $state(false);
+
+  // Time away from training, as the server measured it — null when there is
+  // none, which is the common case and means no prompt.
+  let layoff = $state<Layoff | null>(null);
+  // The lifter's answer. `deload` rides on every preview and on Start, so what
+  // is on screen is what will be lifted; `decided` retires the prompt once
+  // either button has been pressed.
+  let deload = $state(false);
+  let decided = $state(false);
+  // The re-previews behind "Deload" are one request per day, so the answer is
+  // not instant and Start must not be pressable through it — a session started
+  // mid-flight would be prescribed off the answer that hasn't landed yet.
+  let deloading = $state(false);
+  // Re-previewing after accepting the deload failed, leaving the old weights on
+  // screen. Its own flag rather than previewFailed's wording, which would say
+  // "couldn't load some workout details" over numbers that loaded fine and are
+  // simply not the ones the lifter just asked for.
+  let deloadFailed = $state(false);
   // One or more days' next-session preview couldn't be computed.
   let previewFailed = $state(false);
   // A weekday assignment couldn't be saved.
@@ -98,8 +125,12 @@
       prog.data.days.map(async (day) => {
         const preview = await previewNextSession({
           path: { programId, dayId: day.id },
+          query: { deload },
         });
         if (preview.error) previewFailed = true;
+        // Every day reports the same layoff — it is a fact about the lifter,
+        // not about the day — so the last one to answer simply wins.
+        if (preview.data) layoff = preview.data.layoff;
         return {
           id: day.id,
           name: day.name,
@@ -110,6 +141,51 @@
       }),
     );
     loading = false;
+  }
+
+  // Take the deload. Re-previews every day so the lifter sees the weights they
+  // just agreed to before pressing Start on any of them — the whole reason the
+  // question is asked here rather than behind the Start button.
+  //
+  // The previews are re-run in place rather than through load(), which would
+  // blank the program to a skeleton and re-save the current program over an
+  // answer to a question about weights.
+  async function acceptDeload() {
+    deloadFailed = false;
+    deloading = true;
+    const previews = await Promise.all(
+      days.map((day) =>
+        previewNextSession({
+          path: { programId, dayId: day.id },
+          query: { deload: true },
+        }),
+      ),
+    );
+    deloading = false;
+
+    // All of the days or none of them. Start sends one answer for the whole
+    // program, so a half-applied deload would put cut weights on some cards and
+    // uncut ones on others with no way to tell which the session would use.
+    //
+    // Nothing is marked decided on the way out, so the prompt comes back and
+    // the lifter can simply press it again — a failed request is not an answer.
+    if (previews.some((p) => p.error || !p.data)) {
+      deloadFailed = true;
+      return;
+    }
+    days = days.map((day, i) => ({
+      ...day,
+      exercises: previews[i].data?.exercises ?? day.exercises,
+    }));
+    deload = true;
+    decided = true;
+  }
+
+  // Keep the prescribed weights. Nothing to reload: the previews on screen were
+  // computed without the deload already.
+  function declineDeload() {
+    deload = false;
+    decided = true;
   }
 
   // The weight the next session will actually prescribe for an assistance lift:
@@ -156,7 +232,12 @@
   // alone. A failed preview leaves the day's old weights on screen behind the
   // banner, which is better than replacing them with nothing.
   async function refreshDay(dayId: number, assistance: ProgramDayAssistance[]) {
-    const preview = await previewNextSession({ path: { programId, dayId } });
+    // Carries the deload answer, so adding a lift after accepting one doesn't
+    // re-draw the day at its undeloaded weights.
+    const preview = await previewNextSession({
+      path: { programId, dayId },
+      query: { deload },
+    });
     days = days.map((d) =>
       d.id === dayId
         ? { ...d, assistance, exercises: preview.data?.exercises ?? d.exercises }
@@ -209,7 +290,7 @@
   async function start(dayId: number) {
     startFailed = false;
     startingDayId = dayId;
-    const res = await createSession({ body: { programDayId: dayId } });
+    const res = await createSession({ body: { programDayId: dayId, deload } });
     startingDayId = null;
     if (res.error || !res.data) {
       startFailed = true;
@@ -251,6 +332,13 @@
     weightLb: number,
   ): ProgressionView | null {
     if (!p) return null;
+    if (p.status === "layoff") {
+      return {
+        label: `Deload −${pctLabel(p.layoffPct)}`,
+        variant: "destructive",
+        hint: `time off · ${p.previousWeightLb} → ${weightLb} lb`,
+      };
+    }
     if (p.status === "deload") {
       return {
         label: "Deload",
@@ -312,6 +400,45 @@
       />
     {/if}
 
+    {#if deloadFailed}
+      <ErrorBanner
+        message="Couldn't apply the deload. Your weights are unchanged."
+        onDismiss={() => (deloadFailed = false)}
+      />
+    {/if}
+
+    <!-- Above the days, because it changes every number below it: answering
+         re-prescribes the whole program, and the lifter should see what they
+         agreed to before they press Start on any of it. -->
+    {#if shouldPrompt(layoff, decided) && layoff}
+      <Card class="border-primary/40 bg-primary/5 p-5">
+        <h3
+          class="flex items-center gap-2 text-lg font-bold text-card-foreground"
+        >
+          <TrendingDown class="size-5 text-primary" aria-hidden="true" />
+          Welcome back
+        </h3>
+        <p class="mt-1 text-sm text-muted-foreground">
+          {layoffHeadline(layoff)}. Ease back in with {pctLabel(
+            layoff.deloadPct,
+          )} off your working weights?
+        </p>
+        <div class="mt-4 flex flex-wrap gap-2">
+          <Button size="sm" onclick={acceptDeload} disabled={deloading}>
+            {deloading ? "Deloading…" : deloadLabel(layoff)}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onclick={declineDeload}
+            disabled={deloading}
+          >
+            Keep my weights
+          </Button>
+        </div>
+      </Card>
+    {/if}
+
     {#each orderedDays as day (day.id)}
       <Card
         class="p-5 {day.weekday === todayWeekday() ? 'ring-2 ring-primary' : ''}"
@@ -345,7 +472,7 @@
           <Button
             size="sm"
             onclick={() => start(day.id)}
-            disabled={startingDayId !== null}
+            disabled={startingDayId !== null || deloading}
           >
             <Play />
             {startingDayId === day.id ? "Starting…" : "Start"}

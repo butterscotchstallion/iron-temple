@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import type { RackedReport } from "../src/lib/api";
 
 // The UI is driven entirely by the API, so the e2e suite mocks those responses
@@ -78,6 +78,7 @@ const nextSession = {
         failureCount: 0,
         failuresBeforeDeload: 3,
         previousWeightLb: 0,
+        layoffPct: 0,
       },
     },
     // A stalled lift that hit the deload threshold — drives the "Deload" badge.
@@ -94,9 +95,13 @@ const nextSession = {
         failureCount: 3,
         failuresBeforeDeload: 3,
         previousWeightLb: 72.5,
+        layoffPct: 0,
       },
     },
   ],
+  // Trained recently, so there is nothing to be asked about. The layoff tests
+  // below override this.
+  layoff: null,
 };
 
 // A SessionSummary as returned by GET /sessions (History list).
@@ -173,7 +178,10 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/api/v1/programs", (route) => route.fulfill({ json: programs }));
   await page.route("**/api/v1/sessions**", (route) => route.fulfill({ json: emptySessions }));
   await page.route("**/api/v1/programs/1", (route) => route.fulfill({ json: program1 }));
-  await page.route("**/api/v1/programs/1/days/10/next-session", (route) =>
+  // Trailing ** so the glob still matches once a query string is on the URL —
+  // the preview carries ?deload=<answer>, the same reason /sessions and
+  // /exercises above are wildcarded.
+  await page.route("**/api/v1/programs/1/days/10/next-session**", (route) =>
     route.fulfill({ json: nextSession }),
   );
   // Default the Progress page to no exercises; individual tests override this.
@@ -231,6 +239,105 @@ test("navigates into a program's detail", async ({ page }) => {
   // The stalled Bench Press surfaces its deload reasoning; the fresh Squat does not.
   await expect(page.getByText("Deload", { exact: true })).toBeVisible();
   await expect(page.getByText("stalled 3× at 72.5 → 65 lb")).toBeVisible();
+
+  // Trained recently, so nothing is asked.
+  await expect(page.getByRole("heading", { name: "Welcome back" })).toBeHidden();
+});
+
+// ---- Layoff deload ----
+
+// The preview for a lifter three weeks out of the gym, as the server would
+// answer it either way. `deload` is the answer the client asked for in the
+// query string — the whole point being that the weights on screen are the ones
+// Start will use.
+//
+// The Bench Press is the interesting row: it had already deloaded for a stall
+// to 65, and a 30% layoff off the 72.5 it last worked is 50 — deeper, so the
+// layoff takes over rather than compounding with it. The Squat has never been
+// performed, so it is never cut.
+function layoffNextSession(deload: boolean) {
+  return {
+    ...nextSession,
+    exercises: [
+      nextSession.exercises[0],
+      {
+        ...nextSession.exercises[1],
+        weightLb: deload ? 50 : 65,
+        progression: {
+          ...nextSession.exercises[1].progression,
+          status: deload ? "layoff" : "deload",
+          layoffPct: deload ? 0.3 : 0,
+        },
+      },
+    ],
+    layoff: { weeks: 3, lastTrainedOn: "2026-08-01", deloadPct: 0.3, applied: deload },
+  };
+}
+
+/** Answer the preview according to the deload the client asked for. */
+async function routeLayoffPreview(page: Page) {
+  await page.route("**/api/v1/programs/1/days/10/next-session**", (route) => {
+    const deload = new URL(route.request().url()).searchParams.get("deload") === "true";
+    return route.fulfill({ json: layoffNextSession(deload) });
+  });
+}
+
+test("offers a deload after time away, and applies it to the weights on screen", async ({
+  page,
+}) => {
+  await routeLayoffPreview(page);
+
+  await page.goto("/#/programs/1");
+  await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
+  await expect(page.getByText("It's been 3 weeks since you trained", { exact: false })).toBeVisible();
+
+  // The prescription is untouched until the question is answered.
+  await expect(page.getByText("5×5 · 65 lb")).toBeVisible();
+
+  await page.getByRole("button", { name: "Deload 30%" }).click();
+
+  // Re-prescribed in place, and the badge says why this weight is not the one
+  // the stall deload picked.
+  await expect(page.getByText("5×5 · 50 lb")).toBeVisible();
+  await expect(page.getByText("time off · 72.5 → 50 lb")).toBeVisible();
+  // Answered, so it stops asking.
+  await expect(page.getByRole("heading", { name: "Welcome back" })).toBeHidden();
+});
+
+test("keeps the prescribed weights when the deload is declined", async ({ page }) => {
+  await routeLayoffPreview(page);
+
+  await page.goto("/#/programs/1");
+  await page.getByRole("button", { name: "Keep my weights" }).click();
+
+  await expect(page.getByRole("heading", { name: "Welcome back" })).toBeHidden();
+  await expect(page.getByText("5×5 · 65 lb")).toBeVisible();
+  await expect(page.getByText("stalled 3× at 72.5 → 65 lb")).toBeVisible();
+});
+
+// The answer has to reach the session, or the prompt is decoration.
+test("starts the session with the deload the lifter accepted", async ({ page }) => {
+  await routeLayoffPreview(page);
+  const posted: unknown[] = [];
+  await page.route("**/api/v1/sessions**", (route) => {
+    const request = route.request();
+    if (request.method() === "POST") {
+      posted.push(request.postDataJSON());
+      return route.fulfill({ json: sessionDetail() });
+    }
+    // Start navigates to the created session, so /sessions/1 has to answer with
+    // one — the bare /sessions list is the history behind it.
+    return /\/sessions\/\d+/.test(request.url())
+      ? route.fulfill({ json: sessionDetail() })
+      : route.fulfill({ json: emptySessions });
+  });
+
+  await page.goto("/#/programs/1");
+  await page.getByRole("button", { name: "Deload 30%" }).click();
+  await expect(page.getByText("5×5 · 50 lb")).toBeVisible();
+  await page.getByRole("button", { name: "Start" }).click();
+
+  await expect.poll(() => posted).toEqual([{ programDayId: 10, deload: true }]);
 });
 
 test("navigates between the main tabs via the nav bar", async ({ page }) => {

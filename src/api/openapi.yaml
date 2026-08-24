@@ -559,6 +559,22 @@ paths:
       description: >
         Returns the prescription for the day with weights computed from history
         via the program's progression rules. Does not create a session.
+
+        Also reports whether the lifter has been away from training long enough
+        to be offered a deload (`layoff`), which is measured on every call —
+        applying it is what `deload` below is for.
+      parameters:
+        - name: deload
+          in: query
+          required: false
+          description: >-
+            Apply the layoff deload to the weights in this preview: 10% off per
+            full week since the lifter last trained, capped at 50%. Lets the UI
+            show what easing back in would actually prescribe before the lifter
+            commits to it. Has no effect when they have not been away a week.
+          schema:
+            type: boolean
+            default: false
       responses:
         "200":
           description: Prescribed next session
@@ -1270,7 +1286,7 @@ components:
     PrescribedSession:
       description: A day's prescription with progression-computed weights, not yet saved.
       type: object
-      required: [programId, programDayId, programDayName, exercises]
+      required: [programId, programDayId, programDayName, exercises, layoff]
       properties:
         programId:
           type: integer
@@ -1285,6 +1301,49 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/PrescribedExercise"
+        layoff:
+          allOf:
+            - $ref: "#/components/schemas/Layoff"
+          nullable: true
+          description: >-
+            Null unless the lifter has been away from training for a week or
+            more, so its presence is the cue to ask whether they want to ease
+            back in. Present whether or not the deload was applied — the weights
+            above already reflect the answer, and this says what the question
+            was.
+
+    Layoff:
+      description: >-
+        Time away from training, and what easing back in would cost. Lets a
+        client ask a specific question ("it's been 3 weeks — take 30% off?")
+        rather than a vague one.
+      type: object
+      required: [weeks, lastTrainedOn, deloadPct, applied]
+      properties:
+        weeks:
+          type: integer
+          minimum: 1
+          description: >-
+            Full weeks since the last session with a logged rep, floored — six
+            days off is not a layoff and seven is.
+          example: 3
+        lastTrainedOn:
+          type: string
+          format: date
+          description: The day of that session.
+        deloadPct:
+          type: number
+          minimum: 0
+          maximum: 0.5
+          description: >-
+            What accepting the deload would take off, as a fraction (0.3 is
+            30%): 10% per full week away, capped at 50%.
+          example: 0.3
+        applied:
+          type: boolean
+          description: >-
+            Whether the weights in this response have the cut in them. False by
+            default — a layoff deload is offered, never imposed.
 
     ExerciseKind:
       type: string
@@ -1329,16 +1388,18 @@ components:
         Why the engine chose this lift's weight, so the UI can surface an
         impending stall or a deload instead of a bare number.
       type: object
-      required: [status, failureCount, failuresBeforeDeload, previousWeightLb]
+      required: [status, failureCount, failuresBeforeDeload, previousWeightLb, layoffPct]
       properties:
         status:
           type: string
-          enum: [start, advance, hold, deload, fixed]
+          enum: [start, advance, hold, deload, layoff, fixed]
           description: >-
             start (no history), advance (last session passed), hold (recent
             failure, repeating the weight), deload (stall hit the threshold, weight
-            dropped), fixed (assistance work — no engine runs on it; the weight is
-            carried forward from what was last logged).
+            dropped), layoff (weight cut for time away from training rather than
+            for anything that happened in a session), fixed (assistance work — no
+            engine runs on it; the weight is carried forward from what was last
+            logged).
           example: hold
         failureCount:
           type: integer
@@ -1357,6 +1418,16 @@ components:
             The weight just worked — advanced past, repeated, or deloaded from;
             0 when there is no history.
           example: 185
+        layoffPct:
+          type: number
+          minimum: 0
+          maximum: 0.5
+          description: >-
+            The fraction taken off this lift for time away from training (0.3 is
+            30%), 0 when none was. Per-lift as well as on the session, because a
+            layoff does not necessarily reach every lift: one already deloaded
+            further for a stall keeps its own, deeper cut.
+          example: 0
 
     CreateSessionRequest:
       type: object
@@ -1369,6 +1440,15 @@ components:
           type: string
           format: date
           description: Defaults to the server's current date if omitted
+        deload:
+          type: boolean
+          default: false
+          description: >-
+            Bake the layoff deload into this session's weights — the lifter's
+            yes to the prompt `PrescribedSession.layoff` raised. How deep the cut
+            goes is not sent: the server measures the layoff itself when the
+            session is created, so this cannot ask for an arbitrary weight. Has
+            no effect when they have not been away a week.
 
     UpdateSessionRequest:
       type: object
