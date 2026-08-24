@@ -205,7 +205,16 @@ if [ "$run_repo" -eq 1 ]; then
   # So this gate can pass while CI's finds something — the second one-way divergence
   # here after `pnpm --offline` below, and in the same direction (CI stricter). Such a
   # finding is real; fix the script rather than reaching for --no-verify.
-  shell_scripts=$(sh "$root/dev/list-shell-scripts.sh")
+  # The discovery script emits paths relative to the repo root (its documented
+  # contract, and what keeps CI's log readable). Absolutise them here: preflight can be
+  # invoked from any directory, and shellcheck resolves its arguments against the
+  # CALLER's cwd, so the bare list would miss every file from anywhere but the root —
+  # a false FAIL, not a clean error. hadolint below is CWD-independent for the same
+  # reason, via `find "$root"`; gitleaks gets there by cd'ing inside `sh -c`, which is
+  # not an option here (the embedded newlines would become command separators).
+  shell_scripts=$(sh "$root/dev/list-shell-scripts.sh" | while IFS= read -r f; do
+    printf '%s/%s\n' "$root" "$f"
+  done)
   if [ -z "$shell_scripts" ]; then
     # NOT a "nothing to check" skip. Unlike Dockerfiles, shell scripts are never absent
     # here — the discovery script is itself one, so it always finds at least itself. An
