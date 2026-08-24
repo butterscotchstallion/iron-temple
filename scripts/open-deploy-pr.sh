@@ -20,6 +20,7 @@ VERSION="$1"; API_REF="$2"; UI_REF="$3"
 API="http://gitea-http.gitea.svc.cluster.local:3000/api/v1/repos/gitadmin/homelab-gitops"
 FILE="services/iron-temple/deployment.yaml"
 BRANCH="deploy/iron-temple-v${VERSION}"
+PAGE_LIMIT=50 # Gitea caps /pulls page size here anyway
 
 # req METHOD URL [json-datafile] — prints the response body; on HTTP >= 400 prints
 # the method/path/status AND the API's error message (so a 403 says *why*), then fails.
@@ -57,8 +58,24 @@ branch_exists() {
 # has to be re-cut from current main, which means retiring the PR pointing at it.
 # Best-effort throughout — the images and tag are already pushed by this point, so
 # a hiccup here should cost us a conflict to clean up by hand, not the whole PR.
+# Paged through rather than read off page one: gitops carries a long renovate tail,
+# and a deploy PR pushed past the first page would silently go un-superseded — the
+# exact two-open-PRs state this guards against, minus the evidence.
 superseded=()
-open_prs="$(req GET "${API}/pulls?state=open&limit=50" || echo '[]')"
+open_prs="[]"
+page=1
+while :; do
+  batch="$(req GET "${API}/pulls?state=open&limit=${PAGE_LIMIT}&page=${page}" || echo '[]')"
+  batch="$(printf '%s' "$batch" | jq -c 'if type == "array" then . else [] end' 2>/dev/null || echo '[]')"
+  open_prs="$(jq -nc --argjson a "$open_prs" --argjson b "$batch" '$a + $b')"
+  [ "$(printf '%s' "$batch" | jq 'length')" -lt "${PAGE_LIMIT}" ] && break
+  page=$((page + 1))
+  if [ "$page" -gt 20 ]; then
+    echo "warning: stopped scanning open PRs at page 20 — a pending deploy PR past" \
+         "that point will not be superseded." >&2
+    break
+  fi
+done
 while read -r num ref ver; do
   [ -n "${num}" ] || continue
   # A forced workflow_dispatch can re-release an old version out of order; never
