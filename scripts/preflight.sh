@@ -9,7 +9,7 @@
 # Aligned with CI (.gitea/workflows/):
 #   --api   go vet, golangci-lint, gosec, go test -short -race      (go.yml)
 #   --ui    frozen-lockfile install, generate:api, check, test:unit (ui.yml)
-#   --repo  hadolint, gitleaks                          (hadolint.yml, secret-scan.yml)
+#   --repo  hadolint, gitleaks, shellcheck   (hadolint.yml, secret-scan.yml, shellcheck.yml)
 #
 # CI-only ON PURPOSE — each needs something this box cannot have:
 #   go mod tidy   ignores vendor/ and re-resolves through the Go proxy, which this box
@@ -193,8 +193,49 @@ if [ "$run_ui" -eq 1 ]; then
   fi
 fi
 
-# ===================== repo-wide (Dockerfiles, secrets) ======================
+# ============== repo-wide (Dockerfiles, secrets, shell scripts) ==============
 if [ "$run_repo" -eq 1 ]; then
+  # Same discovery shellcheck.yml uses — dev/list-shell-scripts.sh is shared by both
+  # callers, so this gate and CI's can't drift onto different file sets. Default
+  # severity (style and up) on both sides; the tree is clean at that level, and the
+  # cheapest moment to keep it there is before the commit.
+  #
+  # The VERSIONS do differ, deliberately: the devcontainer installs Debian's shellcheck
+  # (0.9.0) and the runner image bakes the current upstream release, which flags more.
+  # So this gate can pass while CI's finds something — the second one-way divergence
+  # here after `pnpm --offline` below, and in the same direction (CI stricter). Such a
+  # finding is real; fix the script rather than reaching for --no-verify.
+  # The discovery script emits paths relative to the repo root (its documented
+  # contract, and what keeps CI's log readable). Absolutise them here: preflight can be
+  # invoked from any directory, and shellcheck resolves its arguments against the
+  # CALLER's cwd, so the bare list would miss every file from anywhere but the root —
+  # a false FAIL, not a clean error. hadolint below is CWD-independent for the same
+  # reason, via `find "$root"`; gitleaks gets there by cd'ing inside `sh -c`, which is
+  # not an option here (the embedded newlines would become command separators).
+  shell_scripts=$(sh "$root/dev/list-shell-scripts.sh" | while IFS= read -r f; do
+    printf '%s/%s\n' "$root" "$f"
+  done)
+  if [ -z "$shell_scripts" ]; then
+    # NOT a "nothing to check" skip. Unlike Dockerfiles, shell scripts are never absent
+    # here — the discovery script is itself one, so it always finds at least itself. An
+    # empty list therefore means discovery broke, and skip() would pass even under
+    # --strict, leaving the hook green with this gate silently switched off. That is the
+    # no-op gate this whole change exists to prevent, so fail in BOTH modes; the
+    # workflow's `exit 1` on a zero-length list is the same guard on the CI side.
+    printf '\n\033[1m==> shellcheck\033[0m  \033[31m(discovery broken)\033[0m\n'
+    printf '  dev/list-shell-scripts.sh returned no files, which should be impossible.\n'
+    printf '  Refusing to report a pass over zero files.\n'
+    printf 'FAIL\tshellcheck\n' >> "$summary"
+    failed=1
+  elif command -v shellcheck >/dev/null 2>&1; then
+    # Unquoted for the same reason as hadolint below: gate() runs "$@", so IFS splits
+    # the newline-separated list into one argument per file.
+    # shellcheck disable=SC2086
+    gate "shellcheck" shellcheck $shell_scripts
+  else
+    unavailable "shellcheck" "  shellcheck is not on PATH."
+  fi
+
   # Same discovery hadolint.yml uses: our Dockerfiles only, never vendored ones.
   # node_modules is excluded on top of CI's list because it exists only locally —
   # CI lints a fresh checkout that has none, so skipping it MATCHES CI rather than

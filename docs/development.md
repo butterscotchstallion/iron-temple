@@ -22,7 +22,7 @@ staged paths and runs the matching gates from `scripts/preflight.sh`:
 |--------|-------|
 | `src/api/**`, `.gitea/workflows/go.yml` | `go vet`, `golangci-lint`, `gosec`, `go test -short -race`, the integration suite |
 | `src/ui/**`, `src/api/openapi.yaml` | frozen-lockfile install, `generate:api`, `svelte-check`, Vitest |
-| anything | `hadolint`, `gitleaks` |
+| anything | `hadolint`, `gitleaks`, `shellcheck` |
 
 Those match what CI enforces, gate for gate and flag for flag — the point is that a
 local pass should mean a CI pass. Four checks are **deliberately CI-only**, each
@@ -30,6 +30,13 @@ because it needs something an air-gapped box can't have: `go mod tidy` and
 `govulncheck` (Go proxy / `vuln.go.dev`), `trivy` (vulnerability DB), and the
 Playwright e2e suite (too slow for a commit hook). See the header of
 `scripts/preflight.sh` for the full reasoning.
+
+Two gates are **stricter in one direction**, and both lean the safe way — CI catches
+more than the hook, never less. `pnpm install` uses `--offline` locally against a
+`--prefer-offline` CI, and `shellcheck` is Debian's 0.9.0 in the sandbox against the
+newest release on the runner, which flags more. So a green hook is necessary but not
+quite sufficient; if CI reports a shell finding your commit didn't, the finding is
+real — newer shellcheck simply learned to spot it. Fix the script.
 
 If a gate's tooling is missing the commit is **blocked**, not waved through — a hook
 that silently no-ops looks exactly like one that passed. Bypass once with
@@ -47,7 +54,7 @@ something you could catch in seconds. Selectors combine; naming none runs everyt
 scripts/preflight.sh                  # everything runnable here
 scripts/preflight.sh --api            # backend only
 scripts/preflight.sh --ui             # frontend only
-scripts/preflight.sh --repo           # Dockerfile lint + secret scan only
+scripts/preflight.sh --repo           # Dockerfile lint + secret scan + shell lint only
 scripts/preflight.sh --api --repo     # combined
 scripts/preflight.sh --strict         # missing tooling fails instead of skipping
 ```

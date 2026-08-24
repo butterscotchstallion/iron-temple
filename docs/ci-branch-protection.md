@@ -28,8 +28,10 @@ before a PR can merge:
 - **`UI Check & Test`** — the gate job in `ui.yml`
 - **`Go Lint & Test`** — the gate job in `go.yml`
 
-Optionally also require: `Secret Scan`, `Trivy (dependency scan)`,
-`Hadolint (Dockerfile lint)`, `Validate Deploy Manifests`.
+Optionally also require: `Secret Scan`, `ShellCheck (shell script lint)`,
+`Trivy (dependency scan)`, `Hadolint (Dockerfile lint)`, `Validate Deploy Manifests`.
+The first two carry no `on: push: paths:` filter, so they report on every PR and are
+safe to require as-is; the rest are path-filtered — see the deadlock note below.
 
 > **Copy the exact context strings from a live PR.** Gitea renders the check name
 > from the workflow/job; the strings above are what the workflows are named, but
