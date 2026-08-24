@@ -64,11 +64,14 @@ func TestMigrateAppliesSchemaAndSeed(t *testing.T) {
 
 	// 0002 seeds three programs over five lifts; 0007 adds two more programs and
 	// the five variation lifts the Intermediate program needs; 0009 adds the
-	// accessory catalogue the exercise library browses.
+	// accessory catalogue the exercise library browses; 0012 adds Madcow 5x5,
+	// which prescribes only lifts 0002 already seeded — two more days and six
+	// more prescriptions, but no new exercises, which is why every exercise
+	// count in this test is untouched by it.
 	assertCount(t, sqlDB, "SELECT count(*) FROM exercises", 53)
-	assertCount(t, sqlDB, "SELECT count(*) FROM programs", 5)
-	assertCount(t, sqlDB, "SELECT count(*) FROM program_days", 11)
-	assertCount(t, sqlDB, "SELECT count(*) FROM program_day_exercises", 31)
+	assertCount(t, sqlDB, "SELECT count(*) FROM programs", 6)
+	assertCount(t, sqlDB, "SELECT count(*) FROM program_days", 13)
+	assertCount(t, sqlDB, "SELECT count(*) FROM program_day_exercises", 37)
 
 	// The split 0009 draws: the ten lifts the programs prescribe are not
 	// accessories, and everything it seeded is. Asserted as a split rather than

@@ -192,7 +192,7 @@ func TestSeedData(t *testing.T) {
 		JSON().Array().Length().IsEqual(53)
 	e.GET("/programs").Expect().
 		Status(http.StatusOK).
-		JSON().Array().Length().IsEqual(5)
+		JSON().Array().Length().IsEqual(6)
 }
 
 func TestGetProgramAndUnknown(t *testing.T) {
