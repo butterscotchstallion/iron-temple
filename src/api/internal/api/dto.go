@@ -36,6 +36,31 @@ type userDTO struct {
 	// AvatarEtag is appended to the avatar URL as a cache-buster, so a new
 	// upload appears immediately instead of after the cache expires.
 	AvatarEtag string `json:"avatarEtag,omitempty"`
+	// BarWeightLb is what this lifter's bar weighs. Every prescribed weight is
+	// loaded onto it, so plate maths and the warm-up ramp are both wrong without
+	// it — which is exactly what happened while it was a constant in the UI
+	// bundle. Always present: GetBarWeight falls back to 45.
+	BarWeightLb float64 `json:"barWeightLb"`
+	// Plates is what the lifter owns, heaviest first, and it is finite. Never
+	// nil — an account with no plates serializes as [], which the loader reads
+	// as bar-only rather than as "unset".
+	Plates []plateDTO `json:"plates"`
+}
+
+// plateDTO is a denomination and how many PAIRS of it are owned. Pairs rather
+// than a raw count because plates load symmetrically: three 45s are one usable
+// pair, and storing it in the unit it is used in keeps the loader from having to
+// halve and round.
+type plateDTO struct {
+	PlateLb float64 `json:"plateLb"`
+	Pairs   int32   `json:"pairs"`
+}
+
+// liftBaselineDTO is where one lift starts for one lifter. Only lifts with an
+// override appear; the rest fall back to the program's seeded starting weight.
+type liftBaselineDTO struct {
+	ExerciseID int32   `json:"exerciseId"`
+	WeightLb   float64 `json:"weightLb"`
 }
 
 type registrationStatusDTO struct {
@@ -53,12 +78,6 @@ const (
 	exerciseKindMain       = "main"
 	exerciseKindAssistance = "assistance"
 )
-
-// progressionFixed is the status reported for assistance work. It is not one of
-// progression.Status: the engine never produces it, because no engine runs on
-// assistance at all. It says "this weight was carried forward, not computed",
-// which is what stops the UI reaching for a stall badge that has no meaning here.
-const progressionFixed = "fixed"
 
 type exerciseDTO struct {
 	ID          int32  `json:"id"`
@@ -115,6 +134,12 @@ type programDayAssistanceDTO struct {
 	// WeightLb is the fallback used until the lift has been logged once; after
 	// that the prescription carries forward from the last performance.
 	WeightLb float64 `json:"weightLb"`
+	// RepMin and RepMax turn this lift onto double progression: add reps inside
+	// the range week to week, and when every set reaches the top the weight goes
+	// up and the reps reset to the bottom. Both absent means the lift carries its
+	// weight forward and nothing moves it, which is the default.
+	RepMin *int32 `json:"repMin,omitempty"`
+	RepMax *int32 `json:"repMax,omitempty"`
 }
 
 type programDayExerciseDTO struct {
@@ -155,21 +180,47 @@ type layoffDTO struct {
 }
 
 type prescribedExerciseDTO struct {
-	ExerciseID   int32              `json:"exerciseId"`
-	ExerciseName string             `json:"exerciseName"`
-	Kind         string             `json:"kind"`
-	Sets         int32              `json:"sets"`
-	Reps         int32              `json:"reps"`
-	WeightLb     float64            `json:"weightLb"`
-	RestSeconds  int32              `json:"restSeconds"`
-	Progression  progressionInfoDTO `json:"progression"`
+	ExerciseID   int32   `json:"exerciseId"`
+	ExerciseName string  `json:"exerciseName"`
+	Kind         string  `json:"kind"`
+	Sets         int32   `json:"sets"`
+	Reps         int32   `json:"reps"`
+	WeightLb     float64 `json:"weightLb"`
+	RestSeconds  int32   `json:"restSeconds"`
+	// RepMin and RepMax bound an assistance lift's rep range, when it has one.
+	// Reps above is the bottom of that range — a set is complete at the bottom
+	// and the weight moves at the top — so the UI needs both to render "3x8-12"
+	// rather than a bare "3x8". Absent on main lifts and on assistance the
+	// lifter has not put a range on.
+	RepMin *int32 `json:"repMin,omitempty"`
+	RepMax *int32 `json:"repMax,omitempty"`
+	// SetPlan is every set this lift prescribes today, with its own reps and its
+	// own weight. Always populated, for every program: a lift with one weight
+	// across its sets emits a flat plan rather than nothing, so a client has one
+	// shape to render instead of two.
+	//
+	// Sets and WeightLb above stay meaningful alongside it — Sets is len(SetPlan)
+	// and WeightLb is the top set, which is the number that moves week to week
+	// and the one to put beside the lift's name.
+	SetPlan     []prescribedSetDTO `json:"setPlan"`
+	Progression progressionInfoDTO `json:"progression"`
+}
+
+// prescribedSetDTO is one set of a prescription. Ramping programs give each set
+// its own weight and reps — Madcow climbs 50/62.5/75/87.5/100% of a top set, and
+// its intensity day finishes with a triple above that and a backoff below it.
+type prescribedSetDTO struct {
+	SetNumber int32   `json:"setNumber"`
+	Reps      int32   `json:"reps"`
+	WeightLb  float64 `json:"weightLb"`
 }
 
 // progressionInfoDTO explains why the engine chose a lift's weight, so the UI
 // can surface an impending stall or a deload instead of a bare number.
 type progressionInfoDTO struct {
 	// Status is one of the progression.Status values
-	// (start|advance|hold|deload|layoff), or "fixed" for assistance.
+	// (start|advance|hold|deload|layoff), or, for assistance, "fixed" when the
+	// weight was carried forward and "progressing" when a rep range advanced it.
 	Status string `json:"status"`
 	// FailureCount is the consecutive trailing failures at the working weight.
 	//

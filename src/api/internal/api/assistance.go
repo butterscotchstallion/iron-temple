@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
@@ -39,6 +40,30 @@ type createAssistanceRequest struct {
 	Sets       int32    `json:"sets"`
 	Reps       int32    `json:"reps"`
 	WeightLb   *float64 `json:"weightLb"`
+	// RepMin and RepMax put the lift on double progression. Both or neither —
+	// "8 to null" is not a range, it is a mistake, and the database says so too.
+	RepMin *int32 `json:"repMin"`
+	RepMax *int32 `json:"repMax"`
+}
+
+// validRepRange reports whether a proposed range is usable, and says why if not.
+// Both bounds or neither, in range, and running the right way round. Mirrors
+// program_day_assistance_rep_range_ck, so the constraint is a backstop rather
+// than the thing producing the error a lifter reads.
+func validRepRange(repMin, repMax *int32) (string, bool) {
+	if repMin == nil && repMax == nil {
+		return "", true
+	}
+	if repMin == nil || repMax == nil {
+		return "repMin and repMax must be given together, or neither", false
+	}
+	if *repMin < 1 || *repMin > maxAssistanceReps || *repMax < 1 || *repMax > maxAssistanceReps {
+		return "repMin and repMax must be between 1 and 100", false
+	}
+	if *repMax < *repMin {
+		return "repMax must be at least repMin", false
+	}
+	return "", true
 }
 
 func (s *Server) addAssistance(w http.ResponseWriter, r *http.Request) {
@@ -63,6 +88,10 @@ func (s *Server) addAssistance(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Reps < 1 || req.Reps > maxAssistanceReps {
 		badRequest(w, "reps must be between 1 and 100")
+		return
+	}
+	if msg, ok := validRepRange(req.RepMin, req.RepMax); !ok {
+		badRequest(w, msg)
 		return
 	}
 	// Absent means bodyweight, which is the common case for assistance — dips,
@@ -126,6 +155,8 @@ func (s *Server) addAssistance(w http.ResponseWriter, r *http.Request) {
 		Sets:         req.Sets,
 		Reps:         req.Reps,
 		WeightLb:     floatToNumeric(weight),
+		RepMin:       req.RepMin,
+		RepMax:       req.RepMax,
 	})
 	// One entry per lift per day: adding dips twice is an edit of the first
 	// entry, not a second row. The unique constraint decides that, so a
@@ -147,6 +178,8 @@ func (s *Server) addAssistance(w http.ResponseWriter, r *http.Request) {
 		Sets:         created.Sets,
 		Reps:         created.Reps,
 		WeightLb:     numericToFloat(created.WeightLb),
+		RepMin:       created.RepMin,
+		RepMax:       created.RepMax,
 	})
 }
 
@@ -154,6 +187,10 @@ type updateAssistanceRequest struct {
 	Sets     *int32   `json:"sets"`
 	Reps     *int32   `json:"reps"`
 	WeightLb *float64 `json:"weightLb"`
+	// RepMin and RepMax are decoded from the raw body rather than taken from
+	// here, because null is meaningful for them and a *int32 renders absent and
+	// null identically. Turning the range off is how a lifter puts a lift back on
+	// carry-forward, so it has to be sayable. See updateAssistance.
 }
 
 func (s *Server) updateAssistance(w http.ResponseWriter, r *http.Request) {
@@ -168,8 +205,23 @@ func (s *Server) updateAssistance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Read twice: once into the struct for the fields where a pointer is enough,
+	// and once as raw messages for repMin/repMax, where null is an instruction
+	// rather than a synonym for absent — the same distinction updateSession draws
+	// for bodyweightLb. Sending null turns the rep range off and puts the lift
+	// back on carrying its weight forward.
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		badRequest(w, "invalid JSON body")
+		return
+	}
 	var req updateAssistanceRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.Unmarshal(body, &req); err != nil {
+		badRequest(w, "invalid JSON body")
+		return
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
 		badRequest(w, "invalid JSON body")
 		return
 	}
@@ -194,6 +246,8 @@ func (s *Server) updateAssistance(w http.ResponseWriter, r *http.Request) {
 		Sets:     current.Sets,
 		Reps:     current.Reps,
 		WeightLb: current.WeightLb,
+		RepMin:   current.RepMin,
+		RepMax:   current.RepMax,
 	}
 	if req.Sets != nil {
 		if *req.Sets < 1 || *req.Sets > maxAssistanceSets {
@@ -217,6 +271,36 @@ func (s *Server) updateAssistance(w http.ResponseWriter, r *http.Request) {
 		params.WeightLb = floatToNumeric(*req.WeightLb)
 	}
 
+	// The range is validated as a pair after the merge, not field by field: a
+	// PATCH that raises repMax alone still has to end up with a range that runs
+	// the right way round, and only the merged values know that.
+	if v, ok := raw["repMin"]; ok {
+		params.RepMin = nil
+		if string(v) != "null" {
+			var n int32
+			if err := json.Unmarshal(v, &n); err != nil {
+				badRequest(w, "repMin must be an integer or null")
+				return
+			}
+			params.RepMin = &n
+		}
+	}
+	if v, ok := raw["repMax"]; ok {
+		params.RepMax = nil
+		if string(v) != "null" {
+			var n int32
+			if err := json.Unmarshal(v, &n); err != nil {
+				badRequest(w, "repMax must be an integer or null")
+				return
+			}
+			params.RepMax = &n
+		}
+	}
+	if msg, ok := validRepRange(params.RepMin, params.RepMax); !ok {
+		badRequest(w, msg)
+		return
+	}
+
 	updated, err := s.q.UpdateAssistance(ctx, params)
 	if errors.Is(err, pgx.ErrNoRows) {
 		notFound(w, "assistance not found")
@@ -235,6 +319,8 @@ func (s *Server) updateAssistance(w http.ResponseWriter, r *http.Request) {
 		Sets:         updated.Sets,
 		Reps:         updated.Reps,
 		WeightLb:     numericToFloat(updated.WeightLb),
+		RepMin:       updated.RepMin,
+		RepMax:       updated.RepMax,
 	})
 }
 

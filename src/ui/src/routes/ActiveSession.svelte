@@ -6,6 +6,8 @@
     getExerciseHistory,
     updateSession,
     updateSessionSet,
+    addSessionSet,
+    removeSessionSet,
     finishSession,
     type Session,
     type SessionSet,
@@ -252,12 +254,31 @@
     session = data;
   }
 
-  // Adjust the working weight for every set of an exercise by delta lb.
+  // Adjust an exercise's weight by delta lb.
+  //
+  // For a uniform block that is every set by the same amount, which is what it
+  // has always been. For a ramping lift it is the TOP set by that amount, with
+  // every other set scaled to keep its share of it: the rungs of a Madcow day
+  // are 50/62.5/75/87.5% of the top set, and shifting them all by a flat 5 lb
+  // would leave a ramp that is no longer a ramp of anything.
+  //
+  // Scaled from the resolved weights rather than from the percentages, which the
+  // session does not store — it holds what to lift, not the rule that produced
+  // it. Rounded to the nearest 5 lb for the same reason the server rounds.
   async function changeWeight(sets: SessionSet[], delta: number) {
-    if (isOver) return;
-    const current = sets[0]?.weightLb ?? 0;
-    const weightLb = Math.max(0, current + delta);
-    if (weightLb === current) return;
+    if (isOver || sets.length === 0) return;
+
+    const top = Math.max(...sets.map((s) => s.weightLb));
+    const nextTop = Math.max(0, top + delta);
+    if (nextTop === top) return;
+
+    const ramping = sets.some((s) => s.weightLb !== top);
+    const weightFor = (set: SessionSet) => {
+      if (!ramping) return nextTop;
+      if (top === 0) return nextTop;
+      return Math.max(0, Math.round((set.weightLb * nextTop) / top / 5) * 5);
+    };
+
     // Each leg is tracked separately rather than the Promise.all as a whole, so
     // the count reflects what's actually outstanding if some land first.
     const results = await Promise.all(
@@ -265,7 +286,7 @@
         track(
           updateSessionSet({
             path: { sessionId, setId: set.id },
-            body: { weightLb },
+            body: { weightLb: weightFor(set) },
           }),
         ),
       ),
@@ -277,6 +298,41 @@
         session.sets = session.sets.map((s) => (s.id === data.id ? data : s));
       }
     }
+  }
+
+  // One more set of the same lift — the extra set, the AMRAP, the day that went
+  // better than the prescription. The server copies the rep target and weight
+  // from that lift's current last set, so nothing has to be sent but the lift.
+  async function addSet(exerciseId: number) {
+    if (isOver) return;
+    const { data, error } = await track(
+      addSessionSet({ path: { sessionId }, body: { exerciseId } }),
+    );
+    if (error || !data) {
+      actionError = "Couldn't add a set.";
+      return;
+    }
+    actionError = null;
+    if (!session) return;
+    // Appended rather than re-sorted: the server numbers it past the lift's last
+    // set, and the group it joins is already in prescription order.
+    session.sets = [...session.sets, data];
+  }
+
+  // Drop a set that wasn't performed. Removing a lift's last set takes the lift
+  // out of the session, which is what skipping it looks like.
+  async function removeSet(set: SessionSet) {
+    if (isOver) return;
+    const { error } = await track(
+      removeSessionSet({ path: { sessionId, setId: set.id } }),
+    );
+    if (error) {
+      actionError = "Couldn't remove that set.";
+      return;
+    }
+    actionError = null;
+    if (!session) return;
+    session.sets = session.sets.filter((s) => s.id !== set.id);
   }
 </script>
 
@@ -399,6 +455,8 @@
         sets={group.sets}
         onCycle={cycle}
         onChangeWeight={(delta) => changeWeight(group.sets, delta)}
+        onAddSet={() => addSet(group.sets[0].exerciseId)}
+        onRemoveSet={removeSet}
         readonly={isOver}
       />
     {/each}

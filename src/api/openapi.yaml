@@ -216,6 +216,68 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /me/baselines:
+    get:
+      tags: [users]
+      operationId: listBaselines
+      summary: Starting weights this lifter has overridden
+      description: >
+        Where each lift starts for this lifter, for the lifts they have said.
+        A baseline displaces the program's seeded starting weight, and the seed
+        is only consulted while a lift has no history at all — so a baseline
+        decides a lift's first session and nothing after it. Lifts with no
+        override are simply absent.
+      responses:
+        "200":
+          description: Baselines
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LiftBaseline"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /me/baselines/{exerciseId}:
+    parameters:
+      - name: exerciseId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    put:
+      tags: [users]
+      operationId: setBaseline
+      summary: Set where a lift starts for this lifter
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetBaselineRequest"
+      responses:
+        "204":
+          description: Stored
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    delete:
+      tags: [users]
+      operationId: clearBaseline
+      summary: Fall back to the program's seeded starting weight
+      responses:
+        "204":
+          description: Cleared
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /me/avatar:
     post:
       tags: [users]
@@ -775,10 +837,76 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /sessions/{sessionId}/sets:
+    parameters:
+      - $ref: "#/components/parameters/SessionId"
+    post:
+      tags: [sessions]
+      operationId: addSessionSet
+      summary: Add one more set to a lift in this session
+      description: >
+        Appends a set to a lift already in the session, copying the rep target
+        and weight from that lift's current last set. For the extra set, the
+        AMRAP, the drop set — the day that did not go to plan in the direction of
+        more work.
+
+
+        Refused once the session is over: changing a closed session's shape can
+        retroactively turn a successful lift into a failed one, since a lift
+        succeeds only when every one of its sets was completed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddSessionSetRequest"
+      responses:
+        "201":
+          description: The new set
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionSet"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: No such session, or that lift is not in it
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /sessions/{sessionId}/sets/{setId}:
     parameters:
       - $ref: "#/components/parameters/SessionId"
       - $ref: "#/components/parameters/SetId"
+    delete:
+      tags: [sessions]
+      operationId: removeSessionSet
+      summary: Remove a set from this session
+      description: >
+        Drops a set that was not performed. Removing a lift's last set takes the
+        lift out of the session, which is what skipping it looks like.
+
+
+        Set numbers are not renumbered afterwards — they order the sets, they do
+        not name them — so a gap is expected and harmless.
+
+
+        Refused once the session is over, for the same reason adding one is.
+      responses:
+        "204":
+          description: Removed
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
     patch:
       tags: [sessions]
       operationId: updateSessionSet
@@ -937,6 +1065,61 @@ components:
           description: >
             Append to the avatar URL as a cache-buster so a new upload shows
             immediately.
+        barWeightLb:
+          type: number
+          minimum: 0
+          description: >
+            What this lifter's bar weighs. Every prescribed weight is loaded onto
+            it, so the plate maths and the warm-up ramp are both wrong without
+            it. 45 until the setup screen says otherwise.
+          example: 80
+        plates:
+          type: array
+          description: >
+            The plates the lifter owns, heaviest first. Finite: the loader will
+            not ask for a fifth pair of 45s when there are two, and rounds to the
+            nearest weight this rack can actually build.
+          items:
+            $ref: "#/components/schemas/Plate"
+
+    Plate:
+      type: object
+      required: [plateLb, pairs]
+      properties:
+        plateLb:
+          type: number
+          exclusiveMinimum: 0
+          example: 45
+        pairs:
+          type: integer
+          minimum: 1
+          description: >
+            How many *pairs* are owned, not how many plates. Plates load
+            symmetrically, so three 45s are one usable pair.
+          example: 2
+
+    LiftBaseline:
+      type: object
+      required: [exerciseId, weightLb]
+      properties:
+        exerciseId:
+          type: integer
+          format: int64
+        weightLb:
+          type: number
+          minimum: 0
+          example: 95
+
+    SetBaselineRequest:
+      type: object
+      required: [weightLb]
+      properties:
+        weightLb:
+          type: number
+          minimum: 0
+          description: >
+            0 is a legitimate baseline — an empty bar is where a press starts.
+            Clearing an override is DELETE, not a weight.
 
     RegistrationStatus:
       type: object
@@ -1001,6 +1184,21 @@ components:
             The program to remember as the user's current one. Must name an
             existing program. There is no way to clear it back to unset — a
             program the user has opened is only forgotten when it is deleted.
+        barWeightLb:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 200
+        plates:
+          type: array
+          maxItems: 20
+          description: >
+            Replaces the inventory whole rather than patching one denomination:
+            the client edits a rack, not a row, and a partial write would leave a
+            plate the lifter deleted still loadable. An empty array is a lifter
+            who owns no plates, and is honoured — every prescription then reads
+            bar-only. Duplicate denominations are a 400.
+          items:
+            $ref: "#/components/schemas/Plate"
 
     ChangePasswordRequest:
       type: object
@@ -1100,7 +1298,13 @@ components:
 
     ProgressionKind:
       type: string
-      enum: [linear]
+      enum: [linear, madcow]
+      description: >
+        linear advances a lift's single working weight every session and deloads
+        after three failures. madcow ramps each session to a top set — 50, 62.5,
+        75, 87.5, 100% — and advances that top set once a WEEK, on the one day
+        whose ramp reaches 100%; every other day's weights are a percentage of
+        it.
 
     ProgramSummary:
       type: object
@@ -1195,6 +1399,22 @@ components:
           minimum: 0
           description: Fallback weight, used until the lift has been logged once.
           example: 0
+        repMin:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: >
+            Bottom of the rep range. Given with repMax or not at all.
+          example: 8
+        repMax:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: >
+            Top of the rep range. When every set reaches it, the weight goes up
+            by 5 lb and the reps reset to repMin. There is no deload — a stalled
+            accessory is not a signal.
+          example: 12
 
     CreateAssistanceRequest:
       type: object
@@ -1218,9 +1438,29 @@ components:
           minimum: 0
           default: 0
           description: Omit or send 0 for bodyweight work.
+        repMin:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: >
+            Bottom of the rep range. Given with repMax or not at all.
+          example: 8
+        repMax:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: >
+            Top of the rep range. When every set reaches it, the weight goes up
+            by 5 lb and the reps reset to repMin. There is no deload — a stalled
+            accessory is not a signal.
+          example: 12
 
     UpdateAssistanceRequest:
-      description: Any subset; omitted fields keep their current value.
+      description: >
+        Any subset; omitted fields keep their current value. repMin and repMax
+        are the exception: null on them is an instruction, not the same as
+        omitting them — it turns the rep range off and puts the lift back on
+        carrying its weight forward.
       type: object
       properties:
         sets:
@@ -1234,6 +1474,16 @@ components:
         weightLb:
           type: number
           minimum: 0
+        repMin:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 100
+        repMax:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 100
 
     UpdateProgramDayRequest:
       type: object
@@ -1380,8 +1630,53 @@ components:
           description: >-
             Prescribed rest between sets, in seconds — see ProgramDayExercise.
           example: 300
+        repMin:
+          type: integer
+          description: >-
+            Bottom of an assistance lift's rep range, when it has one. `reps`
+            above is this same number: a set is complete at the bottom of the
+            range and the weight moves at the top, which is what keeps
+            "finished the session" and "earned the increase" apart. Absent on
+            main lifts and on assistance with no range.
+          example: 8
+        repMax:
+          type: integer
+          description: Top of that range — reaching it on every set is what advances the weight.
+          example: 12
+        setPlan:
+          type: array
+          description: >
+            Every set this lift prescribes today, each with its own reps and its
+            own weight. Always present, for every program: a lift whose sets
+            share one weight emits a flat plan rather than nothing, so a client
+            has one shape to render instead of two.
+
+
+            `sets` above is its length and `weightLb` is the top set — the number
+            that moves week to week, and the one to show beside the lift's name.
+          items:
+            $ref: "#/components/schemas/PrescribedSet"
         progression:
           $ref: "#/components/schemas/ProgressionInfo"
+
+    PrescribedSet:
+      description: >
+        One set of a prescription. Ramping programs give each set its own weight
+        and reps — Madcow climbs to a top set, and its intensity day finishes
+        with a triple above that and a backoff below it.
+      type: object
+      required: [setNumber, reps, weightLb]
+      properties:
+        setNumber:
+          type: integer
+          example: 5
+        reps:
+          type: integer
+          example: 5
+        weightLb:
+          type: number
+          minimum: 0
+          example: 185
 
     ProgressionInfo:
       description: >-
@@ -1392,14 +1687,16 @@ components:
       properties:
         status:
           type: string
-          enum: [start, advance, hold, deload, layoff, fixed]
+          enum: [start, advance, hold, deload, layoff, fixed, progressing]
           description: >-
             start (no history), advance (last session passed), hold (recent
             failure, repeating the weight), deload (stall hit the threshold, weight
             dropped), layoff (weight cut for time away from training rather than
-            for anything that happened in a session), fixed (assistance work — no
-            engine runs on it; the weight is carried forward from what was last
-            logged).
+            for anything that happened in a session), fixed (the weight was
+            carried forward from what was last logged, rather than computed —
+            assistance work with no rep range), progressing (an assistance lift
+            with a rep range topped it out on every set, so the weight went up
+            and the reps reset to the bottom).
           example: hold
         failureCount:
           type: integer
@@ -1468,6 +1765,17 @@ components:
             What the lifter weighed on the day. Omit the field to leave an
             existing weigh-in alone; send null to erase one. Zero and negatives
             are rejected — a weigh-in of nothing is a typo, not a measurement.
+
+    AddSessionSetRequest:
+      type: object
+      required: [exerciseId]
+      properties:
+        exerciseId:
+          type: integer
+          format: int64
+          description: >
+            The lift to add a set to. Must already be in the session — this adds
+            a set, not an exercise.
 
     UpdateSessionSetRequest:
       type: object

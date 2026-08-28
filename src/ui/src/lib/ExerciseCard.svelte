@@ -1,10 +1,12 @@
 <script lang="ts">
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog";
   import Minus from "@lucide/svelte/icons/minus";
   import Plus from "@lucide/svelte/icons/plus";
   import PlateBar from "./PlateBar.svelte";
   import { plateLabel } from "./plates";
+  import { barWeightLb, plateInventory } from "./gym.svelte";
   import { warmupSets } from "./warmup";
   import { formatTime } from "./time";
   import type { SessionSet } from "./api";
@@ -14,17 +16,63 @@
     sets,
     onCycle,
     onChangeWeight,
+    onAddSet,
+    onRemoveSet,
     readonly = false,
   }: {
     name: string;
     sets: SessionSet[];
     onCycle: (set: SessionSet) => void;
     onChangeWeight: (delta: number) => void;
+    /** Append one more set of this lift. Omitted where sets are fixed. */
+    onAddSet?: () => void;
+    /** Drop a set that wasn't performed. Omitted where sets are fixed. */
+    onRemoveSet?: (set: SessionSet) => void;
     // An over session is a record, not a worksheet: sets and weights lock.
     readonly?: boolean;
   } = $props();
 
-  const workWeight = $derived(sets[0]?.weightLb ?? 0);
+  // The set the lifter has asked to remove, held until they confirm. Only reps
+  // that were actually logged are worth a confirmation — dropping an untouched
+  // set is the same gesture as never having had it, and a dialog there is a
+  // dialog in the way of somebody between sets.
+  let pendingRemoval = $state<SessionSet | null>(null);
+
+  function requestRemove(set: SessionSet) {
+    if (readonly) return;
+    if (set.actualReps == null || set.actualReps === 0) {
+      onRemoveSet?.(set);
+      return;
+    }
+    pendingRemoval = set;
+  }
+
+  function confirmRemove() {
+    if (pendingRemoval) onRemoveSet?.(pendingRemoval);
+    pendingRemoval = null;
+  }
+
+  // The last set is the one a "remove a set" control should target: sets are
+  // numbered in order and the tail is what an extra one was appended to.
+  const lastSet = $derived(sets[sets.length - 1]);
+
+  // A ramping lift gives every set its own weight and reps — Madcow climbs
+  // 50/62.5/75/87.5/100% of a top set, and its intensity day finishes with a
+  // triple above that and a backoff below it. A uniform block is the common case
+  // and keeps the compact display it has always had.
+  const ramping = $derived(
+    sets.some(
+      (s) => s.weightLb !== sets[0]?.weightLb || s.targetReps !== sets[0]?.targetReps,
+    ),
+  );
+  // The top set is the heaviest, which is the number a ramping lift is "about":
+  // it is what the percentages are of and what moves week to week. For a uniform
+  // block it is simply the weight.
+  const workWeight = $derived(
+    ramping
+      ? Math.max(...sets.map((s) => s.weightLb))
+      : (sets[0]?.weightLb ?? 0),
+  );
   const targetReps = $derived(sets[0]?.targetReps ?? 0);
   // The rest this lift asks for, shown alongside the rep target because it is
   // half of the prescription and the countdown that enforces it lives in a
@@ -32,9 +80,16 @@
   const restSeconds = $derived(sets[0]?.restSeconds ?? 0);
 
   // Warm-up ramp expanded to one entry per set (the empty bar is done twice).
+  // Built against this lifter's bar and rack: the ramp starts at whatever their
+  // bar weighs and each rung rounds to a weight that rack can build, so a
+  // prescription below the bar yields no warm-ups rather than impossible ones.
+  // A ramp is its own warm-up — that is what the first three rungs of a Madcow
+  // day are — so bolting a second one in front of it would have the lifter warm
+  // up to warm up.
   const warmups = $derived.by(() => {
     const out: { weightLb: number; reps: number }[] = [];
-    for (const w of warmupSets(workWeight)) {
+    if (ramping) return out;
+    for (const w of warmupSets(workWeight, barWeightLb(), plateInventory())) {
       for (let k = 0; k < w.sets; k++) {
         out.push({ weightLb: w.weightLb, reps: w.reps });
       }
@@ -76,10 +131,14 @@
     return Math.max(0, total - 1);
   });
   const activeWeight = $derived(
-    active < warmups.length ? warmups[active].weightLb : workWeight,
+    active < warmups.length
+      ? warmups[active].weightLb
+      : (sets[active - warmups.length]?.weightLb ?? workWeight),
   );
   const activeReps = $derived(
-    active < warmups.length ? warmups[active].reps : targetReps,
+    active < warmups.length
+      ? warmups[active].reps
+      : (sets[active - warmups.length]?.targetReps ?? targetReps),
   );
 
   function warmClass(i: number): string {
@@ -127,7 +186,13 @@
     <h3 class="text-lg font-bold text-card-foreground">{name}</h3>
     <div class="flex items-center gap-3">
       <span class="text-sm tabular-nums text-muted-foreground">
-        {targetReps} reps
+        <!-- A ramp has no single rep target, so it says what it is instead:
+             how many sets are coming, up to the top set beside it. -->
+        {#if ramping}
+          {sets.length} sets, ramping
+        {:else}
+          {targetReps} reps
+        {/if}
         {#if restSeconds > 0}
           · {formatTime(restSeconds)} rest
         {/if}
@@ -164,7 +229,11 @@
   <div class="mt-4 flex flex-col items-center gap-2">
     <PlateBar weightLb={activeWeight} />
     <p class="text-xs tabular-nums text-muted-foreground">
-      {activeWeight} lb × {activeReps} · {plateLabel(activeWeight)}
+      {activeWeight} lb × {activeReps} · {plateLabel(
+        activeWeight,
+        barWeightLb(),
+        plateInventory(),
+      )}
     </p>
   </div>
 
@@ -198,22 +267,90 @@
             : 'cursor-pointer'} {workClass(set, i)}"
           onclick={() => cycleSet(set)}
           disabled={readonly}
-          aria-label={`Set ${set.setNumber}: ${
-            set.actualReps == null ? "not logged" : `${set.actualReps} reps`
-          }`}
+          title={ramping ? `${set.weightLb} lb x ${set.targetReps}` : undefined}
+          aria-label={ramping
+            ? `Set ${set.setNumber}, ${set.weightLb} lb for ${set.targetReps}: ${
+                set.actualReps == null ? "not logged" : `${set.actualReps} reps`
+              }`
+            : `Set ${set.setNumber}: ${
+                set.actualReps == null ? "not logged" : `${set.actualReps} reps`
+              }`}
         >
           {set.actualReps ?? 0}
         </button>
       {/each}
+
+      <!-- Add and drop a set. The prescription is a plan, not a cage: an extra
+           set, an AMRAP or a set skipped all happen, and until these existed the
+           closest a lifter could get was a ghost row logged at zero reps. -->
+      {#if !readonly && (onAddSet || onRemoveSet)}
+        <div class="flex items-center gap-1.5">
+          {#if onRemoveSet && lastSet}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onclick={() => requestRemove(lastSet)}
+              aria-label={`Remove set ${lastSet.setNumber} of ${name}`}
+            >
+              <Minus />
+            </Button>
+          {/if}
+          {#if onAddSet}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onclick={onAddSet}
+              aria-label={`Add a set of ${name}`}
+            >
+              <Plus />
+            </Button>
+          {/if}
+        </div>
+      {/if}
     </div>
   </div>
+
+  <AlertDialog.Root
+    open={pendingRemoval !== null}
+    onOpenChange={(open) => {
+      if (!open) pendingRemoval = null;
+    }}
+  >
+    <AlertDialog.Content>
+      <AlertDialog.Header>
+        <AlertDialog.Title>Remove this set?</AlertDialog.Title>
+        <AlertDialog.Description>
+          Set {pendingRemoval?.setNumber} of {name} has {pendingRemoval?.actualReps}
+          {pendingRemoval?.actualReps === 1 ? "rep" : "reps"} logged against it.
+          Removing it throws that away.
+        </AlertDialog.Description>
+      </AlertDialog.Header>
+      <AlertDialog.Footer>
+        <AlertDialog.Cancel>Keep it</AlertDialog.Cancel>
+        <AlertDialog.Action onclick={confirmRemove}>Remove</AlertDialog.Action>
+      </AlertDialog.Footer>
+    </AlertDialog.Content>
+  </AlertDialog.Root>
+
+  {#if ramping}
+    <!-- The ramp written out. Each circle above is one of these, but a lifter
+         setting up the bar wants to see the whole climb at once. -->
+    <ol class="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs tabular-nums text-muted-foreground">
+      {#each sets as set (set.id)}
+        <li class={active === warmups.length + sets.indexOf(set) ? "text-primary" : ""}>
+          {set.weightLb}×{set.targetReps}
+        </li>
+      {/each}
+    </ol>
+  {/if}
 
   <p class="mt-3 text-xs text-muted-foreground">
     {#if readonly}
       This workout is finished — sets are locked.
     {:else}
-      {#if warmups.length > 0}Cyan sets are warm-ups. {/if}Tap a set to add a
-      rep; it clears after the target.
+      {#if warmups.length > 0}Cyan sets are warm-ups. {/if}{#if ramping}The ramp
+        is the warm-up — work up through it. {/if}Tap a set to add a rep; it
+      clears after the target.
     {/if}
   </p>
 </Card>

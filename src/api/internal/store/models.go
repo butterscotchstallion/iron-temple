@@ -45,6 +45,8 @@ type ProgramDayAssistance struct {
 	Reps         int32              `json:"reps"`
 	WeightLb     pgtype.Numeric     `json:"weight_lb"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	RepMin       *int32             `json:"rep_min"`
+	RepMax       *int32             `json:"rep_max"`
 }
 
 type ProgramDayExercise struct {
@@ -55,6 +57,13 @@ type ProgramDayExercise struct {
 	Sets             int32          `json:"sets"`
 	Reps             int32          `json:"reps"`
 	StartingWeightLb pgtype.Numeric `json:"starting_weight_lb"`
+}
+
+type ProgramDayExerciseSet struct {
+	ProgramDayExerciseID int32          `json:"program_day_exercise_id"`
+	SetNumber            int32          `json:"set_number"`
+	Reps                 int32          `json:"reps"`
+	PctOfTop             pgtype.Numeric `json:"pct_of_top"`
 }
 
 type ReportRun struct {
@@ -109,6 +118,24 @@ type UserAvatar struct {
 	Bytes     []byte             `json:"bytes"`
 	Etag      string             `json:"etag"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type UserGym struct {
+	UserID      int32              `json:"user_id"`
+	BarWeightLb pgtype.Numeric     `json:"bar_weight_lb"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type UserLiftBaseline struct {
+	UserID     int32          `json:"user_id"`
+	ExerciseID int32          `json:"exercise_id"`
+	WeightLb   pgtype.Numeric `json:"weight_lb"`
+}
+
+type UserPlate struct {
+	UserID  int32          `json:"user_id"`
+	PlateLb pgtype.Numeric `json:"plate_lb"`
+	Pairs   int32          `json:"pairs"`
 }
 
 type UserSession struct {

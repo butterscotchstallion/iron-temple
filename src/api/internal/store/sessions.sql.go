@@ -11,6 +11,66 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const appendSessionSet = `-- name: AppendSessionSet :one
+INSERT INTO session_sets (session_id, exercise_id, set_number, target_reps, weight_lb)
+SELECT last.session_id,
+       last.exercise_id,
+       last.set_number + 1,
+       last.target_reps,
+       last.weight_lb
+FROM (
+    SELECT ss.session_id, ss.exercise_id, ss.set_number, ss.target_reps, ss.weight_lb
+    FROM session_sets ss
+    JOIN sessions s ON s.id = ss.session_id
+    WHERE ss.session_id = $1
+      AND ss.exercise_id = $2
+      AND s.user_id = $3::int
+    ORDER BY ss.set_number DESC
+    LIMIT 1
+) AS last
+RETURNING id, session_id, exercise_id, set_number, target_reps, actual_reps, weight_lb, completed
+`
+
+type AppendSessionSetParams struct {
+	SessionID  int32 `json:"session_id"`
+	ExerciseID int32 `json:"exercise_id"`
+	UserID     int32 `json:"user_id"`
+}
+
+// AppendSessionSet adds one more set to a lift already in the session, copying
+// the rep target and weight from that lift's current last set — an extra set is
+// another set of the same thing, and anything else is what the weight stepper
+// and the rep counter are for.
+//
+// set_number is MAX + 1, computed inside the INSERT rather than read and
+// incremented by the handler: two concurrent taps that both read "5" would both
+// write 6 and one would lose to session_sets' UNIQUE. Same argument
+// CreateAssistance makes for position.
+//
+// Taking the last set by ORDER BY ... LIMIT 1 also means gaps are harmless: a
+// deleted set leaves its number unused, and the next append lands past it rather
+// than trying to fill it.
+//
+// Returns no rows when the lift is not in the session, which is how the handler
+// tells a bad exerciseId from a real failure. Ownership and whether the session
+// is still open are checked before this runs, so they are 404 and 409 rather
+// than an indistinguishable empty result.
+func (q *Queries) AppendSessionSet(ctx context.Context, arg AppendSessionSetParams) (SessionSet, error) {
+	row := q.db.QueryRow(ctx, appendSessionSet, arg.SessionID, arg.ExerciseID, arg.UserID)
+	var i SessionSet
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.ExerciseID,
+		&i.SetNumber,
+		&i.TargetReps,
+		&i.ActualReps,
+		&i.WeightLb,
+		&i.Completed,
+	)
+	return i, err
+}
+
 const createSession = `-- name: CreateSession :one
 
 INSERT INTO sessions (program_day_id, performed_on, user_id)
@@ -112,6 +172,39 @@ type DeleteSessionParams struct {
 
 func (q *Queries) DeleteSession(ctx context.Context, arg DeleteSessionParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteSession, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteSessionSet = `-- name: DeleteSessionSet :execrows
+DELETE FROM session_sets ss
+USING sessions s
+WHERE ss.id = $1
+  AND s.id = ss.session_id
+  AND s.user_id = $2::int
+`
+
+type DeleteSessionSetParams struct {
+	ID     int32 `json:"id"`
+	UserID int32 `json:"user_id"`
+}
+
+// DeleteSessionSet removes one set. Reaches the owner through sessions, the same
+// way GetSessionSet does, so a set id belonging to someone else does not resolve
+// rather than reporting a different failure.
+//
+// Nothing renumbers afterwards. set_number is ordering, not identity: every read
+// here sorts by it and none of them assume it is dense, and renumbering inside
+// UNIQUE (session_id, exercise_id, set_number) would need a deferred constraint
+// to avoid colliding with itself mid-update. A gap costs nothing.
+//
+// Deleting a lift's last set is allowed, and takes the lift out of the session.
+// That is a real thing to want — the rows were skipped — and it reads correctly
+// everywhere downstream, since a lift with no sets simply has nothing to report.
+func (q *Queries) DeleteSessionSet(ctx context.Context, arg DeleteSessionSetParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteSessionSet, arg.ID, arg.UserID)
 	if err != nil {
 		return 0, err
 	}

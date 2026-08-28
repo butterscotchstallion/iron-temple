@@ -605,6 +605,92 @@ func TestProgressionCountsFinishedSessionsWithLoggedWork(t *testing.T) {
 	}
 }
 
+// A lift's history is the lift's, not the program's. This is the regression for
+// ListLiftHistory having been scoped to one program: the squat is prescribed by
+// both StrongLifts 5x5 and Advanced 3x5, and taking the second used to restart
+// it at the seeded 45 lb no matter what had been logged under the first — which
+// hit hardest on the one program switch the app actually recommends, since
+// Advanced 3x5 is where a stalled 5x5 is supposed to go.
+func TestProgressionFollowsTheLiftAcrossPrograms(t *testing.T) {
+	e := expect(t)
+
+	fromProgram, fromDay := programAndFirstDay(e, "StrongLifts 5x5")
+	toProgram, toDay := programAndFirstDay(e, "Advanced 3x5")
+
+	// Both days open on the squat, which is what makes them comparable.
+	fromLift := firstExerciseName(e, fromProgram, fromDay)
+	toLift := firstExerciseName(e, toProgram, toDay)
+	if fromLift != toLift {
+		t.Fatalf("expected both days to open on the same lift, got %q and %q", fromLift, toLift)
+	}
+
+	_, seeded := firstExercisePreview(e, toProgram, toDay)
+
+	// A clean session under the first program.
+	logCleanFirstExercise(t, e, fromDay)
+
+	_, advanced := firstExercisePreview(e, fromProgram, fromDay)
+	if advanced <= seeded {
+		t.Fatalf("the session did not advance the lift under its own program: %v → %v",
+			seeded, advanced)
+	}
+
+	// The other program must pick the bar up where that left it.
+	status, carried := firstExercisePreview(e, toProgram, toDay)
+	if carried != advanced {
+		t.Fatalf("switching programs did not carry the lift: %v under %q but %v under %q",
+			advanced, "StrongLifts 5x5", carried, "Advanced 3x5")
+	}
+	if status == "start" {
+		t.Fatalf("the lift read as having no history under the second program (weight %v)", carried)
+	}
+}
+
+// programAndFirstDay resolves a program by name and returns it with its first
+// day. By name rather than by position because the point of the caller is to
+// compare two named programs.
+func programAndFirstDay(e *httpexpect.Expect, name string) (int, int) {
+	programs := e.GET("/programs").Expect().Status(http.StatusOK).JSON().Array()
+	for i := 0; i < int(programs.Length().Raw()); i++ {
+		p := programs.Value(i).Object()
+		if p.Value("name").String().Raw() != name {
+			continue
+		}
+		id := int(p.Value("id").Number().Raw())
+		dayID := int(e.GET(fmt.Sprintf("/programs/%d", id)).Expect().Status(http.StatusOK).
+			JSON().Object().Value("days").Array().Value(0).Object().Value("id").Number().Raw())
+		return id, dayID
+	}
+	panic("no seeded program named " + name)
+}
+
+func firstExerciseName(e *httpexpect.Expect, programID, dayID int) string {
+	return e.GET(fmt.Sprintf("/programs/%d/days/%d/next-session", programID, dayID)).
+		Expect().Status(http.StatusOK).
+		JSON().Object().Value("exercises").Array().Value(0).Object().
+		Value("exerciseName").String().Raw()
+}
+
+// logCleanFirstExercise runs a session on a day, hitting every prescribed rep of
+// its first exercise, and finishes it — one successful session for that lift.
+func logCleanFirstExercise(t *testing.T, e *httpexpect.Expect, dayID int) {
+	t.Helper()
+	created := startSession(t, e, dayID)
+	sessionID := int(created.Value("id").Number().Raw())
+
+	sets := created.Value("sets").Array()
+	firstExerciseID := sets.Value(0).Object().Value("exerciseId").Number().Raw()
+	for i := 0; i < int(sets.Length().Raw()); i++ {
+		set := sets.Value(i).Object()
+		if set.Value("exerciseId").Number().Raw() != firstExerciseID {
+			continue
+		}
+		logSet(e, sessionID, int(set.Value("id").Number().Raw()),
+			int(set.Value("targetReps").Number().Raw()), true)
+	}
+	e.POST(fmt.Sprintf("/sessions/%d/finish", sessionID)).Expect().Status(http.StatusOK)
+}
+
 // ---- Racked ----
 
 // A period the lifter did not train in is a valid recap, not a 404 and not a

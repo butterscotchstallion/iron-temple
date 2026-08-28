@@ -58,10 +58,26 @@ func (s *Server) getMe(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateProfileRequest struct {
-	DisplayName      *string `json:"displayName"`
-	AvatarColor      *string `json:"avatarColor"`
-	CurrentProgramID *int32  `json:"currentProgramId"`
+	DisplayName      *string  `json:"displayName"`
+	AvatarColor      *string  `json:"avatarColor"`
+	CurrentProgramID *int32   `json:"currentProgramId"`
+	BarWeightLb      *float64 `json:"barWeightLb"`
+	// Plates replaces the inventory whole. A pointer to a slice so that an
+	// omitted field ("leave my rack alone") stays distinguishable from an empty
+	// array ("I own no plates"), which is a thing a lifter is allowed to say.
+	Plates *[]plateDTO `json:"plates"`
 }
+
+// Gym-setup bounds. Typo catches rather than claims about equipment: a bar
+// heavier than the lifter is a mistyped digit, and nobody racks a twenty-first
+// distinct denomination.
+const (
+	maxBarWeightLb = 200
+	maxPlateKinds  = 20
+	maxPlateLb     = 200
+	maxPlatePairs  = 20
+	maxBaselineLb  = 2000
+)
 
 func (s *Server) updateMe(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -106,12 +122,53 @@ func (s *Server) updateMe(w http.ResponseWriter, r *http.Request) {
 		params.CurrentProgramID = req.CurrentProgramID
 	}
 
+	// Gym setup lives in its own tables, so it is validated here and written
+	// below — after UpdateUserProfile has succeeded, so a rejected display name
+	// does not leave a half-applied rack behind.
+	if req.BarWeightLb != nil {
+		if *req.BarWeightLb <= 0 || *req.BarWeightLb > maxBarWeightLb {
+			badRequest(w, "barWeightLb must be between 0 and 200")
+			return
+		}
+	}
+	if req.Plates != nil {
+		if len(*req.Plates) > maxPlateKinds {
+			badRequest(w, "plates may name at most 20 denominations")
+			return
+		}
+		seen := make(map[float64]bool, len(*req.Plates))
+		for _, p := range *req.Plates {
+			if p.PlateLb <= 0 || p.PlateLb > maxPlateLb {
+				badRequest(w, "each plateLb must be between 0 and 200")
+				return
+			}
+			if p.Pairs < 1 || p.Pairs > maxPlatePairs {
+				badRequest(w, "each plate's pairs must be between 1 and 20")
+				return
+			}
+			// A rack cannot hold the same denomination twice, and the primary key
+			// would reject the second write anyway — as a 500, since it arrives
+			// from the middle of a transaction. Refuse it here with something to
+			// say instead.
+			if seen[p.PlateLb] {
+				badRequest(w, "plates must not repeat a denomination")
+				return
+			}
+			seen[p.PlateLb] = true
+		}
+	}
+
 	updated, err := s.q.UpdateUserProfile(ctx, params)
 	if errors.Is(err, pgx.ErrNoRows) {
 		notFound(w, "user not found")
 		return
 	}
 	if err != nil {
+		internalError(w)
+		return
+	}
+
+	if err := s.writeGymSetup(ctx, u.ID, req); err != nil {
 		internalError(w)
 		return
 	}
@@ -124,6 +181,137 @@ func (s *Server) updateMe(w http.ResponseWriter, r *http.Request) {
 		IsAdmin:          updated.IsAdmin,
 		CurrentProgramID: updated.CurrentProgramID,
 	}))
+}
+
+// writeGymSetup applies the bar and the rack, if the request named them.
+//
+// The plate inventory is replaced rather than patched, in one transaction: the
+// client edits a rack, not a row. Without the transaction a failure between the
+// delete and the last insert would leave the lifter owning some of their plates,
+// and the next prescription would round to a weight they cannot build.
+func (s *Server) writeGymSetup(ctx context.Context, userID int32, req updateProfileRequest) error {
+	if req.BarWeightLb == nil && req.Plates == nil {
+		return nil
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := s.q.WithTx(tx)
+
+	if req.BarWeightLb != nil {
+		if err := qtx.SetBarWeight(ctx, store.SetBarWeightParams{
+			UserID: userID, BarWeightLb: floatToNumeric(*req.BarWeightLb),
+		}); err != nil {
+			return err
+		}
+	}
+	if req.Plates != nil {
+		if err := qtx.DeleteAllPlates(ctx, userID); err != nil {
+			return err
+		}
+		for _, p := range *req.Plates {
+			if err := qtx.AddPlate(ctx, store.AddPlateParams{
+				UserID: userID, PlateLb: floatToNumeric(p.PlateLb), Pairs: p.Pairs,
+			}); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+// listBaselines returns the lifter's starting-weight overrides. Absence is the
+// common case — most lifts run on the program's seed — so an empty list is the
+// normal answer rather than a sign of anything.
+func (s *Server) listBaselines(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	rows, err := s.q.ListBaselines(ctx, userFrom(ctx).ID)
+	if err != nil {
+		internalError(w)
+		return
+	}
+	out := make([]liftBaselineDTO, 0, len(rows))
+	for _, b := range rows {
+		out = append(out, liftBaselineDTO{
+			ExerciseID: b.ExerciseID,
+			WeightLb:   numericToFloat(b.WeightLb),
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+type setBaselineRequest struct {
+	WeightLb *float64 `json:"weightLb"`
+}
+
+func (s *Server) setBaseline(w http.ResponseWriter, r *http.Request) {
+	id, ok := idParam(r, "exerciseId")
+	if !ok {
+		notFound(w, "exercise not found")
+		return
+	}
+	ctx := r.Context()
+	userID := userFrom(ctx).ID
+
+	var req setBaselineRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		badRequest(w, "invalid JSON body")
+		return
+	}
+	if req.WeightLb == nil {
+		badRequest(w, "weightLb is required")
+		return
+	}
+	// 0 is allowed: an empty bar is where a press legitimately starts. Clearing
+	// an override is DELETE, not a weight of zero.
+	if *req.WeightLb < 0 || *req.WeightLb > maxBaselineLb {
+		badRequest(w, "weightLb must be between 0 and 2000")
+		return
+	}
+
+	// Checked before the write so an unknown or someone else's custom exercise
+	// is a 404 rather than a foreign-key violation surfacing as a 500. GetExercise
+	// already carries the "mine or everyone's" visibility rule.
+	if _, err := s.q.GetExercise(ctx, store.GetExerciseParams{ID: id, UserID: userID}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			notFound(w, "exercise not found")
+			return
+		}
+		internalError(w)
+		return
+	}
+
+	if err := s.q.SetBaseline(ctx, store.SetBaselineParams{
+		UserID: userID, ExerciseID: id, WeightLb: floatToNumeric(*req.WeightLb),
+	}); err != nil {
+		internalError(w)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) clearBaseline(w http.ResponseWriter, r *http.Request) {
+	id, ok := idParam(r, "exerciseId")
+	if !ok {
+		notFound(w, "baseline not found")
+		return
+	}
+	ctx := r.Context()
+	n, err := s.q.DeleteBaseline(ctx, store.DeleteBaselineParams{
+		UserID: userFrom(ctx).ID, ExerciseID: id,
+	})
+	if err != nil {
+		internalError(w)
+		return
+	}
+	if n == 0 {
+		notFound(w, "baseline not found")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 type changePasswordRequest struct {
@@ -333,8 +521,35 @@ func (s *Server) userDTO(ctx context.Context, u store.GetUserRow) userDTO {
 		dto.HasAvatar = true
 		dto.AvatarEtag = etag
 	}
+
+	// The gym travels with the profile because every screen that draws a weight
+	// needs it — the plate bar, the warm-up ramp, the loadable rounding — and
+	// making each of them fetch it separately is how they end up disagreeing.
+	//
+	// Neither read is allowed to fail the profile. A bar that cannot be read
+	// falls back to the same 45 the query would have returned, and an
+	// unreadable rack renders as bar-only; both are wrong in a visible,
+	// recoverable way, where a 500 on /me is a locked-out app.
+	if bar, err := s.q.GetBarWeight(ctx, u.ID); err == nil {
+		dto.BarWeightLb = numericToFloat(bar)
+	} else {
+		dto.BarWeightLb = defaultBarWeightLb
+	}
+	dto.Plates = []plateDTO{}
+	if plates, err := s.q.ListPlates(ctx, u.ID); err == nil {
+		for _, p := range plates {
+			dto.Plates = append(dto.Plates, plateDTO{
+				PlateLb: numericToFloat(p.PlateLb),
+				Pairs:   p.Pairs,
+			})
+		}
+	}
 	return dto
 }
+
+// defaultBarWeightLb mirrors the column default in 0013_gym_setup. Only reached
+// when the bar cannot be read at all; the query itself already COALESCEs.
+const defaultBarWeightLb = 45
 
 // compile-time guard: auth.Hasher must keep satisfying what the handlers use.
 var _ interface {

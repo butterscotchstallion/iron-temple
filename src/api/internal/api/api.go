@@ -141,6 +141,9 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 				r.Put("/password", s.changePassword)
 				r.Post("/avatar", s.uploadAvatar)
 				r.Delete("/avatar", s.deleteAvatar)
+				r.Get("/baselines", s.listBaselines)
+				r.Put("/baselines/{exerciseId}", s.setBaseline)
+				r.Delete("/baselines/{exerciseId}", s.clearBaseline)
 			})
 
 			r.Route("/exercises", func(r chi.Router) {
@@ -173,7 +176,9 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 				r.Patch("/{sessionId}", s.updateSession)
 				r.Delete("/{sessionId}", s.deleteSession)
 				r.Post("/{sessionId}/finish", s.finishSession)
+				r.Post("/{sessionId}/sets", s.addSessionSet)
 				r.Patch("/{sessionId}/sets/{setId}", s.updateSessionSet)
+				r.Delete("/{sessionId}/sets/{setId}", s.removeSessionSet)
 			})
 		})
 	})

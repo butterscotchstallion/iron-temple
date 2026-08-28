@@ -234,7 +234,9 @@ test("navigates into a program's detail", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Workout A" })).toBeVisible();
   // exact: the program description also contains "Squat"; match only the set line.
   await expect(page.getByText("Squat", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Start" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Start", exact: true }),
+  ).toBeVisible();
 
   // The stalled Bench Press surfaces its deload reasoning; the fresh Squat does not.
   await expect(page.getByText("Deload", { exact: true })).toBeVisible();
@@ -335,7 +337,7 @@ test("starts the session with the deload the lifter accepted", async ({ page }) 
   await page.goto("/#/programs/1");
   await page.getByRole("button", { name: "Deload 30%" }).click();
   await expect(page.getByText("5×5 · 50 lb")).toBeVisible();
-  await page.getByRole("button", { name: "Start" }).click();
+  await page.getByRole("button", { name: "Start", exact: true }).click();
 
   await expect.poll(() => posted).toEqual([{ programDayId: 10, deload: true }]);
 });
@@ -851,7 +853,7 @@ test("carries a running rest timer through a reload", async ({ page }) => {
 
   await page.goto("/#/sessions/1");
   const remaining = page.getByTestId("rest-remaining");
-  const start = page.getByRole("button", { name: "Start" });
+  const start = page.getByRole("button", { name: "Start", exact: true });
   await expect(remaining).toHaveText("3:00");
 
   await start.click();

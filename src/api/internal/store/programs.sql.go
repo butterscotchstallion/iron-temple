@@ -61,10 +61,8 @@ SELECT s.performed_on,
        BOOL_AND(ss.completed)      AS success
 FROM sessions s
 JOIN session_sets ss ON ss.session_id = s.id
-JOIN program_days pd ON pd.id = s.program_day_id
-WHERE pd.program_id = $1
-  AND ss.exercise_id = $2
-  AND s.user_id = $3::int
+WHERE ss.exercise_id = $1
+  AND s.user_id = $2::int
   AND (s.finished_at IS NOT NULL
        OR s.created_at < now() - INTERVAL '12 hours')
 GROUP BY s.id, s.performed_on
@@ -73,7 +71,6 @@ ORDER BY s.performed_on, s.id
 `
 
 type ListLiftHistoryParams struct {
-	ProgramID  int32 `json:"program_id"`
 	ExerciseID int32 `json:"exercise_id"`
 	UserID     int32 `json:"user_id"`
 }
@@ -85,11 +82,24 @@ type ListLiftHistoryRow struct {
 }
 
 // ListLiftHistory returns one row per past session in which a lift was
-// performed within a program, oldest first, for the progression engine.
-// Scope is the whole program (all days) because a lift such as the squat
-// progresses continuously across Workout A and B. A session "succeeds" for the
-// lift only if every logged set for it was completed; weight_lb is the top
+// performed, oldest first, for the progression engine. A session "succeeds" for
+// the lift only if every logged set for it was completed; weight_lb is the top
 // weight worked that session.
+//
+// Scope is the lift and the lifter, deliberately NOT the program. A squat is a
+// squat: the bar does not know which program day sent you to it, and neither
+// should the engine. Scoping this to one program used to mean that switching
+// programs restarted every lift at its seeded starting weight — which fell
+// hardest on exactly the move the app recommends, since Advanced 3x5 is the
+// graduation fork when 5x5 stalls and taking it dropped a working squat back to
+// an empty bar. ListExerciseHistory has always read across programs for the
+// same reason (assistance.sql calls it "dips are dips whichever day they were
+// done on"); this is the main lifts agreeing with it.
+//
+// The consequence to keep in mind: a lift's history is now one series, so a
+// deload or a stall follows you between programs as well. That is the intent —
+// a stall is a fact about the lifter, not about the program they were running
+// when it happened.
 //
 // Only sessions that are over and carry real logged work count. Sets are
 // materialized up front with completed = false, so without both guards a
@@ -102,7 +112,7 @@ type ListLiftHistoryRow struct {
 // working weight from another's performance — a wrong number on the bar, not
 // merely a privacy leak.
 func (q *Queries) ListLiftHistory(ctx context.Context, arg ListLiftHistoryParams) ([]ListLiftHistoryRow, error) {
-	rows, err := q.db.Query(ctx, listLiftHistory, arg.ProgramID, arg.ExerciseID, arg.UserID)
+	rows, err := q.db.Query(ctx, listLiftHistory, arg.ExerciseID, arg.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -110,6 +120,65 @@ func (q *Queries) ListLiftHistory(ctx context.Context, arg ListLiftHistoryParams
 	var items []ListLiftHistoryRow
 	for rows.Next() {
 		var i ListLiftHistoryRow
+		if err := rows.Scan(&i.PerformedOn, &i.WeightLb, &i.Success); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLiftHistoryForDay = `-- name: ListLiftHistoryForDay :many
+SELECT s.performed_on,
+       MAX(ss.weight_lb)::numeric  AS weight_lb,
+       BOOL_AND(ss.completed)      AS success
+FROM sessions s
+JOIN session_sets ss ON ss.session_id = s.id
+WHERE ss.exercise_id = $1
+  AND s.user_id = $2::int
+  AND s.program_day_id = $3
+  AND (s.finished_at IS NOT NULL
+       OR s.created_at < now() - INTERVAL '12 hours')
+GROUP BY s.id, s.performed_on
+HAVING COUNT(ss.id) FILTER (WHERE ss.actual_reps > 0) > 0
+ORDER BY s.performed_on, s.id
+`
+
+type ListLiftHistoryForDayParams struct {
+	ExerciseID   int32 `json:"exercise_id"`
+	UserID       int32 `json:"user_id"`
+	ProgramDayID int32 `json:"program_day_id"`
+}
+
+type ListLiftHistoryForDayRow struct {
+	PerformedOn pgtype.Date    `json:"performed_on"`
+	WeightLb    pgtype.Numeric `json:"weight_lb"`
+	Success     bool           `json:"success"`
+}
+
+// ListLiftHistoryForDay is ListLiftHistory narrowed to one program day, for the
+// Madcow engine's top set.
+//
+// The narrowing is the whole point and is not an optimisation. A lift's top set
+// is decided on its reference day alone: the squat's ramp tops at 87.5% on the
+// light day and 102.5% on the intensity day, so a history taking every day's
+// heaviest set would see the number wander and read it as progress and regress
+// that never happened.
+//
+// Same is_over and actual_reps guards as ListLiftHistory, for the same reasons —
+// see the note there, which this query is otherwise a copy of.
+func (q *Queries) ListLiftHistoryForDay(ctx context.Context, arg ListLiftHistoryForDayParams) ([]ListLiftHistoryForDayRow, error) {
+	rows, err := q.db.Query(ctx, listLiftHistoryForDay, arg.ExerciseID, arg.UserID, arg.ProgramDayID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLiftHistoryForDayRow
+	for rows.Next() {
+		var i ListLiftHistoryForDayRow
 		if err := rows.Scan(&i.PerformedOn, &i.WeightLb, &i.Success); err != nil {
 			return nil, err
 		}
@@ -305,6 +374,63 @@ func (q *Queries) ListPrograms(ctx context.Context) ([]ListProgramsRow, error) {
 			&i.Name,
 			&i.Description,
 			&i.ProgressionKind,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSetPlansByProgram = `-- name: ListSetPlansByProgram :many
+SELECT pde.program_day_id,
+       pde.exercise_id,
+       s.set_number,
+       s.reps,
+       s.pct_of_top
+FROM program_day_exercise_sets s
+JOIN program_day_exercises pde ON pde.id = s.program_day_exercise_id
+JOIN program_days pd ON pd.id = pde.program_day_id
+WHERE pd.program_id = $1
+ORDER BY pde.program_day_id, pde.exercise_id, s.set_number
+`
+
+type ListSetPlansByProgramRow struct {
+	ProgramDayID int32          `json:"program_day_id"`
+	ExerciseID   int32          `json:"exercise_id"`
+	SetNumber    int32          `json:"set_number"`
+	Reps         int32          `json:"reps"`
+	PctOfTop     pgtype.Numeric `json:"pct_of_top"`
+}
+
+// ListSetPlansByProgram returns every per-set prescription in a program, so a
+// day's ramps and its lifts' reference days can both be resolved without a query
+// per lift.
+//
+// Scoped to the program rather than to the day because the two questions have
+// different scopes: what to load TODAY needs this day's rungs, but which day is
+// a lift's reference needs every day's. Reading the program once answers both.
+//
+// Empty for every program but Madcow. An absent set plan means a uniform block
+// of sets x reps at one weight, which is what the other five prescribe.
+func (q *Queries) ListSetPlansByProgram(ctx context.Context, programID int32) ([]ListSetPlansByProgramRow, error) {
+	rows, err := q.db.Query(ctx, listSetPlansByProgram, programID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSetPlansByProgramRow
+	for rows.Next() {
+		var i ListSetPlansByProgramRow
+		if err := rows.Scan(
+			&i.ProgramDayID,
+			&i.ExerciseID,
+			&i.SetNumber,
+			&i.Reps,
+			&i.PctOfTop,
 		); err != nil {
 			return nil, err
 		}

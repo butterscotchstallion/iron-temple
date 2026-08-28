@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
@@ -95,6 +96,8 @@ func (s *Server) getProgram(w http.ResponseWriter, r *http.Request) {
 			Sets:         a.Sets,
 			Reps:         a.Reps,
 			WeightLb:     numericToFloat(a.WeightLb),
+			RepMin:       a.RepMin,
+			RepMax:       a.RepMax,
 		})
 	}
 
@@ -228,36 +231,112 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32, 
 		prescribed[p.ExerciseID] = true
 	}
 
+	// Where this lifter starts each lift, when they have said. Read once for the
+	// day rather than per lift: a program day is a handful of exercises and this
+	// is one small indexed read either way.
+	//
+	// A baseline only ever displaces the seeded starting weight, and the seed is
+	// only consulted when a lift has no history at all — so this changes the
+	// first session of a lift and nothing after it. That is the whole point: the
+	// seeds assume a 45 lb bar, and an install whose bar is 80 could not
+	// otherwise be told where to begin.
+	baselines, err := s.q.ListBaselines(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	baseline := make(map[int32]float64, len(baselines))
+	for _, b := range baselines {
+		baseline[b.ExerciseID] = numericToFloat(b.WeightLb)
+	}
+
+	// The program's per-set prescriptions, if it has any. Only Madcow does; for
+	// every other program this comes back empty and each lift is a uniform block
+	// of sets x reps at one weight, exactly as before.
+	//
+	// Read for the whole program rather than for this day because the two
+	// questions it answers have different scopes: what to load today needs this
+	// day's rungs, but which day decides a lift's top set needs every day's.
+	ramps, err := s.setPlans(ctx, programID)
+	if err != nil {
+		return nil, err
+	}
+
 	out := make([]prescribedExerciseDTO, 0, len(pres))
 	for _, p := range pres {
-		hist, err := s.q.ListLiftHistory(ctx, store.ListLiftHistoryParams{
-			ProgramID: programID, ExerciseID: p.ExerciseID, UserID: userID,
-		})
-		if err != nil {
-			return nil, err
+		steps := ramps.stepsFor(dayID, p.ExerciseID)
+
+		// Where the top set's history is read from. For a ramping lift that is
+		// its reference day — the one day whose ramp reaches 100% — because the
+		// same lift tops at 87.5% on one day and 102.5% on another, and a history
+		// that took every day's heaviest set would read that as progress and
+		// regress that never happened. For everything else it is the lift's whole
+		// history, which is what it has always been.
+		var hist []store.ListLiftHistoryRow
+		if refDay, ok := ramps.referenceDay(p.ExerciseID); ok {
+			rows, err := s.q.ListLiftHistoryForDay(ctx, store.ListLiftHistoryForDayParams{
+				ExerciseID: p.ExerciseID, UserID: userID, ProgramDayID: refDay,
+			})
+			if err != nil {
+				return nil, err
+			}
+			// The two row types are structurally identical — the day-scoped query
+			// is otherwise a copy — so this is a conversion rather than a rebuild.
+			hist = make([]store.ListLiftHistoryRow, 0, len(rows))
+			for _, r := range rows {
+				hist = append(hist, store.ListLiftHistoryRow(r))
+			}
+		} else {
+			hist, err = s.q.ListLiftHistory(ctx, store.ListLiftHistoryParams{
+				ExerciseID: p.ExerciseID, UserID: userID,
+			})
+			if err != nil {
+				return nil, err
+			}
 		}
+
 		history := make([]progression.SessionResult, 0, len(hist))
 		for _, h := range hist {
 			history = append(history, progression.SessionResult{
 				WeightLb: numericToFloat(h.WeightLb), Success: h.Success,
 			})
 		}
+		start := numericToFloat(p.StartingWeightLb)
+		if b, ok := baseline[p.ExerciseID]; ok {
+			start = b
+		}
 		plan := progression.NextPlan(
-			numericToFloat(p.StartingWeightLb),
+			start,
 			progression.IncrementFor(p.ExerciseName),
 			history,
 		)
 		if lay.active() {
 			plan = progression.ApplyLayoff(plan, lay.weeks)
 		}
+
+		// plan.WeightLb is the top set for a ramping lift and the working weight
+		// for everything else; the ramp is what tells them apart. A uniform block
+		// emits a flat plan rather than nothing, so every client has one shape to
+		// render instead of two.
+		setPlan := progression.UniformRamp(p.Sets, p.Reps, plan.WeightLb)
+		if len(steps) > 0 {
+			setPlan = progression.ResolveRamp(plan.WeightLb, steps)
+		}
+		// A prescription is a handful of rows and cannot approach int32, but the
+		// clamp is written out rather than assumed so the conversion is provably
+		// safe rather than merely obviously so (gosec G115).
+		setCount := int32(min(len(setPlan), math.MaxInt32))
 		out = append(out, prescribedExerciseDTO{
 			ExerciseID:   p.ExerciseID,
 			ExerciseName: p.ExerciseName,
 			Kind:         exerciseKindMain,
-			Sets:         p.Sets,
+			Sets:         setCount,
 			Reps:         p.Reps,
-			WeightLb:     plan.WeightLb,
-			RestSeconds:  p.RestSeconds,
+			// The top set, for a ramping lift. It is what the percentages are of
+			// and the number that moves week to week, so it is the one to show
+			// beside the lift's name — the rest of the ramp is in setPlan.
+			WeightLb:    plan.WeightLb,
+			RestSeconds: p.RestSeconds,
+			SetPlan:     setPlanDTOs(setPlan),
 			Progression: progressionInfoDTO{
 				Status:               string(plan.Status),
 				FailureCount:         plan.FailureCount,
@@ -278,30 +357,59 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32, 
 		if prescribed[a.ExerciseID] {
 			continue
 		}
-		// No engine runs on assistance. A curl is not a squat: it does not
-		// advance five pounds a session, and stalling on one is not a signal
-		// worth deloading over. So the rule is the one lifters already follow —
-		// do what you did last time, and change it when you feel like it. The
-		// weight carries forward from the last session that logged the lift,
-		// which means editing it mid-workout is how you change it, and the
-		// stored weight is only the fallback for a lift never performed.
+		// Assistance runs on reps, not on weight — and only where the lifter
+		// asked for it.
 		//
-		// ListExerciseHistory is reused rather than a new query written for it:
-		// it already returns one point per session, user-scoped, oldest first,
-		// with the top weight worked. The last point is what we want. It is not
-		// scoped to the program, deliberately — dips are dips whichever day they
-		// were done on.
-		hist, err := s.q.ListExerciseHistory(ctx, store.ListExerciseHistoryParams{
+		// Without a rep range nothing has changed: the weight carries forward
+		// from the last session that logged the lift, editing it mid-workout is
+		// how you change it, and the stored weight is only the fallback for a
+		// lift never performed. A curl is not a squat; it does not advance five
+		// pounds a session, and stalling on one is not a signal worth deloading
+		// over.
+		//
+		// With a range it is double progression: add reps inside the range week
+		// to week, and when every set reaches the top the weight goes up and the
+		// reps reset to the bottom. Still no deload — see progression/assistance.go.
+		//
+		// LastAssistanceSets rather than ListExerciseHistory, which returns one
+		// row per session with the top weight and the best reps and so cannot
+		// answer "did EVERY set reach the top". Neither is scoped to the program,
+		// deliberately — dips are dips whichever day they were done on.
+		lastSets, err := s.q.LastAssistanceSets(ctx, store.LastAssistanceSetsParams{
 			ExerciseID: a.ExerciseID, UserID: userID,
 		})
 		if err != nil {
 			return nil, err
 		}
-		weight := numericToFloat(a.WeightLb)
-		previous := 0.0
-		if n := len(hist); n > 0 {
-			previous = numericToFloat(hist[n-1].WeightLb)
-			weight = previous
+		var last *progression.AssistancePerformance
+		if len(lastSets) > 0 {
+			lastReps := make([]int32, 0, len(lastSets))
+			for _, r := range lastSets {
+				if r.ActualReps != nil {
+					lastReps = append(lastReps, *r.ActualReps)
+				}
+			}
+			last = &progression.AssistancePerformance{
+				// Every row of one session's sets carries that session's weight
+				// for the lift; the first is as good as any.
+				WeightLb: numericToFloat(lastSets[0].WeightLb),
+				Reps:     lastReps,
+			}
+		}
+
+		plan := progression.NextAssistance(
+			numericToFloat(a.WeightLb), derefInt32(a.RepMin), derefInt32(a.RepMax), last,
+		)
+		weight := plan.WeightLb
+		previous := plan.PreviousLb
+
+		// The rep target is the bottom of the range when there is one: a set is
+		// complete at the bottom and the weight moves at the top, which is what
+		// keeps "finished the session" and "earned the increase" separate. With
+		// no range the stored reps stand.
+		reps := a.Reps
+		if plan.TargetReps > 0 {
+			reps = plan.TargetReps
 		}
 
 		// A layoff does reach assistance, which is the one thing that overrides
@@ -320,7 +428,10 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32, 
 			layoffPct = progression.LayoffPct(lay.weeks)
 		}
 
-		status := progressionFixed
+		// A layoff cut outranks a rep-range advance in the label as well as in
+		// the number: a lifter looking at a weight that just went down wants to
+		// be told why it went down.
+		status := string(plan.Status)
 		if layoffPct > 0 {
 			status = string(progression.StatusLayoff)
 		}
@@ -329,9 +440,15 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32, 
 			ExerciseName: a.ExerciseName,
 			Kind:         exerciseKindAssistance,
 			Sets:         a.Sets,
-			Reps:         a.Reps,
+			Reps:         reps,
 			WeightLb:     weight,
 			RestSeconds:  a.RestSeconds,
+			RepMin:       a.RepMin,
+			RepMax:       a.RepMax,
+			// Assistance never ramps — it is a block of the same work at the same
+			// weight — but it still emits a plan, so createSession and the client
+			// have one shape to read for every lift in the session.
+			SetPlan: setPlanDTOs(progression.UniformRamp(a.Sets, reps, weight)),
 			Progression: progressionInfoDTO{
 				Status:               status,
 				FailuresBeforeDeload: progression.FailuresBeforeDeload,
@@ -341,4 +458,71 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32, 
 		})
 	}
 	return out, nil
+}
+
+// ---------------------------------------------------------------------------
+// Per-set prescriptions (ramps)
+// ---------------------------------------------------------------------------
+
+// rampIndex is one program's per-set prescriptions, arranged for the two
+// questions prescribe() asks of them: what are today's rungs for this lift, and
+// which day decides this lift's top set.
+//
+// Empty for every program but Madcow, and every method below answers "no ramp"
+// for an empty index — which is what keeps the linear programs on exactly the
+// path they were on before ramps existed.
+type rampIndex struct {
+	byDayAndLift map[[2]int32][]progression.RampStep
+	reference    map[int32]int32
+}
+
+func (r rampIndex) stepsFor(dayID, exerciseID int32) []progression.RampStep {
+	return r.byDayAndLift[[2]int32{dayID, exerciseID}]
+}
+
+// referenceDay returns the day whose ramp reaches this lift's top set. Absent
+// for a lift with no ramp, and — deliberately — for a ramp that names no 100%
+// set at all: a prescription that never establishes a top set has nothing for
+// the engine to read, and falling back to the lift's whole history is a better
+// answer than picking a day arbitrarily.
+func (r rampIndex) referenceDay(exerciseID int32) (int32, bool) {
+	day, ok := r.reference[exerciseID]
+	return day, ok
+}
+
+func (s *Server) setPlans(ctx context.Context, programID int32) (rampIndex, error) {
+	rows, err := s.q.ListSetPlansByProgram(ctx, programID)
+	if err != nil {
+		return rampIndex{}, err
+	}
+	idx := rampIndex{
+		byDayAndLift: make(map[[2]int32][]progression.RampStep),
+		reference:    make(map[int32]int32),
+	}
+	for _, row := range rows {
+		key := [2]int32{row.ProgramDayID, row.ExerciseID}
+		idx.byDayAndLift[key] = append(idx.byDayAndLift[key], progression.RampStep{
+			SetNumber: row.SetNumber,
+			Reps:      row.Reps,
+			PctOfTop:  numericToFloat(row.PctOfTop),
+		})
+	}
+	for key, steps := range idx.byDayAndLift {
+		if progression.IsReferenceDay(steps) {
+			idx.reference[key[1]] = key[0]
+		}
+	}
+	return idx, nil
+}
+
+func setPlanDTOs(sets []progression.RampSet) []prescribedSetDTO {
+	out := make([]prescribedSetDTO, 0, len(sets))
+	for _, s := range sets {
+		out = append(out, prescribedSetDTO{
+			SetNumber: s.SetNumber,
+			Reps:      s.Reps,
+			WeightLb:  s.WeightLb,
+		})
+	}
+	return out
 }
