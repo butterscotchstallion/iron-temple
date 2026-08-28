@@ -79,12 +79,6 @@ const (
 	exerciseKindAssistance = "assistance"
 )
 
-// progressionFixed is the status reported for assistance work. It is not one of
-// progression.Status: the engine never produces it, because no engine runs on
-// assistance at all. It says "this weight was carried forward, not computed",
-// which is what stops the UI reaching for a stall badge that has no meaning here.
-const progressionFixed = "fixed"
-
 type exerciseDTO struct {
 	ID          int32  `json:"id"`
 	Name        string `json:"name"`
@@ -140,6 +134,12 @@ type programDayAssistanceDTO struct {
 	// WeightLb is the fallback used until the lift has been logged once; after
 	// that the prescription carries forward from the last performance.
 	WeightLb float64 `json:"weightLb"`
+	// RepMin and RepMax turn this lift onto double progression: add reps inside
+	// the range week to week, and when every set reaches the top the weight goes
+	// up and the reps reset to the bottom. Both absent means the lift carries its
+	// weight forward and nothing moves it, which is the default.
+	RepMin *int32 `json:"repMin,omitempty"`
+	RepMax *int32 `json:"repMax,omitempty"`
 }
 
 type programDayExerciseDTO struct {
@@ -180,21 +180,29 @@ type layoffDTO struct {
 }
 
 type prescribedExerciseDTO struct {
-	ExerciseID   int32              `json:"exerciseId"`
-	ExerciseName string             `json:"exerciseName"`
-	Kind         string             `json:"kind"`
-	Sets         int32              `json:"sets"`
-	Reps         int32              `json:"reps"`
-	WeightLb     float64            `json:"weightLb"`
-	RestSeconds  int32              `json:"restSeconds"`
-	Progression  progressionInfoDTO `json:"progression"`
+	ExerciseID   int32   `json:"exerciseId"`
+	ExerciseName string  `json:"exerciseName"`
+	Kind         string  `json:"kind"`
+	Sets         int32   `json:"sets"`
+	Reps         int32   `json:"reps"`
+	WeightLb     float64 `json:"weightLb"`
+	RestSeconds  int32   `json:"restSeconds"`
+	// RepMin and RepMax bound an assistance lift's rep range, when it has one.
+	// Reps above is the bottom of that range — a set is complete at the bottom
+	// and the weight moves at the top — so the UI needs both to render "3x8-12"
+	// rather than a bare "3x8". Absent on main lifts and on assistance the
+	// lifter has not put a range on.
+	RepMin      *int32             `json:"repMin,omitempty"`
+	RepMax      *int32             `json:"repMax,omitempty"`
+	Progression progressionInfoDTO `json:"progression"`
 }
 
 // progressionInfoDTO explains why the engine chose a lift's weight, so the UI
 // can surface an impending stall or a deload instead of a bare number.
 type progressionInfoDTO struct {
 	// Status is one of the progression.Status values
-	// (start|advance|hold|deload|layoff), or "fixed" for assistance.
+	// (start|advance|hold|deload|layoff), or, for assistance, "fixed" when the
+	// weight was carried forward and "progressing" when a rep range advanced it.
 	Status string `json:"status"`
 	// FailureCount is the consecutive trailing failures at the working weight.
 	//

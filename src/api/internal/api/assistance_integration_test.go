@@ -541,3 +541,134 @@ func TestCustomExerciseInUseCannotBeDeleted(t *testing.T) {
 			"DELETE FROM exercises WHERE id = $1", exerciseID)
 	})
 }
+
+// ---- Double progression ----
+//
+// Assistance runs on reps, not on weight, and only where the lifter asked for
+// it. Adding a rep range is what turns it on; without one nothing here changes.
+
+func TestAssistanceRepRangeAdvancesTheWeight(t *testing.T) {
+	e := expect(t)
+	programID, dayID := firstProgramAndDay(e)
+	curlID := exerciseIDByName(t, e, "Barbell Curl")
+
+	created := e.POST(fmt.Sprintf("/programs/%d/days/%d/assistance", programID, dayID)).
+		WithJSON(map[string]any{
+			"exerciseId": curlID, "sets": 3, "reps": 8, "weightLb": 40,
+			"repMin": 8, "repMax": 12,
+		}).
+		Expect().Status(http.StatusCreated).JSON().Object()
+	assistanceID := int(created.Value("id").Number().Raw())
+	t.Cleanup(func() {
+		e.DELETE(fmt.Sprintf("/programs/%d/days/%d/assistance/%d",
+			programID, dayID, assistanceID)).Expect()
+	})
+	created.Value("repMin").Number().IsEqual(8)
+	created.Value("repMax").Number().IsEqual(12)
+
+	// The first session chases the bottom of the range at the stored weight.
+	first := startSession(t, e, dayID)
+	firstID := int(first.Value("id").Number().Raw())
+	curls := sessionSetsFor(first, curlID)
+	curls[0].Value("weightLb").Number().IsEqual(40)
+	curls[0].Value("targetReps").Number().IsEqual(8)
+
+	// Short of the top on one set: the weight holds.
+	for i, set := range curls {
+		reps := 12
+		if i == len(curls)-1 {
+			reps = 9
+		}
+		logSetAt(e, firstID, int(set.Value("id").Number().Raw()), reps, 40, true)
+	}
+	held := assistancePreview(e, programID, dayID, curlID)
+	held.Value("weightLb").Number().IsEqual(40)
+	held.Value("progression").Object().Value("status").String().IsEqual("fixed")
+
+	// Every set at the top: +5 lb, and the reps reset to the bottom.
+	second := startSession(t, e, dayID)
+	secondID := int(second.Value("id").Number().Raw())
+	for _, set := range sessionSetsFor(second, curlID) {
+		logSetAt(e, secondID, int(set.Value("id").Number().Raw()), 12, 40, true)
+	}
+	advanced := assistancePreview(e, programID, dayID, curlID)
+	advanced.Value("weightLb").Number().IsEqual(45)
+	advanced.Value("repMin").Number().IsEqual(8)
+	advanced.Value("repMax").Number().IsEqual(12)
+	advanced.Value("progression").Object().Value("status").String().IsEqual("progressing")
+}
+
+// Turning the range off puts the lift back on carry-forward. null is the
+// instruction; omitting the field leaves the range alone.
+func TestAssistanceRepRangeCanBeTurnedOff(t *testing.T) {
+	e := expect(t)
+	programID, dayID := firstProgramAndDay(e)
+	curlID := exerciseIDByName(t, e, "Barbell Curl")
+
+	created := e.POST(fmt.Sprintf("/programs/%d/days/%d/assistance", programID, dayID)).
+		WithJSON(map[string]any{
+			"exerciseId": curlID, "sets": 3, "reps": 8, "weightLb": 40,
+			"repMin": 8, "repMax": 12,
+		}).
+		Expect().Status(http.StatusCreated).JSON().Object()
+	id := int(created.Value("id").Number().Raw())
+	path := fmt.Sprintf("/programs/%d/days/%d/assistance/%d", programID, dayID, id)
+	t.Cleanup(func() { e.DELETE(path).Expect() })
+
+	// An unrelated edit leaves the range in place.
+	e.PATCH(path).WithJSON(map[string]any{"sets": 4}).
+		Expect().Status(http.StatusOK).
+		JSON().Object().Value("repMin").Number().IsEqual(8)
+
+	// null takes it off.
+	off := e.PATCH(path).
+		WithJSON(map[string]any{"repMin": nil, "repMax": nil}).
+		Expect().Status(http.StatusOK).JSON().Object()
+	off.NotContainsKey("repMin")
+	off.NotContainsKey("repMax")
+}
+
+func TestAssistanceRepRangeValidation(t *testing.T) {
+	e := expect(t)
+	programID, dayID := firstProgramAndDay(e)
+	curlID := exerciseIDByName(t, e, "Barbell Curl")
+
+	cases := []struct {
+		name  string
+		extra map[string]any
+	}{
+		{"only the bottom", map[string]any{"repMin": 8}},
+		{"only the top", map[string]any{"repMax": 12}},
+		{"backwards", map[string]any{"repMin": 12, "repMax": 8}},
+		{"zero", map[string]any{"repMin": 0, "repMax": 12}},
+		{"absurd", map[string]any{"repMin": 8, "repMax": 5000}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := map[string]any{
+				"exerciseId": curlID, "sets": 3, "reps": 8, "weightLb": 40,
+			}
+			for k, v := range tc.extra {
+				body[k] = v
+			}
+			e.POST(fmt.Sprintf("/programs/%d/days/%d/assistance", programID, dayID)).
+				WithJSON(body).Expect().Status(http.StatusBadRequest)
+		})
+	}
+}
+
+// assistancePreview returns the prescription block for one assistance lift.
+func assistancePreview(
+	e *httpexpect.Expect, programID, dayID, exerciseID int,
+) *httpexpect.Object {
+	exercises := e.GET(fmt.Sprintf("/programs/%d/days/%d/next-session", programID, dayID)).
+		Expect().Status(http.StatusOK).
+		JSON().Object().Value("exercises").Array()
+	for i := 0; i < int(exercises.Length().Raw()); i++ {
+		ex := exercises.Value(i).Object()
+		if int(ex.Value("exerciseId").Number().Raw()) == exerciseID {
+			return ex
+		}
+	}
+	panic("assistance lift not in the prescription")
+}

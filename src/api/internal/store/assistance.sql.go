@@ -13,7 +13,7 @@ import (
 
 const createAssistance = `-- name: CreateAssistance :one
 INSERT INTO program_day_assistance
-    (user_id, program_day_id, exercise_id, position, sets, reps, weight_lb)
+    (user_id, program_day_id, exercise_id, position, sets, reps, weight_lb, rep_min, rep_max)
 VALUES (
     $1::int,
     $2,
@@ -24,9 +24,11 @@ VALUES (
        AND program_day_id = $2),
     $4,
     $5,
-    $6
+    $6,
+    $7,
+    $8
 )
-RETURNING id, program_day_id, exercise_id, position, sets, reps, weight_lb
+RETURNING id, program_day_id, exercise_id, position, sets, reps, weight_lb, rep_min, rep_max
 `
 
 type CreateAssistanceParams struct {
@@ -36,6 +38,8 @@ type CreateAssistanceParams struct {
 	Sets         int32          `json:"sets"`
 	Reps         int32          `json:"reps"`
 	WeightLb     pgtype.Numeric `json:"weight_lb"`
+	RepMin       *int32         `json:"rep_min"`
+	RepMax       *int32         `json:"rep_max"`
 }
 
 type CreateAssistanceRow struct {
@@ -46,6 +50,8 @@ type CreateAssistanceRow struct {
 	Sets         int32          `json:"sets"`
 	Reps         int32          `json:"reps"`
 	WeightLb     pgtype.Numeric `json:"weight_lb"`
+	RepMin       *int32         `json:"rep_min"`
+	RepMax       *int32         `json:"rep_max"`
 }
 
 // CreateAssistance appends to the end of the day's assistance block. position is
@@ -61,6 +67,8 @@ func (q *Queries) CreateAssistance(ctx context.Context, arg CreateAssistancePara
 		arg.Sets,
 		arg.Reps,
 		arg.WeightLb,
+		arg.RepMin,
+		arg.RepMax,
 	)
 	var i CreateAssistanceRow
 	err := row.Scan(
@@ -71,6 +79,8 @@ func (q *Queries) CreateAssistance(ctx context.Context, arg CreateAssistancePara
 		&i.Sets,
 		&i.Reps,
 		&i.WeightLb,
+		&i.RepMin,
+		&i.RepMax,
 	)
 	return i, err
 }
@@ -102,7 +112,9 @@ SELECT pda.id,
        pda.position,
        pda.sets,
        pda.reps,
-       pda.weight_lb
+       pda.weight_lb,
+       pda.rep_min,
+       pda.rep_max
 FROM program_day_assistance pda
 JOIN exercises e ON e.id = pda.exercise_id
 WHERE pda.id = $1
@@ -123,6 +135,8 @@ type GetAssistanceRow struct {
 	Sets         int32          `json:"sets"`
 	Reps         int32          `json:"reps"`
 	WeightLb     pgtype.Numeric `json:"weight_lb"`
+	RepMin       *int32         `json:"rep_min"`
+	RepMax       *int32         `json:"rep_max"`
 }
 
 func (q *Queries) GetAssistance(ctx context.Context, arg GetAssistanceParams) (GetAssistanceRow, error) {
@@ -137,8 +151,74 @@ func (q *Queries) GetAssistance(ctx context.Context, arg GetAssistanceParams) (G
 		&i.Sets,
 		&i.Reps,
 		&i.WeightLb,
+		&i.RepMin,
+		&i.RepMax,
 	)
 	return i, err
+}
+
+const lastAssistanceSets = `-- name: LastAssistanceSets :many
+SELECT actual_reps, weight_lb
+FROM (
+    SELECT ss.actual_reps,
+           ss.weight_lb,
+           ss.set_number,
+           DENSE_RANK() OVER (ORDER BY s.performed_on DESC, s.id DESC) AS recency
+    FROM session_sets ss
+    JOIN sessions s ON s.id = ss.session_id
+    WHERE ss.exercise_id = $1
+      AND s.user_id = $2::int
+      AND ss.actual_reps > 0
+) ranked
+WHERE recency = 1
+ORDER BY set_number
+`
+
+type LastAssistanceSetsParams struct {
+	ExerciseID int32 `json:"exercise_id"`
+	UserID     int32 `json:"user_id"`
+}
+
+type LastAssistanceSetsRow struct {
+	ActualReps *int32         `json:"actual_reps"`
+	WeightLb   pgtype.Numeric `json:"weight_lb"`
+}
+
+// LastAssistanceSets returns the reps actually logged on each set of a lift, the
+// last time it was performed, with the weight worked.
+//
+// The double-progression engine needs per-set reps, which is what makes this its
+// own query rather than an extension of ListExerciseHistory — that returns one
+// row per session with the top weight and the best reps, a shape three other
+// callers depend on and which cannot answer "did EVERY set reach the top of the
+// range".
+//
+// actual_reps > 0 keeps unlogged sets out of the answer: a set nobody touched is
+// not a set that fell short, and counting it would stop the range from ever
+// topping out. Deliberately not scoped to a finished session, matching the
+// carry-forward weight this sits beside — a lifter mid-workout is looking at
+// what they just did.
+//
+// DENSE_RANK rather than a correlated subquery so the "which session was last"
+// decision is made once, in the same pass that reads the rows.
+func (q *Queries) LastAssistanceSets(ctx context.Context, arg LastAssistanceSetsParams) ([]LastAssistanceSetsRow, error) {
+	rows, err := q.db.Query(ctx, lastAssistanceSets, arg.ExerciseID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LastAssistanceSetsRow
+	for rows.Next() {
+		var i LastAssistanceSetsRow
+		if err := rows.Scan(&i.ActualReps, &i.WeightLb); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listAssistanceByDay = `-- name: ListAssistanceByDay :many
@@ -151,6 +231,8 @@ SELECT pda.id,
        pda.sets,
        pda.reps,
        pda.weight_lb,
+       pda.rep_min,
+       pda.rep_max,
        e.rest_seconds
 FROM program_day_assistance pda
 JOIN exercises e ON e.id = pda.exercise_id
@@ -173,6 +255,8 @@ type ListAssistanceByDayRow struct {
 	Sets         int32          `json:"sets"`
 	Reps         int32          `json:"reps"`
 	WeightLb     pgtype.Numeric `json:"weight_lb"`
+	RepMin       *int32         `json:"rep_min"`
+	RepMax       *int32         `json:"rep_max"`
 	RestSeconds  int32          `json:"rest_seconds"`
 }
 
@@ -216,6 +300,8 @@ func (q *Queries) ListAssistanceByDay(ctx context.Context, arg ListAssistanceByD
 			&i.Sets,
 			&i.Reps,
 			&i.WeightLb,
+			&i.RepMin,
+			&i.RepMax,
 			&i.RestSeconds,
 		); err != nil {
 			return nil, err
@@ -236,7 +322,9 @@ SELECT pda.id,
        pda.position,
        pda.sets,
        pda.reps,
-       pda.weight_lb
+       pda.weight_lb,
+       pda.rep_min,
+       pda.rep_max
 FROM program_day_assistance pda
 JOIN exercises e ON e.id = pda.exercise_id
 JOIN program_days pd ON pd.id = pda.program_day_id
@@ -259,6 +347,8 @@ type ListAssistanceByProgramRow struct {
 	Sets         int32          `json:"sets"`
 	Reps         int32          `json:"reps"`
 	WeightLb     pgtype.Numeric `json:"weight_lb"`
+	RepMin       *int32         `json:"rep_min"`
+	RepMax       *int32         `json:"rep_max"`
 }
 
 // ListAssistanceByProgram returns every day's assistance across one program, so
@@ -282,6 +372,8 @@ func (q *Queries) ListAssistanceByProgram(ctx context.Context, arg ListAssistanc
 			&i.Sets,
 			&i.Reps,
 			&i.WeightLb,
+			&i.RepMin,
+			&i.RepMax,
 		); err != nil {
 			return nil, err
 		}
@@ -297,16 +389,20 @@ const updateAssistance = `-- name: UpdateAssistance :one
 UPDATE program_day_assistance
 SET sets      = $1,
     reps      = $2,
-    weight_lb = $3
-WHERE id = $4
-  AND user_id = $5::int
-RETURNING id, program_day_id, exercise_id, position, sets, reps, weight_lb
+    weight_lb = $3,
+    rep_min   = $4,
+    rep_max   = $5
+WHERE id = $6
+  AND user_id = $7::int
+RETURNING id, program_day_id, exercise_id, position, sets, reps, weight_lb, rep_min, rep_max
 `
 
 type UpdateAssistanceParams struct {
 	Sets     int32          `json:"sets"`
 	Reps     int32          `json:"reps"`
 	WeightLb pgtype.Numeric `json:"weight_lb"`
+	RepMin   *int32         `json:"rep_min"`
+	RepMax   *int32         `json:"rep_max"`
 	ID       int32          `json:"id"`
 	UserID   int32          `json:"user_id"`
 }
@@ -319,17 +415,25 @@ type UpdateAssistanceRow struct {
 	Sets         int32          `json:"sets"`
 	Reps         int32          `json:"reps"`
 	WeightLb     pgtype.Numeric `json:"weight_lb"`
+	RepMin       *int32         `json:"rep_min"`
+	RepMax       *int32         `json:"rep_max"`
 }
 
-// UpdateAssistance writes all three mutable columns; the handler merges the
-// PATCH body with current values first, the same shape as UpdateSessionSet. The
-// owner check is repeated here rather than inferred from the preceding
-// GetAssistance, for the reason given there.
+// UpdateAssistance writes every mutable column; the handler merges the PATCH
+// body with current values first, the same shape as UpdateSessionSet. The owner
+// check is repeated here rather than inferred from the preceding GetAssistance,
+// for the reason given there.
+//
+// rep_min and rep_max are narg rather than arg because NULL is meaningful: it is
+// how a lifter turns the rep range back off and returns the lift to carrying its
+// weight forward. A COALESCE here would make that unsayable.
 func (q *Queries) UpdateAssistance(ctx context.Context, arg UpdateAssistanceParams) (UpdateAssistanceRow, error) {
 	row := q.db.QueryRow(ctx, updateAssistance,
 		arg.Sets,
 		arg.Reps,
 		arg.WeightLb,
+		arg.RepMin,
+		arg.RepMax,
 		arg.ID,
 		arg.UserID,
 	)
@@ -342,6 +446,8 @@ func (q *Queries) UpdateAssistance(ctx context.Context, arg UpdateAssistancePara
 		&i.Sets,
 		&i.Reps,
 		&i.WeightLb,
+		&i.RepMin,
+		&i.RepMax,
 	)
 	return i, err
 }

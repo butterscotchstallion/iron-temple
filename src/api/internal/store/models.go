@@ -45,6 +45,8 @@ type ProgramDayAssistance struct {
 	Reps         int32              `json:"reps"`
 	WeightLb     pgtype.Numeric     `json:"weight_lb"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	RepMin       *int32             `json:"rep_min"`
+	RepMax       *int32             `json:"rep_max"`
 }
 
 type ProgramDayExercise struct {

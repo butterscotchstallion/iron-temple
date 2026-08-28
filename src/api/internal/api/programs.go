@@ -95,6 +95,8 @@ func (s *Server) getProgram(w http.ResponseWriter, r *http.Request) {
 			Sets:         a.Sets,
 			Reps:         a.Reps,
 			WeightLb:     numericToFloat(a.WeightLb),
+			RepMin:       a.RepMin,
+			RepMax:       a.RepMax,
 		})
 	}
 
@@ -300,30 +302,59 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32, 
 		if prescribed[a.ExerciseID] {
 			continue
 		}
-		// No engine runs on assistance. A curl is not a squat: it does not
-		// advance five pounds a session, and stalling on one is not a signal
-		// worth deloading over. So the rule is the one lifters already follow —
-		// do what you did last time, and change it when you feel like it. The
-		// weight carries forward from the last session that logged the lift,
-		// which means editing it mid-workout is how you change it, and the
-		// stored weight is only the fallback for a lift never performed.
+		// Assistance runs on reps, not on weight — and only where the lifter
+		// asked for it.
 		//
-		// ListExerciseHistory is reused rather than a new query written for it:
-		// it already returns one point per session, user-scoped, oldest first,
-		// with the top weight worked. The last point is what we want. It is not
-		// scoped to the program, deliberately — dips are dips whichever day they
-		// were done on.
-		hist, err := s.q.ListExerciseHistory(ctx, store.ListExerciseHistoryParams{
+		// Without a rep range nothing has changed: the weight carries forward
+		// from the last session that logged the lift, editing it mid-workout is
+		// how you change it, and the stored weight is only the fallback for a
+		// lift never performed. A curl is not a squat; it does not advance five
+		// pounds a session, and stalling on one is not a signal worth deloading
+		// over.
+		//
+		// With a range it is double progression: add reps inside the range week
+		// to week, and when every set reaches the top the weight goes up and the
+		// reps reset to the bottom. Still no deload — see progression/assistance.go.
+		//
+		// LastAssistanceSets rather than ListExerciseHistory, which returns one
+		// row per session with the top weight and the best reps and so cannot
+		// answer "did EVERY set reach the top". Neither is scoped to the program,
+		// deliberately — dips are dips whichever day they were done on.
+		lastSets, err := s.q.LastAssistanceSets(ctx, store.LastAssistanceSetsParams{
 			ExerciseID: a.ExerciseID, UserID: userID,
 		})
 		if err != nil {
 			return nil, err
 		}
-		weight := numericToFloat(a.WeightLb)
-		previous := 0.0
-		if n := len(hist); n > 0 {
-			previous = numericToFloat(hist[n-1].WeightLb)
-			weight = previous
+		var last *progression.AssistancePerformance
+		if len(lastSets) > 0 {
+			lastReps := make([]int32, 0, len(lastSets))
+			for _, r := range lastSets {
+				if r.ActualReps != nil {
+					lastReps = append(lastReps, *r.ActualReps)
+				}
+			}
+			last = &progression.AssistancePerformance{
+				// Every row of one session's sets carries that session's weight
+				// for the lift; the first is as good as any.
+				WeightLb: numericToFloat(lastSets[0].WeightLb),
+				Reps:     lastReps,
+			}
+		}
+
+		plan := progression.NextAssistance(
+			numericToFloat(a.WeightLb), derefInt32(a.RepMin), derefInt32(a.RepMax), last,
+		)
+		weight := plan.WeightLb
+		previous := plan.PreviousLb
+
+		// The rep target is the bottom of the range when there is one: a set is
+		// complete at the bottom and the weight moves at the top, which is what
+		// keeps "finished the session" and "earned the increase" separate. With
+		// no range the stored reps stand.
+		reps := a.Reps
+		if plan.TargetReps > 0 {
+			reps = plan.TargetReps
 		}
 
 		// A layoff does reach assistance, which is the one thing that overrides
@@ -342,7 +373,10 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32, 
 			layoffPct = progression.LayoffPct(lay.weeks)
 		}
 
-		status := progressionFixed
+		// A layoff cut outranks a rep-range advance in the label as well as in
+		// the number: a lifter looking at a weight that just went down wants to
+		// be told why it went down.
+		status := string(plan.Status)
 		if layoffPct > 0 {
 			status = string(progression.StatusLayoff)
 		}
@@ -351,9 +385,11 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32, 
 			ExerciseName: a.ExerciseName,
 			Kind:         exerciseKindAssistance,
 			Sets:         a.Sets,
-			Reps:         a.Reps,
+			Reps:         reps,
 			WeightLb:     weight,
 			RestSeconds:  a.RestSeconds,
+			RepMin:       a.RepMin,
+			RepMax:       a.RepMax,
 			Progression: progressionInfoDTO{
 				Status:               status,
 				FailuresBeforeDeload: progression.FailuresBeforeDeload,

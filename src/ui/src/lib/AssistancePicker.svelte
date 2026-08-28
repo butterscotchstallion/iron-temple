@@ -32,6 +32,8 @@
       sets: number;
       reps: number;
       weightLb: number;
+      repMin?: number;
+      repMax?: number;
     }) => Promise<boolean>;
     onCancel: () => void;
   } = $props();
@@ -50,6 +52,15 @@
   let reps = $state(10);
   let weightLb = $state(0);
   let saving = $state(false);
+
+  // Off by default. A rep range turns the lift onto double progression — add
+  // reps inside the range week to week, and when every set reaches the top the
+  // weight goes up 5 lb and the reps reset to the bottom. Without it the lift
+  // carries its weight forward and nothing moves it, which is what accessories
+  // have always done here and is still the right default for most of them.
+  let ranged = $state(false);
+  let repMin = $state(8);
+  let repMax = $state(12);
 
   const available = $derived(exercises.filter((e) => !exclude.includes(e.id)));
   const counts = $derived(countByGroup(available));
@@ -77,8 +88,11 @@
     const ok = await onAdd({
       exerciseId: selected.id,
       sets,
-      reps,
+      // With a range the bottom is the rep target: a set is complete at the
+      // bottom and the weight moves at the top.
+      reps: ranged ? repMin : reps,
       weightLb,
+      ...(ranged ? { repMin, repMax } : {}),
     });
     saving = false;
     // On failure the parent shows the banner and the panel stays open with the
@@ -118,16 +132,39 @@
           class="rounded-md border border-input bg-transparent px-2 py-1.5 text-sm tabular-nums text-foreground outline-none transition focus:border-primary"
         />
       </label>
-      <label class="flex flex-1 flex-col gap-1 text-xs text-muted-foreground">
-        Reps
-        <input
-          type="number"
-          min="1"
-          max="100"
-          bind:value={reps}
-          class="rounded-md border border-input bg-transparent px-2 py-1.5 text-sm tabular-nums text-foreground outline-none transition focus:border-primary"
-        />
-      </label>
+      {#if !ranged}
+        <label class="flex flex-1 flex-col gap-1 text-xs text-muted-foreground">
+          Reps
+          <input
+            type="number"
+            min="1"
+            max="100"
+            bind:value={reps}
+            class="rounded-md border border-input bg-transparent px-2 py-1.5 text-sm tabular-nums text-foreground outline-none transition focus:border-primary"
+          />
+        </label>
+      {:else}
+        <label class="flex flex-1 flex-col gap-1 text-xs text-muted-foreground">
+          Reps from
+          <input
+            type="number"
+            min="1"
+            max="100"
+            bind:value={repMin}
+            class="rounded-md border border-input bg-transparent px-2 py-1.5 text-sm tabular-nums text-foreground outline-none transition focus:border-primary"
+          />
+        </label>
+        <label class="flex flex-1 flex-col gap-1 text-xs text-muted-foreground">
+          up to
+          <input
+            type="number"
+            min="1"
+            max="100"
+            bind:value={repMax}
+            class="rounded-md border border-input bg-transparent px-2 py-1.5 text-sm tabular-nums text-foreground outline-none transition focus:border-primary"
+          />
+        </label>
+      {/if}
       <label class="flex flex-1 flex-col gap-1 text-xs text-muted-foreground">
         Weight (lb)
         <input
@@ -139,9 +176,19 @@
         />
       </label>
     </div>
+    <label class="flex items-center gap-2 text-xs text-muted-foreground">
+      <input type="checkbox" bind:checked={ranged} class="size-4 accent-primary" />
+      Use a rep range
+    </label>
     <p class="text-xs text-muted-foreground">
-      Leave the weight at 0 for bodyweight work. After the first time you log it,
-      the weight carries over from your last session.
+      Leave the weight at 0 for bodyweight work.
+      {#if ranged}
+        With a range, hit the top on every set and the weight goes up 5 lb next
+        time, with the reps back at the bottom. It never deloads.
+      {:else}
+        After the first time you log it, the weight carries over from your last
+        session — nothing moves it but you.
+      {/if}
     </p>
     <div class="flex gap-2">
       <Button size="sm" onclick={confirm} disabled={saving}>

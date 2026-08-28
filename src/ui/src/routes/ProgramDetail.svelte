@@ -11,6 +11,7 @@
     updateMe,
     setBaseline,
     type Layoff,
+    type PrescribedExercise,
     type Program,
     type ProgramDayAssistance,
   } from "../lib/api";
@@ -43,25 +44,18 @@
   // the preview returned it. assistance is the editable list from the program
   // itself, which is what carries the row ids the remove control needs — the
   // preview knows what will be lifted, not which row said so.
+  //
+  // exercises is the generated PrescribedExercise rather than a hand-written
+  // copy of its shape. The copy drifted the moment the contract gained a
+  // progression status ("progressing", when a rep range advances an accessory):
+  // the structural type restated the old union and stopped accepting what the
+  // API now returns. Naming the generated type means the spec is the only place
+  // that has to know.
   type DayView = {
     id: number;
     name: string;
     weekday: number | null;
-    exercises: {
-      exerciseId: number;
-      exerciseName: string;
-      kind: "main" | "assistance";
-      sets: number;
-      reps: number;
-      weightLb: number;
-      progression: {
-        status: "start" | "advance" | "hold" | "deload" | "layoff" | "fixed";
-        failureCount: number;
-        failuresBeforeDeload: number;
-        previousWeightLb: number;
-        layoffPct: number;
-      };
-    }[];
+    exercises: PrescribedExercise[];
     assistance: ProgramDayAssistance[];
   };
 
@@ -210,7 +204,14 @@
   // the lifter's numbers on screen if it didn't.
   async function add(
     day: DayView,
-    choice: { exerciseId: number; sets: number; reps: number; weightLb: number },
+    choice: {
+      exerciseId: number;
+      sets: number;
+      reps: number;
+      weightLb: number;
+      repMin?: number;
+      repMax?: number;
+    },
   ): Promise<boolean> {
     assistanceError = null;
     const { data, error } = await addAssistance({
@@ -537,7 +538,11 @@
                     <Badge variant={prog.variant}>{prog.label}</Badge>
                   {/if}
                   <span class="tabular-nums text-muted-foreground">
-                    {ex.sets}×{ex.reps} · {ex.weightLb} lb
+                    <!-- A rep range reads as its range: reps is the bottom of
+                         it, and "3×8" would hide the target the weight moves
+                         on. -->
+                    {ex.sets}×{ex.repMax ? `${ex.repMin}–${ex.repMax}` : ex.reps}
+                    · {ex.weightLb} lb
                   </span>
                 </span>
               </div>
@@ -625,7 +630,9 @@
                   </a>
                   <span class="flex items-center gap-2">
                     <span class="tabular-nums text-muted-foreground">
-                      {entry.sets}×{entry.reps}
+                      {entry.sets}×{entry.repMax
+                        ? `${entry.repMin}–${entry.repMax}`
+                        : entry.reps}
                       {#if assistanceWeight(day, entry) > 0}
                         · {assistanceWeight(day, entry)} lb
                       {:else}

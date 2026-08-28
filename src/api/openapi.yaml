@@ -1393,6 +1393,22 @@ components:
           minimum: 0
           description: Fallback weight, used until the lift has been logged once.
           example: 0
+        repMin:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: >
+            Bottom of the rep range. Given with repMax or not at all.
+          example: 8
+        repMax:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: >
+            Top of the rep range. When every set reaches it, the weight goes up
+            by 5 lb and the reps reset to repMin. There is no deload — a stalled
+            accessory is not a signal.
+          example: 12
 
     CreateAssistanceRequest:
       type: object
@@ -1416,9 +1432,29 @@ components:
           minimum: 0
           default: 0
           description: Omit or send 0 for bodyweight work.
+        repMin:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: >
+            Bottom of the rep range. Given with repMax or not at all.
+          example: 8
+        repMax:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: >
+            Top of the rep range. When every set reaches it, the weight goes up
+            by 5 lb and the reps reset to repMin. There is no deload — a stalled
+            accessory is not a signal.
+          example: 12
 
     UpdateAssistanceRequest:
-      description: Any subset; omitted fields keep their current value.
+      description: >
+        Any subset; omitted fields keep their current value. repMin and repMax
+        are the exception: null on them is an instruction, not the same as
+        omitting them — it turns the rep range off and puts the lift back on
+        carrying its weight forward.
       type: object
       properties:
         sets:
@@ -1432,6 +1468,16 @@ components:
         weightLb:
           type: number
           minimum: 0
+        repMin:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 100
+        repMax:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 100
 
     UpdateProgramDayRequest:
       type: object
@@ -1578,6 +1624,19 @@ components:
           description: >-
             Prescribed rest between sets, in seconds — see ProgramDayExercise.
           example: 300
+        repMin:
+          type: integer
+          description: >-
+            Bottom of an assistance lift's rep range, when it has one. `reps`
+            above is this same number: a set is complete at the bottom of the
+            range and the weight moves at the top, which is what keeps
+            "finished the session" and "earned the increase" apart. Absent on
+            main lifts and on assistance with no range.
+          example: 8
+        repMax:
+          type: integer
+          description: Top of that range — reaching it on every set is what advances the weight.
+          example: 12
         progression:
           $ref: "#/components/schemas/ProgressionInfo"
 
@@ -1590,14 +1649,16 @@ components:
       properties:
         status:
           type: string
-          enum: [start, advance, hold, deload, layoff, fixed]
+          enum: [start, advance, hold, deload, layoff, fixed, progressing]
           description: >-
             start (no history), advance (last session passed), hold (recent
             failure, repeating the weight), deload (stall hit the threshold, weight
             dropped), layoff (weight cut for time away from training rather than
-            for anything that happened in a session), fixed (assistance work — no
-            engine runs on it; the weight is carried forward from what was last
-            logged).
+            for anything that happened in a session), fixed (the weight was
+            carried forward from what was last logged, rather than computed —
+            assistance work with no rep range), progressing (an assistance lift
+            with a rep range topped it out on every set, so the weight went up
+            and the reps reset to the bottom).
           example: hold
         failureCount:
           type: integer

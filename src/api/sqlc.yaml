@@ -21,6 +21,7 @@ sql:
       # 0013 is mixed like 0009 and 0011: three CREATE TABLEs, then the seed
       # INSERTs that fill them for the accounts that already exist.
       - "db/migrations/0013_gym_setup.up.sql"
+      - "db/migrations/0014_assistance_rep_range.up.sql"
     queries: "db/queries"
     gen:
       go:
