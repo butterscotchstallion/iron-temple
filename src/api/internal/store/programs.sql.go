@@ -61,10 +61,8 @@ SELECT s.performed_on,
        BOOL_AND(ss.completed)      AS success
 FROM sessions s
 JOIN session_sets ss ON ss.session_id = s.id
-JOIN program_days pd ON pd.id = s.program_day_id
-WHERE pd.program_id = $1
-  AND ss.exercise_id = $2
-  AND s.user_id = $3::int
+WHERE ss.exercise_id = $1
+  AND s.user_id = $2::int
   AND (s.finished_at IS NOT NULL
        OR s.created_at < now() - INTERVAL '12 hours')
 GROUP BY s.id, s.performed_on
@@ -73,7 +71,6 @@ ORDER BY s.performed_on, s.id
 `
 
 type ListLiftHistoryParams struct {
-	ProgramID  int32 `json:"program_id"`
 	ExerciseID int32 `json:"exercise_id"`
 	UserID     int32 `json:"user_id"`
 }
@@ -85,11 +82,24 @@ type ListLiftHistoryRow struct {
 }
 
 // ListLiftHistory returns one row per past session in which a lift was
-// performed within a program, oldest first, for the progression engine.
-// Scope is the whole program (all days) because a lift such as the squat
-// progresses continuously across Workout A and B. A session "succeeds" for the
-// lift only if every logged set for it was completed; weight_lb is the top
+// performed, oldest first, for the progression engine. A session "succeeds" for
+// the lift only if every logged set for it was completed; weight_lb is the top
 // weight worked that session.
+//
+// Scope is the lift and the lifter, deliberately NOT the program. A squat is a
+// squat: the bar does not know which program day sent you to it, and neither
+// should the engine. Scoping this to one program used to mean that switching
+// programs restarted every lift at its seeded starting weight — which fell
+// hardest on exactly the move the app recommends, since Advanced 3x5 is the
+// graduation fork when 5x5 stalls and taking it dropped a working squat back to
+// an empty bar. ListExerciseHistory has always read across programs for the
+// same reason (assistance.sql calls it "dips are dips whichever day they were
+// done on"); this is the main lifts agreeing with it.
+//
+// The consequence to keep in mind: a lift's history is now one series, so a
+// deload or a stall follows you between programs as well. That is the intent —
+// a stall is a fact about the lifter, not about the program they were running
+// when it happened.
 //
 // Only sessions that are over and carry real logged work count. Sets are
 // materialized up front with completed = false, so without both guards a
@@ -102,7 +112,7 @@ type ListLiftHistoryRow struct {
 // working weight from another's performance — a wrong number on the bar, not
 // merely a privacy leak.
 func (q *Queries) ListLiftHistory(ctx context.Context, arg ListLiftHistoryParams) ([]ListLiftHistoryRow, error) {
-	rows, err := q.db.Query(ctx, listLiftHistory, arg.ProgramID, arg.ExerciseID, arg.UserID)
+	rows, err := q.db.Query(ctx, listLiftHistory, arg.ExerciseID, arg.UserID)
 	if err != nil {
 		return nil, err
 	}

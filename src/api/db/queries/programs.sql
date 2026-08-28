@@ -64,11 +64,24 @@ WHERE pde.program_day_id = $1
 ORDER BY pde.position;
 
 -- ListLiftHistory returns one row per past session in which a lift was
--- performed within a program, oldest first, for the progression engine.
--- Scope is the whole program (all days) because a lift such as the squat
--- progresses continuously across Workout A and B. A session "succeeds" for the
--- lift only if every logged set for it was completed; weight_lb is the top
+-- performed, oldest first, for the progression engine. A session "succeeds" for
+-- the lift only if every logged set for it was completed; weight_lb is the top
 -- weight worked that session.
+--
+-- Scope is the lift and the lifter, deliberately NOT the program. A squat is a
+-- squat: the bar does not know which program day sent you to it, and neither
+-- should the engine. Scoping this to one program used to mean that switching
+-- programs restarted every lift at its seeded starting weight — which fell
+-- hardest on exactly the move the app recommends, since Advanced 3x5 is the
+-- graduation fork when 5x5 stalls and taking it dropped a working squat back to
+-- an empty bar. ListExerciseHistory has always read across programs for the
+-- same reason (assistance.sql calls it "dips are dips whichever day they were
+-- done on"); this is the main lifts agreeing with it.
+--
+-- The consequence to keep in mind: a lift's history is now one series, so a
+-- deload or a stall follows you between programs as well. That is the intent —
+-- a stall is a fact about the lifter, not about the program they were running
+-- when it happened.
 --
 -- Only sessions that are over and carry real logged work count. Sets are
 -- materialized up front with completed = false, so without both guards a
@@ -86,9 +99,7 @@ SELECT s.performed_on,
        BOOL_AND(ss.completed)      AS success
 FROM sessions s
 JOIN session_sets ss ON ss.session_id = s.id
-JOIN program_days pd ON pd.id = s.program_day_id
-WHERE pd.program_id = sqlc.arg('program_id')
-  AND ss.exercise_id = sqlc.arg('exercise_id')
+WHERE ss.exercise_id = sqlc.arg('exercise_id')
   AND s.user_id = sqlc.arg('user_id')::int
   AND (s.finished_at IS NOT NULL
        OR s.created_at < now() - INTERVAL '12 hours')

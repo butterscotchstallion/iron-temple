@@ -231,7 +231,7 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32, 
 	out := make([]prescribedExerciseDTO, 0, len(pres))
 	for _, p := range pres {
 		hist, err := s.q.ListLiftHistory(ctx, store.ListLiftHistoryParams{
-			ProgramID: programID, ExerciseID: p.ExerciseID, UserID: userID,
+			ExerciseID: p.ExerciseID, UserID: userID,
 		})
 		if err != nil {
 			return nil, err

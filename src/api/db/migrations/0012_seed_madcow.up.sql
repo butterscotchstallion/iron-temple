@@ -11,6 +11,12 @@ BEGIN;
 -- That reuse also keeps a squat's history one history: the progression engine
 -- reads it by exercise, so a lifter moving here from StrongLifts picks the bar
 -- up where they left it rather than restarting at an empty bar.
+--
+-- That last paragraph was not true when it was written. ListLiftHistory was
+-- scoped to one program until it was fixed, so arriving here really did restart
+-- every lift at the seeded weight below — see the scope note on the query in
+-- db/queries/programs.sql. It is true now, and the seeds are left as they are
+-- because they are only ever the fallback for a lift with no history at all.
 
 INSERT INTO programs (name, description) VALUES
     ('Madcow 5x5',
