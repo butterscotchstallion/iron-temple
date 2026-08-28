@@ -467,6 +467,147 @@ func (s *Server) updateSessionSet(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type addSessionSetRequest struct {
+	ExerciseID int32 `json:"exerciseId"`
+}
+
+// addSessionSet appends one more set to a lift already in the session.
+//
+// The prescription materializes a fixed number of sets, and until now that was
+// the whole session: there was no way to log the extra set, the AMRAP or the
+// drop set, and the closest a lifter could get was leaving a ghost row at zero
+// reps.
+//
+// Refused once the session is over. That is stricter than updateSessionSet,
+// which will still amend a finished session's reps — a real asymmetry, and this
+// is the side worth defending: a lift succeeds only when every one of its sets
+// was completed, so appending an unlogged set to a closed session retroactively
+// turns a success into a failure and moves the next session's weight.
+func (s *Server) addSessionSet(w http.ResponseWriter, r *http.Request) {
+	sessionID, ok := idParam(r, "sessionId")
+	if !ok {
+		notFound(w, "session not found")
+		return
+	}
+	ctx := r.Context()
+	userID := userFrom(ctx).ID
+
+	var req addSessionSetRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		badRequest(w, "invalid JSON body")
+		return
+	}
+	if req.ExerciseID <= 0 {
+		badRequest(w, "exerciseId is required")
+		return
+	}
+
+	// Read the session first so "no such session", "not yours" and "already
+	// finished" are told apart. AppendSessionSet cannot distinguish them: each
+	// one simply produces no row.
+	session, err := s.q.GetSession(ctx, store.GetSessionParams{ID: sessionID, UserID: userID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		notFound(w, "session not found")
+		return
+	}
+	if err != nil {
+		internalError(w)
+		return
+	}
+	if session.IsOver {
+		conflict(w, "session_over", "this session is finished; its sets are a record now")
+		return
+	}
+
+	created, err := s.q.AppendSessionSet(ctx, store.AppendSessionSetParams{
+		SessionID: sessionID, ExerciseID: req.ExerciseID, UserID: userID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The session exists and is open, so the only way to get here is a lift
+		// that is not in it. This adds a set, not an exercise.
+		notFound(w, "that lift is not in this session")
+		return
+	}
+	if err != nil {
+		internalError(w)
+		return
+	}
+
+	// Re-read through GetSessionSet for the exercise name, the rest and whether
+	// it counts as assistance — all derived at read time, and none of them on
+	// the INSERT's RETURNING.
+	full, err := s.q.GetSessionSet(ctx, store.GetSessionSetParams{ID: created.ID, UserID: userID})
+	if err != nil {
+		internalError(w)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, sessionSetDTO{
+		ID:           full.ID,
+		ExerciseID:   full.ExerciseID,
+		ExerciseName: full.ExerciseName,
+		Kind:         setKind(full.IsAssistance),
+		SetNumber:    full.SetNumber,
+		TargetReps:   full.TargetReps,
+		ActualReps:   full.ActualReps,
+		WeightLb:     numericToFloat(full.WeightLb),
+		Completed:    full.Completed,
+		RestSeconds:  full.RestSeconds,
+	})
+}
+
+// removeSessionSet drops a set that was not performed. See DeleteSessionSet for
+// why nothing renumbers afterwards, and addSessionSet for why a finished session
+// refuses this.
+func (s *Server) removeSessionSet(w http.ResponseWriter, r *http.Request) {
+	sessionID, ok := idParam(r, "sessionId")
+	if !ok {
+		notFound(w, "set not found")
+		return
+	}
+	setID, ok := idParam(r, "setId")
+	if !ok {
+		notFound(w, "set not found")
+		return
+	}
+	ctx := r.Context()
+	userID := userFrom(ctx).ID
+
+	// The set has to belong to the session named in the path, not merely to the
+	// caller — otherwise a set could be deleted through any session's URL, and
+	// the 404 below would be reporting on the wrong thing.
+	current, err := s.q.GetSessionSet(ctx, store.GetSessionSetParams{ID: setID, UserID: userID})
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && current.SessionID != sessionID) {
+		notFound(w, "set not found")
+		return
+	}
+	if err != nil {
+		internalError(w)
+		return
+	}
+
+	session, err := s.q.GetSession(ctx, store.GetSessionParams{ID: sessionID, UserID: userID})
+	if err != nil {
+		internalError(w)
+		return
+	}
+	if session.IsOver {
+		conflict(w, "session_over", "this session is finished; its sets are a record now")
+		return
+	}
+
+	n, err := s.q.DeleteSessionSet(ctx, store.DeleteSessionSetParams{ID: setID, UserID: userID})
+	if err != nil {
+		internalError(w)
+		return
+	}
+	if n == 0 {
+		notFound(w, "set not found")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // buildSession assembles the full session response (metadata + ordered sets).
 // Returns pgx.ErrNoRows when the session does not exist *or* belongs to someone
 // else — the caller turns that into a 404 either way, so a probe cannot tell a

@@ -6,6 +6,8 @@
     getExerciseHistory,
     updateSession,
     updateSessionSet,
+    addSessionSet,
+    removeSessionSet,
     finishSession,
     type Session,
     type SessionSet,
@@ -278,6 +280,41 @@
       }
     }
   }
+
+  // One more set of the same lift — the extra set, the AMRAP, the day that went
+  // better than the prescription. The server copies the rep target and weight
+  // from that lift's current last set, so nothing has to be sent but the lift.
+  async function addSet(exerciseId: number) {
+    if (isOver) return;
+    const { data, error } = await track(
+      addSessionSet({ path: { sessionId }, body: { exerciseId } }),
+    );
+    if (error || !data) {
+      actionError = "Couldn't add a set.";
+      return;
+    }
+    actionError = null;
+    if (!session) return;
+    // Appended rather than re-sorted: the server numbers it past the lift's last
+    // set, and the group it joins is already in prescription order.
+    session.sets = [...session.sets, data];
+  }
+
+  // Drop a set that wasn't performed. Removing a lift's last set takes the lift
+  // out of the session, which is what skipping it looks like.
+  async function removeSet(set: SessionSet) {
+    if (isOver) return;
+    const { error } = await track(
+      removeSessionSet({ path: { sessionId, setId: set.id } }),
+    );
+    if (error) {
+      actionError = "Couldn't remove that set.";
+      return;
+    }
+    actionError = null;
+    if (!session) return;
+    session.sets = session.sets.filter((s) => s.id !== set.id);
+  }
 </script>
 
 <!-- Extra bottom padding while the timer is up: it's a fixed overlay, so without
@@ -399,6 +436,8 @@
         sets={group.sets}
         onCycle={cycle}
         onChangeWeight={(delta) => changeWeight(group.sets, delta)}
+        onAddSet={() => addSet(group.sets[0].exerciseId)}
+        onRemoveSet={removeSet}
         readonly={isOver}
       />
     {/each}

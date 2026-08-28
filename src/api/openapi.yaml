@@ -837,10 +837,76 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /sessions/{sessionId}/sets:
+    parameters:
+      - $ref: "#/components/parameters/SessionId"
+    post:
+      tags: [sessions]
+      operationId: addSessionSet
+      summary: Add one more set to a lift in this session
+      description: >
+        Appends a set to a lift already in the session, copying the rep target
+        and weight from that lift's current last set. For the extra set, the
+        AMRAP, the drop set — the day that did not go to plan in the direction of
+        more work.
+
+
+        Refused once the session is over: changing a closed session's shape can
+        retroactively turn a successful lift into a failed one, since a lift
+        succeeds only when every one of its sets was completed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddSessionSetRequest"
+      responses:
+        "201":
+          description: The new set
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionSet"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: No such session, or that lift is not in it
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /sessions/{sessionId}/sets/{setId}:
     parameters:
       - $ref: "#/components/parameters/SessionId"
       - $ref: "#/components/parameters/SetId"
+    delete:
+      tags: [sessions]
+      operationId: removeSessionSet
+      summary: Remove a set from this session
+      description: >
+        Drops a set that was not performed. Removing a lift's last set takes the
+        lift out of the session, which is what skipping it looks like.
+
+
+        Set numbers are not renumbered afterwards — they order the sets, they do
+        not name them — so a gap is expected and harmless.
+
+
+        Refused once the session is over, for the same reason adding one is.
+      responses:
+        "204":
+          description: Removed
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
     patch:
       tags: [sessions]
       operationId: updateSessionSet
@@ -1600,6 +1666,17 @@ components:
             What the lifter weighed on the day. Omit the field to leave an
             existing weigh-in alone; send null to erase one. Zero and negatives
             are rejected — a weigh-in of nothing is a typo, not a measurement.
+
+    AddSessionSetRequest:
+      type: object
+      required: [exerciseId]
+      properties:
+        exerciseId:
+          type: integer
+          format: int64
+          description: >
+            The lift to add a set to. Must already be in the session — this adds
+            a set, not an exercise.
 
     UpdateSessionSetRequest:
       type: object

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog";
   import Minus from "@lucide/svelte/icons/minus";
   import Plus from "@lucide/svelte/icons/plus";
   import PlateBar from "./PlateBar.svelte";
@@ -15,15 +16,45 @@
     sets,
     onCycle,
     onChangeWeight,
+    onAddSet,
+    onRemoveSet,
     readonly = false,
   }: {
     name: string;
     sets: SessionSet[];
     onCycle: (set: SessionSet) => void;
     onChangeWeight: (delta: number) => void;
+    /** Append one more set of this lift. Omitted where sets are fixed. */
+    onAddSet?: () => void;
+    /** Drop a set that wasn't performed. Omitted where sets are fixed. */
+    onRemoveSet?: (set: SessionSet) => void;
     // An over session is a record, not a worksheet: sets and weights lock.
     readonly?: boolean;
   } = $props();
+
+  // The set the lifter has asked to remove, held until they confirm. Only reps
+  // that were actually logged are worth a confirmation — dropping an untouched
+  // set is the same gesture as never having had it, and a dialog there is a
+  // dialog in the way of somebody between sets.
+  let pendingRemoval = $state<SessionSet | null>(null);
+
+  function requestRemove(set: SessionSet) {
+    if (readonly) return;
+    if (set.actualReps == null || set.actualReps === 0) {
+      onRemoveSet?.(set);
+      return;
+    }
+    pendingRemoval = set;
+  }
+
+  function confirmRemove() {
+    if (pendingRemoval) onRemoveSet?.(pendingRemoval);
+    pendingRemoval = null;
+  }
+
+  // The last set is the one a "remove a set" control should target: sets are
+  // numbered in order and the tail is what an extra one was appended to.
+  const lastSet = $derived(sets[sets.length - 1]);
 
   const workWeight = $derived(sets[0]?.weightLb ?? 0);
   const targetReps = $derived(sets[0]?.targetReps ?? 0);
@@ -213,8 +244,58 @@
           {set.actualReps ?? 0}
         </button>
       {/each}
+
+      <!-- Add and drop a set. The prescription is a plan, not a cage: an extra
+           set, an AMRAP or a set skipped all happen, and until these existed the
+           closest a lifter could get was a ghost row logged at zero reps. -->
+      {#if !readonly && (onAddSet || onRemoveSet)}
+        <div class="flex items-center gap-1.5">
+          {#if onRemoveSet && lastSet}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onclick={() => requestRemove(lastSet)}
+              aria-label={`Remove set ${lastSet.setNumber} of ${name}`}
+            >
+              <Minus />
+            </Button>
+          {/if}
+          {#if onAddSet}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onclick={onAddSet}
+              aria-label={`Add a set of ${name}`}
+            >
+              <Plus />
+            </Button>
+          {/if}
+        </div>
+      {/if}
     </div>
   </div>
+
+  <AlertDialog.Root
+    open={pendingRemoval !== null}
+    onOpenChange={(open) => {
+      if (!open) pendingRemoval = null;
+    }}
+  >
+    <AlertDialog.Content>
+      <AlertDialog.Header>
+        <AlertDialog.Title>Remove this set?</AlertDialog.Title>
+        <AlertDialog.Description>
+          Set {pendingRemoval?.setNumber} of {name} has {pendingRemoval?.actualReps}
+          {pendingRemoval?.actualReps === 1 ? "rep" : "reps"} logged against it.
+          Removing it throws that away.
+        </AlertDialog.Description>
+      </AlertDialog.Header>
+      <AlertDialog.Footer>
+        <AlertDialog.Cancel>Keep it</AlertDialog.Cancel>
+        <AlertDialog.Action onclick={confirmRemove}>Remove</AlertDialog.Action>
+      </AlertDialog.Footer>
+    </AlertDialog.Content>
+  </AlertDialog.Root>
 
   <p class="mt-3 text-xs text-muted-foreground">
     {#if readonly}

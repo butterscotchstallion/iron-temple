@@ -203,5 +203,120 @@ describe("ExerciseCard", () => {
       ).toBeInTheDocument();
       expect(screen.queryByText(/Tap a set to add a rep/)).not.toBeInTheDocument();
     });
+
+    it("hides the add and remove controls", () => {
+      render(ExerciseCard, {
+        name: "Squat",
+        sets: workSets(80, 3),
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+        onAddSet: vi.fn(),
+        onRemoveSet: vi.fn(),
+        readonly: true,
+      });
+      expect(
+        screen.queryByRole("button", { name: "Add a set of Squat" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /^Remove set/ }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  // The prescription is a plan, not a cage: an extra set, an AMRAP, or a set
+  // skipped all happen, and until these existed the closest a lifter could get
+  // was a ghost row logged at zero reps.
+  describe("adding and removing sets", () => {
+    it("adds a set", async () => {
+      const onAddSet = vi.fn();
+      render(ExerciseCard, {
+        name: "Squat",
+        sets: workSets(80, 3),
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+        onAddSet,
+      });
+      await fireEvent.click(
+        screen.getByRole("button", { name: "Add a set of Squat" }),
+      );
+      expect(onAddSet).toHaveBeenCalledOnce();
+    });
+
+    it("removes an unlogged set without asking", async () => {
+      // A dialog here is a dialog in the way of somebody between sets: dropping
+      // a set nobody touched is the same gesture as never having had it.
+      const onRemoveSet = vi.fn();
+      render(ExerciseCard, {
+        name: "Squat",
+        sets: workSets(80, 3),
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+        onRemoveSet,
+      });
+      await fireEvent.click(
+        screen.getByRole("button", { name: "Remove set 3 of Squat" }),
+      );
+      expect(onRemoveSet).toHaveBeenCalledWith(
+        expect.objectContaining({ setNumber: 3 }),
+      );
+    });
+
+    it("confirms before throwing away logged reps", async () => {
+      const onRemoveSet = vi.fn();
+      const sets = workSets(80, 2);
+      sets[1] = set({ ...sets[1], actualReps: 5, completed: true });
+      render(ExerciseCard, {
+        name: "Squat",
+        sets,
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+        onRemoveSet,
+      });
+
+      await fireEvent.click(
+        screen.getByRole("button", { name: "Remove set 2 of Squat" }),
+      );
+      expect(onRemoveSet).not.toHaveBeenCalled();
+      expect(screen.getByText(/Remove this set\?/)).toBeInTheDocument();
+
+      await fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+      expect(onRemoveSet).toHaveBeenCalledWith(
+        expect.objectContaining({ setNumber: 2 }),
+      );
+    });
+
+    it("leaves the set alone when the confirmation is dismissed", async () => {
+      const onRemoveSet = vi.fn();
+      const sets = workSets(80, 2);
+      sets[1] = set({ ...sets[1], actualReps: 5, completed: true });
+      render(ExerciseCard, {
+        name: "Squat",
+        sets,
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+        onRemoveSet,
+      });
+
+      await fireEvent.click(
+        screen.getByRole("button", { name: "Remove set 2 of Squat" }),
+      );
+      await fireEvent.click(screen.getByRole("button", { name: "Keep it" }));
+      expect(onRemoveSet).not.toHaveBeenCalled();
+    });
+
+    it("shows no controls at all when the handlers aren't wired", () => {
+      render(ExerciseCard, {
+        name: "Squat",
+        sets: workSets(80, 3),
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+      });
+      expect(
+        screen.queryByRole("button", { name: /^Add a set/ }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /^Remove set/ }),
+      ).not.toBeInTheDocument();
+    });
   });
 });
