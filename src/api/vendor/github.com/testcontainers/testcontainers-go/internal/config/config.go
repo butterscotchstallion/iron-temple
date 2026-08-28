@@ -9,13 +9,15 @@ import (
 	"time"
 
 	"github.com/magiconair/properties"
+
+	"github.com/testcontainers/testcontainers-go/internal/core/bootstrap"
 )
 
-const ReaperDefaultImage = "testcontainers/ryuk:0.10.2"
+const ReaperDefaultImage = "testcontainers/ryuk:0.14.0"
 
 var (
 	tcConfig     Config
-	tcConfigOnce *sync.Once = new(sync.Once)
+	tcConfigOnce = new(sync.Once)
 )
 
 // testcontainersConfig {
@@ -52,6 +54,13 @@ type Config struct {
 	// Environment variable: TESTCONTAINERS_HUB_IMAGE_NAME_PREFIX
 	HubImageNamePrefix string `properties:"hub.image.name.prefix,default="`
 
+	// SessionID is the ID of the testing session.
+	// Setting this value will preclude runs from creating more than one reaper. Therefore,
+	// changes to ryuk settings past its creation will be ignored.
+	//
+	// Environment variable: TESTCONTAINERS_SESSION_ID
+	SessionID string `properties:"session.id,default="`
+
 	// RyukDisabled is a flag to enable or disable the Garbage Collector.
 	// Setting this to true will prevent testcontainers from automatically cleaning up
 	// resources, which is particularly important in tests which timeout as they
@@ -68,17 +77,17 @@ type Config struct {
 
 	// RyukReconnectionTimeout is the time to wait before attempting to reconnect to the Garbage Collector container.
 	//
-	// Environment variable: TESTCONTAINERS_RYUK_RECONNECTION_TIMEOUT
+	// Environment variable: RYUK_RECONNECTION_TIMEOUT
 	RyukReconnectionTimeout time.Duration `properties:"ryuk.reconnection.timeout,default=10s"`
 
 	// RyukConnectionTimeout is the time to wait before timing out when connecting to the Garbage Collector container.
 	//
-	// Environment variable: TESTCONTAINERS_RYUK_CONNECTION_TIMEOUT
+	// Environment variable: RYUK_CONNECTION_TIMEOUT
 	RyukConnectionTimeout time.Duration `properties:"ryuk.connection.timeout,default=1m"`
 
 	// RyukVerbose is a flag to enable or disable verbose logging for the Garbage Collector.
 	//
-	// Environment variable: TESTCONTAINERS_RYUK_VERBOSE
+	// Environment variable: RYUK_VERBOSE
 	RyukVerbose bool `properties:"ryuk.verbose,default=false"`
 
 	// TestcontainersHost is the address of the Testcontainers host.
@@ -121,22 +130,29 @@ func read() Config {
 			config.HubImageNamePrefix = hubImageNamePrefix
 		}
 
+		sessionID := os.Getenv("TESTCONTAINERS_SESSION_ID")
+		if sessionID != "" {
+			config.SessionID = sessionID
+		} else if config.SessionID == "" {
+			config.SessionID = bootstrap.SessionID()
+		}
+
 		ryukPrivilegedEnv := os.Getenv("TESTCONTAINERS_RYUK_CONTAINER_PRIVILEGED")
 		if parseBool(ryukPrivilegedEnv) {
 			config.RyukPrivileged = ryukPrivilegedEnv == "true"
 		}
 
-		ryukVerboseEnv := os.Getenv("TESTCONTAINERS_RYUK_VERBOSE")
+		ryukVerboseEnv := readTestcontainersEnv("RYUK_VERBOSE")
 		if parseBool(ryukVerboseEnv) {
 			config.RyukVerbose = ryukVerboseEnv == "true"
 		}
 
-		ryukReconnectionTimeoutEnv := os.Getenv("TESTCONTAINERS_RYUK_RECONNECTION_TIMEOUT")
+		ryukReconnectionTimeoutEnv := readTestcontainersEnv("RYUK_RECONNECTION_TIMEOUT")
 		if timeout, err := time.ParseDuration(ryukReconnectionTimeoutEnv); err == nil {
 			config.RyukReconnectionTimeout = timeout
 		}
 
-		ryukConnectionTimeoutEnv := os.Getenv("TESTCONTAINERS_RYUK_CONNECTION_TIMEOUT")
+		ryukConnectionTimeoutEnv := readTestcontainersEnv("RYUK_CONNECTION_TIMEOUT")
 		if timeout, err := time.ParseDuration(ryukConnectionTimeoutEnv); err == nil {
 			config.RyukConnectionTimeout = timeout
 		}
@@ -167,4 +183,19 @@ func read() Config {
 func parseBool(input string) bool {
 	_, err := strconv.ParseBool(input)
 	return err == nil
+}
+
+// readTestcontainersEnv reads the environment variable with the given name.
+// It checks for the environment variable with the given name first, and then
+// checks for the environment variable with the given name prefixed with "TESTCONTAINERS_".
+func readTestcontainersEnv(envVar string) string {
+	value := os.Getenv(envVar)
+	if value != "" {
+		return value
+	}
+
+	// TODO: remove this prefix after the next major release
+	const prefix string = "TESTCONTAINERS_"
+
+	return os.Getenv(prefix + envVar)
 }
