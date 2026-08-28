@@ -131,6 +131,65 @@ func (q *Queries) ListLiftHistory(ctx context.Context, arg ListLiftHistoryParams
 	return items, nil
 }
 
+const listLiftHistoryForDay = `-- name: ListLiftHistoryForDay :many
+SELECT s.performed_on,
+       MAX(ss.weight_lb)::numeric  AS weight_lb,
+       BOOL_AND(ss.completed)      AS success
+FROM sessions s
+JOIN session_sets ss ON ss.session_id = s.id
+WHERE ss.exercise_id = $1
+  AND s.user_id = $2::int
+  AND s.program_day_id = $3
+  AND (s.finished_at IS NOT NULL
+       OR s.created_at < now() - INTERVAL '12 hours')
+GROUP BY s.id, s.performed_on
+HAVING COUNT(ss.id) FILTER (WHERE ss.actual_reps > 0) > 0
+ORDER BY s.performed_on, s.id
+`
+
+type ListLiftHistoryForDayParams struct {
+	ExerciseID   int32 `json:"exercise_id"`
+	UserID       int32 `json:"user_id"`
+	ProgramDayID int32 `json:"program_day_id"`
+}
+
+type ListLiftHistoryForDayRow struct {
+	PerformedOn pgtype.Date    `json:"performed_on"`
+	WeightLb    pgtype.Numeric `json:"weight_lb"`
+	Success     bool           `json:"success"`
+}
+
+// ListLiftHistoryForDay is ListLiftHistory narrowed to one program day, for the
+// Madcow engine's top set.
+//
+// The narrowing is the whole point and is not an optimisation. A lift's top set
+// is decided on its reference day alone: the squat's ramp tops at 87.5% on the
+// light day and 102.5% on the intensity day, so a history taking every day's
+// heaviest set would see the number wander and read it as progress and regress
+// that never happened.
+//
+// Same is_over and actual_reps guards as ListLiftHistory, for the same reasons —
+// see the note there, which this query is otherwise a copy of.
+func (q *Queries) ListLiftHistoryForDay(ctx context.Context, arg ListLiftHistoryForDayParams) ([]ListLiftHistoryForDayRow, error) {
+	rows, err := q.db.Query(ctx, listLiftHistoryForDay, arg.ExerciseID, arg.UserID, arg.ProgramDayID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLiftHistoryForDayRow
+	for rows.Next() {
+		var i ListLiftHistoryForDayRow
+		if err := rows.Scan(&i.PerformedOn, &i.WeightLb, &i.Success); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPrescriptionsByDay = `-- name: ListPrescriptionsByDay :many
 SELECT pde.id,
        pde.program_day_id,
@@ -349,4 +408,61 @@ func (q *Queries) UpdateProgramDayWeekday(ctx context.Context, arg UpdateProgram
 		&i.Weekday,
 	)
 	return i, err
+}
+
+const listSetPlansByProgram = `-- name: ListSetPlansByProgram :many
+SELECT pde.program_day_id,
+       pde.exercise_id,
+       s.set_number,
+       s.reps,
+       s.pct_of_top
+FROM program_day_exercise_sets s
+JOIN program_day_exercises pde ON pde.id = s.program_day_exercise_id
+JOIN program_days pd ON pd.id = pde.program_day_id
+WHERE pd.program_id = $1
+ORDER BY pde.program_day_id, pde.exercise_id, s.set_number
+`
+
+type ListSetPlansByProgramRow struct {
+	ProgramDayID int32          `json:"program_day_id"`
+	ExerciseID   int32          `json:"exercise_id"`
+	SetNumber    int32          `json:"set_number"`
+	Reps         int32          `json:"reps"`
+	PctOfTop     pgtype.Numeric `json:"pct_of_top"`
+}
+
+// ListSetPlansByProgram returns every per-set prescription in a program, so a
+// day's ramps and its lifts' reference days can both be resolved without a query
+// per lift.
+//
+// Scoped to the program rather than to the day because the two questions have
+// different scopes: what to load TODAY needs this day's rungs, but which day is
+// a lift's reference needs every day's. Reading the program once answers both.
+//
+// Empty for every program but Madcow. An absent set plan means a uniform block
+// of sets x reps at one weight, which is what the other five prescribe.
+func (q *Queries) ListSetPlansByProgram(ctx context.Context, programID int32) ([]ListSetPlansByProgramRow, error) {
+	rows, err := q.db.Query(ctx, listSetPlansByProgram, programID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSetPlansByProgramRow
+	for rows.Next() {
+		var i ListSetPlansByProgramRow
+		if err := rows.Scan(
+			&i.ProgramDayID,
+			&i.ExerciseID,
+			&i.SetNumber,
+			&i.Reps,
+			&i.PctOfTop,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

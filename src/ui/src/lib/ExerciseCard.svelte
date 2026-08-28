@@ -56,7 +56,23 @@
   // numbered in order and the tail is what an extra one was appended to.
   const lastSet = $derived(sets[sets.length - 1]);
 
-  const workWeight = $derived(sets[0]?.weightLb ?? 0);
+  // A ramping lift gives every set its own weight and reps — Madcow climbs
+  // 50/62.5/75/87.5/100% of a top set, and its intensity day finishes with a
+  // triple above that and a backoff below it. A uniform block is the common case
+  // and keeps the compact display it has always had.
+  const ramping = $derived(
+    sets.some(
+      (s) => s.weightLb !== sets[0]?.weightLb || s.targetReps !== sets[0]?.targetReps,
+    ),
+  );
+  // The top set is the heaviest, which is the number a ramping lift is "about":
+  // it is what the percentages are of and what moves week to week. For a uniform
+  // block it is simply the weight.
+  const workWeight = $derived(
+    ramping
+      ? Math.max(...sets.map((s) => s.weightLb))
+      : (sets[0]?.weightLb ?? 0),
+  );
   const targetReps = $derived(sets[0]?.targetReps ?? 0);
   // The rest this lift asks for, shown alongside the rep target because it is
   // half of the prescription and the countdown that enforces it lives in a
@@ -67,8 +83,12 @@
   // Built against this lifter's bar and rack: the ramp starts at whatever their
   // bar weighs and each rung rounds to a weight that rack can build, so a
   // prescription below the bar yields no warm-ups rather than impossible ones.
+  // A ramp is its own warm-up — that is what the first three rungs of a Madcow
+  // day are — so bolting a second one in front of it would have the lifter warm
+  // up to warm up.
   const warmups = $derived.by(() => {
     const out: { weightLb: number; reps: number }[] = [];
+    if (ramping) return out;
     for (const w of warmupSets(workWeight, barWeightLb(), plateInventory())) {
       for (let k = 0; k < w.sets; k++) {
         out.push({ weightLb: w.weightLb, reps: w.reps });
@@ -111,10 +131,14 @@
     return Math.max(0, total - 1);
   });
   const activeWeight = $derived(
-    active < warmups.length ? warmups[active].weightLb : workWeight,
+    active < warmups.length
+      ? warmups[active].weightLb
+      : (sets[active - warmups.length]?.weightLb ?? workWeight),
   );
   const activeReps = $derived(
-    active < warmups.length ? warmups[active].reps : targetReps,
+    active < warmups.length
+      ? warmups[active].reps
+      : (sets[active - warmups.length]?.targetReps ?? targetReps),
   );
 
   function warmClass(i: number): string {
@@ -162,7 +186,13 @@
     <h3 class="text-lg font-bold text-card-foreground">{name}</h3>
     <div class="flex items-center gap-3">
       <span class="text-sm tabular-nums text-muted-foreground">
-        {targetReps} reps
+        <!-- A ramp has no single rep target, so it says what it is instead:
+             how many sets are coming, up to the top set beside it. -->
+        {#if ramping}
+          {sets.length} sets, ramping
+        {:else}
+          {targetReps} reps
+        {/if}
         {#if restSeconds > 0}
           · {formatTime(restSeconds)} rest
         {/if}
@@ -237,9 +267,14 @@
             : 'cursor-pointer'} {workClass(set, i)}"
           onclick={() => cycleSet(set)}
           disabled={readonly}
-          aria-label={`Set ${set.setNumber}: ${
-            set.actualReps == null ? "not logged" : `${set.actualReps} reps`
-          }`}
+          title={ramping ? `${set.weightLb} lb x ${set.targetReps}` : undefined}
+          aria-label={ramping
+            ? `Set ${set.setNumber}, ${set.weightLb} lb for ${set.targetReps}: ${
+                set.actualReps == null ? "not logged" : `${set.actualReps} reps`
+              }`
+            : `Set ${set.setNumber}: ${
+                set.actualReps == null ? "not logged" : `${set.actualReps} reps`
+              }`}
         >
           {set.actualReps ?? 0}
         </button>
@@ -297,12 +332,25 @@
     </AlertDialog.Content>
   </AlertDialog.Root>
 
+  {#if ramping}
+    <!-- The ramp written out. Each circle above is one of these, but a lifter
+         setting up the bar wants to see the whole climb at once. -->
+    <ol class="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs tabular-nums text-muted-foreground">
+      {#each sets as set (set.id)}
+        <li class={active === warmups.length + sets.indexOf(set) ? "text-primary" : ""}>
+          {set.weightLb}×{set.targetReps}
+        </li>
+      {/each}
+    </ol>
+  {/if}
+
   <p class="mt-3 text-xs text-muted-foreground">
     {#if readonly}
       This workout is finished — sets are locked.
     {:else}
-      {#if warmups.length > 0}Cyan sets are warm-ups. {/if}Tap a set to add a
-      rep; it clears after the target.
+      {#if warmups.length > 0}Cyan sets are warm-ups. {/if}{#if ramping}The ramp
+        is the warm-up — work up through it. {/if}Tap a set to add a rep; it
+      clears after the target.
     {/if}
   </p>
 </Card>

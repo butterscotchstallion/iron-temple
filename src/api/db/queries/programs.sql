@@ -106,3 +106,51 @@ WHERE ss.exercise_id = sqlc.arg('exercise_id')
 GROUP BY s.id, s.performed_on
 HAVING COUNT(ss.id) FILTER (WHERE ss.actual_reps > 0) > 0
 ORDER BY s.performed_on, s.id;
+
+-- ListSetPlansByProgram returns every per-set prescription in a program, so a
+-- day's ramps and its lifts' reference days can both be resolved without a query
+-- per lift.
+--
+-- Scoped to the program rather than to the day because the two questions have
+-- different scopes: what to load TODAY needs this day's rungs, but which day is
+-- a lift's reference needs every day's. Reading the program once answers both.
+--
+-- Empty for every program but Madcow. An absent set plan means a uniform block
+-- of sets x reps at one weight, which is what the other five prescribe.
+-- name: ListSetPlansByProgram :many
+SELECT pde.program_day_id,
+       pde.exercise_id,
+       s.set_number,
+       s.reps,
+       s.pct_of_top
+FROM program_day_exercise_sets s
+JOIN program_day_exercises pde ON pde.id = s.program_day_exercise_id
+JOIN program_days pd ON pd.id = pde.program_day_id
+WHERE pd.program_id = sqlc.arg('program_id')
+ORDER BY pde.program_day_id, pde.exercise_id, s.set_number;
+
+-- ListLiftHistoryForDay is ListLiftHistory narrowed to one program day, for the
+-- Madcow engine's top set.
+--
+-- The narrowing is the whole point and is not an optimisation. A lift's top set
+-- is decided on its reference day alone: the squat's ramp tops at 87.5% on the
+-- light day and 102.5% on the intensity day, so a history taking every day's
+-- heaviest set would see the number wander and read it as progress and regress
+-- that never happened.
+--
+-- Same is_over and actual_reps guards as ListLiftHistory, for the same reasons —
+-- see the note there, which this query is otherwise a copy of.
+-- name: ListLiftHistoryForDay :many
+SELECT s.performed_on,
+       MAX(ss.weight_lb)::numeric  AS weight_lb,
+       BOOL_AND(ss.completed)      AS success
+FROM sessions s
+JOIN session_sets ss ON ss.session_id = s.id
+WHERE ss.exercise_id = sqlc.arg('exercise_id')
+  AND s.user_id = sqlc.arg('user_id')::int
+  AND s.program_day_id = sqlc.arg('program_day_id')
+  AND (s.finished_at IS NOT NULL
+       OR s.created_at < now() - INTERVAL '12 hours')
+GROUP BY s.id, s.performed_on
+HAVING COUNT(ss.id) FILTER (WHERE ss.actual_reps > 0) > 0
+ORDER BY s.performed_on, s.id;

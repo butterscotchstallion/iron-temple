@@ -59,6 +59,13 @@ type ProgramDayExercise struct {
 	StartingWeightLb pgtype.Numeric `json:"starting_weight_lb"`
 }
 
+type ProgramDayExerciseSet struct {
+	ProgramDayExerciseID int32          `json:"program_day_exercise_id"`
+	SetNumber            int32          `json:"set_number"`
+	Reps                 int32          `json:"reps"`
+	PctOfTop             pgtype.Numeric `json:"pct_of_top"`
+}
+
 type ReportRun struct {
 	ID          int32              `json:"id"`
 	UserID      int32              `json:"user_id"`

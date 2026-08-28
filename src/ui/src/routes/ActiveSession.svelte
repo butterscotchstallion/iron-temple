@@ -254,12 +254,31 @@
     session = data;
   }
 
-  // Adjust the working weight for every set of an exercise by delta lb.
+  // Adjust an exercise's weight by delta lb.
+  //
+  // For a uniform block that is every set by the same amount, which is what it
+  // has always been. For a ramping lift it is the TOP set by that amount, with
+  // every other set scaled to keep its share of it: the rungs of a Madcow day
+  // are 50/62.5/75/87.5% of the top set, and shifting them all by a flat 5 lb
+  // would leave a ramp that is no longer a ramp of anything.
+  //
+  // Scaled from the resolved weights rather than from the percentages, which the
+  // session does not store — it holds what to lift, not the rule that produced
+  // it. Rounded to the nearest 5 lb for the same reason the server rounds.
   async function changeWeight(sets: SessionSet[], delta: number) {
-    if (isOver) return;
-    const current = sets[0]?.weightLb ?? 0;
-    const weightLb = Math.max(0, current + delta);
-    if (weightLb === current) return;
+    if (isOver || sets.length === 0) return;
+
+    const top = Math.max(...sets.map((s) => s.weightLb));
+    const nextTop = Math.max(0, top + delta);
+    if (nextTop === top) return;
+
+    const ramping = sets.some((s) => s.weightLb !== top);
+    const weightFor = (set: SessionSet) => {
+      if (!ramping) return nextTop;
+      if (top === 0) return nextTop;
+      return Math.max(0, Math.round((set.weightLb * nextTop) / top / 5) * 5);
+    };
+
     // Each leg is tracked separately rather than the Promise.all as a whole, so
     // the count reflects what's actually outstanding if some land first.
     const results = await Promise.all(
@@ -267,7 +286,7 @@
         track(
           updateSessionSet({
             path: { sessionId, setId: set.id },
-            body: { weightLb },
+            body: { weightLb: weightFor(set) },
           }),
         ),
       ),

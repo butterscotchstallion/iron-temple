@@ -202,15 +202,20 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 		internalError(w)
 		return
 	}
+	// Materialized from the set plan rather than by looping one weight across
+	// pe.Sets. A ramping lift gives every set its own weight and its own rep
+	// target — Madcow's intensity day is four fives, a triple and an eight, none
+	// of them at the same load — and session_sets has always stored both per row,
+	// so this needed nothing but the prescription to say so. A uniform block
+	// emits a flat plan, so this one path serves every program.
 	for _, pe := range prescription {
-		weight := floatToNumeric(pe.WeightLb)
-		for setNumber := int32(1); setNumber <= pe.Sets; setNumber++ {
+		for _, set := range pe.SetPlan {
 			if _, err := qtx.CreateSessionSet(ctx, store.CreateSessionSetParams{
 				SessionID:  session.ID,
 				ExerciseID: pe.ExerciseID,
-				SetNumber:  setNumber,
-				TargetReps: pe.Reps,
-				WeightLb:   weight,
+				SetNumber:  set.SetNumber,
+				TargetReps: set.Reps,
+				WeightLb:   floatToNumeric(set.WeightLb),
 			}); err != nil {
 				internalError(w)
 				return

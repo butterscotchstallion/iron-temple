@@ -319,4 +319,88 @@ describe("ExerciseCard", () => {
       ).not.toBeInTheDocument();
     });
   });
+
+  // Madcow climbs 50/62.5/75/87.5/100% of a top set, and its intensity day
+  // finishes with a triple above that and a backoff below it. A card that
+  // assumed one weight and one rep target across a lift could not show any of
+  // that — it read sets[0] and called it the prescription.
+  describe("a ramping lift", () => {
+    const ramp = [
+      set({ id: 1, setNumber: 1, weightLb: 100, targetReps: 5, actualReps: null, completed: false }),
+      set({ id: 2, setNumber: 2, weightLb: 125, targetReps: 5, actualReps: null, completed: false }),
+      set({ id: 3, setNumber: 3, weightLb: 150, targetReps: 5, actualReps: null, completed: false }),
+      set({ id: 4, setNumber: 4, weightLb: 175, targetReps: 5, actualReps: null, completed: false }),
+      set({ id: 5, setNumber: 5, weightLb: 205, targetReps: 3, actualReps: null, completed: false }),
+      set({ id: 6, setNumber: 6, weightLb: 150, targetReps: 8, actualReps: null, completed: false }),
+    ];
+
+    it("shows the top set rather than the first one", () => {
+      render(ExerciseCard, {
+        name: "Squat",
+        sets: ramp,
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+      });
+      // 205 is the heaviest set; 100 is merely the one it opens on.
+      expect(screen.getByText("205 lb", { exact: true })).toBeInTheDocument();
+    });
+
+    it("says it ramps instead of naming one rep target", () => {
+      render(ExerciseCard, {
+        name: "Squat",
+        sets: ramp,
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+      });
+      expect(screen.getByText(/6 sets, ramping/)).toBeInTheDocument();
+    });
+
+    it("writes the whole climb out, weight by weight", () => {
+      render(ExerciseCard, {
+        name: "Squat",
+        sets: ramp,
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+      });
+      expect(screen.getByText("100×5")).toBeInTheDocument();
+      expect(screen.getByText("205×3")).toBeInTheDocument();
+      expect(screen.getByText("150×8")).toBeInTheDocument();
+    });
+
+    it("carries each set's own weight into its label", () => {
+      render(ExerciseCard, {
+        name: "Squat",
+        sets: ramp,
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+      });
+      expect(
+        screen.getByRole("button", { name: /^Set 5, 205 lb for 3/ }),
+      ).toBeInTheDocument();
+    });
+
+    it("adds no warm-up ramp in front of a ramp", () => {
+      // The first three rungs ARE the warm-up; a second one would have the
+      // lifter warming up to warm up.
+      render(ExerciseCard, {
+        name: "Squat",
+        sets: ramp,
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+      });
+      expect(screen.queryAllByRole("button", { name: /^Warm-up/ })).toHaveLength(0);
+    });
+
+    it("still warms up a uniform block", () => {
+      render(ExerciseCard, {
+        name: "Squat",
+        sets: workSets(200, 5),
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+      });
+      expect(
+        screen.queryAllByRole("button", { name: /^Warm-up/ }).length,
+      ).toBeGreaterThan(0);
+    });
+  });
 });

@@ -1298,7 +1298,13 @@ components:
 
     ProgressionKind:
       type: string
-      enum: [linear]
+      enum: [linear, madcow]
+      description: >
+        linear advances a lift's single working weight every session and deloads
+        after three failures. madcow ramps each session to a top set — 50, 62.5,
+        75, 87.5, 100% — and advances that top set once a WEEK, on the one day
+        whose ramp reaches 100%; every other day's weights are a percentage of
+        it.
 
     ProgramSummary:
       type: object
@@ -1637,8 +1643,40 @@ components:
           type: integer
           description: Top of that range — reaching it on every set is what advances the weight.
           example: 12
+        setPlan:
+          type: array
+          description: >
+            Every set this lift prescribes today, each with its own reps and its
+            own weight. Always present, for every program: a lift whose sets
+            share one weight emits a flat plan rather than nothing, so a client
+            has one shape to render instead of two.
+
+
+            `sets` above is its length and `weightLb` is the top set — the number
+            that moves week to week, and the one to show beside the lift's name.
+          items:
+            $ref: "#/components/schemas/PrescribedSet"
         progression:
           $ref: "#/components/schemas/ProgressionInfo"
+
+    PrescribedSet:
+      description: >
+        One set of a prescription. Ramping programs give each set its own weight
+        and reps — Madcow climbs to a top set, and its intensity day finishes
+        with a triple above that and a backoff below it.
+      type: object
+      required: [setNumber, reps, weightLb]
+      properties:
+        setNumber:
+          type: integer
+          example: 5
+        reps:
+          type: integer
+          example: 5
+        weightLb:
+          type: number
+          minimum: 0
+          example: 185
 
     ProgressionInfo:
       description: >-

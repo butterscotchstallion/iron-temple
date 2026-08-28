@@ -64,14 +64,29 @@ func TestMigrateAppliesSchemaAndSeed(t *testing.T) {
 
 	// 0002 seeds three programs over five lifts; 0007 adds two more programs and
 	// the five variation lifts the Intermediate program needs; 0009 adds the
-	// accessory catalogue the exercise library browses; 0012 adds Madcow 5x5,
-	// which prescribes only lifts 0002 already seeded — two more days and six
-	// more prescriptions, but no new exercises, which is why every exercise
-	// count in this test is untouched by it.
+	// accessory catalogue the exercise library browses; 0012 adds Madcow 5x5 and
+	// 0015 reshapes it from two days to three — nine prescriptions where 0012 had
+	// six. Neither prescribes a lift 0002 had not already seeded, which is why
+	// every exercise count in this test is untouched by both.
 	assertCount(t, sqlDB, "SELECT count(*) FROM exercises", 53)
 	assertCount(t, sqlDB, "SELECT count(*) FROM programs", 6)
-	assertCount(t, sqlDB, "SELECT count(*) FROM program_days", 13)
-	assertCount(t, sqlDB, "SELECT count(*) FROM program_day_exercises", 37)
+	assertCount(t, sqlDB, "SELECT count(*) FROM program_days", 14)
+	assertCount(t, sqlDB, "SELECT count(*) FROM program_day_exercises", 40)
+
+	// Madcow is the only program with per-set prescriptions, and the only one
+	// with a progression kind of its own. Every other program is a uniform block
+	// of sets x reps at one weight, which is what an absent set plan means.
+	assertCount(t, sqlDB,
+		"SELECT count(*) FROM programs WHERE progression_kind = 'madcow'", 1)
+	// 15 on the volume day (3 lifts x 5), 12 on the light day (a 4-set squat plus
+	// a 4-set press and deadlift), 18 on the intensity day (3 lifts x 6: four
+	// ramp sets, a triple and a backoff).
+	assertCount(t, sqlDB, "SELECT count(*) FROM program_day_exercise_sets", 45)
+	// Exactly one day per lift tops out at 100%: that day is the lift's
+	// reference, and every other day's weights are a percentage of it. Five
+	// lifts, five reference days.
+	assertCount(t, sqlDB,
+		"SELECT count(*) FROM program_day_exercise_sets WHERE pct_of_top = 100", 5)
 
 	// The split 0009 draws: the ten lifts the programs prescribe are not
 	// accessories, and everything it seeded is. Asserted as a split rather than

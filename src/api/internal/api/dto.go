@@ -192,9 +192,27 @@ type prescribedExerciseDTO struct {
 	// and the weight moves at the top — so the UI needs both to render "3x8-12"
 	// rather than a bare "3x8". Absent on main lifts and on assistance the
 	// lifter has not put a range on.
-	RepMin      *int32             `json:"repMin,omitempty"`
-	RepMax      *int32             `json:"repMax,omitempty"`
+	RepMin *int32 `json:"repMin,omitempty"`
+	RepMax *int32 `json:"repMax,omitempty"`
+	// SetPlan is every set this lift prescribes today, with its own reps and its
+	// own weight. Always populated, for every program: a lift with one weight
+	// across its sets emits a flat plan rather than nothing, so a client has one
+	// shape to render instead of two.
+	//
+	// Sets and WeightLb above stay meaningful alongside it — Sets is len(SetPlan)
+	// and WeightLb is the top set, which is the number that moves week to week
+	// and the one to put beside the lift's name.
+	SetPlan     []prescribedSetDTO `json:"setPlan"`
 	Progression progressionInfoDTO `json:"progression"`
+}
+
+// prescribedSetDTO is one set of a prescription. Ramping programs give each set
+// its own weight and reps — Madcow climbs 50/62.5/75/87.5/100% of a top set, and
+// its intensity day finishes with a triple above that and a backoff below it.
+type prescribedSetDTO struct {
+	SetNumber int32   `json:"setNumber"`
+	Reps      int32   `json:"reps"`
+	WeightLb  float64 `json:"weightLb"`
 }
 
 // progressionInfoDTO explains why the engine chose a lift's weight, so the UI

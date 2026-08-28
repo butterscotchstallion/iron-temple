@@ -22,6 +22,9 @@ sql:
       # INSERTs that fill them for the accounts that already exist.
       - "db/migrations/0013_gym_setup.up.sql"
       - "db/migrations/0014_assistance_rep_range.up.sql"
+      # 0015 is mixed: the CHECK swap and program_day_exercise_sets are schema,
+      # the Madcow reseed below them is DML.
+      - "db/migrations/0015_madcow.up.sql"
     queries: "db/queries"
     gen:
       go:
