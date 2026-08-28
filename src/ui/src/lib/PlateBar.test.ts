@@ -1,8 +1,40 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { render, screen } from "@testing-library/svelte";
 import PlateBar from "./PlateBar.svelte";
+import { auth } from "./auth.svelte";
+import type { User } from "./api";
 
-// BAR_LB is 80, so anything at/below 80 loads no plates.
+// The bar and the rack come off the profile now, so these have to sign in as
+// somebody with a gym. An 80 lb bar and the standard rack, which is what this
+// file's arithmetic has always assumed — it just used to be a constant.
+const lifter = {
+  id: 1,
+  username: "ada",
+  displayName: "Ada",
+  avatarColor: "",
+  isAdmin: true,
+  hasAvatar: false,
+  barWeightLb: 80,
+  plates: [
+    { plateLb: 45, pairs: 2 },
+    { plateLb: 35, pairs: 2 },
+    { plateLb: 25, pairs: 2 },
+    { plateLb: 10, pairs: 2 },
+    { plateLb: 5, pairs: 2 },
+    { plateLb: 2.5, pairs: 2 },
+  ],
+} satisfies User;
+
+beforeEach(() => {
+  auth.me = { ...lifter };
+  auth.loaded = true;
+});
+
+afterEach(() => {
+  auth.me = null;
+  auth.loaded = false;
+});
+
 describe("PlateBar", () => {
   it("shows 'just the bar' at or below bar weight", () => {
     render(PlateBar, { weightLb: 80 });

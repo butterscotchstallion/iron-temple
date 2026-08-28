@@ -36,6 +36,31 @@ type userDTO struct {
 	// AvatarEtag is appended to the avatar URL as a cache-buster, so a new
 	// upload appears immediately instead of after the cache expires.
 	AvatarEtag string `json:"avatarEtag,omitempty"`
+	// BarWeightLb is what this lifter's bar weighs. Every prescribed weight is
+	// loaded onto it, so plate maths and the warm-up ramp are both wrong without
+	// it — which is exactly what happened while it was a constant in the UI
+	// bundle. Always present: GetBarWeight falls back to 45.
+	BarWeightLb float64 `json:"barWeightLb"`
+	// Plates is what the lifter owns, heaviest first, and it is finite. Never
+	// nil — an account with no plates serializes as [], which the loader reads
+	// as bar-only rather than as "unset".
+	Plates []plateDTO `json:"plates"`
+}
+
+// plateDTO is a denomination and how many PAIRS of it are owned. Pairs rather
+// than a raw count because plates load symmetrically: three 45s are one usable
+// pair, and storing it in the unit it is used in keeps the loader from having to
+// halve and round.
+type plateDTO struct {
+	PlateLb float64 `json:"plateLb"`
+	Pairs   int32   `json:"pairs"`
+}
+
+// liftBaselineDTO is where one lift starts for one lifter. Only lifts with an
+// override appear; the rest fall back to the program's seeded starting weight.
+type liftBaselineDTO struct {
+	ExerciseID int32   `json:"exerciseId"`
+	WeightLb   float64 `json:"weightLb"`
 }
 
 type registrationStatusDTO struct {

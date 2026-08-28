@@ -17,6 +17,10 @@ sql:
       # 0011 is mixed the same way 0009 is: the ALTER at the top is schema, the
       # three tier UPDATEs below it are DML that sqlc ignores.
       - "db/migrations/0011_exercise_rest_seconds.up.sql"
+      # 0012 is seed DML only, so it has no schema to declare here.
+      # 0013 is mixed like 0009 and 0011: three CREATE TABLEs, then the seed
+      # INSERTs that fill them for the accounts that already exist.
+      - "db/migrations/0013_gym_setup.up.sql"
     queries: "db/queries"
     gen:
       go:

@@ -228,6 +228,24 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32, 
 		prescribed[p.ExerciseID] = true
 	}
 
+	// Where this lifter starts each lift, when they have said. Read once for the
+	// day rather than per lift: a program day is a handful of exercises and this
+	// is one small indexed read either way.
+	//
+	// A baseline only ever displaces the seeded starting weight, and the seed is
+	// only consulted when a lift has no history at all — so this changes the
+	// first session of a lift and nothing after it. That is the whole point: the
+	// seeds assume a 45 lb bar, and an install whose bar is 80 could not
+	// otherwise be told where to begin.
+	baselines, err := s.q.ListBaselines(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	baseline := make(map[int32]float64, len(baselines))
+	for _, b := range baselines {
+		baseline[b.ExerciseID] = numericToFloat(b.WeightLb)
+	}
+
 	out := make([]prescribedExerciseDTO, 0, len(pres))
 	for _, p := range pres {
 		hist, err := s.q.ListLiftHistory(ctx, store.ListLiftHistoryParams{
@@ -242,8 +260,12 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32, 
 				WeightLb: numericToFloat(h.WeightLb), Success: h.Success,
 			})
 		}
+		start := numericToFloat(p.StartingWeightLb)
+		if b, ok := baseline[p.ExerciseID]; ok {
+			start = b
+		}
 		plan := progression.NextPlan(
-			numericToFloat(p.StartingWeightLb),
+			start,
 			progression.IncrementFor(p.ExerciseName),
 			history,
 		)

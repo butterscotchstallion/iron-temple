@@ -216,6 +216,68 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /me/baselines:
+    get:
+      tags: [users]
+      operationId: listBaselines
+      summary: Starting weights this lifter has overridden
+      description: >
+        Where each lift starts for this lifter, for the lifts they have said.
+        A baseline displaces the program's seeded starting weight, and the seed
+        is only consulted while a lift has no history at all — so a baseline
+        decides a lift's first session and nothing after it. Lifts with no
+        override are simply absent.
+      responses:
+        "200":
+          description: Baselines
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LiftBaseline"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /me/baselines/{exerciseId}:
+    parameters:
+      - name: exerciseId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    put:
+      tags: [users]
+      operationId: setBaseline
+      summary: Set where a lift starts for this lifter
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetBaselineRequest"
+      responses:
+        "204":
+          description: Stored
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    delete:
+      tags: [users]
+      operationId: clearBaseline
+      summary: Fall back to the program's seeded starting weight
+      responses:
+        "204":
+          description: Cleared
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /me/avatar:
     post:
       tags: [users]
@@ -937,6 +999,61 @@ components:
           description: >
             Append to the avatar URL as a cache-buster so a new upload shows
             immediately.
+        barWeightLb:
+          type: number
+          minimum: 0
+          description: >
+            What this lifter's bar weighs. Every prescribed weight is loaded onto
+            it, so the plate maths and the warm-up ramp are both wrong without
+            it. 45 until the setup screen says otherwise.
+          example: 80
+        plates:
+          type: array
+          description: >
+            The plates the lifter owns, heaviest first. Finite: the loader will
+            not ask for a fifth pair of 45s when there are two, and rounds to the
+            nearest weight this rack can actually build.
+          items:
+            $ref: "#/components/schemas/Plate"
+
+    Plate:
+      type: object
+      required: [plateLb, pairs]
+      properties:
+        plateLb:
+          type: number
+          exclusiveMinimum: 0
+          example: 45
+        pairs:
+          type: integer
+          minimum: 1
+          description: >
+            How many *pairs* are owned, not how many plates. Plates load
+            symmetrically, so three 45s are one usable pair.
+          example: 2
+
+    LiftBaseline:
+      type: object
+      required: [exerciseId, weightLb]
+      properties:
+        exerciseId:
+          type: integer
+          format: int64
+        weightLb:
+          type: number
+          minimum: 0
+          example: 95
+
+    SetBaselineRequest:
+      type: object
+      required: [weightLb]
+      properties:
+        weightLb:
+          type: number
+          minimum: 0
+          description: >
+            0 is a legitimate baseline — an empty bar is where a press starts.
+            Clearing an override is DELETE, not a weight.
 
     RegistrationStatus:
       type: object
@@ -1001,6 +1118,21 @@ components:
             The program to remember as the user's current one. Must name an
             existing program. There is no way to clear it back to unset — a
             program the user has opened is only forgotten when it is deleted.
+        barWeightLb:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 200
+        plates:
+          type: array
+          maxItems: 20
+          description: >
+            Replaces the inventory whole rather than patching one denomination:
+            the client edits a rack, not a row, and a partial write would leave a
+            plate the lifter deleted still loadable. An empty array is a lifter
+            who owns no plates, and is honoured — every prescription then reads
+            bar-only. Duplicate denominations are a 400.
+          items:
+            $ref: "#/components/schemas/Plate"
 
     ChangePasswordRequest:
       type: object

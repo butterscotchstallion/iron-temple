@@ -184,6 +184,16 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Give the account the standard plate set, in the same transaction that
+	// creates it. This is what lets an empty inventory mean "owns no plates"
+	// rather than "never configured" — see 0013_gym_setup. The bar needs no
+	// equivalent: GetBarWeight falls back to the column default, so a missing
+	// user_gym row already answers truthfully.
+	if err := qtx.SeedDefaultPlates(ctx, user.ID); err != nil {
+		internalError(w)
+		return
+	}
+
 	token, err := s.issueSession(ctx, qtx, user.ID, req.RememberMe)
 	if err != nil {
 		internalError(w)
@@ -195,14 +205,17 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	auth.SetCookie(w, token, req.RememberMe, s.secureCookies())
-	writeJSON(w, http.StatusCreated, userDTO{
+	// Built through userDTO rather than by hand so the response carries the gym
+	// setup seeded above. A client that registers and immediately renders a
+	// prescription would otherwise see a bar of 0 and an empty rack until its
+	// next /me.
+	writeJSON(w, http.StatusCreated, s.userDTO(ctx, store.GetUserRow{
 		ID:          user.ID,
 		Username:    user.Username,
 		DisplayName: user.DisplayName,
 		AvatarColor: user.AvatarColor,
 		IsAdmin:     user.IsAdmin,
-		HasAvatar:   false,
-	})
+	}))
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {

@@ -35,6 +35,62 @@
   let avatarError = $state<string | null>(null);
   let fileInput = $state<HTMLInputElement | null>(null);
 
+  // The gym: what the bar weighs and what is in the rack. Both used to be
+  // constants in the bundle, and both were wrong — the bar was assumed to be
+  // 45 lb, and the plate set was treated as unlimited. Every weight the app
+  // draws is loaded onto them, so they belong to the lifter, not to the build.
+  let barWeight = $state(auth.me?.barWeightLb ?? 45);
+  // A local copy: edits should be discardable by navigating away, and binding
+  // straight to auth.me would rewrite the profile as the lifter typed.
+  let plates = $state<{ plateLb: number; pairs: number }[]>(
+    (auth.me?.plates ?? []).map((p) => ({ ...p })),
+  );
+  let gymSaving = $state(false);
+  let gymError = $state<string | null>(null);
+  let gymSaved = $state(false);
+
+  // The denominations a rack is built from. Owning none of one is normal, so
+  // this is the menu rather than a claim about what is there.
+  const DENOMINATIONS = [45, 35, 25, 10, 5, 2.5];
+
+  function pairsOf(plateLb: number): number {
+    return plates.find((p) => p.plateLb === plateLb)?.pairs ?? 0;
+  }
+
+  function setPairs(plateLb: number, pairs: number) {
+    const next = Math.max(0, Math.min(20, pairs));
+    const existing = plates.find((p) => p.plateLb === plateLb);
+    // Zero pairs is an absent row, not a row saying zero — the API rejects
+    // pairs < 1, and "I own none" is expressed by not listing it.
+    if (next === 0) {
+      plates = plates.filter((p) => p.plateLb !== plateLb);
+    } else if (existing) {
+      existing.pairs = next;
+    } else {
+      plates = [...plates, { plateLb, pairs: next }].sort(
+        (a, b) => b.plateLb - a.plateLb,
+      );
+    }
+  }
+
+  async function saveGym(event: SubmitEvent) {
+    event.preventDefault();
+    gymSaving = true;
+    gymError = null;
+    gymSaved = false;
+
+    const { data, error } = await updateMe({
+      body: { barWeightLb: barWeight, plates },
+    });
+    if (error || !data) {
+      gymError = "Couldn't save your gym setup.";
+    } else {
+      setMe(data);
+      gymSaved = true;
+    }
+    gymSaving = false;
+  }
+
   async function saveProfile(event: SubmitEvent) {
     event.preventDefault();
     profileSaving = true;
@@ -213,6 +269,73 @@
             {profileSaving ? "Saving…" : "Save"}
           </Button>
           {#if profileSaved}
+            <span class="text-sm text-muted-foreground" role="status">Saved.</span>
+          {/if}
+        </div>
+      </form>
+    </Card>
+
+    <Card class="p-6">
+      <h3 class="text-lg font-bold text-card-foreground">Your gym</h3>
+      <p class="mt-1 text-sm text-muted-foreground">
+        Every weight the app shows gets loaded onto this bar with these plates.
+        If they're wrong, the plate maths and the warm-ups are wrong with them.
+      </p>
+      <form class="mt-4 flex flex-col gap-4" onsubmit={saveGym}>
+        {#if gymError}
+          <ErrorBanner message={gymError} onDismiss={() => (gymError = null)} />
+        {/if}
+
+        <label class="flex flex-col gap-1.5">
+          <span class={labelClass}>Bar weight (lb)</span>
+          <input
+            bind:value={barWeight}
+            type="number"
+            min="1"
+            max="200"
+            step="0.5"
+            required
+            class="{fieldClass} w-32"
+          />
+          <span class="text-xs text-muted-foreground">
+            A standard Olympic bar is 45 lb. Weigh yours if you're not sure.
+          </span>
+        </label>
+
+        <fieldset class="flex flex-col gap-2">
+          <legend class={labelClass}>Plates you own (pairs)</legend>
+          <p class="text-xs text-muted-foreground">
+            Pairs, not plates — one per side. Set a plate to 0 if you don't have
+            any; the app won't ask you to load it.
+          </p>
+          <div class="mt-1 flex flex-col gap-2">
+            {#each DENOMINATIONS as plateLb (plateLb)}
+              <div class="flex items-center gap-3">
+                <span
+                  class="w-16 text-sm font-bold tabular-nums text-card-foreground"
+                >
+                  {plateLb} lb
+                </span>
+                <input
+                  type="number"
+                  min="0"
+                  max="20"
+                  value={pairsOf(plateLb)}
+                  oninput={(e) =>
+                    setPairs(plateLb, Number(e.currentTarget.value))}
+                  aria-label={`Pairs of ${plateLb} lb plates`}
+                  class="{fieldClass} w-20"
+                />
+              </div>
+            {/each}
+          </div>
+        </fieldset>
+
+        <div class="flex items-center gap-3">
+          <Button type="submit" disabled={gymSaving}>
+            {gymSaving ? "Saving…" : "Save"}
+          </Button>
+          {#if gymSaved}
             <span class="text-sm text-muted-foreground" role="status">Saved.</span>
           {/if}
         </div>

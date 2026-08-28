@@ -5,6 +5,7 @@
   import Plus from "@lucide/svelte/icons/plus";
   import PlateBar from "./PlateBar.svelte";
   import { plateLabel } from "./plates";
+  import { barWeightLb, plateInventory } from "./gym.svelte";
   import { warmupSets } from "./warmup";
   import { formatTime } from "./time";
   import type { SessionSet } from "./api";
@@ -32,9 +33,12 @@
   const restSeconds = $derived(sets[0]?.restSeconds ?? 0);
 
   // Warm-up ramp expanded to one entry per set (the empty bar is done twice).
+  // Built against this lifter's bar and rack: the ramp starts at whatever their
+  // bar weighs and each rung rounds to a weight that rack can build, so a
+  // prescription below the bar yields no warm-ups rather than impossible ones.
   const warmups = $derived.by(() => {
     const out: { weightLb: number; reps: number }[] = [];
-    for (const w of warmupSets(workWeight)) {
+    for (const w of warmupSets(workWeight, barWeightLb(), plateInventory())) {
       for (let k = 0; k < w.sets; k++) {
         out.push({ weightLb: w.weightLb, reps: w.reps });
       }
@@ -164,7 +168,11 @@
   <div class="mt-4 flex flex-col items-center gap-2">
     <PlateBar weightLb={activeWeight} />
     <p class="text-xs tabular-nums text-muted-foreground">
-      {activeWeight} lb × {activeReps} · {plateLabel(activeWeight)}
+      {activeWeight} lb × {activeReps} · {plateLabel(
+        activeWeight,
+        barWeightLb(),
+        plateInventory(),
+      )}
     </p>
   </div>
 

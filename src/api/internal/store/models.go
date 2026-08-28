@@ -111,6 +111,24 @@ type UserAvatar struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
+type UserGym struct {
+	UserID      int32              `json:"user_id"`
+	BarWeightLb pgtype.Numeric     `json:"bar_weight_lb"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type UserLiftBaseline struct {
+	UserID     int32          `json:"user_id"`
+	ExerciseID int32          `json:"exercise_id"`
+	WeightLb   pgtype.Numeric `json:"weight_lb"`
+}
+
+type UserPlate struct {
+	UserID  int32          `json:"user_id"`
+	PlateLb pgtype.Numeric `json:"plate_lb"`
+	Pairs   int32          `json:"pairs"`
+}
+
 type UserSession struct {
 	TokenHash  []byte             `json:"token_hash"`
 	UserID     int32              `json:"user_id"`

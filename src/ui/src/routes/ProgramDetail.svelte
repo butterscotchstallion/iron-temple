@@ -9,6 +9,7 @@
     addAssistance,
     removeAssistance,
     updateMe,
+    setBaseline,
     type Layoff,
     type Program,
     type ProgramDayAssistance,
@@ -357,6 +358,47 @@
     return null;
   }
 
+  // ---- Starting weights -------------------------------------------------
+  //
+  // A lift with no history starts at the program's seeded weight, and those
+  // seeds assume a 45 lb bar. On a rack whose bar is heavier they are not just
+  // light, they are unloadable — so the lifter needs a way to say where they
+  // actually start. It is offered only while a lift reads "start", because a
+  // baseline is consulted only when there is no history and would otherwise be
+  // a control that visibly does nothing.
+
+  // The exercise whose starting weight is being edited, and the value typed.
+  let baselineFor = $state<number | null>(null);
+  let baselineWeight = $state(0);
+  let baselineSaving = $state(false);
+  let baselineFailed = $state(false);
+
+  function openBaseline(exerciseId: number, current: number) {
+    baselineFor = exerciseId;
+    baselineWeight = current;
+    baselineFailed = false;
+  }
+
+  async function saveBaseline() {
+    if (baselineFor == null) return;
+    baselineSaving = true;
+    baselineFailed = false;
+    const { error } = await setBaseline({
+      path: { exerciseId: baselineFor },
+      body: { weightLb: baselineWeight },
+    });
+    baselineSaving = false;
+    if (error) {
+      baselineFailed = true;
+      return;
+    }
+    baselineFor = null;
+    // Re-preview so the new starting weight shows on the card the lifter is
+    // looking at. Through load() rather than in place: a baseline can change
+    // more than one day, since the same lift appears on several.
+    await load();
+  }
+
   onMount(load);
 </script>
 
@@ -503,6 +545,58 @@
                 <span class="text-right text-xs text-muted-foreground">
                   {prog.hint}
                 </span>
+              {/if}
+
+              <!-- Only while the lift has no history: that is the whole window
+                   in which a starting weight has any effect. -->
+              {#if ex.progression?.status === "start"}
+                {#if baselineFor === ex.exerciseId}
+                  <div class="flex items-center justify-end gap-2">
+                    <label class="flex items-center gap-1.5">
+                      <span class="sr-only">
+                        Starting weight for {ex.exerciseName}
+                      </span>
+                      <input
+                        bind:value={baselineWeight}
+                        type="number"
+                        min="0"
+                        max="2000"
+                        step="2.5"
+                        class="w-24 rounded-md border border-border/60 bg-input/40 px-2 py-1 text-right text-sm tabular-nums text-foreground outline-none focus:border-primary"
+                      />
+                      <span class="text-xs text-muted-foreground">lb</span>
+                    </label>
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={baselineSaving}
+                      onclick={saveBaseline}
+                    >
+                      {baselineSaving ? "Saving…" : "Save"}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onclick={() => (baselineFor = null)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                  {#if baselineFailed}
+                    <span class="text-right text-xs text-destructive">
+                      Couldn't save that starting weight.
+                    </span>
+                  {/if}
+                {:else}
+                  <button
+                    type="button"
+                    class="self-end text-xs text-muted-foreground underline-offset-2 transition hover:text-primary hover:underline"
+                    onclick={() => openBaseline(ex.exerciseId, ex.weightLb)}
+                  >
+                    Set starting weight
+                  </button>
+                {/if}
               {/if}
             </li>
           {/each}
