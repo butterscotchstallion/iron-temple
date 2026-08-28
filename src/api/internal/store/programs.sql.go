@@ -385,31 +385,6 @@ func (q *Queries) ListPrograms(ctx context.Context) ([]ListProgramsRow, error) {
 	return items, nil
 }
 
-const updateProgramDayWeekday = `-- name: UpdateProgramDayWeekday :one
-UPDATE program_days
-SET weekday = $1
-WHERE id = $2
-RETURNING id, program_id, name, position, weekday
-`
-
-type UpdateProgramDayWeekdayParams struct {
-	Weekday *int32 `json:"weekday"`
-	ID      int32  `json:"id"`
-}
-
-func (q *Queries) UpdateProgramDayWeekday(ctx context.Context, arg UpdateProgramDayWeekdayParams) (ProgramDay, error) {
-	row := q.db.QueryRow(ctx, updateProgramDayWeekday, arg.Weekday, arg.ID)
-	var i ProgramDay
-	err := row.Scan(
-		&i.ID,
-		&i.ProgramID,
-		&i.Name,
-		&i.Position,
-		&i.Weekday,
-	)
-	return i, err
-}
-
 const listSetPlansByProgram = `-- name: ListSetPlansByProgram :many
 SELECT pde.program_day_id,
        pde.exercise_id,
@@ -465,4 +440,29 @@ func (q *Queries) ListSetPlansByProgram(ctx context.Context, programID int32) ([
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateProgramDayWeekday = `-- name: UpdateProgramDayWeekday :one
+UPDATE program_days
+SET weekday = $1
+WHERE id = $2
+RETURNING id, program_id, name, position, weekday
+`
+
+type UpdateProgramDayWeekdayParams struct {
+	Weekday *int32 `json:"weekday"`
+	ID      int32  `json:"id"`
+}
+
+func (q *Queries) UpdateProgramDayWeekday(ctx context.Context, arg UpdateProgramDayWeekdayParams) (ProgramDay, error) {
+	row := q.db.QueryRow(ctx, updateProgramDayWeekday, arg.Weekday, arg.ID)
+	var i ProgramDay
+	err := row.Scan(
+		&i.ID,
+		&i.ProgramID,
+		&i.Name,
+		&i.Position,
+		&i.Weekday,
+	)
+	return i, err
 }

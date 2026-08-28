@@ -69,6 +69,12 @@ LEFT JOIN user_gym g ON g.user_id = u.id
 WHERE u.id = $1::int
 `
 
+// What the lifter can load, and where their lifts start. See 0013_gym_setup for
+// why these are three tables of their own rather than columns on users.
+//
+// Every query here is scoped to one owner. Gym setup is not as sensitive as a
+// performance, but it is still per-lifter state, and the rule this schema
+// applies everywhere else is easier to keep than to remember exceptions to.
 // GetBarWeight returns the lifter's bar, falling back to the column default for
 // an account that has never opened the setup screen. COALESCE over a LEFT JOIN
 // rather than a plain SELECT so a missing row answers the question instead of
