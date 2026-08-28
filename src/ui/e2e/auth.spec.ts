@@ -212,7 +212,13 @@ test("the profile page saves a display name", async ({ page }) => {
 
   await page.goto("/#/profile");
   await page.getByLabel("Display name").fill("Ada B. Lovelace");
-  await page.getByRole("button", { name: "Save", exact: true }).click();
+  // Scoped to the Details form: the gym-setup card below it has a Save of its
+  // own, so the label alone no longer names one button.
+  await page
+    .locator("form")
+    .filter({ has: page.getByLabel("Display name") })
+    .getByRole("button", { name: "Save", exact: true })
+    .click();
 
   await expect(page.getByText("Saved.")).toBeVisible();
   expect(patched).toMatchObject({ displayName: "Ada B. Lovelace" });
