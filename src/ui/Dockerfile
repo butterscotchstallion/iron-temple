@@ -24,7 +24,7 @@ RUN pnpm generate:api && pnpm build
 # Serve the static build with a non-root nginx (uid 101, listens on :8080).
 # The UI calls the API at the RELATIVE path /api/v1, so /api/* never reaches this
 # container — Traefik path-routes it to the API service.
-FROM nginxinc/nginx-unprivileged:1.27-alpine
+FROM nginxinc/nginx-unprivileged:1.31-alpine@sha256:901e944d1f4fc2bd077e8f5568b98c1f6f8cdacf6b97a87747c43134a339b9a7
 # Patch Alpine base packages (openssl/libcrypto3, c-ares, libexpat, libpng, …) so
 # the Trivy CRITICAL/HIGH gate passes — the pinned nginx base tag lags Alpine's
 # security releases. Runs as root at build time, then drops back to the non-root
