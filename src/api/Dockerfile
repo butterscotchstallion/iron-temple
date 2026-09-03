@@ -2,7 +2,7 @@
 #
 # The module is vendored (src/api/vendor), so the build runs fully offline —
 # CGO off + vendored deps produce a static binary with no libc dependency.
-FROM golang:1.27@sha256:4013ae0f9e7994f8535c58c811f8f863fbed38b72e0d51e6592156f758d66146 AS build
+FROM golang:1.27@sha256:512690a5660563b57d37ecc31129e7f136e831db2aed24a1dbeb8ad7380dc0fa AS build
 # Release version, baked into the binary (main.version) and surfaced by /health.
 # Passed by release.yml (--opt build-arg:VERSION=vX.Y.Z); "dev" for local builds.
 ARG VERSION=dev
