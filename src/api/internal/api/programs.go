@@ -191,6 +191,72 @@ func (s *Server) previewNextSession(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// previewNextSessions prescribes every day of a program in one response.
+//
+// The program detail screen shows all of a program's days at once, so asking
+// day by day made rendering it cost a request per day — four on the seeded
+// programs — and accepting a deload cost another one per day on top. Both are
+// now a single call.
+//
+// The layoff is measured once here rather than per day, which is the shape the
+// data always had: it describes how long the LIFTER has been away, so the
+// per-day endpoint necessarily gave every day the same answer.
+func (s *Server) previewNextSessions(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	programID, ok := idParam(r, "programId")
+	if !ok {
+		notFound(w, "program not found")
+		return
+	}
+
+	// Establishes that the program exists before the days come back empty, so a
+	// bad id is a 404 rather than a 200 with nothing in it.
+	if _, err := s.q.GetProgram(ctx, programID); errors.Is(err, pgx.ErrNoRows) {
+		notFound(w, "program not found")
+		return
+	} else if err != nil {
+		internalError(w)
+		return
+	}
+
+	days, err := s.q.ListProgramDays(ctx, programID)
+	if err != nil {
+		internalError(w)
+		return
+	}
+
+	userID := userFrom(ctx).ID
+	lay, err := s.layoffFor(ctx, userID, r.URL.Query().Get("deload") == "true")
+	if err != nil {
+		internalError(w)
+		return
+	}
+
+	out := prescribedSessionsDTO{
+		ProgramID: programID,
+		Layoff:    lay.dto(),
+		Days:      make([]prescribedDayDTO, 0, len(days)),
+	}
+	// Sequential on purpose. prescribe() runs several queries per day against a
+	// pool this request already holds a connection from, and a program has a
+	// handful of days — fanning out would trade a bounded, predictable cost for
+	// contention on the same pool to save milliseconds.
+	for _, day := range days {
+		exercises, err := s.prescribe(ctx, programID, day.ID, userID, lay)
+		if err != nil {
+			internalError(w)
+			return
+		}
+		out.Days = append(out.Days, prescribedDayDTO{
+			ProgramDayID:   day.ID,
+			ProgramDayName: day.Name,
+			Exercises:      exercises,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, out)
+}
+
 // prescribe computes the next-session prescription for a day: the program's own
 // exercises with a target weight from the progression engine, then the lifter's
 // assistance work. Shared by preview and session creation, so the two can never

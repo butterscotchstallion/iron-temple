@@ -1,13 +1,13 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { link } from "svelte-spa-router";
-  import { getExerciseHistory, listExercises } from "../lib/api";
-  import { exerciseEmoji, topSet } from "../lib/exerciseIcon";
+  import { listExercises, type Exercise } from "../lib/api";
+  import { CACHE_KEYS, cachedValue, fetchThrough } from "../lib/cache.svelte";
+  import { exerciseEmoji } from "../lib/exerciseIcon";
   import { formatLongDate } from "../lib/date";
   import { Card } from "$lib/components/ui/card";
   import TrendingUp from "@lucide/svelte/icons/trending-up";
   import ErrorCard from "../lib/ErrorCard.svelte";
-  import ErrorBanner from "../lib/ErrorBanner.svelte";
 
   type ExerciseCard = {
     id: number;
@@ -19,46 +19,40 @@
   let cards = $state<ExerciseCard[]>([]);
   let loading = $state(true);
   let failed = $state(false);
-  // At least one lift's history request failed, so some cards are missing their
-  // latest weight (and would otherwise read as "No sessions yet").
-  let partialFailed = $state(false);
 
-  // Placeholder cards shown while requests are in flight.
+  // Placeholder cards shown while the request is in flight.
   const skeletons = [0, 1, 2, 3, 4, 5];
 
+  function apply(exercises: Exercise[]) {
+    cards = exercises.map((exercise) => ({
+      id: exercise.id,
+      name: exercise.name,
+      emoji: exerciseEmoji(exercise.name),
+      top: exercise.topSet,
+    }));
+  }
+
   async function load() {
-    loading = true;
     failed = false;
-    partialFailed = false;
-    // Only the lifts with something to chart. Without the scope this asks for
-    // the whole library — dozens of accessories nobody has touched — and then
-    // fires a history request per card to discover they are empty. The Library
-    // tab is where the full catalogue lives.
-    const { data: exercises, error } = await listExercises({
-      query: { scope: "performed" },
-    });
-    if (error || !exercises) {
-      failed = true;
-      loading = false;
-      return;
-    }
-    // Fetch each exercise's history in parallel to compute its top set. A
-    // single failing history request leaves that card without data, so flag it
-    // rather than let the empty card read as "No sessions yet".
-    cards = await Promise.all(
-      exercises.map(async (exercise): Promise<ExerciseCard> => {
-        const { data, error: historyError } = await getExerciseHistory({
-          path: { exerciseId: exercise.id },
-        });
-        if (historyError) partialFailed = true;
-        return {
-          id: exercise.id,
-          name: exercise.name,
-          emoji: exerciseEmoji(exercise.name),
-          top: data ? topSet(data) : null,
-        };
-      }),
+
+    const remembered = cachedValue<Exercise[]>(CACHE_KEYS.performedExercises);
+    if (remembered) apply(remembered);
+    loading = remembered === undefined;
+
+    // One request for the whole page. The scope keeps it to lifts with
+    // something to chart — the Library tab is where the full catalogue lives —
+    // and each row now carries its own top set, so there is nothing left to
+    // ask for. This used to be followed by a history request PER CARD, each
+    // transferring a lift's entire history so the browser could take one
+    // maximum from it; the server computes that maximum now.
+    const { data: exercises, error } = await fetchThrough(CACHE_KEYS.performedExercises, () =>
+      listExercises({ query: { scope: "performed" } }),
     );
+    if (error || !exercises) {
+      if (!remembered) failed = true;
+    } else {
+      apply(exercises);
+    }
     loading = false;
   }
 
@@ -68,14 +62,6 @@
 <div class="flex flex-col gap-4">
   <h2 class="text-2xl font-black text-foreground">Progress</h2>
   <p class="text-sm text-muted-foreground">Pick a lift to see how it's trending.</p>
-
-  {#if partialFailed && !failed}
-    <ErrorBanner
-      message="Couldn't load some lifts' latest weight."
-      onRetry={load}
-      onDismiss={() => (partialFailed = false)}
-    />
-  {/if}
 
   <section class="grid gap-4 sm:grid-cols-3">
     {#if loading}

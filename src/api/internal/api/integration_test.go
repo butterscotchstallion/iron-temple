@@ -195,6 +195,74 @@ func TestSeedData(t *testing.T) {
 		JSON().Array().Length().IsEqual(6)
 }
 
+// TestListExercisesCarriesTopSet pins the top set the list row now carries
+// against the history endpoint the Progress page used to compute it from.
+//
+// That equivalence is the entire basis for dropping the per-card history
+// request, so it is asserted rather than assumed: the test takes the maximum
+// the browser used to take, and requires the server's column to agree. A
+// divergence here — a different definition of "a set", a different tie-break —
+// would otherwise surface as silently wrong weights on the Progress page.
+func TestListExercisesCarriesTopSet(t *testing.T) {
+	e := expect(t)
+	_, dayID := firstProgramAndDay(e)
+
+	created := startSession(t, e, dayID)
+	sessionID := int(created.Value("id").Number().Raw())
+	firstSet := created.Value("sets").Array().Value(0).Object()
+	exerciseID := int(firstSet.Value("exerciseId").Number().Raw())
+	setID := int(firstSet.Value("id").Number().Raw())
+
+	// Before anything is logged the lift has no history, so it reports null —
+	// not a set at zero pounds, which is a real weight. Scoped to this test's
+	// own exercise rather than sweeping the library: every test in the package
+	// shares one database, so "nothing anywhere has a top set" would be an
+	// assertion about the suite's ordering rather than about this endpoint.
+	exerciseTopSet(t, e, exerciseID).IsNull()
+
+	// actual_reps > 0 is what promotes a prescribed set to a performed one, in
+	// this column exactly as in the history endpoint.
+	e.PATCH(fmt.Sprintf("/sessions/%d/sets/%d", sessionID, setID)).
+		WithJSON(map[string]any{"actualReps": 5, "completed": true}).
+		Expect().Status(http.StatusOK)
+
+	// The maximum the browser used to take: scan history oldest-first, keep the
+	// strictly-greater weight, so ties fall to the session that set it first.
+	var wantWeight float64
+	var wantDate string
+	for _, p := range e.GET(fmt.Sprintf("/exercises/%d/history", exerciseID)).
+		Expect().Status(http.StatusOK).JSON().Array().Iter() {
+		point := p.Object()
+		if w := point.Value("weightLb").Number().Raw(); wantDate == "" || w > wantWeight {
+			wantWeight = w
+			wantDate = point.Value("performedOn").String().Raw()
+		}
+	}
+	if wantDate == "" {
+		t.Fatal("logged a set but the lift reports no history to compare against")
+	}
+
+	top := exerciseTopSet(t, e, exerciseID).Object()
+	top.Value("weightLb").Number().IsEqual(wantWeight)
+	top.Value("performedOn").String().IsEqual(wantDate)
+}
+
+// exerciseTopSet picks one exercise's topSet out of the library listing. A
+// missing id is fatal rather than a nil return, so a caller asserting IsNull()
+// on the result cannot be reading a lift that simply wasn't in the response.
+func exerciseTopSet(t *testing.T, e *httpexpect.Expect, exerciseID int) *httpexpect.Value {
+	t.Helper()
+	for _, ex := range e.GET("/exercises").Expect().Status(http.StatusOK).
+		JSON().Array().Iter() {
+		obj := ex.Object()
+		if int(obj.Value("id").Number().Raw()) == exerciseID {
+			return obj.Value("topSet")
+		}
+	}
+	t.Fatalf("exercise %d missing from the library listing", exerciseID)
+	return nil
+}
+
 func TestGetProgramAndUnknown(t *testing.T) {
 	e := expect(t)
 
@@ -220,6 +288,48 @@ func TestPreviewNextSessionUsesStartingWeights(t *testing.T) {
 	obj.Value("exercises").Array().NotEmpty()
 	obj.Value("exercises").Array().Value(0).Object().
 		Value("weightLb").Number().Gt(0)
+}
+
+// TestPreviewNextSessionsMatchesPerDay pins the batched preview against the
+// per-day one it replaced on the program screen. Both endpoints run the same
+// progression engine, so a day prescribed either way must come out identical —
+// if they can disagree, the screen shows different weights depending on which
+// call happened to fill it.
+func TestPreviewNextSessionsMatchesPerDay(t *testing.T) {
+	e := expect(t)
+	programID := firstProgramID(e)
+
+	all := e.GET(fmt.Sprintf("/programs/%d/next-sessions", programID)).Expect().
+		Status(http.StatusOK).
+		JSON().Object()
+	all.Value("programId").Number().IsEqual(programID)
+
+	days := all.Value("days").Array()
+	days.NotEmpty()
+	// Every day of the program, not just the one the old screen asked for first.
+	days.Length().IsEqual(
+		e.GET(fmt.Sprintf("/programs/%d", programID)).Expect().Status(http.StatusOK).
+			JSON().Object().Value("days").Array().Length().Raw())
+
+	for _, d := range days.Iter() {
+		day := d.Object()
+		dayID := int(day.Value("programDayId").Number().Raw())
+
+		single := e.GET(fmt.Sprintf("/programs/%d/days/%d/next-session", programID, dayID)).
+			Expect().Status(http.StatusOK).JSON().Object()
+		day.Value("programDayName").IsEqual(single.Value("programDayName").Raw())
+		day.Value("exercises").IsEqual(single.Value("exercises").Raw())
+		// The layoff is hoisted onto the wrapper, so the per-day copy the batch
+		// response drops must be the one it reports once.
+		all.Value("layoff").IsEqual(single.Value("layoff").Raw())
+	}
+}
+
+func TestPreviewNextSessionsUnknownProgram(t *testing.T) {
+	e := expect(t)
+	// A program that does not exist is a 404, not a 200 with an empty day list —
+	// which is what listing days without checking the program would produce.
+	e.GET("/programs/999999/next-sessions").Expect().Status(http.StatusNotFound)
 }
 
 func TestSessionLifecycle(t *testing.T) {

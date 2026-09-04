@@ -173,6 +173,34 @@ function sessionDetail(
   };
 }
 
+/**
+ * The batched preview the program screen loads from, built out of a single-day
+ * fixture so the two shapes cannot drift apart.
+ *
+ * It mirrors what the real endpoints do: the same prescription, with the layoff
+ * lifted off the day and onto the wrapper, because a layoff describes the
+ * lifter rather than any one day.
+ */
+function nextSessionsFrom(single: {
+  programId: number;
+  programDayId: number;
+  programDayName: string;
+  exercises: unknown[];
+  layoff?: unknown;
+}) {
+  return {
+    programId: single.programId,
+    layoff: single.layoff ?? null,
+    days: [
+      {
+        programDayId: single.programDayId,
+        programDayName: single.programDayName,
+        exercises: single.exercises,
+      },
+    ],
+  };
+}
+
 test.beforeEach(async ({ page }) => {
   await page.route("**/api/v1/me", (route) => route.fulfill({ json: signedInUser }));
   await page.route("**/api/v1/programs", (route) => route.fulfill({ json: programs }));
@@ -183,6 +211,12 @@ test.beforeEach(async ({ page }) => {
   // /exercises above are wildcarded.
   await page.route("**/api/v1/programs/1/days/10/next-session**", (route) =>
     route.fulfill({ json: nextSession }),
+  );
+  // The program screen loads through the batched preview and only falls back to
+  // the per-day one above when a single day's assistance changes under it, so
+  // both have to answer.
+  await page.route("**/api/v1/programs/1/next-sessions**", (route) =>
+    route.fulfill({ json: nextSessionsFrom(nextSession) }),
   );
   // Default the Progress page to no exercises; individual tests override this.
   await page.route("**/api/v1/exercises**", (route) => route.fulfill({ json: [] }));
@@ -281,6 +315,12 @@ async function routeLayoffPreview(page: Page) {
   await page.route("**/api/v1/programs/1/days/10/next-session**", (route) => {
     const deload = new URL(route.request().url()).searchParams.get("deload") === "true";
     return route.fulfill({ json: layoffNextSession(deload) });
+  });
+  // Accepting the deload re-previews the whole program in one request, so this
+  // is the route the "Deload 30%" button actually goes through.
+  await page.route("**/api/v1/programs/1/next-sessions**", (route) => {
+    const deload = new URL(route.request().url()).searchParams.get("deload") === "true";
+    return route.fulfill({ json: nextSessionsFrom(layoffNextSession(deload)) });
   });
 }
 
@@ -561,26 +601,35 @@ test("lists past sessions and paginates with Load more", async ({ page }) => {
 });
 
 test("shows each lift's top set on the progress page", async ({ page }) => {
+  // The top set arrives on the list row. The page used to fetch every lift's
+  // whole history and take the maximum itself, which is why this test once had
+  // a history route per exercise; picking the heaviest set is the server's job
+  // now, pinned against the history endpoint by TestListExercisesCarriesTopSet.
   await page.route("**/api/v1/exercises**", (route) =>
-    route.fulfill({ json: [{ id: 1, name: "Squat" }, { id: 2, name: "Bench Press" }] }),
-  );
-  await page.route("**/api/v1/exercises/1/history", (route) =>
     route.fulfill({
       json: [
-        { performedOn: "2026-07-01", weightLb: 95, reps: 5, completed: true },
-        { performedOn: "2026-08-01", weightLb: 135, reps: 5, completed: true },
+        { id: 1, name: "Squat", topSet: { weightLb: 135, performedOn: "2026-08-01" } },
+        { id: 2, name: "Bench Press", topSet: null },
       ],
     }),
   );
-  await page.route("**/api/v1/exercises/2/history", (route) => route.fulfill({ json: [] }));
+  // Registered last so it wins: the list glob above ends in ** and would
+  // otherwise swallow the history URLs too, making the assertion below vacuous.
+  const historyCalls: string[] = [];
+  await page.route("**/api/v1/exercises/*/history", (route) => {
+    historyCalls.push(route.request().url());
+    return route.fulfill({ json: [] });
+  });
 
   await page.goto("/#/progress");
   await expect(page.getByRole("heading", { name: "Progress", exact: true })).toBeVisible();
   await expect(page.getByText("Squat")).toBeVisible();
-  // topSet picks the heaviest point across the history.
   await expect(page.getByText("135 lb")).toBeVisible();
-  // A lift with no history reads as "No sessions yet".
+  // A null topSet is a lift never performed, and reads as such.
   await expect(page.getByText("No sessions yet")).toBeVisible();
+  // The N+1 this replaced: rendering the page must cost no history request at
+  // all, or the round trips are still being paid one card at a time.
+  expect(historyCalls).toEqual([]);
 });
 
 test("can't finish a session that hasn't started", async ({ page }) => {
@@ -822,6 +871,16 @@ test("loads the new version when the update is accepted", async ({ page }) => {
 
   await page.goto("/");
   const prompt = page.getByTestId("update-prompt");
+
+  // Let the first /health land before jumping the clock, the same way the
+  // declining test above does. routeHealth answers by call count, and
+  // startPolling()'s opening poll is call #1 — jump the interval while that is
+  // still in the air and the tick hits poll()'s inFlight guard, which DROPS it
+  // rather than queueing it. v2.0.0 would then never be asked for, the prompt
+  // would never appear, and the failure would read as a mysterious timeout on
+  // an assertion that has nothing to do with the cause.
+  await expect(page.getByTestId("version")).toContainText("iron-temple v1.0.0");
+
   await page.clock.runFor("06:00");
   await page.clock.resume();
   await expect(prompt).toBeVisible();

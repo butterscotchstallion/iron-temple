@@ -649,6 +649,52 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /programs/{programId}/next-sessions:
+    parameters:
+      - name: programId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    get:
+      tags: [programs]
+      operationId: previewNextSessions
+      summary: Preview the next session for every day in a program
+      description: >
+        The same prescription `previewNextSession` returns, for every day of the
+        program at once.
+
+        The program detail screen shows all of a program's days together, so
+        asking day by day made rendering it cost one request per day — four on
+        the seeded programs, and the whole screen waited on the slowest. The
+        layoff is hoisted out of the days because it is a fact about the lifter
+        rather than about any one day: every per-day answer carried an identical
+        copy, and the client kept whichever landed last.
+      parameters:
+        - name: deload
+          in: query
+          required: false
+          description: >-
+            Apply the layoff deload to every day's weights, exactly as the
+            single-day preview does. Accepting the offered deload re-previews
+            the whole program, which is the other place this endpoint saves a
+            request per day.
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Prescribed next session for each day
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrescribedSessions"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /racked:
     get:
       tags: [racked]
@@ -1242,7 +1288,7 @@ components:
     Exercise:
       description: One movement in the library.
       type: object
-      required: [id, name, muscleGroup, equipment, isAccessory, isCustom]
+      required: [id, name, muscleGroup, equipment, isAccessory, isCustom, topSet]
       properties:
         id:
           type: integer
@@ -1265,6 +1311,32 @@ components:
           description: >-
             True for a movement this lifter created. Only custom exercises can be
             deleted, and only by their owner; the seeded catalogue is shared.
+        topSet:
+          allOf:
+            - $ref: "#/components/schemas/ExerciseTopSet"
+          nullable: true
+          description: >-
+            The heaviest set this lifter has ever worked on this movement, or
+            null if they never have. Present so the Progress page can render a
+            card per lift from the list alone: it used to fetch every lift's
+            entire history just to take the maximum, which was one request per
+            card and a whole history transferred to compute one number.
+
+    ExerciseTopSet:
+      description: >
+        A lift's all-time heaviest working set. Computed the same way the
+        history endpoint computes a point — sets with actual_reps > 0, grouped
+        by session, the session's top weight — then the heaviest of those, ties
+        going to the earliest session, which is the one that originally set it.
+      type: object
+      required: [weightLb, performedOn]
+      properties:
+        weightLb:
+          type: number
+          minimum: 0
+        performedOn:
+          type: string
+          format: date
 
     CreateExerciseRequest:
       type: object
@@ -1561,6 +1633,49 @@ components:
             back in. Present whether or not the deload was applied — the weights
             above already reflect the answer, and this says what the question
             was.
+
+    PrescribedSessions:
+      description: >
+        Every day of a program, each with progression-computed weights, in one
+        response.
+      type: object
+      required: [programId, layoff, days]
+      properties:
+        programId:
+          type: integer
+          format: int64
+        layoff:
+          allOf:
+            - $ref: "#/components/schemas/Layoff"
+          nullable: true
+          description: >-
+            The lifter's layoff, reported once for the whole program rather than
+            repeated per day. Same meaning as on PrescribedSession: null unless
+            they have been away a week or more, and present whether or not the
+            deload was applied.
+        days:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrescribedDay"
+
+    PrescribedDay:
+      description: >-
+        One day's prescription within PrescribedSessions. PrescribedSession
+        without the fields the wrapper already carries — the program id and the
+        layoff.
+      type: object
+      required: [programDayId, programDayName, exercises]
+      properties:
+        programDayId:
+          type: integer
+          format: int64
+        programDayName:
+          type: string
+          example: Workout A
+        exercises:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrescribedExercise"
 
     Layoff:
       description: >-

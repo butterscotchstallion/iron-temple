@@ -88,6 +88,19 @@ type exerciseDTO struct {
 	// IsCustom marks a movement this lifter created, which is the only kind
 	// anyone may delete.
 	IsCustom bool `json:"isCustom"`
+	// TopSet is this lifter's heaviest working set on the movement, or nil if
+	// they have never performed it. A pointer rather than a zero value because
+	// the field is `required` and nullable in the spec: the key is always
+	// present, and null is meaningfully different from a set at zero pounds.
+	TopSet *exerciseTopSetDTO `json:"topSet"`
+}
+
+// exerciseTopSetDTO is the heaviest set a lifter has worked on one movement.
+// Carried on the list row so the Progress page can render a card per lift
+// without fetching each one's whole history to take a maximum from it.
+type exerciseTopSetDTO struct {
+	WeightLb    float64 `json:"weightLb"`
+	PerformedOn string  `json:"performedOn"`
 }
 
 type exerciseHistoryPointDTO struct {
@@ -163,6 +176,26 @@ type prescribedSessionDTO struct {
 	// whether or not the deload was applied — the weights above already reflect
 	// the answer, and this says what the question was.
 	Layoff *layoffDTO `json:"layoff"`
+}
+
+// prescribedSessionsDTO is every day of a program prescribed at once.
+//
+// The layoff sits here rather than on each day because it describes the lifter,
+// not the day: the per-day endpoint gives every day an identical copy, and the
+// client kept whichever answer landed last. Hoisting it removes the question of
+// which one was authoritative.
+type prescribedSessionsDTO struct {
+	ProgramID int32              `json:"programId"`
+	Layoff    *layoffDTO         `json:"layoff"`
+	Days      []prescribedDayDTO `json:"days"`
+}
+
+// prescribedDayDTO is prescribedSessionDTO without the fields its wrapper
+// already carries.
+type prescribedDayDTO struct {
+	ProgramDayID   int32                   `json:"programDayId"`
+	ProgramDayName string                  `json:"programDayName"`
+	Exercises      []prescribedExerciseDTO `json:"exercises"`
 }
 
 // layoffDTO describes time away from training and what easing back in would

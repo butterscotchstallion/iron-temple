@@ -6,12 +6,11 @@
     <meta name="theme-color" content="#0d021a" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Iron Temple</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&display=swap"
-      rel="stylesheet"
-    />
+    <!-- Orbitron is self-hosted via @fontsource/orbitron (imported in app.css)
+         rather than fetched from fonts.googleapis.com. A stylesheet <link> here
+         blocked first paint on DNS + TLS to a third party to style the H1, which
+         is the largest thing on the screen — and left the app renderless on a
+         LAN with no route to the internet. -->
   </head>
   <body>
     <div id="app"></div>

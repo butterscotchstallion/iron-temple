@@ -13,14 +13,41 @@
 -- EXISTS uses actual_reps > 0, the same definition of real work as
 -- ListExerciseHistory below, so a lift appears on Progress exactly when it has a
 -- history to draw.
+--
+-- top_weight_lb/top_performed_on are that lift's heaviest working set, carried
+-- on the list row so Progress can draw a card without asking. It used to fetch
+-- every listed lift's ENTIRE history and take the maximum in the browser — one
+-- request per card, each transferring a full history to compute one number.
+--
+-- The lateral reproduces that maximum exactly rather than approximately. Its
+-- inner grouping is ListExerciseHistory's, so "a set" means the same thing in
+-- both places; ordering by the session's top weight descending and breaking
+-- ties on the earliest (performed_on, id) picks the session that ORIGINALLY set
+-- the weight, which is what the browser's oldest-first scan did with its
+-- strictly-greater comparison. NULL for a lift never performed, which is why
+-- both columns are nullable and the DTO carries them as one nullable object.
 -- name: ListExercises :many
 SELECT e.id,
        e.name,
        e.muscle_group,
        e.equipment,
        e.is_accessory,
-       (e.created_by_user_id IS NOT NULL)::bool AS is_custom
+       (e.created_by_user_id IS NOT NULL)::bool AS is_custom,
+       top.weight_lb                            AS top_weight_lb,
+       top.performed_on                         AS top_performed_on
 FROM exercises e
+LEFT JOIN LATERAL (
+    SELECT MAX(ss.weight_lb)::numeric AS weight_lb,
+           s.performed_on
+    FROM session_sets ss
+    JOIN sessions s ON s.id = ss.session_id
+    WHERE ss.exercise_id = e.id
+      AND s.user_id = sqlc.arg('user_id')::int
+      AND ss.actual_reps > 0
+    GROUP BY s.id, s.performed_on
+    ORDER BY MAX(ss.weight_lb) DESC, s.performed_on, s.id
+    LIMIT 1
+) top ON true
 WHERE (e.created_by_user_id IS NULL OR e.created_by_user_id = sqlc.arg('user_id')::int)
   AND (NOT sqlc.arg('performed_only')::bool
        OR EXISTS (

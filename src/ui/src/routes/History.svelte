@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { link } from "svelte-spa-router";
-  import { listSessions, type SessionSummary } from "../lib/api";
+  import { listSessions, type SessionList, type SessionSummary } from "../lib/api";
+  import { CACHE_KEYS, cachedValue, fetchThrough } from "../lib/cache.svelte";
   import { formatLongDate } from "../lib/date";
   import { formatVolume } from "../lib/volume";
   import { Card } from "$lib/components/ui/card";
@@ -25,18 +26,29 @@
 
   const hasMore = $derived(sessions.length < total);
 
+  function apply(data: SessionList) {
+    sessions = data.items;
+    total = data.total;
+    totalVolumeLb = data.totalVolumeLb;
+  }
+
+  // Only the first page is cached. Pages the lifter scrolled to are theirs for
+  // that visit, not something to restore them into: coming back to History
+  // should open at the top, which is where the first page already puts them.
   async function loadInitial() {
-    loading = true;
     failed = false;
-    const { data, error } = await listSessions({
-      query: { limit: pageSize, offset: 0 },
-    });
+
+    const remembered = cachedValue<SessionList>(CACHE_KEYS.historyFirstPage);
+    if (remembered) apply(remembered);
+    loading = remembered === undefined;
+
+    const { data, error } = await fetchThrough(CACHE_KEYS.historyFirstPage, () =>
+      listSessions({ query: { limit: pageSize, offset: 0 } }),
+    );
     if (error || !data) {
-      failed = true;
+      if (!remembered) failed = true;
     } else {
-      sessions = data.items;
-      total = data.total;
-      totalVolumeLb = data.totalVolumeLb;
+      apply(data);
     }
     loading = false;
   }
