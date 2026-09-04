@@ -19,6 +19,7 @@
     muscleGroupLabel,
   } from "../lib/library";
   import { exerciseEmoji } from "../lib/exerciseIcon";
+  import { CACHE_KEYS, cachedValue, fetchThrough, invalidate } from "../lib/cache.svelte";
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
   import ErrorCard from "../lib/ErrorCard.svelte";
@@ -54,15 +55,18 @@
   );
 
   async function load() {
-    loading = true;
     failed = false;
-    const { data, error } = await listExercises();
+
+    const remembered = cachedValue<Exercise[]>(CACHE_KEYS.allExercises);
+    if (remembered) exercises = remembered;
+    loading = remembered === undefined;
+
+    const { data, error } = await fetchThrough(CACHE_KEYS.allExercises, () => listExercises());
     if (error || !data) {
-      failed = true;
-      loading = false;
-      return;
+      if (!remembered) failed = true;
+    } else {
+      exercises = data;
     }
-    exercises = data;
     loading = false;
   }
 
@@ -83,8 +87,11 @@
       return;
     }
     // Splice it in rather than refetching: the list is alphabetical, and one
-    // insertion is cheaper and less jarring than a whole reload.
+    // insertion is cheaper and less jarring than a whole reload. The cached
+    // copy is now a library short one movement, so drop it — the next visit
+    // pays a load rather than opening on a list missing what was just added.
     exercises = [...exercises, data].sort((a, b) => a.name.localeCompare(b.name));
+    invalidate(CACHE_KEYS.allExercises);
     newName = "";
     adding = false;
   }
@@ -99,6 +106,7 @@
       return;
     }
     exercises = exercises.filter((e) => e.id !== exercise.id);
+    invalidate(CACHE_KEYS.allExercises);
   }
 
   onMount(load);

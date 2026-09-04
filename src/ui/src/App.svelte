@@ -11,6 +11,7 @@
   import UpdatePrompt from "./lib/UpdatePrompt.svelte";
   import ErrorBoundary from "./lib/ErrorBoundary.svelte";
   import { auth, loadMe } from "./lib/auth.svelte";
+  import { loadHomeSessions } from "./lib/homeData";
   import { startPolling } from "./lib/version.svelte";
 
   // Hash-based routes (svelte-spa-router). "/" lands on the current program's
@@ -53,7 +54,21 @@
     "*": Home,
   };
 
-  onMount(loadMe);
+  // Both at once, not one after the other.
+  //
+  // No route can mount until /me settles, so the home screen's session list —
+  // the thing the landing route is made of — could not even be REQUESTED until
+  // a round trip had already completed. Starting it here overlaps the two, and
+  // the cache's in-flight dedupe means Home joins this request rather than
+  // making a second one.
+  //
+  // Signed out, this costs one 401 that nothing reads. That is the right side
+  // of the trade: signing in happens once, landing signed-in happens every
+  // time, and the 401 is the same request the route would have made anyway.
+  onMount(() => {
+    void loadMe();
+    void loadHomeSessions();
+  });
 
   // Watch for a release landing under an open tab. Owned by the shell rather
   // than by the header that displays the version, because what it feeds is the

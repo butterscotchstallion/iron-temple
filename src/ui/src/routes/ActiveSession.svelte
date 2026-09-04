@@ -12,6 +12,7 @@
     type Session,
     type SessionSet,
   } from "../lib/api";
+  import { invalidateTraining } from "../lib/cache.svelte";
   import type { Options as ConfettiOptions } from "canvas-confetti";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import Dumbbell from "@lucide/svelte/icons/dumbbell";
@@ -131,6 +132,11 @@
 
   $effect(() => () => {
     if (prTimer) clearTimeout(prTimer);
+    // Whatever was logged while this screen was open — a rep, a weight nudge, a
+    // whole finished workout — has moved the streak, the lifetime volume and
+    // the top sets that Home, History and Progress cache. Dropped here, once,
+    // rather than after each individual write.
+    invalidateTraining();
   });
 
   // Sets grouped by exercise, preserving prescription order. The server already

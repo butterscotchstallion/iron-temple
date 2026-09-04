@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { listSessions } from "../lib/api";
   import { auth } from "../lib/auth.svelte";
+  import { CACHE_KEYS, cachedValue, fetchThrough } from "../lib/cache.svelte";
+  import { loadHomeSessions, type HomeSessions } from "../lib/homeData";
   import { currentStreak, STREAK_DISPLAY_THRESHOLD } from "../lib/streak";
   import ProgramDetail from "./ProgramDetail.svelte";
   import Programs from "./Programs.svelte";
@@ -23,16 +24,10 @@
   let loading = $state(true);
   let failed = $state(false);
 
-  async function load() {
-    loading = true;
-    failed = false;
-    const { data, error } = await listSessions({ query: { limit: 100 } });
-    if (error) {
-      failed = true;
-      loading = false;
-      return;
-    }
-    if (data && data.items.length > 0) {
+  // Everything on this screen is derived from the session list, so applying it
+  // is one step whether it came from the cache or the network.
+  function apply(data: HomeSessions) {
+    if (data.items.length > 0) {
       lastSessionProgramId = data.items[0].programId;
       streak = currentStreak(data.items);
       sessions = data.items.map((s) => ({
@@ -43,6 +38,30 @@
       lastSessionProgramId = null;
       streak = 0;
       sessions = [];
+    }
+  }
+
+  async function load() {
+    failed = false;
+
+    // Paint whatever last loaded before waiting on anything. Coming back to
+    // this tab used to blank the streak, the heatmap and the workout back to a
+    // skeleton to re-fetch a list that had almost certainly not changed.
+    const remembered = cachedValue<HomeSessions>(CACHE_KEYS.homeSessions);
+    if (remembered) apply(remembered);
+    loading = remembered === undefined;
+
+    // Usually already in flight: the shell starts this at launch, alongside
+    // /me, so by the time this route mounts there is a promise to join rather
+    // than a request to make.
+    const { data, error } = await loadHomeSessions();
+    if (error || !data) {
+      // A failed refresh keeps the numbers already on screen. Only a lifter
+      // with nothing cached is told the load failed, because only they have
+      // nothing to read.
+      if (!remembered) failed = true;
+    } else {
+      apply(data);
     }
     loading = false;
   }

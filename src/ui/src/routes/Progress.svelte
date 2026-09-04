@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { link } from "svelte-spa-router";
-  import { listExercises } from "../lib/api";
+  import { listExercises, type Exercise } from "../lib/api";
+  import { CACHE_KEYS, cachedValue, fetchThrough } from "../lib/cache.svelte";
   import { exerciseEmoji } from "../lib/exerciseIcon";
   import { formatLongDate } from "../lib/date";
   import { Card } from "$lib/components/ui/card";
@@ -22,29 +23,36 @@
   // Placeholder cards shown while the request is in flight.
   const skeletons = [0, 1, 2, 3, 4, 5];
 
-  async function load() {
-    loading = true;
-    failed = false;
-    // One request for the whole page. The scope keeps it to lifts with
-    // something to chart — the Library tab is where the full catalogue lives —
-    // and each row now carries its own top set, so there is nothing left to
-    // ask for. This used to be followed by a history request PER CARD, each
-    // transferring a lift's entire history so the browser could take one
-    // maximum from it; the server computes that maximum now.
-    const { data: exercises, error } = await listExercises({
-      query: { scope: "performed" },
-    });
-    if (error || !exercises) {
-      failed = true;
-      loading = false;
-      return;
-    }
+  function apply(exercises: Exercise[]) {
     cards = exercises.map((exercise) => ({
       id: exercise.id,
       name: exercise.name,
       emoji: exerciseEmoji(exercise.name),
       top: exercise.topSet,
     }));
+  }
+
+  async function load() {
+    failed = false;
+
+    const remembered = cachedValue<Exercise[]>(CACHE_KEYS.performedExercises);
+    if (remembered) apply(remembered);
+    loading = remembered === undefined;
+
+    // One request for the whole page. The scope keeps it to lifts with
+    // something to chart — the Library tab is where the full catalogue lives —
+    // and each row now carries its own top set, so there is nothing left to
+    // ask for. This used to be followed by a history request PER CARD, each
+    // transferring a lift's entire history so the browser could take one
+    // maximum from it; the server computes that maximum now.
+    const { data: exercises, error } = await fetchThrough(CACHE_KEYS.performedExercises, () =>
+      listExercises({ query: { scope: "performed" } }),
+    );
+    if (error || !exercises) {
+      if (!remembered) failed = true;
+    } else {
+      apply(exercises);
+    }
     loading = false;
   }
 

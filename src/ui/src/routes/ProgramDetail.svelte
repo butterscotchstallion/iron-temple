@@ -19,6 +19,7 @@
     type ProgramDayAssistance,
   } from "../lib/api";
   import { auth, setMe } from "../lib/auth.svelte";
+  import { invalidateTraining } from "../lib/cache.svelte";
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
   import { Badge } from "$lib/components/ui/badge";
@@ -303,6 +304,8 @@
       startFailed = true;
       return;
     }
+    // A session now exists that the cached Home and History views predate.
+    invalidateTraining();
     push(`/sessions/${res.data.id}`);
   }
 

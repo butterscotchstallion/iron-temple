@@ -6,6 +6,7 @@ import {
   register as registerRequest,
   type User,
 } from "./api";
+import { clearCache } from "./cache.svelte";
 
 // Shared authentication state. A module-level `$state` object rather than a
 // store contract: Svelte 5 runes make the object itself reactive, so every
@@ -94,6 +95,10 @@ export async function signOut(): Promise<void> {
     await logoutRequest();
   } finally {
     auth.me = null;
+    // Before anything can re-render: the cache holds one lifter's training
+    // history, and the next person to use this browser must not be shown a
+    // frame of it while their own /me is in flight.
+    clearCache();
     window.location.hash = "#/";
     await loadMe();
   }
