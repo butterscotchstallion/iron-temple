@@ -63,6 +63,16 @@ func (s *Server) listExercises(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]exerciseDTO, 0, len(rows))
 	for _, e := range rows {
+		// Both columns come from the same LEFT JOIN LATERAL, so they are valid
+		// or NULL together; testing the weight alone is enough to know whether
+		// this lifter has ever performed the movement.
+		var top *exerciseTopSetDTO
+		if e.TopWeightLb.Valid {
+			top = &exerciseTopSetDTO{
+				WeightLb:    numericToFloat(e.TopWeightLb),
+				PerformedOn: dateToString(e.TopPerformedOn),
+			}
+		}
 		out = append(out, exerciseDTO{
 			ID:          e.ID,
 			Name:        e.Name,
@@ -70,6 +80,7 @@ func (s *Server) listExercises(w http.ResponseWriter, r *http.Request) {
 			Equipment:   e.Equipment,
 			IsAccessory: e.IsAccessory,
 			IsCustom:    e.IsCustom,
+			TopSet:      top,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -145,6 +156,9 @@ func (s *Server) createExercise(w http.ResponseWriter, r *http.Request) {
 		Equipment:   created.Equipment,
 		IsAccessory: created.IsAccessory,
 		IsCustom:    created.IsCustom,
+		// A movement that did not exist a moment ago has nothing logged against
+		// it, so its top set is null by construction rather than by lookup.
+		TopSet: nil,
 	})
 }
 

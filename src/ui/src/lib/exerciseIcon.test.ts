@@ -1,12 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { exerciseEmoji, topSet } from "./exerciseIcon";
-import type { ExerciseHistoryPoint } from "./api";
-
-// Minimal ExerciseHistoryPoint fixture — the generated type carries more fields
-// than topSet reads, so build points through a helper and cast.
-function point(weightLb: number, performedOn: string): ExerciseHistoryPoint {
-  return { weightLb, performedOn } as unknown as ExerciseHistoryPoint;
-}
+import { exerciseEmoji } from "./exerciseIcon";
 
 describe("exerciseEmoji", () => {
   it("matches known lifts case-insensitively as a substring", () => {
@@ -51,26 +44,3 @@ describe("exerciseEmoji", () => {
   });
 });
 
-describe("topSet", () => {
-  it("returns null for empty history", () => {
-    expect(topSet([])).toBeNull();
-  });
-
-  it("finds the heaviest point", () => {
-    const history = [point(45, "2026-01-01"), point(95, "2026-01-08"), point(65, "2026-01-15")];
-    expect(topSet(history)).toEqual({ weightLb: 95, performedOn: "2026-01-08" });
-  });
-
-  it("keeps the earliest occurrence on ties (the PR-setting session)", () => {
-    const history = [point(95, "2026-01-01"), point(95, "2026-01-08")];
-    // history is oldest-first, so the first 95 is when the PR was set.
-    expect(topSet(history)).toEqual({ weightLb: 95, performedOn: "2026-01-01" });
-  });
-
-  it("handles a single point", () => {
-    expect(topSet([point(135, "2026-02-02")])).toEqual({
-      weightLb: 135,
-      performedOn: "2026-02-02",
-    });
-  });
-});

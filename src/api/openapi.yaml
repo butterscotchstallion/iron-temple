@@ -1242,7 +1242,7 @@ components:
     Exercise:
       description: One movement in the library.
       type: object
-      required: [id, name, muscleGroup, equipment, isAccessory, isCustom]
+      required: [id, name, muscleGroup, equipment, isAccessory, isCustom, topSet]
       properties:
         id:
           type: integer
@@ -1265,6 +1265,32 @@ components:
           description: >-
             True for a movement this lifter created. Only custom exercises can be
             deleted, and only by their owner; the seeded catalogue is shared.
+        topSet:
+          allOf:
+            - $ref: "#/components/schemas/ExerciseTopSet"
+          nullable: true
+          description: >-
+            The heaviest set this lifter has ever worked on this movement, or
+            null if they never have. Present so the Progress page can render a
+            card per lift from the list alone: it used to fetch every lift's
+            entire history just to take the maximum, which was one request per
+            card and a whole history transferred to compute one number.
+
+    ExerciseTopSet:
+      description: >
+        A lift's all-time heaviest working set. Computed the same way the
+        history endpoint computes a point — sets with actual_reps > 0, grouped
+        by session, the session's top weight — then the heaviest of those, ties
+        going to the earliest session, which is the one that originally set it.
+      type: object
+      required: [weightLb, performedOn]
+      properties:
+        weightLb:
+          type: number
+          minimum: 0
+        performedOn:
+          type: string
+          format: date
 
     CreateExerciseRequest:
       type: object

@@ -88,6 +88,19 @@ type exerciseDTO struct {
 	// IsCustom marks a movement this lifter created, which is the only kind
 	// anyone may delete.
 	IsCustom bool `json:"isCustom"`
+	// TopSet is this lifter's heaviest working set on the movement, or nil if
+	// they have never performed it. A pointer rather than a zero value because
+	// the field is `required` and nullable in the spec: the key is always
+	// present, and null is meaningfully different from a set at zero pounds.
+	TopSet *exerciseTopSetDTO `json:"topSet"`
+}
+
+// exerciseTopSetDTO is the heaviest set a lifter has worked on one movement.
+// Carried on the list row so the Progress page can render a card per lift
+// without fetching each one's whole history to take a maximum from it.
+type exerciseTopSetDTO struct {
+	WeightLb    float64 `json:"weightLb"`
+	PerformedOn string  `json:"performedOn"`
 }
 
 type exerciseHistoryPointDTO struct {

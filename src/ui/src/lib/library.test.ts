@@ -17,6 +17,9 @@ function exercise(over: Partial<Exercise> & { name: string }): Exercise {
     equipment: "other",
     isAccessory: true,
     isCustom: false,
+    // Nothing in this file exercises the top set — it drives the library's
+    // grouping and search — so the default is the "never performed" case.
+    topSet: null,
     ...over,
   };
 }
