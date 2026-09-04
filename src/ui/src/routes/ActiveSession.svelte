@@ -12,7 +12,7 @@
     type Session,
     type SessionSet,
   } from "../lib/api";
-  import confetti from "canvas-confetti";
+  import type { Options as ConfettiOptions } from "canvas-confetti";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import Dumbbell from "@lucide/svelte/icons/dumbbell";
   import Flag from "@lucide/svelte/icons/flag";
@@ -52,6 +52,32 @@
   // A finish request is in flight (guards a double-tap).
   let finishing = $state(false);
 
+  // canvas-confetti is physics that only runs when something goes right, so it
+  // is fetched at the first celebration rather than carried in the route's
+  // chunk. The promise is cached, so a session full of PRs imports it once.
+  type ConfettiFn = (options?: ConfettiOptions) => unknown;
+  let confettiLoader: Promise<ConfettiFn> | undefined;
+
+  /**
+   * Fire the confetti, loading it if this is the first time.
+   *
+   * Deliberately not awaited by callers: the celebration must never sit in
+   * front of finishing a set. A failed chunk fetch is swallowed for the same
+   * reason — losing the confetti is not losing the PR.
+   *
+   * The cast reconciles a mismatch in the package itself: canvas-confetti's
+   * types are written for its CJS entry (`export = confetti`, so TypeScript
+   * types the dynamic import as the bare callable), while the bundler resolves
+   * its ESM build, which has a real default export. `.default` is what is
+   * actually there at runtime.
+   */
+  function celebrate(options: ConfettiOptions): void {
+    const loader = (confettiLoader ??= import("canvas-confetti").then(
+      (m) => (m as unknown as { default: ConfettiFn }).default,
+    ));
+    void loader.then((fire) => fire(options)).catch(() => {});
+  }
+
   // Personal-record tracking: best weight per exercise BEFORE this session.
   let prBest: Record<number, number> = {};
   let prReady = false;
@@ -69,8 +95,18 @@
     }
     session = data;
     restSeconds = data.sets[0]?.restSeconds ?? restSeconds;
-    await loadPRs(); // resolve PRs before the session is interactive
     loading = false;
+
+    // Deliberately not awaited. PRs cost one history request per distinct lift
+    // in the session, and they feed nothing but the celebration — so blocking
+    // the screen on them made the one page you use mid-workout wait on N
+    // requests to show sets that were already in hand.
+    //
+    // The race this opens is real but benign, and `prReady` is what closes it:
+    // a set logged before the histories land doesn't get confetti. That was
+    // already the behaviour on a failed history request, and a missed flourish
+    // beats a set you couldn't tick because the screen was still spinning.
+    void loadPRs();
   }
 
   // Each lift's best weight before this session, used to detect a new PR. A
@@ -194,7 +230,7 @@
     // New PR: a completed set above this lift's prior best.
     if (completed && prReady && set.weightLb > (prBest[set.exerciseId] ?? 0)) {
       prMessage = `${set.exerciseName} · ${set.weightLb} lb`;
-      confetti({ particleCount: 120, spread: 70, origin: { y: 0.5 } });
+      celebrate({ particleCount: 120, spread: 70, origin: { y: 0.5 } });
       if (prTimer) clearTimeout(prTimer);
       prTimer = setTimeout(() => (prMessage = null), 6000);
     }
@@ -233,7 +269,7 @@
     actionError = null;
     session = data;
     showComplete = true;
-    confetti({ particleCount: 140, spread: 75, origin: { y: 0.6 } });
+    celebrate({ particleCount: 140, spread: 75, origin: { y: 0.6 } });
   }
 
   // Record (or, with null, erase) what the lifter weighed today. The response is

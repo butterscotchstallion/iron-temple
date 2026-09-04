@@ -2,6 +2,12 @@
 @import "tw-animate-css";
 @import "shadcn-svelte/tailwind.css";
 @import "@fontsource-variable/inter";
+/* Orbitron is --font-display, and every one of its three call sites pairs it
+   with font-black. So this is the latin 900 face alone: the Google Fonts URL
+   this replaced asked for 500, 700 and 900, two of which nothing ever used.
+   Self-hosted so first paint doesn't wait on a third-party round trip — and so
+   the app still renders on a LAN with no route to the internet. */
+@import "@fontsource/orbitron/latin-900.css";
 
 @custom-variant dark (&:is(.dark *));
 
