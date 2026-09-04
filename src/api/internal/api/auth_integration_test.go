@@ -359,9 +359,12 @@ func TestProgressionDoesNotSeeAnotherUsersHistory(t *testing.T) {
 	// Exercise history is scoped by the same rule.
 	exerciseID := int(firstExerciseID)
 	e.GET(fmt.Sprintf("/exercises/%d/history", exerciseID)).
-		Expect().Status(http.StatusOK).JSON().Array().NotEmpty()
+		Expect().Status(http.StatusOK).JSON().Object().Value("points").Array().NotEmpty()
+	// The seeded lift is visible to everyone, so the other user still gets a 200
+	// naming it — with no points, because they have not performed it. Scoping
+	// hides the performances, not the movement.
 	other.GET(fmt.Sprintf("/exercises/%d/history", exerciseID)).
-		Expect().Status(http.StatusOK).JSON().Array().IsEmpty()
+		Expect().Status(http.StatusOK).JSON().Object().Value("points").Array().IsEmpty()
 }
 
 // ---- profile ----

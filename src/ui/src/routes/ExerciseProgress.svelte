@@ -1,11 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { link } from "svelte-spa-router";
-  import {
-    getExerciseHistory,
-    listExercises,
-    type ExerciseHistoryPoint,
-  } from "../lib/api";
+  import { getExerciseHistory, type ExerciseHistoryPoint } from "../lib/api";
   import { estimateOneRepMax } from "../lib/oneRepMax";
   import { formatLongDate } from "../lib/date";
   import ProgressChart from "../lib/ProgressChart.svelte";
@@ -54,16 +50,15 @@
   async function load() {
     loading = true;
     failed = false;
-    const [history, exercises] = await Promise.all([
-      getExerciseHistory({ path: { exerciseId } }),
-      listExercises(),
-    ]);
-    if (history.error || !history.data) {
+    // One request. This used to fetch the WHOLE exercise library alongside the
+    // history — all 53 movements — so it could look up a single name in it; the
+    // lift now arrives named by its own history endpoint.
+    const { data, error } = await getExerciseHistory({ path: { exerciseId } });
+    if (error || !data) {
       failed = true;
     } else {
-      points = history.data;
-      name =
-        exercises.data?.find((e) => e.id === exerciseId)?.name ?? "Exercise";
+      points = data.points;
+      name = data.exerciseName;
     }
     loading = false;
   }

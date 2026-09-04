@@ -103,6 +103,16 @@ type exerciseTopSetDTO struct {
 	PerformedOn string  `json:"performedOn"`
 }
 
+// exerciseHistoryDTO carries the lift's identity alongside its history, so a
+// caller charting one movement needs no second request to find out what it is
+// called. Points is never nil — a lift that exists but has never been performed
+// serializes as [], which is different from the 404 an unknown lift now gets.
+type exerciseHistoryDTO struct {
+	ExerciseID   int32                     `json:"exerciseId"`
+	ExerciseName string                    `json:"exerciseName"`
+	Points       []exerciseHistoryPointDTO `json:"points"`
+}
+
 type exerciseHistoryPointDTO struct {
 	PerformedOn string  `json:"performedOn"`
 	WeightLb    float64 `json:"weightLb"`
@@ -307,8 +317,20 @@ type sessionDTO struct {
 	BodyweightLb *float64 `json:"bodyweightLb"`
 	// LastWeighIn is the most recent weigh-in from another session, which is what
 	// lets the session screen open its box pre-filled. Nil until there is one.
-	LastWeighIn *weighInDTO     `json:"lastWeighIn"`
-	Sets        []sessionSetDTO `json:"sets"`
+	LastWeighIn *weighInDTO `json:"lastWeighIn"`
+	// PreviousBests is the record to beat for each lift in this session, from
+	// every OTHER session. Never nil — a lifter with no history serializes as
+	// [], which reads as "nothing to beat" rather than "not told".
+	PreviousBests []personalBestDTO `json:"previousBests"`
+	Sets          []sessionSetDTO   `json:"sets"`
+}
+
+// personalBestDTO is one lift's heaviest working weight before this session.
+// Carried on the session so the screen can flag a personal record without
+// fetching a full history per exercise.
+type personalBestDTO struct {
+	ExerciseID int32   `json:"exerciseId"`
+	WeightLb   float64 `json:"weightLb"`
 }
 
 // weighInDTO pairs a bodyweight with the day it was recorded, so a client

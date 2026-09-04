@@ -1,8 +1,17 @@
 import { execFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, watch, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  watch,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 import type { Plugin } from "vite";
 import { defineConfig } from "vitest/config";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
@@ -320,8 +329,133 @@ function changelogVirtualModule(): Plugin {
   };
 }
 
+/**
+ * Tell the browser about the display font while it is still reading the HTML.
+ *
+ * Orbitron is `--font-display`, and the only thing it styles is the "Iron
+ * Temple" H1 — the largest element on the page, and so almost certainly what
+ * decides LCP. Self-hosting it (app.css) removed a third-party round trip, but
+ * left the file three hops from the document: the HTML has to arrive, the
+ * stylesheet has to be fetched and parsed, and only then does the @font-face
+ * rule reveal a .woff2 to go and get.
+ *
+ * A preload collapses that to two. It has to be injected at build time rather
+ * than written into index.html by hand because the filename is content-hashed,
+ * so only the bundle knows it.
+ *
+ * `crossorigin` is not optional even though the font is same-origin: fonts are
+ * fetched in CORS mode, and a preload whose mode doesn't match the real request
+ * is not reused — the browser downloads the file twice and the preload becomes
+ * a pessimisation. Chrome warns about exactly this in the console.
+ */
+function preloadDisplayFont(): Plugin {
+  // transformIndexHtml's `this` is not the Rollup plugin context, so there is no
+  // this.warn to reach for. Take Vite's own logger while it is on offer.
+  let warn = (message: string) => console.warn(message);
+
+  return {
+    name: "iron-temple:preload-display-font",
+    apply: "build",
+    configResolved(config) {
+      warn = (message) => config.logger.warn(`[preload-display-font] ${message}`);
+    },
+    transformIndexHtml(html, ctx) {
+      const font = Object.keys(ctx.bundle ?? {}).find(
+        (file) => /orbitron.*\.woff2$/.test(file),
+      );
+      // No match means the font was renamed or dropped. Log it rather than
+      // failing the build — a missing preload is slower, not broken — but do
+      // say so, because a silent no-op here looks exactly like a working one.
+      if (!font) {
+        warn("no Orbitron .woff2 in the bundle; skipping the preload hint");
+        return html;
+      }
+      return {
+        html,
+        tags: [
+          {
+            tag: "link",
+            attrs: {
+              rel: "preload",
+              as: "font",
+              type: "font/woff2",
+              href: `/${font}`,
+              crossorigin: "",
+            },
+            injectTo: "head-prepend",
+          },
+        ],
+      };
+    },
+  };
+}
+
+/** Which built files are worth compressing ahead of time. */
+const PRECOMPRESS = /\.(js|css|html|svg|json)$/;
+
+/**
+ * Write a .gz beside every compressible asset, for nginx's gzip_static.
+ *
+ * nginx compresses on the fly at gzip_comp_level 1 by default — the fastest,
+ * weakest setting, chosen because it runs per request. These files are
+ * immutable and built once, so there is no reason to keep paying that: gzip
+ * them at level 9 here and nginx serves the result verbatim, spending nothing
+ * per request and sending fewer bytes than it would have compressed itself.
+ *
+ * Uses node's own zlib rather than a plugin dependency, which for "walk the
+ * output directory and gzip some files" is the whole implementation.
+ *
+ * Compressed files smaller than the original are kept; a .gz that came out
+ * bigger is deleted, because gzip_static would otherwise serve the larger one.
+ * Anything below nginx's own gzip_min_length is skipped for the same reason it
+ * skips them: the framing costs more than the saving.
+ */
+function precompressAssets(): Plugin {
+  return {
+    name: "iron-temple:precompress",
+    apply: "build",
+    // After the bundle is on disk, so it covers assets other plugins emitted
+    // too, not only the ones Rollup knows about.
+    closeBundle: {
+      sequential: true,
+      async handler() {
+        const outDir = fileURLToPath(new URL("./dist", import.meta.url));
+        if (!existsSync(outDir)) return;
+
+        let written = 0;
+        let saved = 0;
+        for (const file of readdirSync(outDir, { recursive: true, encoding: "utf8" })) {
+          if (!PRECOMPRESS.test(file)) continue;
+          const path = join(outDir, file);
+          if (!statSync(path).isFile()) continue;
+
+          const raw = readFileSync(path);
+          if (raw.byteLength < 1024) continue;
+
+          const gz = gzipSync(raw, { level: 9 });
+          if (gz.byteLength >= raw.byteLength) continue;
+
+          writeFileSync(`${path}.gz`, gz);
+          written += 1;
+          saved += raw.byteLength - gz.byteLength;
+        }
+        this.info(
+          `precompressed ${written} files, ${(saved / 1024).toFixed(0)} kB smaller on the wire`,
+        );
+      },
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [svelte(), tailwindcss(), regenerateApiOnSpecChange(), changelogVirtualModule()],
+  plugins: [
+    svelte(),
+    tailwindcss(),
+    regenerateApiOnSpecChange(),
+    changelogVirtualModule(),
+    preloadDisplayFont(),
+    precompressAssets(),
+  ],
   resolve: {
     // $lib alias for shadcn-svelte's generated components (Vite, not SvelteKit).
     alias: {

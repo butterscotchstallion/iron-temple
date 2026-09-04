@@ -231,7 +231,7 @@ func TestListExercisesCarriesTopSet(t *testing.T) {
 	var wantWeight float64
 	var wantDate string
 	for _, p := range e.GET(fmt.Sprintf("/exercises/%d/history", exerciseID)).
-		Expect().Status(http.StatusOK).JSON().Array().Iter() {
+		Expect().Status(http.StatusOK).JSON().Object().Value("points").Array().Iter() {
 		point := p.Object()
 		if w := point.Value("weightLb").Number().Raw(); wantDate == "" || w > wantWeight {
 			wantWeight = w
@@ -330,6 +330,130 @@ func TestPreviewNextSessionsUnknownProgram(t *testing.T) {
 	// A program that does not exist is a 404, not a 200 with an empty day list —
 	// which is what listing days without checking the program would produce.
 	e.GET("/programs/999999/next-sessions").Expect().Status(http.StatusNotFound)
+}
+
+// The history endpoint names its own lift, which is what lets the progress
+// chart stop fetching the entire library to label itself.
+func TestExerciseHistoryNamesTheLift(t *testing.T) {
+	e := expect(t)
+	_, dayID := firstProgramAndDay(e)
+
+	created := startSession(t, e, dayID)
+	firstSet := created.Value("sets").Array().Value(0).Object()
+	exerciseID := int(firstSet.Value("exerciseId").Number().Raw())
+	wantName := firstSet.Value("exerciseName").String().Raw()
+
+	history := e.GET(fmt.Sprintf("/exercises/%d/history", exerciseID)).
+		Expect().Status(http.StatusOK).JSON().Object()
+	history.Value("exerciseId").Number().IsEqual(exerciseID)
+	// The same name the session calls it, rather than a second spelling of it.
+	history.Value("exerciseName").String().IsEqual(wantName)
+	// A lift that exists but has not been performed has an empty list, not a
+	// missing one — the chart draws "no sessions yet" from that.
+	history.Value("points").Array().IsEmpty()
+}
+
+// A lift nobody can see is a 404, not an empty history. Before the endpoint had
+// a name to return it never looked the exercise up, so an unknown id was
+// indistinguishable from a movement that had simply never been trained.
+func TestExerciseHistoryUnknownLift(t *testing.T) {
+	e := expect(t)
+	e.GET("/exercises/999999/history").Expect().Status(http.StatusNotFound)
+}
+
+// TestSessionPreviousBestsExcludeThisSession pins the record-to-beat the active
+// session screen reads instead of fetching a history per lift.
+//
+// The exclusion is the part worth asserting. The browser used to take the
+// maximum over everything it could see, so a set already logged in THIS session
+// counted towards the record it was about to be compared against — which made
+// "is this a PR" depend on when the page was opened.
+func TestSessionPreviousBestsExcludeThisSession(t *testing.T) {
+	e := expect(t)
+	_, dayID := firstProgramAndDay(e)
+
+	// A first session, logged, to become the record.
+	first := startSession(t, e, dayID)
+	firstID := int(first.Value("id").Number().Raw())
+	firstSet := first.Value("sets").Array().Value(0).Object()
+	exerciseID := int(firstSet.Value("exerciseId").Number().Raw())
+	recordWeight := firstSet.Value("weightLb").Number().Raw()
+	e.PATCH(fmt.Sprintf("/sessions/%d/sets/%d", firstID, int(firstSet.Value("id").Number().Raw()))).
+		WithJSON(map[string]any{"actualReps": 5, "completed": true}).
+		Expect().Status(http.StatusOK)
+
+	// Read back through the session that set it: its own logged set must not
+	// count, so it still sees nothing to beat for that lift.
+	if got, ok := previousBest(e, firstID, exerciseID); ok {
+		t.Errorf("session %d counted its own set towards the record to beat: got %v", firstID, got)
+	}
+
+	// A later session does see it.
+	second := startSession(t, e, dayID)
+	secondID := int(second.Value("id").Number().Raw())
+	got, ok := previousBest(e, secondID, exerciseID)
+	if !ok {
+		t.Fatalf("session %d sees no record for exercise %d after one was set", secondID, exerciseID)
+	}
+	if got != recordWeight {
+		t.Errorf("record to beat = %v, want %v", got, recordWeight)
+	}
+}
+
+// previousBest reads one lift's record-to-beat off a session, reporting whether
+// the session listed it at all — absent means "nothing to beat", which is a
+// different answer from a record of zero.
+func previousBest(e *httpexpect.Expect, sessionID, exerciseID int) (float64, bool) {
+	for _, b := range e.GET(fmt.Sprintf("/sessions/%d", sessionID)).
+		Expect().Status(http.StatusOK).
+		JSON().Object().Value("previousBests").Array().Iter() {
+		best := b.Object()
+		if int(best.Value("exerciseId").Number().Raw()) == exerciseID {
+			return best.Value("weightLb").Number().Raw(), true
+		}
+	}
+	return 0, false
+}
+
+// TestConditionalGetReturnsNotModified pins the conditional-GET path the UI's
+// revalidation leans on: it repaints from cache and refetches on every mount,
+// so most reads return exactly what the caller already holds.
+func TestConditionalGetReturnsNotModified(t *testing.T) {
+	e := expect(t)
+
+	first := e.GET("/exercises").Expect().Status(http.StatusOK)
+	etag := first.Header("ETag").NotEmpty().Raw()
+	first.Header("Cache-Control").Contains("must-revalidate")
+
+	// Same content, so the body is not sent again.
+	e.GET("/exercises").WithHeader("If-None-Match", etag).
+		Expect().Status(http.StatusNotModified).NoContent()
+
+	// A tag that isn't ours gets the full answer.
+	e.GET("/exercises").WithHeader("If-None-Match", `W/"not-the-one"`).
+		Expect().Status(http.StatusOK).JSON().Array().NotEmpty()
+
+	// The tag follows the content, not the request: adding a movement changes
+	// the library, so the previous validator must stop matching.
+	created := e.POST("/exercises").
+		WithJSON(map[string]any{
+			"name": "Conditional Get Test Lift", "muscleGroup": "other", "equipment": "other",
+		}).
+		Expect().Status(http.StatusCreated).JSON().Object()
+	exerciseID := int(created.Value("id").Number().Raw())
+	t.Cleanup(func() {
+		e.DELETE(fmt.Sprintf("/exercises/%d", exerciseID)).Expect().Status(http.StatusNoContent)
+	})
+
+	e.GET("/exercises").WithHeader("If-None-Match", etag).
+		Expect().Status(http.StatusOK)
+}
+
+// A write must never be answered from a validator — only GETs are conditional.
+func TestConditionalGetIgnoresWrites(t *testing.T) {
+	e := expect(t)
+	e.PATCH("/me").WithJSON(map[string]any{"displayName": "Primary Lifter"}).
+		Expect().Status(http.StatusOK).Header("ETag").IsEmpty()
 }
 
 func TestSessionLifecycle(t *testing.T) {

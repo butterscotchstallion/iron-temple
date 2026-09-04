@@ -481,6 +481,66 @@ func (q *Queries) ListSessionExerciseWeights(ctx context.Context, arg ListSessio
 	return items, nil
 }
 
+const listSessionPersonalBests = `-- name: ListSessionPersonalBests :many
+SELECT ss.exercise_id,
+       MAX(ss.weight_lb)::numeric AS best_weight_lb
+FROM session_sets ss
+JOIN sessions s ON s.id = ss.session_id
+WHERE s.user_id = $1::int
+  AND ss.session_id <> $2
+  AND ss.actual_reps > 0
+  AND ss.exercise_id IN (
+      SELECT exercise_id FROM session_sets WHERE session_id = $2
+  )
+GROUP BY ss.exercise_id
+`
+
+type ListSessionPersonalBestsParams struct {
+	UserID    int32 `json:"user_id"`
+	SessionID int32 `json:"session_id"`
+}
+
+type ListSessionPersonalBestsRow struct {
+	ExerciseID   int32          `json:"exercise_id"`
+	BestWeightLb pgtype.Numeric `json:"best_weight_lb"`
+}
+
+// ListSessionPersonalBests returns, for each lift in the given session, the
+// heaviest weight that lifter has ever worked on it in ANY OTHER session.
+//
+// This is what the active-session screen compares a logged set against to
+// decide it is a personal record. It used to be one history request per
+// distinct lift in the session — five or six round trips, each returning a
+// whole training history, to end up with one number apiece.
+//
+// The current session is excluded rather than filtered client-side, which is
+// what makes the answer stable: the browser previously took the maximum over
+// everything it could see, so a set already logged in THIS session counted
+// towards the record it was being compared against, and what qualified as a PR
+// depended on when the page happened to be opened.
+//
+// actual_reps > 0 is the same definition of real work as ListExerciseHistory,
+// so a weight only defends a record once it has actually been performed.
+func (q *Queries) ListSessionPersonalBests(ctx context.Context, arg ListSessionPersonalBestsParams) ([]ListSessionPersonalBestsRow, error) {
+	rows, err := q.db.Query(ctx, listSessionPersonalBests, arg.UserID, arg.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSessionPersonalBestsRow
+	for rows.Next() {
+		var i ListSessionPersonalBestsRow
+		if err := rows.Scan(&i.ExerciseID, &i.BestWeightLb); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSessionSets = `-- name: ListSessionSets :many
 SELECT ss.id,
        ss.session_id,

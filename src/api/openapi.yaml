@@ -453,15 +453,23 @@ paths:
       tags: [exercises]
       operationId: getExerciseHistory
       summary: Per-session weight history for a lift (oldest first)
+      description: >
+        The lift's own identity travels with its history so a caller charting it
+        needs nothing else. The progress chart used to fetch the WHOLE exercise
+        library alongside this, purely to look one name up in it.
+
+        A lift that does not exist — or is another lifter's custom movement — is
+        a 404 rather than an empty history, which it previously could not tell
+        apart from a movement nobody has performed yet.
       responses:
         "200":
-          description: History points
+          description: The lift, and one point per session it was performed in
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/ExerciseHistoryPoint"
+                $ref: "#/components/schemas/ExerciseHistory"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "401":
           $ref: "#/components/responses/Unauthorized"
 
@@ -1352,6 +1360,23 @@ components:
         equipment:
           $ref: "#/components/schemas/Equipment"
 
+    ExerciseHistory:
+      description: One lift's performance history, with the lift it belongs to.
+      type: object
+      required: [exerciseId, exerciseName, points]
+      properties:
+        exerciseId:
+          type: integer
+          format: int64
+        exerciseName:
+          type: string
+          example: Squat
+        points:
+          description: Oldest first. Empty for a lift that exists but has never been performed.
+          type: array
+          items:
+            $ref: "#/components/schemas/ExerciseHistoryPoint"
+
     ExerciseHistoryPoint:
       description: One performed session's top set for a lift.
       type: object
@@ -1911,7 +1936,8 @@ components:
     Session:
       type: object
       required:
-        [id, programId, programName, programDayId, programDayName, performedOn, notes, createdAt, isOver, sets]
+        [id, programId, programName, programDayId, programDayName, performedOn, notes, createdAt,
+         isOver, previousBests, sets]
       properties:
         id:
           type: integer
@@ -1966,6 +1992,19 @@ components:
             session's box can open pre-filled rather than empty. Null until they
             have recorded one. Carrying it here rather than writing it onto the
             new session is what keeps an un-weighed day null.
+        previousBests:
+          description: >
+            The record to beat for each lift in this session, taken from every
+            OTHER session the lifter has performed it in. Present so the screen
+            can flag a personal record without asking for a full history per
+            exercise — which was one request per distinct lift, each returning a
+            whole history to yield a single number.
+
+            A lift with no prior performance is absent rather than zero: there
+            is no record to beat, and a set at 0 lb is a real weight.
+          type: array
+          items:
+            $ref: "#/components/schemas/PersonalBest"
         sets:
           type: array
           items:
@@ -1982,6 +2021,20 @@ components:
         performedOn:
           type: string
           format: date
+
+    PersonalBest:
+      description: >-
+        One lift's heaviest working set before the session carrying it —
+        the weight a set has to beat to count as a personal record.
+      type: object
+      required: [exerciseId, weightLb]
+      properties:
+        exerciseId:
+          type: integer
+          format: int64
+        weightLb:
+          type: number
+          minimum: 0
 
     SessionSet:
       type: object

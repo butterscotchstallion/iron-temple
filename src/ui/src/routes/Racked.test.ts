@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Racked from "./Racked.svelte";
 import type { RackedReport } from "../lib/api";
+import { clearCache } from "../lib/cache.svelte";
 
 // A render test for a route, which the suite otherwise leaves to Playwright.
 //
@@ -211,6 +212,11 @@ function fullReport(): RackedReport {
 
 beforeEach(() => {
   getRacked.mockReset();
+  // The recap is cached per period across mounts, which is the point of it —
+  // but that cache is module state shared by every test in this file, so a
+  // report rendered by one would otherwise paint instantly in the next, before
+  // its own mock had answered. Reset it alongside the mock it belongs to.
+  clearCache();
 });
 
 describe("Racked", () => {
