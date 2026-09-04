@@ -871,6 +871,16 @@ test("loads the new version when the update is accepted", async ({ page }) => {
 
   await page.goto("/");
   const prompt = page.getByTestId("update-prompt");
+
+  // Let the first /health land before jumping the clock, the same way the
+  // declining test above does. routeHealth answers by call count, and
+  // startPolling()'s opening poll is call #1 — jump the interval while that is
+  // still in the air and the tick hits poll()'s inFlight guard, which DROPS it
+  // rather than queueing it. v2.0.0 would then never be asked for, the prompt
+  // would never appear, and the failure would read as a mysterious timeout on
+  // an assertion that has nothing to do with the cause.
+  await expect(page.getByTestId("version")).toContainText("iron-temple v1.0.0");
+
   await page.clock.runFor("06:00");
   await page.clock.resume();
   await expect(prompt).toBeVisible();
