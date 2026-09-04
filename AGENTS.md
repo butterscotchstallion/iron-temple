@@ -6,8 +6,17 @@ Conventions for agents (and humans) working in this repository.
 
 - **Use [Conventional Commits](https://www.conventionalcommits.org).** Format the
   subject as `type(scope): summary` — e.g. `feat(ui): list programs from the API`.
-  Common types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `build`, `ci`.
+  Common types: `feat`, `fix`, `perf`, `revert`, `docs`, `refactor`, `test`,
+  `chore`, `build`, `ci`.
   The scope is optional but encouraged (`api`, `ui`, `db`, `deploy`, `dev`, …).
+- **The type decides whether anything ships.** `scripts/next-version.sh` reads
+  the subjects since the last stable tag and bumps: `feat` minor, `fix`/`perf`/
+  `revert` patch, `!` or a `BREAKING CHANGE:` footer major. Every other type
+  scores nothing, and a push to main where NOTHING scores is a release that
+  skips — the workflow goes green, no tag is cut, no images are built, and no
+  deploy PR is opened. That is intentional for `docs` and `chore`, and it is the
+  trap for anything user-visible filed under `refactor`. If a lifter would
+  notice the change, it needs a releasing type.
 - **Always include a body** describing what changed and why, separated from the
   subject by a blank line. Explain intent, not just the mechanics of the diff.
 - **No line may exceed 100 characters** — subject or body. Wrap long prose.
