@@ -3,7 +3,10 @@
   import { push, link } from "svelte-spa-router";
   import {
     getProgram,
+    // Both: the whole program when the screen loads or a deload is accepted,
+    // one day when a single day's assistance changes under it.
     previewNextSession,
+    previewNextSessions,
     createSession,
     updateProgramDayWeekday,
     addAssistance,
@@ -106,7 +109,17 @@
     loading = true;
     failed = false;
     previewFailed = false;
-    const prog = await getProgram({ path: { programId } });
+
+    // Fired together rather than chained. The previews are keyed by program id,
+    // not by the day ids the program response carries, so nothing here has to
+    // wait to learn what to ask for — this screen used to cost getProgram plus
+    // one preview PER DAY, arranged so the days could not even start until the
+    // program came back.
+    const [prog, previews] = await Promise.all([
+      getProgram({ path: { programId } }),
+      previewNextSessions({ path: { programId }, query: { deload } }),
+    ]);
+
     if (prog.error || !prog.data) {
       failed = true;
       loading = false;
@@ -115,26 +128,19 @@
     program = prog.data;
     void remember();
 
-    // Each day's next-session weights come from the server's progression engine.
-    days = await Promise.all(
-      prog.data.days.map(async (day) => {
-        const preview = await previewNextSession({
-          path: { programId, dayId: day.id },
-          query: { deload },
-        });
-        if (preview.error) previewFailed = true;
-        // Every day reports the same layoff — it is a fact about the lifter,
-        // not about the day — so the last one to answer simply wins.
-        if (preview.data) layoff = preview.data.layoff;
-        return {
-          id: day.id,
-          name: day.name,
-          weekday: day.weekday ?? null,
-          exercises: preview.data?.exercises ?? [],
-          assistance: day.assistance,
-        };
-      }),
-    );
+    // The prescription is what puts weights on the cards; without it the day
+    // still renders, from the program's own structure, with no numbers.
+    if (previews.error) previewFailed = true;
+    layoff = previews.data?.layoff ?? null;
+    const byDay = new Map(previews.data?.days.map((d) => [d.programDayId, d.exercises]));
+
+    days = prog.data.days.map((day) => ({
+      id: day.id,
+      name: day.name,
+      weekday: day.weekday ?? null,
+      exercises: byDay.get(day.id) ?? [],
+      assistance: day.assistance,
+    }));
     loading = false;
   }
 
@@ -148,29 +154,28 @@
   async function acceptDeload() {
     deloadFailed = false;
     deloading = true;
-    const previews = await Promise.all(
-      days.map((day) =>
-        previewNextSession({
-          path: { programId, dayId: day.id },
-          query: { deload: true },
-        }),
-      ),
-    );
+    const previews = await previewNextSessions({
+      path: { programId },
+      query: { deload: true },
+    });
     deloading = false;
 
     // All of the days or none of them. Start sends one answer for the whole
     // program, so a half-applied deload would put cut weights on some cards and
     // uncut ones on others with no way to tell which the session would use.
+    // One request makes that atomic rather than merely careful: there is no
+    // longer a way for some days to answer and others to fail.
     //
     // Nothing is marked decided on the way out, so the prompt comes back and
     // the lifter can simply press it again — a failed request is not an answer.
-    if (previews.some((p) => p.error || !p.data)) {
+    if (previews.error || !previews.data) {
       deloadFailed = true;
       return;
     }
-    days = days.map((day, i) => ({
+    const byDay = new Map(previews.data.days.map((d) => [d.programDayId, d.exercises]));
+    days = days.map((day) => ({
       ...day,
-      exercises: previews[i].data?.exercises ?? day.exercises,
+      exercises: byDay.get(day.id) ?? day.exercises,
     }));
     deload = true;
     decided = true;

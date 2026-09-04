@@ -290,6 +290,48 @@ func TestPreviewNextSessionUsesStartingWeights(t *testing.T) {
 		Value("weightLb").Number().Gt(0)
 }
 
+// TestPreviewNextSessionsMatchesPerDay pins the batched preview against the
+// per-day one it replaced on the program screen. Both endpoints run the same
+// progression engine, so a day prescribed either way must come out identical —
+// if they can disagree, the screen shows different weights depending on which
+// call happened to fill it.
+func TestPreviewNextSessionsMatchesPerDay(t *testing.T) {
+	e := expect(t)
+	programID := firstProgramID(e)
+
+	all := e.GET(fmt.Sprintf("/programs/%d/next-sessions", programID)).Expect().
+		Status(http.StatusOK).
+		JSON().Object()
+	all.Value("programId").Number().IsEqual(programID)
+
+	days := all.Value("days").Array()
+	days.NotEmpty()
+	// Every day of the program, not just the one the old screen asked for first.
+	days.Length().IsEqual(
+		e.GET(fmt.Sprintf("/programs/%d", programID)).Expect().Status(http.StatusOK).
+			JSON().Object().Value("days").Array().Length().Raw())
+
+	for _, d := range days.Iter() {
+		day := d.Object()
+		dayID := int(day.Value("programDayId").Number().Raw())
+
+		single := e.GET(fmt.Sprintf("/programs/%d/days/%d/next-session", programID, dayID)).
+			Expect().Status(http.StatusOK).JSON().Object()
+		day.Value("programDayName").IsEqual(single.Value("programDayName").Raw())
+		day.Value("exercises").IsEqual(single.Value("exercises").Raw())
+		// The layoff is hoisted onto the wrapper, so the per-day copy the batch
+		// response drops must be the one it reports once.
+		all.Value("layoff").IsEqual(single.Value("layoff").Raw())
+	}
+}
+
+func TestPreviewNextSessionsUnknownProgram(t *testing.T) {
+	e := expect(t)
+	// A program that does not exist is a 404, not a 200 with an empty day list —
+	// which is what listing days without checking the program would produce.
+	e.GET("/programs/999999/next-sessions").Expect().Status(http.StatusNotFound)
+}
+
 func TestSessionLifecycle(t *testing.T) {
 	e := expect(t)
 	_, dayID := firstProgramAndDay(e)

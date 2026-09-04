@@ -178,6 +178,26 @@ type prescribedSessionDTO struct {
 	Layoff *layoffDTO `json:"layoff"`
 }
 
+// prescribedSessionsDTO is every day of a program prescribed at once.
+//
+// The layoff sits here rather than on each day because it describes the lifter,
+// not the day: the per-day endpoint gives every day an identical copy, and the
+// client kept whichever answer landed last. Hoisting it removes the question of
+// which one was authoritative.
+type prescribedSessionsDTO struct {
+	ProgramID int32              `json:"programId"`
+	Layoff    *layoffDTO         `json:"layoff"`
+	Days      []prescribedDayDTO `json:"days"`
+}
+
+// prescribedDayDTO is prescribedSessionDTO without the fields its wrapper
+// already carries.
+type prescribedDayDTO struct {
+	ProgramDayID   int32                   `json:"programDayId"`
+	ProgramDayName string                  `json:"programDayName"`
+	Exercises      []prescribedExerciseDTO `json:"exercises"`
+}
+
 // layoffDTO describes time away from training and what easing back in would
 // cost, so the UI can ask a specific question ("it's been 3 weeks — take 30%
 // off?") instead of a vague one.

@@ -157,6 +157,7 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 				r.Get("/", s.listPrograms)
 				r.Get("/{programId}", s.getProgram)
 				r.Get("/{programId}/days/{dayId}/next-session", s.previewNextSession)
+				r.Get("/{programId}/next-sessions", s.previewNextSessions)
 				r.Patch("/{programId}/days/{dayId}", s.updateProgramDayWeekday)
 				// Assistance is per-user state hanging off a shared program day,
 				// which is why it is a nested collection rather than a field on
