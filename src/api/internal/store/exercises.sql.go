@@ -262,14 +262,12 @@ type ListExercisesParams struct {
 }
 
 type ListExercisesRow struct {
-	ID          int32  `json:"id"`
-	Name        string `json:"name"`
-	MuscleGroup string `json:"muscle_group"`
-	Equipment   string `json:"equipment"`
-	IsAccessory bool   `json:"is_accessory"`
-	IsCustom    bool   `json:"is_custom"`
-	// Null for a lift this user has never performed — the LEFT JOIN LATERAL
-	// finds no session to take a maximum over.
+	ID             int32          `json:"id"`
+	Name           string         `json:"name"`
+	MuscleGroup    string         `json:"muscle_group"`
+	Equipment      string         `json:"equipment"`
+	IsAccessory    bool           `json:"is_accessory"`
+	IsCustom       bool           `json:"is_custom"`
 	TopWeightLb    pgtype.Numeric `json:"top_weight_lb"`
 	TopPerformedOn pgtype.Date    `json:"top_performed_on"`
 }
