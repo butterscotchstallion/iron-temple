@@ -5,8 +5,12 @@
 package api
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -134,6 +138,9 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 		// avoid is a handler that quietly sits outside the middleware.
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireUser)
+			// Below requireUser, so a 401 is never given an ETag and cached as
+			// though it were an answer.
+			r.Use(jsonETag)
 
 			r.Route("/me", func(r chi.Router) {
 				r.Get("/", s.getMe)
@@ -200,6 +207,101 @@ func corsOrigins(origin string) []string {
 }
 
 // ---- shared response + parsing helpers ----
+
+// jsonETag adds conditional-GET support to JSON reads.
+//
+// The UI keeps a stale-while-revalidate cache: it paints last-known data
+// immediately and refetches behind it on every mount. That makes revalidation
+// the app's most common request by some margin, and almost all of it returns
+// exactly what the caller already has — a full session list re-serialized and
+// re-sent to say "unchanged". An ETag turns that into a 304 with no body.
+//
+// Applied as middleware rather than inside writeJSON so it covers every JSON
+// read at once, including handlers added later, and so it can see the request
+// it is answering — writeJSON only ever gets the writer.
+//
+// Only plain GETs of 200 JSON are touched. A 4xx is left alone (caching an
+// error would be worse than re-sending it), and so is any handler that already
+// set an ETag of its own: getUserAvatar serves binary with a hash it computes
+// from the stored image, and buffering that through here would be both wasteful
+// and wrong.
+func jsonETag(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		rec := &etagRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+
+		body := rec.body.Bytes()
+		header := w.Header()
+		eligible := rec.status == http.StatusOK &&
+			header.Get("ETag") == "" &&
+			strings.HasPrefix(header.Get("Content-Type"), "application/json")
+		if !eligible {
+			w.WriteHeader(rec.status)
+			_, _ = w.Write(body)
+			return
+		}
+
+		// Weak comparison is what If-None-Match uses, and the tag is a digest of
+		// the exact bytes about to be sent, so a strong tag would claim more than
+		// it can: the same content re-serialized is the same response as far as
+		// this endpoint is concerned.
+		sum := sha256.Sum256(body)
+		etag := fmt.Sprintf(`W/"%s"`, hex.EncodeToString(sum[:16]))
+		header.Set("ETag", etag)
+		// Must-revalidate rather than a max-age: the client is already asking on
+		// every mount, and what we are saving is the body, not the round trip.
+		// A max-age would let it show stale data without asking, which is the
+		// cache's own job and its own rules.
+		header.Set("Cache-Control", "private, max-age=0, must-revalidate")
+
+		if matchesETag(r.Header.Get("If-None-Match"), etag) {
+			// A 304 carries no body, and Content-Length would be a lie about one.
+			header.Del("Content-Length")
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+
+		w.WriteHeader(rec.status)
+		_, _ = w.Write(body)
+	})
+}
+
+// matchesETag reports whether an If-None-Match header names this tag. The header
+// is a comma-separated list and may be "*"; entries are compared weakly, so
+// W/"x" and "x" are the same validator.
+func matchesETag(header, etag string) bool {
+	if header == "" {
+		return false
+	}
+	if strings.TrimSpace(header) == "*" {
+		return true
+	}
+	want := strings.TrimPrefix(etag, "W/")
+	for _, candidate := range strings.Split(header, ",") {
+		if strings.TrimPrefix(strings.TrimSpace(candidate), "W/") == want {
+			return true
+		}
+	}
+	return false
+}
+
+// etagRecorder buffers a response so its body can be hashed before any of it is
+// committed. Responses here are a session or a list of them — small enough that
+// holding one in memory costs less than re-sending it would.
+type etagRecorder struct {
+	http.ResponseWriter
+	status int
+	body   bytes.Buffer
+}
+
+func (rec *etagRecorder) WriteHeader(status int) { rec.status = status }
+
+func (rec *etagRecorder) Write(p []byte) (int, error) { return rec.body.Write(p) }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")

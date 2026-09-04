@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { getRacked } from "../lib/api";
   import type { RackedReport } from "../lib/api";
+  import { cachedValue, fetchThrough, rackedKey } from "../lib/cache.svelte";
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
   import Share2 from "@lucide/svelte/icons/share-2";
@@ -45,19 +46,30 @@
   let sharing = $state(false);
 
   async function load() {
-    loading = true;
     failed = false;
     // A new report invalidates any card drawn from the last one. Without this,
     // switching period with the dialog open unmounts it while `sharing` stays
     // true, and it springs back the next time a period has something to share.
     sharing = false;
-    const { data, error } = await getRacked({ query: { period } });
+
+    // Cached per period rather than per screen: this is the most expensive read
+    // the app makes, and flicking between week, month and year is the whole
+    // interaction. One key each means going back to a period you have already
+    // looked at is instant, where a single key would make every switch a
+    // reload of the one before.
+    const key = rackedKey(period);
+    const remembered = cachedValue<RackedReport>(key);
+    if (remembered) report = remembered;
+    loading = remembered === undefined;
+
+    const { data, error } = await fetchThrough(key, () => getRacked({ query: { period } }));
     if (error || !data) {
-      failed = true;
-      loading = false;
-      return;
+      // A failed refresh leaves the recap that is already on screen. Only a
+      // period with nothing cached reports the failure.
+      if (!remembered) failed = true;
+    } else {
+      report = data;
     }
-    report = data;
     loading = false;
   }
 

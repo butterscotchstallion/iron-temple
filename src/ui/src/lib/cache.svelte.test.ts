@@ -6,6 +6,7 @@ import {
   fetchThrough,
   invalidate,
   invalidateTraining,
+  rackedKey,
 } from "./cache.svelte";
 
 const KEY = "test:key";
@@ -175,5 +176,75 @@ describe("clearCache", () => {
 
     expect(second).toHaveBeenCalledTimes(1);
     expect(cachedValue(CACHE_KEYS.homeSessions)).toBe("new lifter");
+  });
+});
+
+describe("rackedKey", () => {
+  it("gives each period its own entry", async () => {
+    await fetchThrough(rackedKey("week"), async () => ({ data: "week report" }));
+    await fetchThrough(rackedKey("month"), async () => ({ data: "month report" }));
+    // Switching period and back must not re-fetch what was already read.
+    expect(cachedValue(rackedKey("week"))).toBe("week report");
+    expect(cachedValue(rackedKey("month"))).toBe("month report");
+  });
+
+  it("is dropped for every period when training changes", async () => {
+    for (const period of ["week", "month", "year"]) {
+      await fetchThrough(rackedKey(period), async () => ({ data: period }));
+    }
+    await fetchThrough(CACHE_KEYS.allExercises, async () => ({ data: "library" }));
+
+    invalidateTraining();
+
+    // A workout does not announce which periods it lands in — training on the
+    // 1st moves the week, the month and the year at once.
+    for (const period of ["week", "month", "year"]) {
+      expect(cachedValue(rackedKey(period))).toBeUndefined();
+    }
+    // The catalogue of movements is not a record of training.
+    expect(cachedValue(CACHE_KEYS.allExercises)).toBe("library");
+  });
+});
+
+describe("persistence across a reload", () => {
+  // The module hydrates once at import, so a reload is simulated by writing
+  // what a previous page load would have left behind and re-importing it.
+  async function reload() {
+    vi.resetModules();
+    return import("./cache.svelte");
+  }
+
+  it("mirrors values into sessionStorage under a per-build prefix", async () => {
+    await fetchThrough(CACHE_KEYS.homeSessions, async () => ({ data: { items: [1] } }));
+
+    const keys = Object.keys(sessionStorage);
+    const mirrored = keys.filter((k) => k.endsWith(CACHE_KEYS.homeSessions));
+    expect(mirrored).toHaveLength(1);
+    // Namespaced by build, so a release that changes a response shape cannot
+    // hydrate the previous build's values.
+    expect(mirrored[0]).toMatch(/^iron-temple:cache:/);
+  });
+
+  it("hydrates what the previous page load left behind", async () => {
+    await fetchThrough(CACHE_KEYS.homeSessions, async () => ({ data: "before reload" }));
+
+    const fresh = await reload();
+    expect(fresh.cachedValue(fresh.CACHE_KEYS.homeSessions)).toBe("before reload");
+  });
+
+  it("does not carry a signed-out lifter's data into the next page load", async () => {
+    await fetchThrough(CACHE_KEYS.homeSessions, async () => ({ data: "private" }));
+    clearCache();
+
+    const fresh = await reload();
+    expect(fresh.cachedValue(fresh.CACHE_KEYS.homeSessions)).toBeUndefined();
+  });
+
+  it("forgets an invalidated key on the next page load too", async () => {
+    await fetchThrough(CACHE_KEYS.homeSessions, async () => ({ data: "stale" }));
+    invalidate(CACHE_KEYS.homeSessions);
+
+    const fresh = await reload();
+    expect(fresh.cachedValue(fresh.CACHE_KEYS.homeSessions)).toBeUndefined();
   });
 });

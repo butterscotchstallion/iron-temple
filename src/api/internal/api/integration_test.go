@@ -415,6 +415,47 @@ func previousBest(e *httpexpect.Expect, sessionID, exerciseID int) (float64, boo
 	return 0, false
 }
 
+// TestConditionalGetReturnsNotModified pins the conditional-GET path the UI's
+// revalidation leans on: it repaints from cache and refetches on every mount,
+// so most reads return exactly what the caller already holds.
+func TestConditionalGetReturnsNotModified(t *testing.T) {
+	e := expect(t)
+
+	first := e.GET("/exercises").Expect().Status(http.StatusOK)
+	etag := first.Header("ETag").NotEmpty().Raw()
+	first.Header("Cache-Control").Contains("must-revalidate")
+
+	// Same content, so the body is not sent again.
+	e.GET("/exercises").WithHeader("If-None-Match", etag).
+		Expect().Status(http.StatusNotModified).NoContent()
+
+	// A tag that isn't ours gets the full answer.
+	e.GET("/exercises").WithHeader("If-None-Match", `W/"not-the-one"`).
+		Expect().Status(http.StatusOK).JSON().Array().NotEmpty()
+
+	// The tag follows the content, not the request: adding a movement changes
+	// the library, so the previous validator must stop matching.
+	created := e.POST("/exercises").
+		WithJSON(map[string]any{
+			"name": "Conditional Get Test Lift", "muscleGroup": "other", "equipment": "other",
+		}).
+		Expect().Status(http.StatusCreated).JSON().Object()
+	exerciseID := int(created.Value("id").Number().Raw())
+	t.Cleanup(func() {
+		e.DELETE(fmt.Sprintf("/exercises/%d", exerciseID)).Expect().Status(http.StatusNoContent)
+	})
+
+	e.GET("/exercises").WithHeader("If-None-Match", etag).
+		Expect().Status(http.StatusOK)
+}
+
+// A write must never be answered from a validator — only GETs are conditional.
+func TestConditionalGetIgnoresWrites(t *testing.T) {
+	e := expect(t)
+	e.PATCH("/me").WithJSON(map[string]any{"displayName": "Primary Lifter"}).
+		Expect().Status(http.StatusOK).Header("ETag").IsEmpty()
+}
+
 func TestSessionLifecycle(t *testing.T) {
 	e := expect(t)
 	_, dayID := firstProgramAndDay(e)
