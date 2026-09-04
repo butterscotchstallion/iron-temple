@@ -121,4 +121,59 @@ describe("clearCache", () => {
       expect(cachedValue(key)).toBeUndefined();
     }
   });
+
+  it("drops a request that was already in flight when the cache was cleared", async () => {
+    // The sign-out leak: A's request is in the air, A signs out, and the reply
+    // lands afterwards. Storing it would put A's training data back into the
+    // cache that sign-out just emptied, where B's first paint would read it.
+    let land!: (result: { data: string }) => void;
+    const inFlight = fetchThrough(
+      CACHE_KEYS.homeSessions,
+      () => new Promise<{ data: string }>((resolve) => (land = resolve)),
+    );
+
+    clearCache();
+    land({ data: "previous lifter's sessions" });
+    await inFlight;
+
+    expect(cachedValue(CACHE_KEYS.homeSessions)).toBeUndefined();
+  });
+
+  it("leaves a request started after the clear able to cache normally", async () => {
+    // The generation guard must silence only the requests it straddles — the
+    // next lifter's own fetches have to work.
+    clearCache();
+    await fetchThrough(CACHE_KEYS.homeSessions, async () => ({ data: "new lifter" }));
+    expect(cachedValue(CACHE_KEYS.homeSessions)).toBe("new lifter");
+  });
+
+  it("does not let a straddling request retire a newer request's dedupe slot", async () => {
+    let landFirst!: (result: { data: string }) => void;
+    const first = fetchThrough(
+      CACHE_KEYS.homeSessions,
+      () => new Promise<{ data: string }>((resolve) => (landFirst = resolve)),
+    );
+
+    clearCache();
+
+    // The next lifter's request now owns the key, and is itself still in
+    // flight — which is the only state in which the slot can be stolen.
+    let landSecond!: (result: { data: string }) => void;
+    const second = vi.fn(
+      () => new Promise<{ data: string }>((resolve) => (landSecond = resolve)),
+    );
+    const a = fetchThrough(CACHE_KEYS.homeSessions, second);
+
+    // The old one settles and cleans up after itself — it must not evict the
+    // slot `a` is parked in, or the dedupe below silently stops working.
+    landFirst({ data: "previous lifter" });
+    await first;
+
+    const b = fetchThrough(CACHE_KEYS.homeSessions, second);
+    landSecond({ data: "new lifter" });
+    await Promise.all([a, b]);
+
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(cachedValue(CACHE_KEYS.homeSessions)).toBe("new lifter");
+  });
 });

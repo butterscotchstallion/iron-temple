@@ -30,6 +30,17 @@ const values = new Map<string, unknown>();
  */
 const pending = new Map<string, Promise<ApiResult<unknown>>>();
 
+/**
+ * Which generation of the cache we are in. Bumped by clearCache().
+ *
+ * Clearing the two Maps is not enough on its own, because it cannot reach a
+ * request that is already in the air: that request's `.then` would run after
+ * the clear and write the OLD lifter's data straight back into the emptied
+ * cache, where the next person to sign in would read it. A request records the
+ * generation it started in and stays silent if it no longer matches.
+ */
+let generation = 0;
+
 /** Keys are spelled out here so two callers cannot disagree about one. */
 export const CACHE_KEYS = {
   /** listSessions at the limit Home asks for. */
@@ -58,9 +69,12 @@ export function cachedValue<T>(key: string): T | undefined {
  * remember the result if it succeeds.
  *
  * The result is returned untouched, errors included, so callers keep the
- * `{ data, error }` handling they already had. Only successes are stored — a
- * failed revalidation must not evict a good answer, because the alternative is
- * replacing what the lifter is reading with an error card over a network blip.
+ * `{ data, error }` handling they already had — including a caller from a
+ * signed-out session, whose component has already been unmounted and whose
+ * assignments therefore go nowhere. Only successes are stored, and only for the
+ * generation that asked: a failed revalidation must not evict a good answer,
+ * because the alternative is replacing what the lifter is reading with an error
+ * card over a network blip.
  */
 export function fetchThrough<T>(
   key: string,
@@ -69,12 +83,21 @@ export function fetchThrough<T>(
   const inFlight = pending.get(key) as Promise<ApiResult<T>> | undefined;
   if (inFlight) return inFlight;
 
-  const request = call()
+  const startedIn = generation;
+  const request: Promise<ApiResult<T>> = call()
     .then((result) => {
+      // Landing after a sign-out means this answer belongs to whoever was
+      // signed in when it was asked for, and storing it would undo the clear.
+      if (generation !== startedIn) return result;
       if (!result.error && result.data !== undefined) values.set(key, result.data);
       return result;
     })
-    .finally(() => pending.delete(key));
+    .finally(() => {
+      // Only ever retire OUR OWN slot. A clear empties `pending` outright, so
+      // by the time this runs the key may already belong to a newer request —
+      // deleting that one would silently switch off deduping for the key.
+      if (pending.get(key) === request) pending.delete(key);
+    });
 
   pending.set(key, request as Promise<ApiResult<unknown>>);
   return request;
@@ -90,6 +113,11 @@ export function fetchThrough<T>(
  */
 export function invalidate(key: string): void {
   values.delete(key);
+  // Deliberately does NOT touch the generation. A request in flight across an
+  // invalidate belongs to the same lifter, so letting it cache its answer is at
+  // worst a few seconds stale and self-corrects on the next mount. The
+  // generation is for the one case where the old answer must never be stored at
+  // all, which is a change of who is signed in.
 }
 
 /**
@@ -115,8 +143,15 @@ export function invalidateTraining(): void {
 /**
  * Forget everything. Called on sign-out: the cache holds one lifter's training
  * history, and the next person to use this browser must not see any of it.
+ *
+ * The generation bump is what makes that a guarantee rather than a hope.
+ * Emptying the Maps only forgets answers that have already arrived; a request
+ * still in the air would otherwise resolve a moment later and write the
+ * previous lifter's data back into the cache it was just cleared from, ready
+ * for the next person's first paint to read.
  */
 export function clearCache(): void {
   values.clear();
   pending.clear();
+  generation += 1;
 }
