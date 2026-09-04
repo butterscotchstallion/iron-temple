@@ -647,6 +647,25 @@ func (s *Server) buildSession(ctx context.Context, id, userID int32) (sessionDTO
 		return sessionDTO{}, err
 	}
 
+	// Each lift's record to beat, so the screen can celebrate a PR without
+	// asking for a full history per exercise. One grouped read for the whole
+	// session, on every session response rather than only the first: the client
+	// replaces its session wholesale after each write, so a field present on
+	// some responses and not others would simply disappear mid-workout.
+	bests, err := s.q.ListSessionPersonalBests(ctx, store.ListSessionPersonalBestsParams{
+		UserID: userID, SessionID: id,
+	})
+	if err != nil {
+		return sessionDTO{}, err
+	}
+	bestDTOs := make([]personalBestDTO, 0, len(bests))
+	for _, best := range bests {
+		bestDTOs = append(bestDTOs, personalBestDTO{
+			ExerciseID: best.ExerciseID,
+			WeightLb:   numericToFloat(best.BestWeightLb),
+		})
+	}
+
 	setDTOs := make([]sessionSetDTO, 0, len(sets))
 	for _, set := range sets {
 		setDTOs = append(setDTOs, sessionSetDTO{
@@ -676,6 +695,7 @@ func (s *Server) buildSession(ctx context.Context, id, userID int32) (sessionDTO
 		IsOver:         g.IsOver,
 		BodyweightLb:   optionalNumeric(g.BodyweightLb),
 		LastWeighIn:    lastWeighIn,
+		PreviousBests:  bestDTOs,
 		Sets:           setDTOs,
 	}, nil
 }

@@ -155,6 +155,10 @@ function sessionDetail(
     createdAt: "2026-08-01T18:00:00Z",
     finishedAt,
     isOver,
+    // No prior sessions in these fixtures, so nothing to beat. The screen
+    // reads its PR thresholds from here now rather than fetching a history
+    // per lift.
+    previousBests: [],
     sets: [1, 2].map((n) => {
       const logged = loggedSets == null || n <= loggedSets;
       return {
@@ -513,7 +517,6 @@ test("separates assistance from the program's work in a session", async ({ page 
       },
     }),
   );
-  await page.route("**/api/v1/exercises/*/history", (route) => route.fulfill({ json: [] }));
 
   await page.goto("/#/sessions/1");
   await expect(page.getByRole("heading", { name: "Squat" })).toBeVisible();
@@ -539,7 +542,6 @@ test("carries the last weigh-in into a session and records an edit", async ({ pa
     patched.push(route.request().postDataJSON());
     return route.fulfill({ json: { ...session, bodyweightLb: 183 } });
   });
-  await page.route("**/api/v1/exercises/*/history", (route) => route.fulfill({ json: [] }));
 
   await page.goto("/#/sessions/1");
 
@@ -636,10 +638,19 @@ test("can't finish a session that hasn't started", async ({ page }) => {
   await page.route("**/api/v1/sessions/1", (route) =>
     route.fulfill({ json: sessionDetail() }),
   );
-  await page.route("**/api/v1/exercises/1/history", (route) => route.fulfill({ json: [] }));
+  // The fan-out this replaced: opening a session used to cost one history
+  // request per distinct lift in it, purely to know what a personal record
+  // would be. Those numbers ride on the session now, so the screen must ask for
+  // no history at all — a mock that answered would hide their return.
+  const historyCalls: string[] = [];
+  await page.route("**/api/v1/exercises/*/history", (route) => {
+    historyCalls.push(route.request().url());
+    return route.fulfill({ json: { exerciseId: 1, exerciseName: "Squat", points: [] } });
+  });
 
   await page.goto("/#/sessions/1");
   await expect(page.getByText("0 / 2 sets logged")).toBeVisible();
+  expect(historyCalls).toEqual([]);
 
   // Nothing has been lifted, so there is no workout to close.
   await expect(page.getByRole("button", { name: "Finish workout" })).toBeDisabled();
@@ -662,7 +673,6 @@ test("finishes a part-done session with sets still unlogged, after confirming", 
       json: sessionDetail({ actualReps: 5, completed: true, loggedSets: 1 }),
     }),
   );
-  await page.route("**/api/v1/exercises/1/history", (route) => route.fulfill({ json: [] }));
 
   await page.goto("/#/sessions/1");
   await expect(page.getByText("1 / 2 sets logged")).toBeVisible();
@@ -696,7 +706,6 @@ test("finishes without confirming once every set is logged", async ({ page }) =>
   await page.route("**/api/v1/sessions/1", (route) =>
     route.fulfill({ json: sessionDetail({ actualReps: 5, completed: true }) }),
   );
-  await page.route("**/api/v1/exercises/1/history", (route) => route.fulfill({ json: [] }));
 
   await page.goto("/#/sessions/1");
   await page.getByRole("button", { name: "Finish workout" }).click();
@@ -719,7 +728,6 @@ test("renders an already-finished session read-only", async ({ page }) => {
       }),
     }),
   );
-  await page.route("**/api/v1/exercises/1/history", (route) => route.fulfill({ json: [] }));
 
   await page.goto("/#/sessions/1");
   await expect(page.getByText(/^Finished ·/)).toBeVisible();
@@ -733,7 +741,6 @@ test("marks a session aged past the 12h cutoff as closed automatically", async (
   await page.route("**/api/v1/sessions/1", (route) =>
     route.fulfill({ json: sessionDetail({ isOver: true, actualReps: 5, completed: true }) }),
   );
-  await page.route("**/api/v1/exercises/1/history", (route) => route.fulfill({ json: [] }));
 
   await page.goto("/#/sessions/1");
   // No finishedAt, so the banner explains it aged out rather than being finished.
@@ -908,7 +915,6 @@ test("carries a running rest timer through a reload", async ({ page }) => {
       json: sessionDetail({ actualReps: 5, completed: true, loggedSets: 1 }),
     }),
   );
-  await page.route("**/api/v1/exercises/1/history", (route) => route.fulfill({ json: [] }));
 
   await page.goto("/#/sessions/1");
   const remaining = page.getByTestId("rest-remaining");

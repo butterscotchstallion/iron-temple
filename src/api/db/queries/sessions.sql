@@ -348,3 +348,32 @@ WHERE ss.session_id = ANY(@session_ids::int[])
   AND s.user_id = sqlc.arg('user_id')::int
 GROUP BY ss.session_id, e.name
 ORDER BY ss.session_id, MIN(COALESCE(pde.position, 1000 + pda.position, 2000));
+
+-- ListSessionPersonalBests returns, for each lift in the given session, the
+-- heaviest weight that lifter has ever worked on it in ANY OTHER session.
+--
+-- This is what the active-session screen compares a logged set against to
+-- decide it is a personal record. It used to be one history request per
+-- distinct lift in the session — five or six round trips, each returning a
+-- whole training history, to end up with one number apiece.
+--
+-- The current session is excluded rather than filtered client-side, which is
+-- what makes the answer stable: the browser previously took the maximum over
+-- everything it could see, so a set already logged in THIS session counted
+-- towards the record it was being compared against, and what qualified as a PR
+-- depended on when the page happened to be opened.
+--
+-- actual_reps > 0 is the same definition of real work as ListExerciseHistory,
+-- so a weight only defends a record once it has actually been performed.
+-- name: ListSessionPersonalBests :many
+SELECT ss.exercise_id,
+       MAX(ss.weight_lb)::numeric AS best_weight_lb
+FROM session_sets ss
+JOIN sessions s ON s.id = ss.session_id
+WHERE s.user_id = sqlc.arg('user_id')::int
+  AND ss.session_id <> sqlc.arg('session_id')
+  AND ss.actual_reps > 0
+  AND ss.exercise_id IN (
+      SELECT exercise_id FROM session_sets WHERE session_id = sqlc.arg('session_id')
+  )
+GROUP BY ss.exercise_id;

@@ -3,7 +3,6 @@
   import { push, link } from "svelte-spa-router";
   import {
     getSession,
-    getExerciseHistory,
     updateSession,
     updateSessionSet,
     addSessionSet,
@@ -79,9 +78,19 @@
     void loader.then((fire) => fire(options)).catch(() => {});
   }
 
-  // Personal-record tracking: best weight per exercise BEFORE this session.
-  let prBest: Record<number, number> = {};
-  let prReady = false;
+  // Personal-record tracking: the record to beat per lift, which the session
+  // response now carries. It used to be one history request per distinct lift
+  // in the session — five or six round trips, each returning a whole training
+  // history to yield a single number — which also meant a window after load
+  // where a logged set could not be recognised as a record because the
+  // histories had not arrived yet. There is no such window now: the numbers
+  // come with the sets they are compared against.
+  //
+  // A lift with no prior performance is simply absent, so `?? 0` reads as "no
+  // record to beat" and any completed set clears it.
+  const prBest = $derived(
+    new Map((session?.previousBests ?? []).map((b) => [b.exerciseId, b.weightLb])),
+  );
   let prMessage = $state<string | null>(null);
   let prTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -97,35 +106,6 @@
     session = data;
     restSeconds = data.sets[0]?.restSeconds ?? restSeconds;
     loading = false;
-
-    // Deliberately not awaited. PRs cost one history request per distinct lift
-    // in the session, and they feed nothing but the celebration — so blocking
-    // the screen on them made the one page you use mid-workout wait on N
-    // requests to show sets that were already in hand.
-    //
-    // The race this opens is real but benign, and `prReady` is what closes it:
-    // a set logged before the histories land doesn't get confetti. That was
-    // already the behaviour on a failed history request, and a missed flourish
-    // beats a set you couldn't tick because the screen was still spinning.
-    void loadPRs();
-  }
-
-  // Each lift's best weight before this session, used to detect a new PR. A
-  // failed history request only disables PR celebration (not core data), so it
-  // stays silent and simply won't flag a record for that lift.
-  async function loadPRs() {
-    if (!session) return;
-    const ids = [...new Set(session.sets.map((s) => s.exerciseId))];
-    const results = await Promise.all(
-      ids.map((id) => getExerciseHistory({ path: { exerciseId: id } })),
-    );
-    ids.forEach((id, i) => {
-      const points = results[i].data ?? [];
-      prBest[id] = points.length
-        ? Math.max(...points.map((p) => p.weightLb))
-        : 0;
-    });
-    prReady = true;
   }
 
   onMount(load);
@@ -234,7 +214,7 @@
     restSeconds = set.restSeconds;
 
     // New PR: a completed set above this lift's prior best.
-    if (completed && prReady && set.weightLb > (prBest[set.exerciseId] ?? 0)) {
+    if (completed && set.weightLb > (prBest.get(set.exerciseId) ?? 0)) {
       prMessage = `${set.exerciseName} · ${set.weightLb} lb`;
       celebrate({ particleCount: 120, spread: 70, origin: { y: 0.5 } });
       if (prTimer) clearTimeout(prTimer);

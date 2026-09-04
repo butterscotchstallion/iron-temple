@@ -228,21 +228,42 @@ func (s *Server) getExerciseHistory(w http.ResponseWriter, r *http.Request) {
 		notFound(w, "exercise not found")
 		return
 	}
-	rows, err := s.q.ListExerciseHistory(r.Context(), store.ListExerciseHistoryParams{
-		ExerciseID: id, UserID: userFrom(r.Context()).ID,
+	ctx := r.Context()
+	userID := userFrom(ctx).ID
+
+	// Resolved first, for its name — which is what saves the caller from
+	// fetching the entire library to label one chart. It also gives the endpoint
+	// a 404 it never had: an unknown id, or someone else's custom movement, used
+	// to answer with an empty history and so read as "never performed".
+	exercise, err := s.q.GetExercise(ctx, store.GetExerciseParams{ID: id, UserID: userID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		notFound(w, "exercise not found")
+		return
+	}
+	if err != nil {
+		internalError(w)
+		return
+	}
+
+	rows, err := s.q.ListExerciseHistory(ctx, store.ListExerciseHistoryParams{
+		ExerciseID: id, UserID: userID,
 	})
 	if err != nil {
 		internalError(w)
 		return
 	}
-	out := make([]exerciseHistoryPointDTO, 0, len(rows))
+	points := make([]exerciseHistoryPointDTO, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, exerciseHistoryPointDTO{
+		points = append(points, exerciseHistoryPointDTO{
 			PerformedOn: dateToString(row.PerformedOn),
 			WeightLb:    numericToFloat(row.WeightLb),
 			Reps:        row.Reps,
 			Completed:   row.Completed,
 		})
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, exerciseHistoryDTO{
+		ExerciseID:   exercise.ID,
+		ExerciseName: exercise.Name,
+		Points:       points,
+	})
 }
