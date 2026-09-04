@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/svelte";
 import UpdatePrompt from "./UpdatePrompt.svelte";
 import { version } from "./version.svelte";
@@ -25,6 +25,22 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+// bits-ui's body-scroll-lock resets the document's styles on a TIMER scheduled
+// when the dialog unmounts. The last test's cleanup leaves one pending with
+// nothing after it, and if vitest tears the jsdom environment down first it
+// fires into a world with no `document` — which fails the whole run on an
+// unhandled error while every test still reports as passing, because none of
+// them did anything wrong.
+//
+// It is a race, so it turns on machine speed: the sandbox wins it and CI, being
+// slower, does not. Waiting here removes it rather than making it rarer.
+// Deliberately afterAll and not afterEach: unmounting by hand between tests
+// would close a dialog that bits-ui then complains about being read during
+// teardown, trading this for a pile of derived_inert warnings.
+afterAll(async () => {
+  await new Promise((resolve) => setTimeout(resolve, 100));
 });
 
 describe("UpdatePrompt", () => {
