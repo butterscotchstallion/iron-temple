@@ -34,6 +34,14 @@ the prescribed lifts, sets and reps.
 - **Set-by-set logging** — tick sets off as you complete them, or edit reps and
   weight when the day doesn't go to plan. **Add a set** for the extra one you had
   in you, or **drop one** you skipped.
+- **Training without a signal.** A gym in a basement is where this app is used and
+  where the network isn't. A tap that can't reach the server is written to disk,
+  applied to the screen as though it had landed, and replayed in order when the
+  API answers again — so a dropped connection costs a banner rather than a set.
+  It survives the tab being killed and the phone being pocketed; the sets are
+  sent when you walk out. (A **reload** while offline is the one gap: the queued
+  work is safe and will sync, but the screen can't be rebuilt without the server,
+  so it waits.)
 - **A rest timer that knows the lift.** Rest is a property of the movement, not a
   flat three minutes: a deadlift and a lateral raise get their own lengths, and
   assistance work inherits one automatically.

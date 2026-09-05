@@ -8,10 +8,13 @@
   import SignIn from "./routes/SignIn.svelte";
   import NavBar from "./lib/NavBar.svelte";
   import ErrorBoundary from "./lib/ErrorBoundary.svelte";
+  import OfflineBanner from "./lib/OfflineBanner.svelte";
   import { auth, loadMe } from "./lib/auth.svelte";
   import { loadHomeSessions } from "./lib/homeData";
   import { startPolling } from "./lib/version.svelte";
   import { deferred } from "./lib/deferred.svelte";
+  import { watchConnectivity } from "./lib/connectivity.svelte";
+  import { flush, startQueueRetry } from "./lib/writeQueue.svelte";
 
   // The two pieces of shell built on bits-ui, fetched rather than bundled — it
   // and its dependencies were about a third of the entry chunk, to render a
@@ -87,7 +90,18 @@
     // shell should be in place by the time there is anything to put in it.
     void headerBar.load();
     void updatePrompt.load();
+    // Anything left in the write queue from a previous visit — a session logged
+    // in a basement and then backgrounded, a tab the phone killed on the drive
+    // home. Replayed at startup rather than when the session screen next mounts,
+    // because the lifter has no reason to ever open that screen again.
+    void flush();
   });
+
+  // Owned by the shell for the same reason the version poll is: the queue
+  // outlives any one route, and the reps waiting in it belong to a session
+  // screen that may never be mounted again.
+  $effect(() => watchConnectivity(() => void flush()));
+  $effect(() => startQueueRetry());
 
   // Watch for a release landing under an open tab. Owned by the shell rather
   // than by the header that displays the version, because what it feeds is the
@@ -123,6 +137,11 @@
 {#if updatePrompt.current}
   <updatePrompt.current />
 {/if}
+
+<!-- Above the routed content and outside the boundary, like the update prompt.
+     What it reports is true of the whole app rather than of one screen, and it
+     has to survive navigating away from the session that filled the queue. -->
+<OfflineBanner />
 
 <main class="mx-auto flex max-w-3xl flex-col gap-8 px-5 py-10">
   <header class="text-center">
