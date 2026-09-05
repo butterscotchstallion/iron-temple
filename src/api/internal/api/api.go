@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"gitea.homelab/gitadmin/iron-temple/api/internal/auth"
+	"gitea.homelab/gitadmin/iron-temple/api/internal/metrics"
 	"gitea.homelab/gitadmin/iron-temple/api/internal/racked"
 	"gitea.homelab/gitadmin/iron-temple/api/internal/store"
 )
@@ -45,21 +46,48 @@ type Server struct {
 	// which is how tests and local development avoid sending real mail — the
 	// integration suite drives sendDueReports directly instead.
 	mailer *racked.Mailer
+	// metrics counts what the API serves. Always present — a nil check at every
+	// observation point is a worse trade than a registry nobody scrapes, and
+	// the exposition page is only reachable from the address main.go binds it
+	// to, not from this router.
+	metrics *metrics.Registry
 }
 
 // NewServer builds a Server over a pgx connection pool. version and environment
 // are surfaced by the health endpoint (and the UI header bar); environment also
 // decides whether session cookies are marked Secure.
 func NewServer(pool *pgxpool.Pool, version, environment string) *Server {
-	return &Server{
+	s := &Server{
 		pool:        pool,
 		q:           store.New(pool),
 		version:     version,
 		environment: environment,
 		logins:      auth.NewRateLimiter(auth.DefaultAttempts, auth.DefaultWindow),
 		reportLoc:   time.UTC,
+		metrics:     metrics.New(version, environment),
 	}
+	// Pool saturation is the failure this deployment is most likely to hit —
+	// one small pool, a reporter and a sweeper sharing it with request traffic
+	// — so it is wired up here rather than left to the caller to remember. The
+	// closure is evaluated per scrape, not now.
+	if pool != nil {
+		s.metrics.SetPoolSource(func() metrics.PoolStats {
+			stat := pool.Stat()
+			return metrics.PoolStats{
+				Acquired: stat.AcquiredConns(),
+				Idle:     stat.IdleConns(),
+				Total:    stat.TotalConns(),
+				Max:      stat.MaxConns(),
+			}
+		})
+	}
+	return s
 }
+
+// Metrics returns the registry this server records into, so main.go can serve
+// its exposition page. Deliberately not mounted on the API router — see
+// cmd/server for where it is bound and why that is a different listener.
+func (s *Server) Metrics() *metrics.Registry { return s.metrics }
 
 // SetReportLocation sets the zone the Racked recap buckets session start times
 // in. Defaults to UTC; main.go overrides it from REPORT_TZ. A nil location is
@@ -102,6 +130,13 @@ func (s *Server) reportToday() time.Time {
 func (s *Server) Router(corsOrigin string) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
+	// Outside Recoverer on purpose. Middleware runs in registration order, so
+	// this wraps it: a handler that panics is turned into a 500 by Recoverer
+	// *inside* the wrapped writer, and the observation reads that 500. The
+	// other way round, the panic would unwind past this deferred observation
+	// before any status had been written, and the request that took the
+	// process closest to failing would be recorded as a success.
+	r.Use(s.observe)
 	r.Use(middleware.Recoverer)
 	// AllowCredentials is deliberately absent. The UI is same-origin with the
 	// API in both development (the Vite proxy) and production (Traefik path
@@ -268,6 +303,39 @@ func jsonETag(next http.Handler) http.Handler {
 
 		w.WriteHeader(rec.status)
 		_, _ = w.Write(body)
+	})
+}
+
+// observe records every request in the metrics registry.
+//
+// The `route` label is chi's route PATTERN, not the path: `/sessions/{sessionId}`
+// rather than `/sessions/412`. Labelling by path would mint a time series per
+// session id, and the series count would then grow with the training history —
+// the classic way a metrics endpoint becomes the most expensive thing in a
+// deployment. An unrouted request has no pattern and is folded into a single
+// "unmatched" series by the registry, for the same reason.
+func (s *Server) observe(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		done := s.metrics.RequestStarted()
+		// chi's wrapper rather than a local one: it preserves Flush and Hijack
+		// through the chain, which a bare struct embedding ResponseWriter would
+		// silently drop.
+		rec := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+
+		defer func() {
+			// A handler that returns without ever writing a header has served
+			// a 200, which is what net/http will send.
+			status := rec.Status()
+			if status == 0 {
+				status = http.StatusOK
+			}
+			// RoutePattern is only populated once routing has happened, which
+			// is why this is read here and not before next.
+			done(r.Method, chi.RouteContext(r.Context()).RoutePattern(), status, time.Since(start))
+		}()
+
+		next.ServeHTTP(rec, r)
 	})
 }
 

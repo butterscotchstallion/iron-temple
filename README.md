@@ -110,6 +110,7 @@ an uploaded avatar or a colour, and a password change.
 | [`docs/implementation-plan.md`](docs/implementation-plan.md) | What's built, phase by phase |
 | [`docs/api-integration-tests.md`](docs/api-integration-tests.md) | The DB-backed API suite |
 | [`docs/ci-branch-protection.md`](docs/ci-branch-protection.md) | CI and branch rules |
+| [`docs/observability.md`](docs/observability.md) | Prometheus metrics and how to scrape them |
 | [`docs/sandbox-ui-tooling.md`](docs/sandbox-ui-tooling.md) | Offline UI tooling in the sandbox |
 | [`AGENTS.md`](AGENTS.md) | Commit conventions and generated-code rules |
 
