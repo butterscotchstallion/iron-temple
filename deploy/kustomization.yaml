@@ -6,6 +6,11 @@ namespace: databases
 
 resources:
   - job.yaml
+  # The nightly pg_dump and the volume it writes to. Independent of the
+  # bootstrap Job above — that one runs once to provision, this one runs
+  # forever — but it belongs to the same tenant, in the same namespace, holding
+  # the same Secret, so it is applied by the same overlay.
+  - backup.yaml
 
 # Builds the ConfigMap from bootstrap.sql and rewrites the Job's volume
 # reference to the hashed name automatically, so an edited SQL file produces

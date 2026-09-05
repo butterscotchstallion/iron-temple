@@ -12,6 +12,14 @@
     type SessionSet,
   } from "../lib/api";
   import { invalidateTraining } from "../lib/cache.svelte";
+  import { observe } from "../lib/connectivity.svelte";
+  import {
+    enqueue,
+    mustQueue,
+    nextTempSetId,
+    onDrained,
+    type PendingWrite,
+  } from "../lib/writeQueue.svelte";
   import type { Options as ConfettiOptions } from "canvas-confetti";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import Dumbbell from "@lucide/svelte/icons/dumbbell";
@@ -97,7 +105,13 @@
   async function load() {
     loading = true;
     failed = false;
-    const { data, error } = await getSession({ path: { sessionId } });
+    const result = await getSession({ path: { sessionId } });
+    // Reads are not queued — there is nothing to replay about a GET — but a
+    // read that never lands is still the clearest evidence the app has that it
+    // is offline, and it is usually the first request a cold load makes. Told
+    // here, the banner is up before the lifter taps anything.
+    observe(result);
+    const { data, error } = result;
     if (error || !data) {
       failed = true;
       loading = false;
@@ -109,6 +123,56 @@
   }
 
   onMount(load);
+
+  // When the queue finishes replaying, take the server's version of the
+  // session wholesale rather than trying to reconcile the optimistic copy
+  // against it. This is what makes the temp ids a non-problem on screen: the
+  // reload replaces every set, placeholder or not, with the row the server
+  // actually has.
+  $effect(() => {
+    onDrained(() => void load());
+    return () => onDrained(null);
+  });
+
+  /** What a write produced: the server's row, or the one we assumed. */
+  type WriteOutcome<T> = { ok: true; value: T } | { ok: false };
+
+  /**
+   * Send a write, or queue it and pretend.
+   *
+   * The three paths, in the order they are tried:
+   *
+   *   Already queueing — offline, or writes are waiting ahead of this one. Do
+   *   not touch the network; enqueue and hand back the optimistic value.
+   *
+   *   Sent, but never arrived. Same outcome, decided a round trip later. The
+   *   tap is not lost and the lifter is not told anything, because from where
+   *   they are standing nothing went wrong.
+   *
+   *   The server answered. Its version wins, error or otherwise. A refusal is
+   *   a real refusal and is reported; queueing it would only retry a request
+   *   that has already been declined.
+   */
+  async function write<T>(
+    queued: PendingWrite,
+    live: () => Promise<{ data?: T; error?: unknown; response?: Response }>,
+    optimistic: () => T,
+  ): Promise<WriteOutcome<T>> {
+    if (mustQueue()) {
+      enqueue(queued);
+      return { ok: true, value: optimistic() };
+    }
+
+    const result = await track(live());
+    if (observe(result)) {
+      enqueue(queued);
+      return { ok: true, value: optimistic() };
+    }
+    if (result.error) return { ok: false };
+    // A 204 carries no body — removeSet's success looks exactly like this — so
+    // the optimistic value stands in as the sentinel.
+    return { ok: true, value: result.data ?? optimistic() };
+  }
 
   $effect(() => () => {
     if (prTimer) clearTimeout(prTimer);
@@ -192,19 +256,32 @@
     const reps = nextReps(set);
     const completed = reps != null && reps >= set.targetReps;
 
-    // track() here, and on the three writes below, is what lets the update
-    // prompt reload safely: it holds the reload until every request in the air
-    // has landed, so a rep can't be lost between the tap and the response.
-    const { data, error } = await track(
-      updateSessionSet({
-        path: { sessionId, setId: set.id },
+    // track() inside write(), here and on every mutation below, is what lets
+    // the update prompt reload safely: it holds the reload until every request
+    // in the air has landed, so a rep can't be lost between the tap and the
+    // response. A queued write needs no such protection — it is already on disk.
+    const outcome = await write<SessionSet>(
+      {
+        kind: "updateSet",
+        sessionId,
+        setId: set.id,
         body: { actualReps: reps, completed },
-      }),
+      },
+      () =>
+        updateSessionSet({
+          path: { sessionId, setId: set.id },
+          body: { actualReps: reps, completed },
+        }),
+      () => ({ ...set, actualReps: reps, completed }),
     );
-    if (error) actionError = "Couldn't save that set.";
-    if (!data || !session) return;
+    if (!outcome.ok) {
+      actionError = "Couldn't save that set.";
+      return;
+    }
+    if (!session) return;
     actionError = null;
-    session.sets = session.sets.map((s) => (s.id === data.id ? data : s));
+    const saved = outcome.value;
+    session.sets = session.sets.map((s) => (s.id === saved.id ? saved : s));
 
     // Clearing a set (wrap back to 0) doesn't touch the timer.
     if (reps == null) return;
@@ -242,18 +319,31 @@
 
   // End the session for good. The server stamps finishedAt and returns the
   // session with isOver set, which is what locks the screen.
+  // Queued like everything else when there is no network. Finishing is the last
+  // thing that happens at the rack, which makes it the write most likely to be
+  // made in the worst signal of the session — and refusing it would leave the
+  // lifter staring at a workout they have plainly finished.
   async function finish() {
-    if (finishing) return;
+    if (finishing || !session) return;
     finishing = true;
-    const { data, error } = await track(finishSession({ path: { sessionId } }));
+    const current = session;
+    const outcome = await write<Session>(
+      { kind: "finishSession", sessionId },
+      () => finishSession({ path: { sessionId } }),
+      () => ({
+        ...current,
+        isOver: true,
+        finishedAt: new Date().toISOString(),
+      }),
+    );
     finishing = false;
     confirmFinish = false;
-    if (error || !data) {
+    if (!outcome.ok) {
       actionError = "Couldn't finish the session.";
       return;
     }
     actionError = null;
-    session = data;
+    session = outcome.value;
     showComplete = true;
     celebrate({ particleCount: 140, spread: 75, origin: { y: 0.6 } });
   }
@@ -262,18 +352,23 @@
   // the whole session, so it also refreshes lastWeighIn — no second request to
   // find out what the box should carry next time.
   async function saveBodyweight(weightLb: number | null) {
-    const { data, error } = await track(
-      updateSession({
-        path: { sessionId },
-        body: { bodyweightLb: weightLb },
-      }),
+    if (!session) return;
+    const current = session;
+    const outcome = await write<Session>(
+      { kind: "updateSession", sessionId, bodyweightLb: weightLb },
+      () =>
+        updateSession({
+          path: { sessionId },
+          body: { bodyweightLb: weightLb },
+        }),
+      () => ({ ...current, bodyweightLb: weightLb }),
     );
-    if (error || !data) {
+    if (!outcome.ok) {
       actionError = "Couldn't save your weight.";
       return;
     }
     actionError = null;
-    session = data;
+    session = outcome.value;
   }
 
   // Adjust an exercise's weight by delta lb.
@@ -302,23 +397,30 @@
     };
 
     // Each leg is tracked separately rather than the Promise.all as a whole, so
-    // the count reflects what's actually outstanding if some land first.
-    const results = await Promise.all(
-      sets.map((set) =>
-        track(
-          updateSessionSet({
-            path: { sessionId, setId: set.id },
-            body: { weightLb: weightFor(set) },
-          }),
-        ),
-      ),
+    // the count reflects what's actually outstanding if some land first. They
+    // queue independently too, which is safe precisely because each names a
+    // different set — the ordering the queue protects is between edits to the
+    // SAME row, and there are none here.
+    const outcomes = await Promise.all(
+      sets.map((set) => {
+        const weightLb = weightFor(set);
+        return write<SessionSet>(
+          { kind: "updateSet", sessionId, setId: set.id, body: { weightLb } },
+          () =>
+            updateSessionSet({
+              path: { sessionId, setId: set.id },
+              body: { weightLb },
+            }),
+          () => ({ ...set, weightLb }),
+        );
+      }),
     );
     if (!session) return;
-    if (results.some((r) => r.error)) actionError = "Couldn't update the weight.";
-    for (const { data } of results) {
-      if (data) {
-        session.sets = session.sets.map((s) => (s.id === data.id ? data : s));
-      }
+    if (outcomes.some((o) => !o.ok)) actionError = "Couldn't update the weight.";
+    for (const outcome of outcomes) {
+      if (!outcome.ok) continue;
+      const saved = outcome.value;
+      session.sets = session.sets.map((s) => (s.id === saved.id ? saved : s));
     }
   }
 
@@ -326,11 +428,32 @@
   // better than the prescription. The server copies the rep target and weight
   // from that lift's current last set, so nothing has to be sent but the lift.
   async function addSet(exerciseId: number) {
-    if (isOver) return;
-    const { data, error } = await track(
-      addSessionSet({ path: { sessionId }, body: { exerciseId } }),
+    if (isOver || !session) return;
+    // What the server would copy from: the lift's current last set. Needed up
+    // front because the offline stand-in has to be built from it, and it is the
+    // same row the server itself reads.
+    const previous = session.sets.filter((s) => s.exerciseId === exerciseId).at(-1);
+    if (!previous) return;
+
+    // One id, used by both the queued entry and the row on screen. Allocating
+    // it separately in each would leave the replay remapping an id the screen
+    // has never heard of, and the two would drift apart silently.
+    const tempSetId = nextTempSetId();
+    const outcome = await write<SessionSet>(
+      { kind: "addSet", sessionId, exerciseId, tempSetId },
+      () => addSessionSet({ path: { sessionId }, body: { exerciseId } }),
+      // A placeholder with a negative id. It behaves like any other set on
+      // screen — it can be tapped, edited, even removed — and is replaced by
+      // the real row when the queue drains and the session reloads.
+      () => ({
+        ...previous,
+        id: tempSetId,
+        setNumber: previous.setNumber + 1,
+        actualReps: null,
+        completed: false,
+      }),
     );
-    if (error || !data) {
+    if (!outcome.ok) {
       actionError = "Couldn't add a set.";
       return;
     }
@@ -338,17 +461,20 @@
     if (!session) return;
     // Appended rather than re-sorted: the server numbers it past the lift's last
     // set, and the group it joins is already in prescription order.
-    session.sets = [...session.sets, data];
+    session.sets = [...session.sets, outcome.value];
   }
 
   // Drop a set that wasn't performed. Removing a lift's last set takes the lift
   // out of the session, which is what skipping it looks like.
   async function removeSet(set: SessionSet) {
     if (isOver) return;
-    const { error } = await track(
-      removeSessionSet({ path: { sessionId, setId: set.id } }),
+    // void, because a delete answers 204 with no body. Only `ok` is read here.
+    const outcome = await write<void>(
+      { kind: "removeSet", sessionId, setId: set.id },
+      () => removeSessionSet({ path: { sessionId, setId: set.id } }),
+      () => undefined,
     );
-    if (error) {
+    if (!outcome.ok) {
       actionError = "Couldn't remove that set.";
       return;
     }

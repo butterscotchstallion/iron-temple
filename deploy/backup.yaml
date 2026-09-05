@@ -1,0 +1,160 @@
+---
+# Scheduled pg_dump of the iron_temple tenant, kept on a PVC in the cluster.
+#
+# The app's data has no other copy. Everything a lifter has — the sessions, the
+# weights, the gym they configured — lives in one database on one shared
+# instance, and until this existed a lost volume was a lost training history.
+#
+# Two layers, deliberately different in kind. This is the operator's copy: whole
+# database, restorable with pg_restore, no application involved. GET /me/export
+# is the lifter's copy: their account as JSON, readable without Postgres. One is
+# for "the disk died", the other for "I want my data" — neither substitutes.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: iron-temple-backups
+  labels:
+    app.kubernetes.io/name: iron-temple
+    app.kubernetes.io/component: backup
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      # A custom-format dump of this app is measured in megabytes — one lifter's
+      # sessions and sets, no blobs beyond a single avatar. 2Gi holds years of
+      # the retained set with room the rotation below never needs.
+      storage: 2Gi
+  # storageClassName: <-- EDIT if your cluster has no usable default class.
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: iron-temple-backup
+  labels:
+    app.kubernetes.io/name: iron-temple
+    app.kubernetes.io/component: backup
+spec:
+  # 03:17, not 03:00. Every chart in every cluster fires on the hour; an odd
+  # minute keeps the dump off the same spindle as everyone else's.
+  schedule: "17 3 * * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  # A run may start up to an hour late — a node that was down or busy at 03:17
+  # should still take the backup at 03:40. Past that the window is abandoned
+  # rather than queued, because the next one is only a day away and a backlog of
+  # dumps all writing to one RWO volume helps nobody.
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  # Kept longer than the successes: a failed backup is the one you want the logs
+  # of, and it is also the one nobody notices for a week.
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: iron-temple
+            app.kubernetes.io/component: backup
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            # The postgres image's own unprivileged user. pg_dump needs no more
+            # than a network socket and somewhere to write.
+            runAsUser: 999
+            runAsGroup: 999
+            fsGroup: 999
+          containers:
+            - name: pg-dump
+              image: postgres:17
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              env:
+                # --- Connection: the TENANT role, not the instance admin. ---
+                # A backup needs to read one database, so it is taken with the
+                # credentials that can reach exactly one database.
+                - name: PGHOST
+                  value: postgres.databases.svc.cluster.local # <-- EDIT
+                - name: PGPORT
+                  value: "5432"
+                - name: PGDATABASE
+                  value: iron_temple
+                - name: PGUSER
+                  value: iron_temple
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: iron-temple-db
+                      key: password
+                - name: PGSSLMODE
+                  value: require
+                # How many dumps to keep. Daily, so this is a fortnight.
+                - name: KEEP
+                  value: "14"
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+
+                  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+                  final="/backups/iron_temple-${stamp}.dump"
+                  # Written aside and moved into place only on success. A dump
+                  # interrupted halfway — evicted pod, full volume, dropped
+                  # connection — must not be left sitting in the directory
+                  # looking exactly like a good one, because the moment anybody
+                  # needs it is the moment nobody can check.
+                  partial="${final}.partial"
+
+                  echo "dumping ${PGDATABASE} as ${PGUSER} -> ${final}"
+                  # -Fc: the custom format. Compressed on the way out (so no
+                  # pipe, and pg_dump's own exit status is the script's) and
+                  # restorable selectively with pg_restore, which a plain SQL
+                  # file is not. Ownership and grants are dumped as they are;
+                  # whether to apply them is a restore-time decision, and
+                  # deploy/README.md makes it there rather than here.
+                  pg_dump --format=custom --file="${partial}"
+                  mv "${partial}" "${final}"
+
+                  # A dump that cannot be listed cannot be restored, so the
+                  # freshest one is opened before any older one is deleted.
+                  # pg_restore --list reads the archive's table of contents and
+                  # writes nothing, which is as close to a restore rehearsal as
+                  # is free.
+                  pg_restore --list "${final}" > /dev/null
+                  echo "verified ${final} ($(wc -c < "${final}") bytes)"
+
+                  # Rotation, newest first, keeping $KEEP. Deliberately after
+                  # the verify: a run that produced nothing good deletes nothing.
+                  # Leftover .partial files from an earlier crash go too.
+                  rm -f /backups/*.partial
+                  ls -1t /backups/*.dump 2>/dev/null | tail -n "+$((KEEP + 1))" | while read -r old; do
+                    echo "rotating out ${old}"
+                    rm -f "${old}"
+                  done
+
+                  echo "backups on disk:"
+                  ls -lh /backups
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+                # readOnlyRootFilesystem is on, and libpq wants somewhere to
+                # write. Nothing here needs to outlive the pod.
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: iron-temple-backups
+            - name: tmp
+              emptyDir: {}

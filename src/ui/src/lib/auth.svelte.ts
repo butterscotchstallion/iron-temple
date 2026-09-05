@@ -7,6 +7,7 @@ import {
   type User,
 } from "./api";
 import { clearCache } from "./cache.svelte";
+import { flush } from "./writeQueue.svelte";
 
 // Shared authentication state. A module-level `$state` object rather than a
 // store contract: Svelte 5 runes make the object itself reactive, so every
@@ -91,6 +92,19 @@ export async function signUp(
  * the server has the last word either way.
  */
 export async function signOut(): Promise<void> {
+  // Before the cookie goes, not after: the queue can only be drained while the
+  // session that authorises it still exists.
+  //
+  // Whatever will not go is deliberately KEPT rather than cleared alongside the
+  // cache. The two look alike and are not: the cache is a copy of what the
+  // server already has, so dropping it costs nothing, while the queue is work
+  // the server has never seen — reps logged in a basement that exist nowhere
+  // else. Clearing it would make signing out a way to silently destroy a
+  // workout. It replays on the next sign-in, and a write belonging to an
+  // account that no longer owns that session is refused by the API and counted,
+  // which is the same protection every other request here relies on.
+  await flush();
+
   try {
     await logoutRequest();
   } finally {

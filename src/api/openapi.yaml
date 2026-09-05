@@ -324,6 +324,42 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /me/export:
+    get:
+      tags: [users]
+      operationId: exportAccount
+      summary: Download everything on this account as one JSON document
+      description: >
+        The whole account in one response: profile, gym setup, starting-weight
+        overrides, the movements this lifter added to the library, their
+        assistance work, and every session with its sets.
+
+
+        Written to be read without the app. Rows name their program, day and
+        exercise instead of carrying ids into a database whose sequences are
+        somewhere else; the only id in the document is the session id a set
+        refers to, which exists so the two lists can be joined.
+
+
+        Two things are deliberately absent. Login sessions, because a list of
+        live credentials is not personal data anybody wants in their downloads
+        folder. And the avatar image, because it is a binary the lifter uploaded
+        and can fetch from `/me/avatar` — it is in the database backup either
+        way, and base64 in a training log helps nobody.
+
+
+        Served with `Content-Disposition: attachment`, so a browser saves it
+        rather than rendering a year of training as a wall of text.
+      responses:
+        "200":
+          description: The account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountExport"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /users/{userId}/avatar:
     parameters:
       - $ref: "#/components/parameters/UserId"
@@ -1174,6 +1210,208 @@ components:
           description: >
             0 is a legitimate baseline — an empty bar is where a press starts.
             Clearing an override is DELETE, not a weight.
+
+    AccountExport:
+      type: object
+      required:
+        [
+          formatVersion,
+          exportedAt,
+          appVersion,
+          profile,
+          gym,
+          baselines,
+          customExercises,
+          assistance,
+          sessions,
+        ]
+      properties:
+        formatVersion:
+          type: integer
+          description: >
+            The shape of this document, not the app's version. Bumped only when
+            a field is removed or its meaning changes — an importer should
+            refuse a number it does not know, and may ignore fields it does not
+            recognise at a version it does.
+          example: 1
+        exportedAt:
+          type: string
+          format: date-time
+        appVersion:
+          type: string
+          description: The release that produced the file, for when a shape needs explaining.
+          example: v1.4.0
+        profile:
+          $ref: "#/components/schemas/ExportProfile"
+        gym:
+          $ref: "#/components/schemas/ExportGym"
+        baselines:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExportBaseline"
+        customExercises:
+          type: array
+          description: Movements this lifter added. The seeded catalogue is not included.
+          items:
+            $ref: "#/components/schemas/ExportExercise"
+        assistance:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExportAssistance"
+        sessions:
+          type: array
+          description: Every session, oldest first, each with its sets nested.
+          items:
+            $ref: "#/components/schemas/ExportSession"
+
+    ExportProfile:
+      type: object
+      required: [username, displayName, createdAt]
+      properties:
+        username:
+          type: string
+        displayName:
+          type: string
+        avatarColor:
+          type: string
+          nullable: true
+        currentProgram:
+          type: string
+          nullable: true
+          description: Named, not keyed — the program the lifter last used.
+        createdAt:
+          type: string
+          format: date-time
+
+    ExportGym:
+      type: object
+      required: [barWeightLb, plates]
+      properties:
+        barWeightLb:
+          type: number
+          exclusiveMinimum: 0
+        plates:
+          type: array
+          items:
+            $ref: "#/components/schemas/Plate"
+
+    ExportBaseline:
+      type: object
+      required: [exerciseName, weightLb]
+      properties:
+        exerciseName:
+          type: string
+        weightLb:
+          type: number
+          minimum: 0
+
+    ExportExercise:
+      type: object
+      required: [name, muscleGroup, equipment, isAccessory, restSeconds, createdAt]
+      properties:
+        name:
+          type: string
+        muscleGroup:
+          $ref: "#/components/schemas/MuscleGroup"
+        equipment:
+          $ref: "#/components/schemas/Equipment"
+        isAccessory:
+          type: boolean
+        restSeconds:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+
+    ExportAssistance:
+      type: object
+      required: [programName, programDayName, exerciseName, sets, reps, weightLb, createdAt]
+      properties:
+        programName:
+          type: string
+        programDayName:
+          type: string
+        exerciseName:
+          type: string
+        sets:
+          type: integer
+          minimum: 1
+        reps:
+          type: integer
+          minimum: 1
+        repMin:
+          type: integer
+          nullable: true
+          description: Present together with repMax when the lift runs on double progression.
+        repMax:
+          type: integer
+          nullable: true
+        weightLb:
+          type: number
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+
+    ExportSession:
+      type: object
+      required: [id, programName, programDayName, performedOn, notes, createdAt, sets]
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: >
+            This install's session id. Carried only so a reader can tell two
+            sessions of the same day apart, and so the document is stable to
+            re-export; it means nothing outside this database.
+        programName:
+          type: string
+        programDayName:
+          type: string
+        performedOn:
+          type: string
+          format: date
+        notes:
+          type: string
+        bodyweightLb:
+          type: number
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Null for a session never finished by hand.
+        sets:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExportSessionSet"
+
+    ExportSessionSet:
+      type: object
+      required: [exerciseName, kind, setNumber, targetReps, weightLb, completed]
+      properties:
+        exerciseName:
+          type: string
+        kind:
+          $ref: "#/components/schemas/ExerciseKind"
+        setNumber:
+          type: integer
+          minimum: 1
+        targetReps:
+          type: integer
+          minimum: 1
+        actualReps:
+          type: integer
+          nullable: true
+          description: Null for a set that was never logged.
+        weightLb:
+          type: number
+          minimum: 0
+        completed:
+          type: boolean
 
     RegistrationStatus:
       type: object

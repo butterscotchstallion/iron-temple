@@ -3,6 +3,8 @@
 //
 //	DATABASE_URL  (required)  Postgres DSN, connected as the iron_temple tenant.
 //	PORT          (default 8080)
+//	METRICS_PORT  (default 9090) Prometheus exposition, on its own listener.
+//	              "off" disables it.
 //	CORS_ORIGIN   (optional)  comma-separated UI origins; empty allows any.
 //	REPORT_TZ     (default UTC) IANA zone the Racked recap reads clock times in.
 //	REPORT_MAIL   (default on outside development) "off" disables the Racked
@@ -139,6 +141,19 @@ func run() error {
 		serveErr <- nil
 	}()
 
+	metricsSrv := metricsServer(apiSrv)
+	if metricsSrv != nil {
+		go func() {
+			log.Printf("metrics on %s/metrics", metricsSrv.Addr)
+			// Deliberately not reported on serveErr. Prometheus not being able
+			// to scrape is a monitoring outage; the API refusing to start over
+			// it would turn that into a training outage.
+			if err := metricsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Printf("metrics listener stopped: %v", err)
+			}
+		}()
+	}
+
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
@@ -149,7 +164,40 @@ func run() error {
 		log.Println("shutting down")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+		if metricsSrv != nil {
+			// Closed first and without waiting on it: a scrape is a read of a
+			// few kilobytes, and nothing is lost by cutting one short. The API's
+			// own drain is the one worth the ten seconds.
+			_ = metricsSrv.Shutdown(shutdownCtx)
+		}
 		return srv.Shutdown(shutdownCtx)
+	}
+}
+
+// metricsServer builds the listener the Prometheus exposition page is served
+// on, or nil when METRICS_PORT is "off".
+//
+// A SEPARATE listener from the API, which is the whole point. Traefik routes
+// the public hostname at the API's port, so anything mounted on that port is
+// reachable from outside the cluster — and this page names every route, counts
+// every error and reports the traffic volume of a household. On its own port it
+// is reachable from inside the cluster only, where the scraper lives, without
+// depending on getting an ingress exclusion right.
+func metricsServer(apiSrv *api.Server) *http.Server {
+	port := strings.TrimSpace(os.Getenv("METRICS_PORT"))
+	if port == "" {
+		port = "9090"
+	}
+	if strings.EqualFold(port, "off") {
+		return nil
+	}
+
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", apiSrv.Metrics().Handler())
+	return &http.Server{
+		Addr:              ":" + port,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 }
 

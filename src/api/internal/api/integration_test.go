@@ -36,6 +36,12 @@ var baseURL string
 // a second account once registration has closed itself.
 var testPool *pgxpool.Pool
 
+// testAPI is the server behind baseURL, kept so metrics_integration_test.go can
+// read the registry the requests below are being counted into. There is no HTTP
+// route to it by design — the exposition page is bound to its own listener in
+// cmd/server, not mounted on this router.
+var testAPI *api.Server
+
 // primaryToken is the session cookie for the account registered in TestMain.
 // Every endpoint except /health and /auth/* now requires one, so expect()
 // attaches it by default and the tests below read as they did before.
@@ -71,7 +77,8 @@ func TestMain(m *testing.M) {
 	}
 
 	testPool = pool
-	srv := httptest.NewServer(api.NewServer(pool, "", "").Router(""))
+	testAPI = api.NewServer(pool, "", "")
+	srv := httptest.NewServer(testAPI.Router(""))
 	baseURL = srv.URL + "/api/v1"
 
 	// Claim the install. Registration closes behind this call, which is itself
