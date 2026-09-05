@@ -224,6 +224,16 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 				r.Delete("/{sessionId}/sets/{setId}", s.removeSessionSet)
 			})
 		})
+
+		// The export sits outside the group above because it must not be
+		// ETagged, and requireUser is therefore spelled out here rather than
+		// inherited. Two reasons it is excluded, one of which is fatal to the
+		// idea: the document embeds the instant it was produced, so its bytes
+		// differ on every request and a validator computed from them can never
+		// match. The other is that tagging means buffering the whole response
+		// to hash it, and this is the one endpoint whose response grows without
+		// bound as the training history does.
+		r.With(s.requireUser).Get("/me/export", s.exportAccount)
 	})
 
 	return r
