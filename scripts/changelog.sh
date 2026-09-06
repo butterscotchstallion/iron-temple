@@ -12,11 +12,12 @@
 #                               instead of the empty range it gets by default.
 #   changelog.sh --last-tag     print the most recent stable tag, or nothing.
 #
-# "Releasable" deliberately mirrors scripts/next-version.sh: feat/fix subjects,
-# any type carrying a `!`, and BREAKING CHANGE body footers. The two decide the
-# same question — whether a commit is worth releasing — and when they disagreed,
-# a release cut solely on a breaking footer got notes reading "no notable
-# changes".
+# "Releasable" deliberately mirrors scripts/next-version.sh: feat/fix/perf/revert
+# subjects, any type carrying a `!`, and BREAKING CHANGE body footers. The two
+# decide the same question — whether a commit is worth releasing — and every time
+# they have drifted, the release next-version.sh cut got notes reading "no notable
+# changes": first for a release cut solely on a breaking footer, then again for
+# one cut solely on a perf commit. Change the set in one and change it in both.
 set -euo pipefail
 
 # Stable tags only, ascending. Pre-releases (v0.0.1-rc1) are not releases.
@@ -64,7 +65,7 @@ breaking="$(git log --format='%H' --grep='^BREAKING CHANGE:' "$range" || true)"
 
 notes=""
 while IFS=$'\t' read -r hash subject short; do
-  if printf '%s' "$subject" | grep -qE '^(feat|fix)(\([^)]*\))?!?:|^[a-z]+(\([^)]*\))?!:' ||
+  if printf '%s' "$subject" | grep -qE '^(feat|fix|perf|revert)(\([^)]*\))?!?:|^[a-z]+(\([^)]*\))?!:' ||
      printf '%s\n' "$breaking" | grep -qxF "$hash"; then
     notes+="- ${subject} (${short})"$'\n'
   fi
