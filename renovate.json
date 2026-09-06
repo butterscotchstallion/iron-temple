@@ -14,6 +14,11 @@
       "description": "Group non-major updates per ecosystem to keep PR noise low.",
       "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
       "groupName": "{{manager}} minor and patch"
+    },
+    {
+      "description": "vite-plugin-svelte v7 peers on vite ^8. On our vite 6 it silently breaks `pnpm dev`: v7 defaults prebundleSvelteLibraries to true and prebundles .svelte through vite 8's rolldown optimizer, so on vite 6 the svelte libs get dropped from optimizeDeps.exclude and esbuild dies with 'No loader is configured for .svelte files'. Only the dev server is affected, so no CI gate catches it. Hold at v6 until vite itself moves to 8.",
+      "matchPackageNames": ["@sveltejs/vite-plugin-svelte"],
+      "allowedVersions": "<7"
     }
   ]
 }
