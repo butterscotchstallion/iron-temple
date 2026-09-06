@@ -1178,7 +1178,8 @@ components:
       properties:
         plateLb:
           type: number
-          exclusiveMinimum: 0
+          minimum: 0
+          exclusiveMinimum: true
           example: 45
         pairs:
           type: integer
@@ -1289,7 +1290,8 @@ components:
       properties:
         barWeightLb:
           type: number
-          exclusiveMinimum: 0
+          minimum: 0
+          exclusiveMinimum: true
         plates:
           type: array
           items:
@@ -1478,7 +1480,8 @@ components:
             program the user has opened is only forgotten when it is deleted.
         barWeightLb:
           type: number
-          exclusiveMinimum: 0
+          minimum: 0
+          exclusiveMinimum: true
           maximum: 200
         plates:
           type: array
