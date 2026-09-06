@@ -206,6 +206,21 @@ function nextSessionsFrom(single: {
 }
 
 test.beforeEach(async ({ page }) => {
+  // The version poller in App.svelte runs on every page load, so leaving /health
+  // unstubbed sent a real request past page.route on all but the handful of tests
+  // below that route it themselves — out to vite preview, whose /api proxy points
+  // at a Go API this workflow never starts. Each one logged an ECONNREFUSED into
+  // the CI output. Nothing failed, because poll() swallows errors by design (see
+  // version.svelte.ts), but a suite that mocks the API to stay self-contained
+  // should not be going to the network to discover that.
+  //
+  // One fixed version, and never a second one: `running` baselines off the first
+  // answer, so latest === running for the life of the page and hasUpdate() cannot
+  // go true. The tests that DO want a release to land get their moving versions
+  // from routeHealth, which registers later and therefore wins.
+  await page.route("**/api/v1/health", (route) =>
+    route.fulfill({ json: { status: "ok", version: "v9.9.9", environment: "production" } }),
+  );
   await page.route("**/api/v1/me", (route) => route.fulfill({ json: signedInUser }));
   await page.route("**/api/v1/programs", (route) => route.fulfill({ json: programs }));
   await page.route("**/api/v1/sessions**", (route) => route.fulfill({ json: emptySessions }));
