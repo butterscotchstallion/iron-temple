@@ -32,6 +32,11 @@ fi
 # Everything else stays silent on purpose. refactor, test, chore, docs, build and
 # ci change nothing a lifter can see, and tagging a version for them would spend
 # a deploy on an identical app.
+#
+# scripts/changelog.sh matches the SAME set, because it writes the notes for the
+# release this script decides to cut. Widening the set here without widening it
+# there cuts a release whose notes say "no notable changes" — which is what
+# happened when perf and revert were added below and not there.
 level=0
 while IFS= read -r subj; do
   if printf '%s' "$subj" | grep -qE '^[a-z]+(\([^)]*\))?!:'; then
