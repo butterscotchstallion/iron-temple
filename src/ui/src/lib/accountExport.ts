@@ -7,11 +7,11 @@
  * chose. Going through the client would mean parsing a training history into
  * memory and re-serializing it, which is two conversions that can only lose.
  *
- * The base path still comes from the client's own config rather than a literal,
+ * The base path still comes from the client's own module rather than a literal,
  * so there remains exactly one place that knows where the API lives.
  */
 
-import { client } from "./api/client.gen";
+import { API_BASE_URL } from "./apiFetch";
 
 /** Used when the response carries no usable Content-Disposition. */
 const FALLBACK_FILENAME = "iron-temple-export.json";
@@ -34,10 +34,9 @@ export function filenameFrom(disposition: string | null): string {
   return raw;
 }
 
-/** Where the export lives, from whatever base the client is configured with. */
+/** Where the export lives, from the same base every generated call uses. */
 function exportUrl(): string {
-  const base = client.getConfig().baseUrl ?? "";
-  return `${base.replace(/\/$/, "")}/me/export`;
+  return `${API_BASE_URL.replace(/\/$/, "")}/me/export`;
 }
 
 /**

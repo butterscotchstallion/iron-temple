@@ -5,7 +5,7 @@
 # lives here rather than in lefthook.yml globs, for two reasons:
 #
 #   • Ordering and selection are explicit and testable. `pnpm generate:api` has to
-#     precede `pnpm check` (the generated hey-api client is git-ignored, so on a
+#     precede `pnpm check` (the generated orval client is git-ignored, so on a
 #     fresh clone svelte-check fails on a missing import); expressing that as a
 #     shell sequence beats relying on lefthook's command-ordering rules.
 #   • A glob that quietly matches nothing turns a gate into a no-op without ever

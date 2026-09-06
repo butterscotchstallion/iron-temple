@@ -33,14 +33,14 @@ export const auth = $state<{
  * not a failure — it sets `me` to null and lets the app render the sign-in page.
  */
 export async function loadMe(): Promise<void> {
-  const { data, error } = await getMe();
-  auth.me = error || !data ? null : data;
+  const me = await getMe();
+  auth.me = me.status === 200 ? me.data : null;
 
   // Only ask whether registration is open when nobody is signed in; for a
   // signed-in user the answer is always "no" and the request is wasted.
   if (!auth.me) {
     const status = await getRegistrationStatus();
-    auth.registrationOpen = status.data?.open ?? false;
+    auth.registrationOpen = status.status === 200 ? status.data.open : false;
   } else {
     auth.registrationOpen = false;
   }
@@ -56,13 +56,11 @@ export async function signIn(
   password: string,
   rememberMe: boolean,
 ): Promise<string | null> {
-  const { data, error } = await loginRequest({
-    body: { username, password, rememberMe },
-  });
-  if (error || !data) {
-    return errorMessage(error, "Incorrect username or password.");
+  const result = await loginRequest({ username, password, rememberMe });
+  if (result.status !== 200) {
+    return errorMessage(result.data, "Incorrect username or password.");
   }
-  auth.me = data;
+  auth.me = result.data;
   auth.registrationOpen = false;
   return null;
 }
@@ -74,13 +72,11 @@ export async function signUp(
   password: string,
   rememberMe: boolean,
 ): Promise<string | null> {
-  const { data, error } = await registerRequest({
-    body: { username, displayName, password, rememberMe },
-  });
-  if (error || !data) {
-    return errorMessage(error, "Couldn't create the account.");
+  const result = await registerRequest({ username, displayName, password, rememberMe });
+  if (result.status !== 201) {
+    return errorMessage(result.data, "Couldn't create the account.");
   }
-  auth.me = data;
+  auth.me = result.data;
   auth.registrationOpen = false;
   return null;
 }

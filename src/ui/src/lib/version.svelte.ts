@@ -103,10 +103,11 @@ export async function poll(): Promise<void> {
   if (inFlight) return;
   inFlight = true;
   try {
-    const { data } = await getHealth();
-    const reported = data?.version ?? "";
+    const health = await getHealth();
+    if (health.status !== 200) return;
+    const reported = health.data.version ?? "";
     if (reported === "") return;
-    version.environment = data?.environment ?? "";
+    version.environment = health.data.environment ?? "";
     version.latest = reported;
     // First answer of this page load is the baseline: whatever the API says
     // now is what this bundle was served alongside.

@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
-# Refresh the git-ignored hey-api client when the OpenAPI contract has changed.
+# Refresh the git-ignored orval client when the OpenAPI contract has changed.
 #
-# src/ui/src/lib/api/ is generated from src/api/openapi.yaml and is NOT tracked
+# src/ui/src/lib/api/generated/ is generated from src/api/openapi.yaml and is NOT tracked
 # (src/ui/.gitignore). So pulling a commit that changes the contract leaves the
 # client on disk describing the OLD contract, and svelte-check fails on call
 # sites that are actually correct — "has no exported member", "property does not
@@ -31,7 +31,7 @@
 # (a direct `pnpm generate:api` regenerates without touching it) and cost a
 # redundant 250ms run, but it can never read current while the client is stale.
 #
-# Editing openapi-ts.config.ts changes the output without changing the spec, so
+# Editing orval.config.ts changes the output without changing the spec, so
 # the stamp will read as current. That is fine: the npm scripts regenerate
 # unconditionally, so `pnpm dev` / `check` / `build` correct it immediately.
 #
@@ -45,7 +45,7 @@ ui="$root/src/ui"
 spec="$root/src/api/openapi.yaml"
 stamp="$ui/node_modules/.cache/iron-temple/openapi-spec.sha256"
 
-# Fresh clone: no node_modules, so openapi-ts isn't installed yet. Bail quietly —
+# Fresh clone: no node_modules, so orval isn't installed yet. Bail quietly —
 # `pnpm install` followed by any generate-chained script covers this case.
 [ -d "$ui/node_modules" ] || exit 0
 [ -f "$spec" ] || exit 0
@@ -55,7 +55,7 @@ stamp="$ui/node_modules/.cache/iron-temple/openapi-spec.sha256"
 current=$(sha256sum < "$spec" | cut -d' ' -f1)
 
 # Up to date only if the recorded hash matches AND a client actually exists.
-if [ -d "$ui/src/lib/api" ] && [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$current" ]; then
+if [ -d "$ui/src/lib/api/generated" ] && [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$current" ]; then
   exit 0
 fi
 

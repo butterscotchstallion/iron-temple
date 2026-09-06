@@ -16,7 +16,9 @@ vi.mock("./api", async (importOriginal) => ({
 }));
 
 const health = (v: string, environment = "production") => ({
+  status: 200,
   data: { status: "ok", version: v, environment },
+  headers: new Headers(),
 });
 
 // Module-level $state outlives a single test, so wind it back by hand.
@@ -172,7 +174,11 @@ describe("version store", () => {
   });
 
   it("ignores an answer with no version in it", async () => {
-    getHealth.mockResolvedValue({ data: { status: "ok" } });
+    getHealth.mockResolvedValue({
+      status: 200,
+      data: { status: "ok" },
+      headers: new Headers(),
+    });
     await poll();
 
     expect(version.running).toBe("");

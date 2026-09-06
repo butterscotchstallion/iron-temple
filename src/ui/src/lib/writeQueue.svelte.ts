@@ -41,6 +41,7 @@ import {
   updateSession,
   updateSessionSet,
 } from "./api";
+import { isOk } from "./apiFetch";
 import { isOnline, observe } from "./connectivity.svelte";
 
 /** Fields a set update may carry. Absolute values, never deltas — see coalesce. */
@@ -260,30 +261,19 @@ export function enqueue(write: PendingWrite): void {
 
 // ---- replay ----
 
-/** Send one entry. Resolves to the client's `{ data, error, response }`. */
+/** Send one entry. Resolves to the client's `{ status, data, headers }`. */
 function send(entry: QueuedWrite) {
   switch (entry.kind) {
     case "updateSet":
-      return updateSessionSet({
-        path: { sessionId: entry.sessionId, setId: entry.setId },
-        body: entry.body,
-      });
+      return updateSessionSet(entry.sessionId, entry.setId, entry.body);
     case "addSet":
-      return addSessionSet({
-        path: { sessionId: entry.sessionId },
-        body: { exerciseId: entry.exerciseId },
-      });
+      return addSessionSet(entry.sessionId, { exerciseId: entry.exerciseId });
     case "removeSet":
-      return removeSessionSet({
-        path: { sessionId: entry.sessionId, setId: entry.setId },
-      });
+      return removeSessionSet(entry.sessionId, entry.setId);
     case "updateSession":
-      return updateSession({
-        path: { sessionId: entry.sessionId },
-        body: { bodyweightLb: entry.bodyweightLb },
-      });
+      return updateSession(entry.sessionId, { bodyweightLb: entry.bodyweightLb });
     case "finishSession":
-      return finishSession({ path: { sessionId: entry.sessionId } });
+      return finishSession(entry.sessionId);
   }
 }
 
@@ -332,7 +322,7 @@ export async function flush(): Promise<void> {
 
       if (observe(result)) return; // transport failure: still offline
 
-      if (result.error) {
+      if (!isOk(result.status)) {
         rejected += 1;
       } else if (entry.kind === "addSet") {
         const realId = (result.data as { id?: number } | undefined)?.id;

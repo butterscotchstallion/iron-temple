@@ -186,7 +186,7 @@ if [ "$run_ui" -eq 1 ]; then
     # is to rebuild the image — not --no-verify, which costs you every other gate.
     gate "pnpm install --frozen-lockfile --offline" \
       sh -c "cd '$root/src/ui' && pnpm install --frozen-lockfile --offline"
-    # generate:api first — svelte-check imports the git-ignored hey-api client.
+    # generate:api first — svelte-check imports the git-ignored orvalapi client.
     gate "pnpm generate:api" sh -c "cd '$root/src/ui' && pnpm generate:api"
     gate "pnpm check"        sh -c "cd '$root/src/ui' && pnpm check"
     gate "pnpm test:unit"    sh -c "cd '$root/src/ui' && pnpm test:unit"

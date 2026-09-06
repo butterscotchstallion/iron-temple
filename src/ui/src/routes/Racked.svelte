@@ -62,13 +62,13 @@
     if (remembered) report = remembered;
     loading = remembered === undefined;
 
-    const { data, error } = await fetchThrough(key, () => getRacked({ query: { period } }));
-    if (error || !data) {
+    const result = await fetchThrough(key, () => getRacked({ period }));
+    if (result.status !== 200) {
       // A failed refresh leaves the recap that is already on screen. Only a
       // period with nothing cached reports the failure.
       if (!remembered) failed = true;
     } else {
-      report = data;
+      report = result.data;
     }
     loading = false;
   }

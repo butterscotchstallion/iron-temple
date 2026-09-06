@@ -42,13 +42,13 @@
     if (remembered) apply(remembered);
     loading = remembered === undefined;
 
-    const { data, error } = await fetchThrough(CACHE_KEYS.historyFirstPage, () =>
-      listSessions({ query: { limit: pageSize, offset: 0 } }),
+    const result = await fetchThrough(CACHE_KEYS.historyFirstPage, () =>
+      listSessions({ limit: pageSize, offset: 0 }),
     );
-    if (error || !data) {
+    if (result.status !== 200) {
       if (!remembered) failed = true;
     } else {
-      apply(data);
+      apply(result.data);
     }
     loading = false;
   }
@@ -56,15 +56,13 @@
   async function loadMore() {
     loadingMore = true;
     loadMoreFailed = false;
-    const { data, error } = await listSessions({
-      query: { limit: pageSize, offset: sessions.length },
-    });
-    if (error || !data) {
+    const page = await listSessions({ limit: pageSize, offset: sessions.length });
+    if (page.status !== 200) {
       loadMoreFailed = true;
     } else {
-      sessions = [...sessions, ...data.items];
-      total = data.total;
-      totalVolumeLb = data.totalVolumeLb;
+      sessions = [...sessions, ...page.data.items];
+      total = page.data.total;
+      totalVolumeLb = page.data.totalVolumeLb;
     }
     loadingMore = false;
   }

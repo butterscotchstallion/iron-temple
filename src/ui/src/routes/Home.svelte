@@ -54,14 +54,14 @@
     // Usually already in flight: the shell starts this at launch, alongside
     // /me, so by the time this route mounts there is a promise to join rather
     // than a request to make.
-    const { data, error } = await loadHomeSessions();
-    if (error || !data) {
+    const result = await loadHomeSessions();
+    if (result.status !== 200) {
       // A failed refresh keeps the numbers already on screen. Only a lifter
       // with nothing cached is told the load failed, because only they have
       // nothing to read.
       if (!remembered) failed = true;
     } else {
-      apply(data);
+      apply(result.data);
     }
     loading = false;
   }

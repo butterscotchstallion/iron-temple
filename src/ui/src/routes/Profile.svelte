@@ -99,13 +99,11 @@
     gymError = null;
     gymSaved = false;
 
-    const { data, error } = await updateMe({
-      body: { barWeightLb: barWeight, plates },
-    });
-    if (error || !data) {
+    const saved = await updateMe({ barWeightLb: barWeight, plates });
+    if (saved.status !== 200) {
       gymError = "Couldn't save your gym setup.";
     } else {
-      setMe(data);
+      setMe(saved.data);
       gymSaved = true;
     }
     gymSaving = false;
@@ -117,11 +115,11 @@
     profileError = null;
     profileSaved = false;
 
-    const { data, error } = await updateMe({ body: { displayName, avatarColor } });
-    if (error || !data) {
+    const saved = await updateMe({ displayName, avatarColor });
+    if (saved.status !== 200) {
       profileError = "Couldn't save your profile.";
     } else {
-      setMe(data);
+      setMe(saved.data);
       profileSaved = true;
     }
     profileSaving = false;
@@ -133,10 +131,8 @@
     passwordError = null;
     passwordSaved = false;
 
-    const { error } = await changePassword({
-      body: { currentPassword, newPassword },
-    });
-    if (error) {
+    const changed = await changePassword({ currentPassword, newPassword });
+    if (changed.status !== 204) {
       // The server distinguishes "wrong current password" (401) from a new
       // password that fails validation (400); both land here as a message the
       // user can act on.
@@ -157,13 +153,13 @@
 
     avatarBusy = true;
     avatarError = null;
-    const { data, error } = await uploadAvatar({ body: { avatar: file } });
-    if (error || !data) {
+    const uploaded = await uploadAvatar({ avatar: file });
+    if (uploaded.status !== 200) {
       avatarError = "Couldn't upload that image. PNG or JPEG, up to 256 KB.";
     } else if (auth.me) {
       // Patch the etag locally so the <img> cache-buster changes and the new
       // picture appears at once, without a round trip to /me.
-      setMe({ ...auth.me, hasAvatar: true, avatarEtag: data.etag });
+      setMe({ ...auth.me, hasAvatar: true, avatarEtag: uploaded.data.etag });
     }
     avatarBusy = false;
     // Clear the input so re-picking the same file fires change again.
@@ -173,8 +169,8 @@
   async function removeAvatar() {
     avatarBusy = true;
     avatarError = null;
-    const { error } = await deleteAvatar();
-    if (error) {
+    const removed = await deleteAvatar();
+    if (removed.status !== 204) {
       avatarError = "Couldn't remove your avatar.";
     } else if (auth.me) {
       setMe({ ...auth.me, hasAvatar: false, avatarEtag: undefined });

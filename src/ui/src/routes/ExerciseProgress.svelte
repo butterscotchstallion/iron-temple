@@ -53,12 +53,12 @@
     // One request. This used to fetch the WHOLE exercise library alongside the
     // history — all 53 movements — so it could look up a single name in it; the
     // lift now arrives named by its own history endpoint.
-    const { data, error } = await getExerciseHistory({ path: { exerciseId } });
-    if (error || !data) {
+    const history = await getExerciseHistory(exerciseId);
+    if (history.status !== 200) {
       failed = true;
     } else {
-      points = data.points;
-      name = data.exerciseName;
+      points = history.data.points;
+      name = history.data.exerciseName;
     }
     loading = false;
   }

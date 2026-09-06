@@ -1,12 +1,10 @@
 import "./app.css";
 import { mount } from "svelte";
 import App from "./App.svelte";
-import { client } from "./lib/api/client.gen";
 
-// Point the generated client at the API base path. In dev, Vite proxies
-// /api -> http://localhost:8080 (see vite.config.ts); in production the UI is
-// served from the same origin as the API.
-client.setConfig({ baseUrl: "/api/v1" });
+// Where the API lives is no longer configured here: every generated call goes
+// through src/lib/apiFetch.ts, which owns the base path (and the offline case)
+// for the whole app.
 
 const app = mount(App, {
   target: document.getElementById("app")!,

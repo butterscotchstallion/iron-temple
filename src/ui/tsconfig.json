@@ -25,7 +25,7 @@
     "src/**/*.svelte",
     "vite.config.ts",
     "vitest-setup.ts",
-    "openapi-ts.config.ts",
+    "orval.config.ts",
     "playwright.config.ts"
   ]
 }

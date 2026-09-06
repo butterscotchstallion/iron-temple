@@ -20,6 +20,6 @@ const HOME_SESSION_LIMIT = 100;
  */
 export function loadHomeSessions() {
   return fetchThrough(CACHE_KEYS.homeSessions, () =>
-    listSessions({ query: { limit: HOME_SESSION_LIMIT } }),
+    listSessions({ limit: HOME_SESSION_LIMIT }),
   );
 }

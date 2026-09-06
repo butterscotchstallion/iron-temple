@@ -119,7 +119,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
 
-      # The hey-api client (src/ui/src/lib/api/) is git-ignored; regenerate it from the
+      # The orval client (src/ui/src/lib/api/generated/) is git-ignored; regenerate it from the
       # backend OpenAPI spec before anything that imports it (check / dev server / e2e).
       - name: Generate API client
         run: pnpm generate:api
