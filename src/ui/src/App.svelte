@@ -122,7 +122,7 @@
        returned yet either, and a shimmer standing in for two short labels is
        more distracting than the space they will occupy. -->
   <header
-    class="sticky top-0 z-40 w-full border-b border-white/10 bg-black/95 backdrop-blur"
+    class="sticky top-0 z-40 w-full border-b border-white/10 bg-black/95"
     aria-hidden="true"
   >
     <div class="h-12"></div>

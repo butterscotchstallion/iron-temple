@@ -17,8 +17,15 @@
   // prompt is what tells you a newer one exists.
 </script>
 
+<!-- No backdrop-blur. The bar is sticky, so the whole page passes underneath it:
+     a blurred backdrop is one the compositor has to re-read and re-blur on every
+     scrolled frame, and Firefox pays noticeably more for that than Chrome does.
+     What it bought was nothing — bg-black/95 covers the backdrop to within 5%,
+     and a 5% ghost of blurred-vs-sharp text is not a visible effect. Anything
+     translucent enough to blur usefully (see NavBar, bg-card/40) is welcome to
+     it; this is not that. -->
 <header
-  class="sticky top-0 z-40 w-full border-b border-white/10 bg-black/95 backdrop-blur"
+  class="sticky top-0 z-40 w-full border-b border-white/10 bg-black/95"
 >
   <div class="mx-auto flex h-12 max-w-5xl items-center justify-between gap-4 px-5">
     <VersionChangelog
