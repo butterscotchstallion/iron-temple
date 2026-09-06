@@ -46,10 +46,13 @@
     </DropdownMenu.Trigger>
 
     <DropdownMenu.Portal>
+      <!-- No backdrop-blur: bg-card is opaque, so there was never any backdrop
+           left to see through it. Same dead effect the scrolling surfaces
+           carried — see HeaderBar. -->
       <DropdownMenu.Content
         sideOffset={8}
         align="end"
-        class="z-50 min-w-44 rounded-md border border-border/60 bg-card p-1 shadow-lg shadow-black/40 backdrop-blur"
+        class="z-50 min-w-44 rounded-md border border-border/60 bg-card p-1 shadow-lg shadow-black/40"
       >
         <DropdownMenu.Item class={itemClass} onSelect={() => go("/racked")}>
           <BarChart3 class="size-4" aria-hidden="true" />

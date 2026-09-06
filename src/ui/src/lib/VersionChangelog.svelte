@@ -72,13 +72,15 @@
     <span id={hintId} class="sr-only">Show the release notes for this version</span>
 
     <LinkPreview.Portal>
+      <!-- No backdrop-blur, for the reason UserMenu's dropdown has none: bg-card
+           is opaque, so it blurred a backdrop nobody could see. -->
       <LinkPreview.Content
         side="bottom"
         align="start"
         sideOffset={8}
         collisionPadding={16}
         data-testid="changelog-panel"
-        class="z-50 max-h-[60vh] w-[min(28rem,calc(100vw-2rem))] overflow-y-auto rounded-md border border-border/60 bg-card p-4 shadow-lg shadow-black/40 backdrop-blur"
+        class="z-50 max-h-[60vh] w-[min(28rem,calc(100vw-2rem))] overflow-y-auto rounded-md border border-border/60 bg-card p-4 shadow-lg shadow-black/40"
       >
         <h2 class="text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-primary">
           What's new in {notes.version}

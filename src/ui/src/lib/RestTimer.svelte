@@ -208,9 +208,15 @@
 
 <!-- A floating pill rather than a card in the page flow: the countdown matters
      between sets, not while you're reading the session, so it sits out of the
-     way in the corner. Anchored bottom-right because the nav lives up top. -->
+     way in the corner. Anchored bottom-right because the nav lives up top.
+
+     Fixed, so like the sticky header it had a backdrop-blur that the compositor
+     re-blurred for every frame the session scrolled underneath — and here the
+     clock repaints the same region once a second on top of that. bg-card/90
+     leaves 10% of the backdrop showing, which is not enough of it to tell blurred
+     from sharp. See HeaderBar for the longer version. -->
 <div
-  class="fixed bottom-4 right-4 z-40 flex items-center gap-3 rounded-2xl border border-border/60 bg-card/90 py-2 pl-4 pr-2 shadow-lg backdrop-blur"
+  class="fixed bottom-4 right-4 z-40 flex items-center gap-3 rounded-2xl border border-border/60 bg-card/90 py-2 pl-4 pr-2 shadow-lg"
   data-testid="rest-timer"
 >
   <div class="flex flex-col leading-none">
