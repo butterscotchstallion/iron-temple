@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { TRANSPORT_FAILURE_STATUS } from "./apiFetch";
 import {
   isOnline,
   isTransportFailure,
@@ -18,41 +19,34 @@ afterEach(() => {
 });
 
 describe("isTransportFailure", () => {
-  // The discriminator is the absence of a response. The generated client
-  // resolves rather than throws, and leaves `response` undefined only when
-  // fetch itself rejected.
-  it("is true for an error with no response", () => {
-    expect(isTransportFailure({ error: new TypeError("Failed to fetch") })).toBe(true);
+  // The discriminator is the sentinel status. Every call resolves rather than
+  // throws, and carries the sentinel only when fetch itself rejected — see
+  // apiFetch.ts for why it is encoded as a status rather than an exception.
+  it("is true for the transport-failure sentinel", () => {
+    expect(isTransportFailure({ status: TRANSPORT_FAILURE_STATUS })).toBe(true);
   });
 
   // A 500 is a REACHABLE server that had an opinion. Calling it offline would
   // queue writes the server has already refused and retry them forever.
   it("is false for an error the server answered with", () => {
-    expect(
-      isTransportFailure({
-        error: { message: "no" },
-        response: new Response("", { status: 500 }),
-      }),
-    ).toBe(false);
+    expect(isTransportFailure({ status: 500 })).toBe(false);
   });
 
   it("is false for a success", () => {
-    expect(isTransportFailure({ response: new Response() })).toBe(false);
+    expect(isTransportFailure({ status: 200 })).toBe(false);
   });
 });
 
 describe("observe", () => {
   it("goes offline on a transport failure and reports it", () => {
-    expect(observe({ error: new TypeError("Failed to fetch") })).toBe(true);
+    expect(observe({ status: TRANSPORT_FAILURE_STATUS })).toBe(true);
     expect(isOnline()).toBe(false);
   });
 
   it("comes back online on any answer at all, including an error", () => {
     markUnreachable();
 
-    expect(
-      observe({ error: { message: "no" }, response: new Response("", { status: 409 }) }),
-    ).toBe(false);
+    expect(observe({ status: 409 })).toBe(false);
     expect(isOnline()).toBe(true);
   });
 });

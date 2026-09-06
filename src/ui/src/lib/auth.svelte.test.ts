@@ -17,6 +17,13 @@ vi.mock("./api", async (importOriginal) => ({
   register,
 }));
 
+/** An answer in the shape the generated client produces. */
+const answer = (status: number, data: unknown = undefined) => ({
+  status,
+  data,
+  headers: new Headers(),
+});
+
 const ada: User = {
   id: 1,
   username: "ada",
@@ -30,8 +37,8 @@ beforeEach(() => {
   auth.me = null;
   auth.loaded = false;
   auth.registrationOpen = false;
-  getRegistrationStatus.mockResolvedValue({ data: { open: false } });
-  logout.mockResolvedValue({ data: undefined, error: undefined });
+  getRegistrationStatus.mockResolvedValue(answer(200, { open: false }));
+  logout.mockResolvedValue(answer(204));
 });
 
 afterEach(() => {
@@ -40,7 +47,7 @@ afterEach(() => {
 
 describe("loadMe", () => {
   it("stores the user returned by the API", async () => {
-    getMe.mockResolvedValue({ data: ada, error: undefined });
+    getMe.mockResolvedValue(answer(200, ada));
     await loadMe();
     expect(auth.me).toEqual(ada);
     expect(auth.loaded).toBe(true);
@@ -48,20 +55,20 @@ describe("loadMe", () => {
 
   // Signed out is the expected state, not an error condition.
   it("treats a 401 as signed out rather than a failure", async () => {
-    getMe.mockResolvedValue({ data: undefined, error: { code: "unauthenticated" } });
+    getMe.mockResolvedValue(answer(401, { code: "unauthenticated" }));
     await loadMe();
     expect(auth.me).toBeNull();
     expect(auth.loaded).toBe(true);
   });
 
   it("asks whether registration is open only when signed out", async () => {
-    getMe.mockResolvedValue({ data: undefined, error: { code: "unauthenticated" } });
-    getRegistrationStatus.mockResolvedValue({ data: { open: true } });
+    getMe.mockResolvedValue(answer(401, { code: "unauthenticated" }));
+    getRegistrationStatus.mockResolvedValue(answer(200, { open: true }));
     await loadMe();
     expect(auth.registrationOpen).toBe(true);
 
     vi.clearAllMocks();
-    getMe.mockResolvedValue({ data: ada, error: undefined });
+    getMe.mockResolvedValue(answer(200, ada));
     await loadMe();
     expect(getRegistrationStatus).not.toHaveBeenCalled();
     expect(auth.registrationOpen).toBe(false);
@@ -70,31 +77,32 @@ describe("loadMe", () => {
 
 describe("signIn", () => {
   it("stores the user and reports success", async () => {
-    login.mockResolvedValue({ data: ada, error: undefined });
+    login.mockResolvedValue(answer(200, ada));
     const error = await signIn("ada", "hunter2hunter2", true);
     expect(error).toBeNull();
     expect(auth.me).toEqual(ada);
   });
 
   it("passes rememberMe through to the API", async () => {
-    login.mockResolvedValue({ data: ada, error: undefined });
+    login.mockResolvedValue(answer(200, ada));
     await signIn("ada", "hunter2hunter2", true);
     expect(login).toHaveBeenCalledWith({
-      body: { username: "ada", password: "hunter2hunter2", rememberMe: true },
+      username: "ada",
+      password: "hunter2hunter2",
+      rememberMe: true,
     });
   });
 
   it("surfaces the server's message on a rejected sign-in", async () => {
-    login.mockResolvedValue({
-      data: undefined,
-      error: { code: "unauthenticated", message: "invalid username or password" },
-    });
+    login.mockResolvedValue(
+      answer(401, { code: "unauthenticated", message: "invalid username or password" }),
+    );
     expect(await signIn("ada", "wrong", false)).toBe("invalid username or password");
     expect(auth.me).toBeNull();
   });
 
   it("falls back to a readable message when the error has no shape", async () => {
-    login.mockResolvedValue({ data: undefined, error: "network down" });
+    login.mockResolvedValue(answer(0));
     expect(await signIn("ada", "wrong", false)).toBe(
       "Incorrect username or password.",
     );
@@ -104,7 +112,7 @@ describe("signIn", () => {
 describe("signUp", () => {
   it("stores the user and closes registration", async () => {
     auth.registrationOpen = true;
-    register.mockResolvedValue({ data: ada, error: undefined });
+    register.mockResolvedValue(answer(201, ada));
 
     expect(await signUp("ada", "Ada Lovelace", "hunter2hunter2", true)).toBeNull();
     expect(auth.me).toEqual(ada);
@@ -112,10 +120,9 @@ describe("signUp", () => {
   });
 
   it("reports the server's reason for refusing", async () => {
-    register.mockResolvedValue({
-      data: undefined,
-      error: { code: "registration_closed", message: "registration is closed" },
-    });
+    register.mockResolvedValue(
+      answer(403, { code: "registration_closed", message: "registration is closed" }),
+    );
     expect(await signUp("ada", "", "hunter2hunter2", false)).toBe(
       "registration is closed",
     );
@@ -125,7 +132,7 @@ describe("signUp", () => {
 describe("signOut", () => {
   it("revokes the session server-side and clears the user", async () => {
     auth.me = { ...ada };
-    getMe.mockResolvedValue({ data: undefined, error: { code: "unauthenticated" } });
+    getMe.mockResolvedValue(answer(401, { code: "unauthenticated" }));
 
     await signOut();
 
@@ -138,7 +145,7 @@ describe("signOut", () => {
   it("clears the user even when the request fails", async () => {
     auth.me = { ...ada };
     logout.mockRejectedValue(new Error("network down"));
-    getMe.mockResolvedValue({ data: undefined, error: { code: "unauthenticated" } });
+    getMe.mockResolvedValue(answer(401, { code: "unauthenticated" }));
 
     await expect(signOut()).rejects.toThrow("network down");
     expect(auth.me).toBeNull();

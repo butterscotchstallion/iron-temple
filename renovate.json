@@ -19,6 +19,11 @@
       "description": "vite-plugin-svelte v7 peers on vite ^8. On our vite 6 it silently breaks `pnpm dev`: v7 defaults prebundleSvelteLibraries to true and prebundles .svelte through vite 8's rolldown optimizer, so on vite 6 the svelte libs get dropped from optimizeDeps.exclude and esbuild dies with 'No loader is configured for .svelte files'. Only the dev server is affected, so no CI gate catches it. Hold at v6 until vite itself moves to 8.",
       "matchPackageNames": ["@sveltejs/vite-plugin-svelte"],
       "allowedVersions": "<7"
+    },
+    {
+      "description": "js-yaml is here only as a pnpm override, to hold orval's copy at or above 4.3.0 for CVE-2026-59869/59870 (see 3d904fe). v5 drops the CommonJS default export, and orval imports it as `import yaml from \"js-yaml\"` — so v5 breaks `pnpm generate:api` outright while clearing nothing the 4.3 line does not already clear. Revisit when orval ships a v5-compatible import.",
+      "matchPackageNames": ["js-yaml"],
+      "allowedVersions": "<5"
     }
   ]
 }

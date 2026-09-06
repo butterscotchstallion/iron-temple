@@ -2,7 +2,7 @@
 
 Svelte 5 + Vite + TypeScript + Tailwind v4. Mobile-first (tuned for iPad),
 synthwave aesthetic. The typed API client is generated from the backend's
-OpenAPI spec with [hey-api](https://heyapi.dev).
+OpenAPI spec with [orval](https://orval.dev).
 
 Package manager: **pnpm** (pinned via `packageManager` in `package.json`; use
 `corepack enable` to get the matching version automatically).
@@ -20,17 +20,21 @@ pnpm dev            # http://localhost:5173 (proxies /api -> localhost:8080)
 | `pnpm dev` | Vite dev server |
 | `pnpm build` | Production build |
 | `pnpm check` | `svelte-check` type checking |
-| `pnpm generate:api` | Regenerate the hey-api client from the OpenAPI spec |
+| `pnpm generate:api` | Regenerate the orval client from the OpenAPI spec |
 | `pnpm test:unit` | Vitest unit + component tests (jsdom) |
 | `pnpm test:coverage` | Vitest with a V8 coverage report (text + `coverage/` html/lcov) |
 | `pnpm test:e2e` | Playwright end-to-end tests |
 
 ## Layout
-- `src/App.svelte` — app shell: loads programs from the API (hey-api client), plus the rest timer.
+- `src/App.svelte` — app shell: loads programs from the API (orval client), plus the rest timer.
 - `src/lib/programs.ts` — pure view helpers for program data (unit-tested).
 - `src/lib/RestTimer.svelte` — 3-minute rest countdown (Svelte 5 runes).
 - `src/lib/time.ts` — pure helpers (unit-tested in `time.test.ts`).
-- `src/lib/api/` — **generated** hey-api client (git-ignored; run `generate:api`).
+- `src/lib/api/` — the API client. `index.ts` is a tracked barrel; everything under
+  `generated/` is written by orval and git-ignored (run `generate:api`).
+- `src/lib/apiFetch.ts` — the single fetch every generated call goes through: it owns
+  the base path and turns an unreachable server into a `status: 0` answer rather than
+  a thrown rejection.
 - `src/lib/VersionChangelog.svelte` — the header's version label, and the panel of
   this release's notes that opens off it on hover/tap/focus. The notes are inlined
   at build time from `virtual:iron-temple/changelog` (see `changelogVirtualModule()`
@@ -70,7 +74,7 @@ pnpm dev            # http://localhost:5173 (proxies /api -> localhost:8080)
 
 ## Version sensitivity
 This scaffold was authored without a reachable npm registry, so nothing here has
-been installed or run. Tailwind v4, Svelte 5 (`mount` API, runes), and hey-api
+been installed or run. Tailwind v4, Svelte 5 (`mount` API, runes), and orval
 move quickly — if `pnpm install` or `pnpm generate:api` complain, check the pinned
-versions in `package.json` and hey-api's current config format. hey-api can be
-pinned exactly with `pnpm add -D -E @hey-api/openapi-ts@latest`.
+versions in `package.json` and orval's current config format. orval can be
+pinned exactly with `pnpm add -D -E orval@latest`.

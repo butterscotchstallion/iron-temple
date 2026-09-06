@@ -45,13 +45,13 @@
     // ask for. This used to be followed by a history request PER CARD, each
     // transferring a lift's entire history so the browser could take one
     // maximum from it; the server computes that maximum now.
-    const { data: exercises, error } = await fetchThrough(CACHE_KEYS.performedExercises, () =>
-      listExercises({ query: { scope: "performed" } }),
+    const result = await fetchThrough(CACHE_KEYS.performedExercises, () =>
+      listExercises({ scope: "performed" }),
     );
-    if (error || !exercises) {
+    if (result.status !== 200) {
       if (!remembered) failed = true;
     } else {
-      apply(exercises);
+      apply(result.data);
     }
     loading = false;
   }

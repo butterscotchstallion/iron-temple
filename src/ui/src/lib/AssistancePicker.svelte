@@ -72,13 +72,13 @@
   async function load() {
     loading = true;
     failed = false;
-    const { data, error } = await listExercises();
-    if (error || !data) {
+    const result = await listExercises();
+    if (result.status !== 200) {
       failed = true;
       loading = false;
       return;
     }
-    exercises = data;
+    exercises = result.data;
     loading = false;
   }
 

@@ -117,11 +117,11 @@
     // one preview PER DAY, arranged so the days could not even start until the
     // program came back.
     const [prog, previews] = await Promise.all([
-      getProgram({ path: { programId } }),
-      previewNextSessions({ path: { programId }, query: { deload } }),
+      getProgram(programId),
+      previewNextSessions(programId, { deload }),
     ]);
 
-    if (prog.error || !prog.data) {
+    if (prog.status !== 200) {
       failed = true;
       loading = false;
       return;
@@ -131,9 +131,13 @@
 
     // The prescription is what puts weights on the cards; without it the day
     // still renders, from the program's own structure, with no numbers.
-    if (previews.error) previewFailed = true;
-    layoff = previews.data?.layoff ?? null;
-    const byDay = new Map(previews.data?.days.map((d) => [d.programDayId, d.exercises]));
+    if (previews.status !== 200) previewFailed = true;
+    layoff = previews.status === 200 ? (previews.data.layoff ?? null) : null;
+    const byDay = new Map(
+      previews.status === 200
+        ? previews.data.days.map((d) => [d.programDayId, d.exercises])
+        : [],
+    );
 
     days = prog.data.days.map((day) => ({
       id: day.id,
@@ -155,10 +159,7 @@
   async function acceptDeload() {
     deloadFailed = false;
     deloading = true;
-    const previews = await previewNextSessions({
-      path: { programId },
-      query: { deload: true },
-    });
+    const previews = await previewNextSessions(programId, { deload: true });
     deloading = false;
 
     // All of the days or none of them. Start sends one answer for the whole
@@ -169,7 +170,7 @@
     //
     // Nothing is marked decided on the way out, so the prompt comes back and
     // the lifter can simply press it again — a failed request is not an answer.
-    if (previews.error || !previews.data) {
+    if (previews.status !== 200) {
       deloadFailed = true;
       return;
     }
@@ -220,19 +221,16 @@
     },
   ): Promise<boolean> {
     assistanceError = null;
-    const { data, error } = await addAssistance({
-      path: { programId, dayId: day.id },
-      body: choice,
-    });
-    if (error || !data) {
-      assistanceError = error?.message ?? "Couldn't add that exercise.";
+    const added = await addAssistance(programId, day.id, choice);
+    if (added.status !== 201) {
+      assistanceError = added.data?.message ?? "Couldn't add that exercise.";
       return false;
     }
     pickerDayId = null;
     // Re-preview this day rather than calling load(): the new entry's weight
     // carries forward from history and is the server's to compute, but a full
     // reload would blank the whole program to a skeleton over one added lift.
-    await refreshDay(day.id, [...day.assistance, data]);
+    await refreshDay(day.id, [...day.assistance, added.data]);
     return true;
   }
 
@@ -242,25 +240,19 @@
   async function refreshDay(dayId: number, assistance: ProgramDayAssistance[]) {
     // Carries the deload answer, so adding a lift after accepting one doesn't
     // re-draw the day at its undeloaded weights.
-    const preview = await previewNextSession({
-      path: { programId, dayId },
-      query: { deload },
-    });
+    const preview = await previewNextSession(programId, dayId, { deload });
+    const exercises = preview.status === 200 ? preview.data.exercises : undefined;
     days = days.map((d) =>
-      d.id === dayId
-        ? { ...d, assistance, exercises: preview.data?.exercises ?? d.exercises }
-        : d,
+      d.id === dayId ? { ...d, assistance, exercises: exercises ?? d.exercises } : d,
     );
-    if (preview.error) previewFailed = true;
+    if (preview.status !== 200) previewFailed = true;
   }
 
   async function remove(day: DayView, entry: ProgramDayAssistance) {
     assistanceError = null;
-    const { error } = await removeAssistance({
-      path: { programId, dayId: day.id, assistanceId: entry.id },
-    });
-    if (error) {
-      assistanceError = error.message ?? `Couldn't remove ${entry.exerciseName}.`;
+    const removed = await removeAssistance(programId, day.id, entry.id);
+    if (removed.status !== 204) {
+      assistanceError = removed.data?.message ?? `Couldn't remove ${entry.exerciseName}.`;
       return;
     }
     // Local removal is enough here: nothing else on the card depends on it, so
@@ -291,16 +283,16 @@
   // workout, and there is nothing they could do about it from here.
   async function remember() {
     if (!auth.me || auth.me.currentProgramId === programId) return;
-    const { data } = await updateMe({ body: { currentProgramId: programId } });
-    if (data) setMe(data);
+    const updated = await updateMe({ currentProgramId: programId });
+    if (updated.status === 200) setMe(updated.data);
   }
 
   async function start(dayId: number) {
     startFailed = false;
     startingDayId = dayId;
-    const res = await createSession({ body: { programDayId: dayId, deload } });
+    const res = await createSession({ programDayId: dayId, deload });
     startingDayId = null;
-    if (res.error || !res.data) {
+    if (res.status !== 201) {
       startFailed = true;
       return;
     }
@@ -315,11 +307,8 @@
     weekdayFailed = false;
     const value = select.value;
     const weekday = value === "" ? null : Number(value);
-    const { error } = await updateProgramDayWeekday({
-      path: { programId, dayId: day.id },
-      body: { weekday },
-    });
-    if (error) {
+    const saved = await updateProgramDayWeekday(programId, day.id, { weekday });
+    if (saved.status !== 204) {
       // The one-way `value={...}` binding won't re-assert the old value when
       // `day.weekday` is unchanged, so reset the DOM control explicitly.
       select.value = day.weekday === null ? "" : String(day.weekday);
@@ -392,12 +381,9 @@
     if (baselineFor == null) return;
     baselineSaving = true;
     baselineFailed = false;
-    const { error } = await setBaseline({
-      path: { exerciseId: baselineFor },
-      body: { weightLb: baselineWeight },
-    });
+    const saved = await setBaseline(baselineFor, { weightLb: baselineWeight });
     baselineSaving = false;
-    if (error) {
+    if (saved.status !== 204) {
       baselineFailed = true;
       return;
     }

@@ -61,11 +61,11 @@
     if (remembered) exercises = remembered;
     loading = remembered === undefined;
 
-    const { data, error } = await fetchThrough(CACHE_KEYS.allExercises, () => listExercises());
-    if (error || !data) {
+    const result = await fetchThrough(CACHE_KEYS.allExercises, () => listExercises());
+    if (result.status !== 200) {
       if (!remembered) failed = true;
     } else {
-      exercises = data;
+      exercises = result.data;
     }
     loading = false;
   }
@@ -77,20 +77,21 @@
 
     saving = true;
     actionError = null;
-    const { data, error } = await createExercise({
-      body: { name, muscleGroup: newGroup, equipment: newEquipment },
+    const created = await createExercise({
+      name,
+      muscleGroup: newGroup,
+      equipment: newEquipment,
     });
     saving = false;
-    if (error || !data) {
-      actionError =
-        error?.message ?? "Couldn't add that exercise. Try again.";
+    if (created.status !== 201) {
+      actionError = created.data?.message ?? "Couldn't add that exercise. Try again.";
       return;
     }
     // Splice it in rather than refetching: the list is alphabetical, and one
     // insertion is cheaper and less jarring than a whole reload. The cached
     // copy is now a library short one movement, so drop it — the next visit
     // pays a load rather than opening on a list missing what was just added.
-    exercises = [...exercises, data].sort((a, b) => a.name.localeCompare(b.name));
+    exercises = [...exercises, created.data].sort((a, b) => a.name.localeCompare(b.name));
     invalidate(CACHE_KEYS.allExercises);
     newName = "";
     adding = false;
@@ -98,11 +99,11 @@
 
   async function remove(exercise: Exercise) {
     actionError = null;
-    const { error } = await deleteExercise({ path: { exerciseId: exercise.id } });
-    if (error) {
+    const deleted = await deleteExercise(exercise.id);
+    if (deleted.status !== 204) {
       // The server's message names the reason — logged sets, or still on a
       // program — which is more use than "couldn't delete".
-      actionError = error.message ?? `Couldn't delete ${exercise.name}.`;
+      actionError = deleted.data?.message ?? `Couldn't delete ${exercise.name}.`;
       return;
     }
     exercises = exercises.filter((e) => e.id !== exercise.id);

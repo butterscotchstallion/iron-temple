@@ -221,7 +221,7 @@ beforeEach(() => {
 
 describe("Racked", () => {
   it("renders the headline and its restatement in objects", async () => {
-    getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
+    getRacked.mockResolvedValue({ status: 200, data: fullReport(), headers: new Headers() });
     render(Racked);
 
     await waitFor(() => expect(screen.getByText("84,000")).toBeInTheDocument());
@@ -231,7 +231,7 @@ describe("Racked", () => {
   });
 
   it("renders every populated section without touching a null", async () => {
-    getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
+    getRacked.mockResolvedValue({ status: 200, data: fullReport(), headers: new Headers() });
     render(Racked);
 
     await waitFor(() =>
@@ -250,7 +250,7 @@ describe("Racked", () => {
   // The split divides the headline rather than qualifying it, so the page has to
   // show both halves against the same total the card above it prints.
   it("breaks the headline volume into main work and assistance", async () => {
-    getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
+    getRacked.mockResolvedValue({ status: 200, data: fullReport(), headers: new Headers() });
     render(Racked);
 
     const split = await screen.findByTestId("work-split");
@@ -268,7 +268,7 @@ describe("Racked", () => {
       main: { volumeLb: 84_000, sets: 180, reps: 900, lifts: 2, share: 1 },
       assistance: { volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0 },
     };
-    getRacked.mockResolvedValue({ data: report, error: undefined });
+    getRacked.mockResolvedValue({ status: 200, data: report, headers: new Headers() });
     render(Racked);
 
     await waitFor(() =>
@@ -278,7 +278,7 @@ describe("Racked", () => {
   });
 
   it("tags the assistance rows in the volume breakdown", async () => {
-    getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
+    getRacked.mockResolvedValue({ status: 200, data: fullReport(), headers: new Headers() });
     render(Racked);
 
     await waitFor(() => expect(screen.getByText("Barbell Curl")).toBeInTheDocument());
@@ -290,7 +290,7 @@ describe("Racked", () => {
   // one ranks the lifts, this one accounts for the body — including the parts of
   // it that went untouched, which no ranking of lifts can show.
   it("accounts for every muscle group, trained or not", async () => {
-    getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
+    getRacked.mockResolvedValue({ status: 200, data: fullReport(), headers: new Headers() });
     render(Racked);
 
     const card = await screen.findByTestId("stat-muscles");
@@ -303,7 +303,7 @@ describe("Racked", () => {
   });
 
   it("names the untrained groups in a sentence", async () => {
-    getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
+    getRacked.mockResolvedValue({ status: 200, data: fullReport(), headers: new Headers() });
     render(Racked);
 
     const card = await screen.findByTestId("stat-muscles");
@@ -321,7 +321,7 @@ describe("Racked", () => {
       volumeLb: m.volumeLb || 1_000,
       sets: m.sets || 1,
     }));
-    getRacked.mockResolvedValue({ data: report, error: undefined });
+    getRacked.mockResolvedValue({ status: 200, data: report, headers: new Headers() });
     render(Racked);
 
     const card = await screen.findByTestId("stat-muscles");
@@ -332,7 +332,7 @@ describe("Racked", () => {
   // rather than seven groups the lifter failed to train, and the card goes with
   // it — telling a quiet month it trained none of seven things is piling on.
   it("drops the card entirely for a period with no work", async () => {
-    getRacked.mockResolvedValue({ data: emptyReport(), error: undefined });
+    getRacked.mockResolvedValue({ status: 200, data: emptyReport(), headers: new Headers() });
     render(Racked);
 
     await waitFor(() =>
@@ -342,7 +342,7 @@ describe("Racked", () => {
   });
 
   it("reports bodyweight as an end value and a change", async () => {
-    getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
+    getRacked.mockResolvedValue({ status: 200, data: fullReport(), headers: new Headers() });
     render(Racked);
 
     const card = await screen.findByTestId("stat-bodyweight");
@@ -358,7 +358,7 @@ describe("Racked", () => {
   it("omits the bodyweight card when the period holds no weigh-in", async () => {
     const report = fullReport();
     report.bodyweight = null;
-    getRacked.mockResolvedValue({ data: report, error: undefined });
+    getRacked.mockResolvedValue({ status: 200, data: report, headers: new Headers() });
     render(Racked);
 
     await waitFor(() => expect(screen.getByText("84,000")).toBeInTheDocument());
@@ -379,7 +379,7 @@ describe("Racked", () => {
       changeLb: null,
       changePct: null,
     };
-    getRacked.mockResolvedValue({ data: report, error: undefined });
+    getRacked.mockResolvedValue({ status: 200, data: report, headers: new Headers() });
     render(Racked);
 
     const card = await screen.findByTestId("stat-bodyweight");
@@ -391,7 +391,7 @@ describe("Racked", () => {
   // unconditionally. A quiet month must render as a sentence, not a stack trace
   // and not a page of confident zeroes.
   it("says nothing was logged rather than rendering empty statistics", async () => {
-    getRacked.mockResolvedValue({ data: emptyReport(), error: undefined });
+    getRacked.mockResolvedValue({ status: 200, data: emptyReport(), headers: new Headers() });
     render(Racked);
 
     await waitFor(() =>
@@ -405,7 +405,7 @@ describe("Racked", () => {
   // No schedule means no target, so there must be no percentage — a rate against
   // a denominator nobody entered reads as a grade regardless of how it is labelled.
   it("reports frequency, not a rate, when the program carries no schedule", async () => {
-    getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
+    getRacked.mockResolvedValue({ status: 200, data: fullReport(), headers: new Headers() });
     render(Racked);
 
     await waitFor(() =>
@@ -425,7 +425,7 @@ describe("Racked", () => {
       rate: 0.923,
       sessionsPerWeek: 2.75,
     };
-    getRacked.mockResolvedValue({ data: report, error: undefined });
+    getRacked.mockResolvedValue({ status: 200, data: report, headers: new Headers() });
     render(Racked);
 
     await waitFor(() =>
@@ -438,7 +438,7 @@ describe("Racked", () => {
   // Charts speak through pointer hover and title attributes, which a keyboard
   // and a screen reader never receive. The tables are the way in.
   it("offers every chart's numbers as a table", async () => {
-    getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
+    getRacked.mockResolvedValue({ status: 200, data: fullReport(), headers: new Headers() });
     render(Racked);
 
     await waitFor(() =>
@@ -467,29 +467,29 @@ describe("Racked", () => {
   });
 
   it("asks for the year when the year is selected", async () => {
-    getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
+    getRacked.mockResolvedValue({ status: 200, data: fullReport(), headers: new Headers() });
     const { getByRole } = render(Racked);
 
     await waitFor(() => expect(getRacked).toHaveBeenCalled());
-    expect(getRacked).toHaveBeenLastCalledWith({ query: { period: "month" } });
+    expect(getRacked).toHaveBeenLastCalledWith({ period: "month" });
 
     getByRole("radio", { name: "This year" }).click();
     await waitFor(() =>
-      expect(getRacked).toHaveBeenLastCalledWith({ query: { period: "year" } }),
+      expect(getRacked).toHaveBeenLastCalledWith({ period: "year" }),
     );
   });
 
   // Week is the cadence a lifter can still act on — a month is something to
   // reflect on, a week is something to correct.
   it("asks for the week when the week is selected", async () => {
-    getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
+    getRacked.mockResolvedValue({ status: 200, data: fullReport(), headers: new Headers() });
     const { getByRole } = render(Racked);
 
     await waitFor(() => expect(getRacked).toHaveBeenCalled());
 
     getByRole("radio", { name: "This week" }).click();
     await waitFor(() =>
-      expect(getRacked).toHaveBeenLastCalledWith({ query: { period: "week" } }),
+      expect(getRacked).toHaveBeenLastCalledWith({ period: "week" }),
     );
   });
 
@@ -505,7 +505,7 @@ describe("Racked", () => {
       label: "March 16–22 2026",
       inProgress: false,
     };
-    getRacked.mockResolvedValue({ data: report, error: undefined });
+    getRacked.mockResolvedValue({ status: 200, data: report, headers: new Headers() });
     const { getByRole } = render(Racked);
 
     await waitFor(() => expect(getRacked).toHaveBeenCalled());
@@ -521,7 +521,7 @@ describe("Racked", () => {
 
   // The month and the year keep it — that is what it is for.
   it("keeps the heatmap and the streak for a month", async () => {
-    getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
+    getRacked.mockResolvedValue({ status: 200, data: fullReport(), headers: new Headers() });
     render(Racked);
 
     await screen.findByTestId("stat-training-days");
@@ -537,7 +537,7 @@ describe("Racked", () => {
   it("says nothing rather than 0% when there is no ratio to quote", async () => {
     const report = fullReport();
     report.change = { volumeLb: 9_000, volumePct: null, sessions: 2, sessionsPct: null };
-    getRacked.mockResolvedValue({ data: report, error: undefined });
+    getRacked.mockResolvedValue({ status: 200, data: report, headers: new Headers() });
     render(Racked);
 
     await waitFor(() => expect(screen.getByText("84,000")).toBeInTheDocument());
@@ -551,7 +551,7 @@ describe("Racked", () => {
   it("names the elapsed comparison while the period is still running", async () => {
     const report = fullReport();
     report.period = { ...report.period, inProgress: true };
-    getRacked.mockResolvedValue({ data: report, error: undefined });
+    getRacked.mockResolvedValue({ status: 200, data: report, headers: new Headers() });
     render(Racked);
 
     await waitFor(() =>
@@ -561,7 +561,7 @@ describe("Racked", () => {
   });
 
   it("compares against the whole period once it has finished", async () => {
-    getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
+    getRacked.mockResolvedValue({ status: 200, data: fullReport(), headers: new Headers() });
     render(Racked);
 
     await waitFor(() =>
@@ -581,7 +581,7 @@ describe("Racked", () => {
     ) as RackedReport["hours"];
     report.peakHour = 18;
     report.hourLabel = "Evening lifter";
-    getRacked.mockResolvedValue({ data: report, error: undefined });
+    getRacked.mockResolvedValue({ status: 200, data: report, headers: new Headers() });
     render(Racked);
 
     await waitFor(() => expect(screen.getByText("Evening lifter")).toBeInTheDocument());
@@ -599,7 +599,7 @@ describe("Racked", () => {
   // of the period's start against the best of its end. Both are right; saying so
   // is what stops them reading as a contradiction.
   it("names the basis of each improvement measure", async () => {
-    getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
+    getRacked.mockResolvedValue({ status: 200, data: fullReport(), headers: new Headers() });
     render(Racked);
 
     await waitFor(() =>
@@ -614,7 +614,7 @@ describe("Racked", () => {
   });
 
   it("offers the recap as an image once there is something to show", async () => {
-    getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
+    getRacked.mockResolvedValue({ status: 200, data: fullReport(), headers: new Headers() });
     render(Racked);
 
     await waitFor(() =>
@@ -625,7 +625,7 @@ describe("Racked", () => {
   // A picture of the "nothing logged" card says nothing, and the page already
   // hides every statistic behind the same condition.
   it("offers nothing to share from a period with no sessions", async () => {
-    getRacked.mockResolvedValue({ data: emptyReport(), error: undefined });
+    getRacked.mockResolvedValue({ status: 200, data: emptyReport(), headers: new Headers() });
     render(Racked);
 
     await waitFor(() =>
@@ -638,7 +638,7 @@ describe("Racked", () => {
   // only with canvas disabled: the dialog opens, says it could not draw the
   // card, and leaves the page standing.
   it("opens the share dialog and survives a canvas it cannot draw on", async () => {
-    getRacked.mockResolvedValue({ data: fullReport(), error: undefined });
+    getRacked.mockResolvedValue({ status: 200, data: fullReport(), headers: new Headers() });
     render(Racked);
 
     await waitFor(() => screen.getByRole("button", { name: "Share" }));
@@ -696,7 +696,7 @@ describe("Racked with two sessions of one lift on the same day", () => {
   }
 
   it("renders instead of throwing on duplicate keys", async () => {
-    getRacked.mockResolvedValue({ data: sameDayReport(), error: undefined });
+    getRacked.mockResolvedValue({ status: 200, data: sameDayReport(), headers: new Headers() });
     render(Racked);
 
     await waitFor(() =>

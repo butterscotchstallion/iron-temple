@@ -24,16 +24,17 @@
   async function load() {
     loading = true;
     failed = false;
-    const [{ data, error }, sessions] = await Promise.all([
+    const [list, sessions] = await Promise.all([
       listPrograms(),
-      listSessions({ query: { limit: 1 } }),
+      listSessions({ limit: 1 }),
     ]);
-    if (error || !data) {
+    if (list.status !== 200) {
       failed = true;
     } else {
-      programs = data;
+      programs = list.data;
     }
-    lastSessionProgramId = sessions.data?.items[0]?.programId ?? null;
+    lastSessionProgramId =
+      sessions.status === 200 ? (sessions.data.items[0]?.programId ?? null) : null;
     loading = false;
   }
 

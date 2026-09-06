@@ -1,8 +1,9 @@
 # iron-temple UI — Svelte + Vite SPA.
 #
 # BUILD CONTEXT IS THE REPO ROOT (not src/ui), because the typed API client is
-# generated from the backend spec: openapi-ts.config.ts reads ../api/openapi.yaml
-# and writes src/lib/api (which is gitignored, so it must be generated here). We
+# generated from the backend spec: orval.config.ts reads ../api/openapi.yaml
+# and writes src/lib/api/generated (which is gitignored, so it must be generated
+# here — the barrel at src/lib/api/index.ts is tracked and arrives with the copy). We
 # lay the spec and the UI out as sibling api/ and ui/ dirs to match that path.
 #
 # NOTE: needs npm-registry access at build time (buildkitd egress or the in-cluster
@@ -17,7 +18,7 @@ WORKDIR /app/ui
 COPY src/ui/package.json src/ui/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY src/ui/ ./
-# Generate the typed client (openapi-ts → src/lib/api, gitignored) then build.
+# Generate the typed client (orval → src/lib/api/generated, gitignored) then build.
 # One RUN: keeps hadolint happy (DL3059) and drops a layer.
 RUN pnpm generate:api && pnpm build
 

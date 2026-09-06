@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { TRANSPORT_FAILURE_STATUS } from "./apiFetch";
 import {
   clearQueue,
   clearRejected,
@@ -30,15 +31,23 @@ vi.mock("./api", async (importOriginal) => ({
 }));
 
 /** A request that reached the server and succeeded. */
-const ok = (data: unknown = undefined) => ({ data, error: undefined, response: new Response() });
+const ok = (data: unknown = undefined) => ({
+  status: data === undefined ? 204 : 200,
+  data,
+  headers: new Headers(),
+});
 /** A request that reached the server and was refused. */
 const refused = () => ({
-  data: undefined,
-  error: { message: "no" },
-  response: new Response("", { status: 409 }),
+  status: 409,
+  data: { message: "no" },
+  headers: new Headers(),
 });
-/** A request that never reached anything. `response` absent is the signal. */
-const unreachable = () => ({ data: undefined, error: new TypeError("Failed to fetch") });
+/** A request that never reached anything. The sentinel status is the signal. */
+const unreachable = () => ({
+  status: TRANSPORT_FAILURE_STATUS,
+  data: undefined,
+  headers: new Headers(),
+});
 
 beforeEach(() => {
   localStorage.clear();
@@ -97,9 +106,10 @@ describe("enqueue", () => {
     updateSessionSet.mockResolvedValue(ok({ id: 7 }));
     await flush();
 
-    expect(updateSessionSet).toHaveBeenCalledWith({
-      path: { sessionId: 1, setId: 7 },
-      body: { weightLb: 185, actualReps: 5, completed: true },
+    expect(updateSessionSet).toHaveBeenCalledWith(1, 7, {
+      weightLb: 185,
+      actualReps: 5,
+      completed: true,
     });
   });
 
@@ -168,12 +178,11 @@ describe("flush", () => {
     await flush();
 
     expect(updateSessionSet).toHaveBeenCalledOnce();
-    expect(removeSessionSet).toHaveBeenCalledWith({ path: { sessionId: 1, setId: 3 } });
-    expect(updateSession).toHaveBeenCalledWith({
-      path: { sessionId: 1 },
-      body: { bodyweightLb: 180 },
+    expect(removeSessionSet).toHaveBeenCalledWith(1, 3);
+    expect(updateSession).toHaveBeenCalledWith(1, {
+      bodyweightLb: 180,
     });
-    expect(finishSession).toHaveBeenCalledWith({ path: { sessionId: 1 } });
+    expect(finishSession).toHaveBeenCalledWith(1);
     expect(queuedCount()).toBe(0);
   });
 
@@ -206,9 +215,8 @@ describe("flush", () => {
 
     await flush();
 
-    expect(updateSessionSet).toHaveBeenCalledWith({
-      path: { sessionId: 1, setId: 501 },
-      body: { actualReps: 8 },
+    expect(updateSessionSet).toHaveBeenCalledWith(1, 501, {
+      actualReps: 8,
     });
   });
 
@@ -327,10 +335,7 @@ describe("durability", () => {
     updateSessionSet.mockResolvedValue(ok({ id: 7 }));
     await flush();
 
-    expect(updateSessionSet).toHaveBeenCalledWith({
-      path: { sessionId: 1, setId: 7 },
-      body: { actualReps: 5 },
-    });
+    expect(updateSessionSet).toHaveBeenCalledWith(1, 7, { actualReps: 5 });
   });
 
   it("drops a stored queue written by a build with a different shape", () => {

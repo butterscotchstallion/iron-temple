@@ -14,8 +14,10 @@
  * form of the question the app cares about.
  */
 
+import { TRANSPORT_FAILURE_STATUS } from "./apiFetch";
+
 /** The shape every generated client call resolves to, as far as this cares. */
-type ApiResult = { error?: unknown; response?: Response };
+type ApiResult = { status: number };
 
 /**
  * Start optimistic, corrected by the first request either way.
@@ -50,13 +52,13 @@ export function markUnreachable(): void {
 /**
  * Whether a client result is a transport failure rather than an answer.
  *
- * The generated client resolves rather than throws, and returns `response`
- * undefined when `fetch` itself rejected — DNS, refused connection, dropped
- * radio. That absence is the discriminator: with a response, the server spoke;
- * without one, nothing did.
+ * Every call resolves rather than throws, and carries the sentinel status when
+ * `fetch` itself rejected — DNS, refused connection, dropped radio. That status
+ * is the discriminator: any real status means the server spoke; the sentinel
+ * means nothing did. See src/lib/apiFetch.ts for why it is encoded that way.
  */
 export function isTransportFailure(result: ApiResult): boolean {
-  return result.error !== undefined && result.response === undefined;
+  return result.status === TRANSPORT_FAILURE_STATUS;
 }
 
 /**

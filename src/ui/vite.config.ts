@@ -19,7 +19,11 @@ import tailwindcss from "@tailwindcss/vite";
 
 const UI_ROOT = fileURLToPath(new URL(".", import.meta.url));
 const OPENAPI_SPEC = fileURLToPath(new URL("../api/openapi.yaml", import.meta.url));
-const GENERATED_CLIENT = fileURLToPath(new URL("./src/lib/api", import.meta.url));
+// The generated tree specifically, not src/lib/api — that directory also holds
+// the tracked barrel (index.ts) and so exists even when nothing has been
+// generated, which would make the "is the client on disk?" check below always
+// say yes and let a missing client through as up to date.
+const GENERATED_CLIENT = fileURLToPath(new URL("./src/lib/api/generated", import.meta.url));
 
 // Shared with dev/regen-api.sh — same path, same digest, so the hook and the dev
 // server never disagree about whether the client is current. The shell side hashes
@@ -63,7 +67,7 @@ function writeStamp(hash: string): void {
 }
 
 /**
- * Regenerate the hey-api client when the OpenAPI contract changes, mid-session.
+ * Regenerate the orval client when the OpenAPI contract changes, mid-session.
  *
  * `pnpm dev` generates the client once at startup, but the spec lives outside the
  * Vite root and no module imports it, so it is not in the module graph and Vite
@@ -80,8 +84,8 @@ function writeStamp(hash: string): void {
  * that leaves the spec byte-identical — the reflexive ctrl-s, a formatter that
  * changed nothing — must not cost you that.
  *
- * Shells out to `pnpm generate:api` rather than calling openapi-ts directly so
- * there is one definition of how the client is generated (openapi-ts.config.ts),
+ * Shells out to `pnpm generate:api` rather than calling orval directly so
+ * there is one definition of how the client is generated (orval.config.ts),
  * shared with CI, the pre-commit hook and dev/regen-api.sh.
  */
 function regenerateApiOnSpecChange(): Plugin {

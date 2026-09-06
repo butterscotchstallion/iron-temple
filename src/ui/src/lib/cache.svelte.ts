@@ -22,9 +22,10 @@
 // is not shared with other tabs that may be signed in as someone else.
 
 import changelog from "virtual:iron-temple/changelog";
+import { isOk } from "./apiFetch";
 
 /** The shape every generated client call resolves to. */
-type ApiResult<T> = { data?: T; error?: unknown };
+type ApiResult = { status: number; data: unknown };
 
 /** Last good value per key. Survives unmount, cleared on sign-out. */
 const values = new Map<string, unknown>();
@@ -37,7 +38,7 @@ const values = new Map<string, unknown>();
  * moment later, once /me has settled — joins the same promise instead of firing
  * a second one.
  */
-const pending = new Map<string, Promise<ApiResult<unknown>>>();
+const pending = new Map<string, Promise<ApiResult>>();
 
 /**
  * Which generation of the cache we are in. Bumped by clearCache().
@@ -150,28 +151,33 @@ export function cachedValue<T>(key: string): T | undefined {
  * Run a request through the cache: dedupe it against one already in flight, and
  * remember the result if it succeeds.
  *
- * The result is returned untouched, errors included, so callers keep the
- * `{ data, error }` handling they already had — including a caller from a
- * signed-out session, whose component has already been unmounted and whose
- * assignments therefore go nowhere. Only successes are stored, and only for the
- * generation that asked: a failed revalidation must not evict a good answer,
- * because the alternative is replacing what the lifter is reading with an error
- * card over a network blip.
+ * The result is returned untouched, error statuses included, so callers keep the
+ * status narrowing they already had — including a caller from a signed-out
+ * session, whose component has already been unmounted and whose assignments
+ * therefore go nowhere. Only successes are stored, and only for the generation
+ * that asked: a failed revalidation must not evict a good answer, because the
+ * alternative is replacing what the lifter is reading with an error card over a
+ * network blip.
+ *
+ * Generic over the whole response union rather than over its `data`, so the
+ * caller gets its own per-status union back and can narrow on it. Narrowing here
+ * instead would collapse the union to a single arm and hand every call site the
+ * error body typed as the success type.
  */
-export function fetchThrough<T>(
+export function fetchThrough<R extends ApiResult>(
   key: string,
-  call: () => Promise<ApiResult<T>>,
-): Promise<ApiResult<T>> {
-  const inFlight = pending.get(key) as Promise<ApiResult<T>> | undefined;
+  call: () => Promise<R>,
+): Promise<R> {
+  const inFlight = pending.get(key) as Promise<R> | undefined;
   if (inFlight) return inFlight;
 
   const startedIn = generation;
-  const request: Promise<ApiResult<T>> = call()
+  const request: Promise<R> = call()
     .then((result) => {
       // Landing after a sign-out means this answer belongs to whoever was
       // signed in when it was asked for, and storing it would undo the clear.
       if (generation !== startedIn) return result;
-      if (!result.error && result.data !== undefined) {
+      if (isOk(result.status) && result.data !== undefined) {
         values.set(key, result.data);
         persist(key, result.data);
       }
@@ -184,7 +190,7 @@ export function fetchThrough<T>(
       if (pending.get(key) === request) pending.delete(key);
     });
 
-  pending.set(key, request as Promise<ApiResult<unknown>>);
+  pending.set(key, request);
   return request;
 }
 

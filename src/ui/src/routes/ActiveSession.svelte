@@ -11,6 +11,7 @@
     type Session,
     type SessionSet,
   } from "../lib/api";
+  import { isOk } from "../lib/apiFetch";
   import { invalidateTraining } from "../lib/cache.svelte";
   import { observe } from "../lib/connectivity.svelte";
   import {
@@ -105,20 +106,19 @@
   async function load() {
     loading = true;
     failed = false;
-    const result = await getSession({ path: { sessionId } });
+    const result = await getSession(sessionId);
     // Reads are not queued — there is nothing to replay about a GET — but a
     // read that never lands is still the clearest evidence the app has that it
     // is offline, and it is usually the first request a cold load makes. Told
     // here, the banner is up before the lifter taps anything.
     observe(result);
-    const { data, error } = result;
-    if (error || !data) {
+    if (result.status !== 200) {
       failed = true;
       loading = false;
       return;
     }
-    session = data;
-    restSeconds = data.sets[0]?.restSeconds ?? restSeconds;
+    session = result.data;
+    restSeconds = result.data.sets[0]?.restSeconds ?? restSeconds;
     loading = false;
   }
 
@@ -155,7 +155,7 @@
    */
   async function write<T>(
     queued: PendingWrite,
-    live: () => Promise<{ data?: T; error?: unknown; response?: Response }>,
+    live: () => Promise<{ status: number; data: unknown }>,
     optimistic: () => T,
   ): Promise<WriteOutcome<T>> {
     if (mustQueue()) {
@@ -168,10 +168,17 @@
       enqueue(queued);
       return { ok: true, value: optimistic() };
     }
-    if (result.error) return { ok: false };
+    if (!isOk(result.status)) return { ok: false };
     // A 204 carries no body — removeSet's success looks exactly like this — so
     // the optimistic value stands in as the sentinel.
-    return { ok: true, value: result.data ?? optimistic() };
+    //
+    // The cast is the price of taking the response union as `unknown` rather
+    // than threading each operation's success type through this one helper:
+    // every caller pairs a `live` with an `optimistic` that returns the same
+    // row type, so on a 2xx the body IS T. The alternative is a conditional
+    // type over five different response unions to express what the pairing
+    // already guarantees, in a helper each call site can read at a glance.
+    return { ok: true, value: (result.data as T | undefined) ?? optimistic() };
   }
 
   $effect(() => () => {
@@ -267,11 +274,7 @@
         setId: set.id,
         body: { actualReps: reps, completed },
       },
-      () =>
-        updateSessionSet({
-          path: { sessionId, setId: set.id },
-          body: { actualReps: reps, completed },
-        }),
+      () => updateSessionSet(sessionId, set.id, { actualReps: reps, completed }),
       () => ({ ...set, actualReps: reps, completed }),
     );
     if (!outcome.ok) {
@@ -329,7 +332,7 @@
     const current = session;
     const outcome = await write<Session>(
       { kind: "finishSession", sessionId },
-      () => finishSession({ path: { sessionId } }),
+      () => finishSession(sessionId),
       () => ({
         ...current,
         isOver: true,
@@ -356,11 +359,7 @@
     const current = session;
     const outcome = await write<Session>(
       { kind: "updateSession", sessionId, bodyweightLb: weightLb },
-      () =>
-        updateSession({
-          path: { sessionId },
-          body: { bodyweightLb: weightLb },
-        }),
+      () => updateSession(sessionId, { bodyweightLb: weightLb }),
       () => ({ ...current, bodyweightLb: weightLb }),
     );
     if (!outcome.ok) {
@@ -406,11 +405,7 @@
         const weightLb = weightFor(set);
         return write<SessionSet>(
           { kind: "updateSet", sessionId, setId: set.id, body: { weightLb } },
-          () =>
-            updateSessionSet({
-              path: { sessionId, setId: set.id },
-              body: { weightLb },
-            }),
+          () => updateSessionSet(sessionId, set.id, { weightLb }),
           () => ({ ...set, weightLb }),
         );
       }),
@@ -441,7 +436,7 @@
     const tempSetId = nextTempSetId();
     const outcome = await write<SessionSet>(
       { kind: "addSet", sessionId, exerciseId, tempSetId },
-      () => addSessionSet({ path: { sessionId }, body: { exerciseId } }),
+      () => addSessionSet(sessionId, { exerciseId }),
       // A placeholder with a negative id. It behaves like any other set on
       // screen — it can be tapped, edited, even removed — and is replaced by
       // the real row when the queue drains and the session reloads.
@@ -471,7 +466,7 @@
     // void, because a delete answers 204 with no body. Only `ok` is read here.
     const outcome = await write<void>(
       { kind: "removeSet", sessionId, setId: set.id },
-      () => removeSessionSet({ path: { sessionId, setId: set.id } }),
+      () => removeSessionSet(sessionId, set.id),
       () => undefined,
     );
     if (!outcome.ok) {

@@ -11,8 +11,10 @@ dist
 /playwright-report/
 /playwright/.cache/
 
-# hey-api generated client (regenerated from ../api/openapi.yaml)
-src/lib/api/
+# orval-generated client (regenerated from ../api/openapi.yaml). Only the
+# generated tree is ignored — src/lib/api/index.ts is the tracked barrel the app
+# imports through, and orval never writes to it.
+src/lib/api/generated/
 
 # Release notes for the header's changelog panel. The release workflow writes this
 # into the UI build context so the notes ship with the image, and the e2e suite
@@ -20,7 +22,7 @@ src/lib/api/
 # from git instead, so this file is always generated and never belongs in a commit.
 changelog.generated.json
 
-# openapi-ts drops a crash log here when generation fails. The dev server
-# regenerates on every save of the spec, so a half-typed edit produces one
-# routinely — they are noise, not artifacts worth keeping.
-openapi-ts-error-*.log
+# orval drops a crash log here when generation fails. The dev server regenerates
+# on every save of the spec, so a half-typed edit produces one routinely — they
+# are noise, not artifacts worth keeping.
+orval-error-*.log
