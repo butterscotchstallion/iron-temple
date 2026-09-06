@@ -14,8 +14,16 @@
   let { children }: { children: Snippet } = $props();
 </script>
 
+<!--
+  The boundary's own parameters are annotated rather than inferred. Under the
+  tsgo checker the contextual types Svelte supplies for `onerror` and the
+  `failed` snippet do not reach these positions, so they land as implicit any
+  and `strict` rejects them. Writing them out costs nothing and says what the
+  boundary actually hands back: an error of unknown shape — anything can be
+  thrown — and a reset callback.
+-->
 <svelte:boundary
-  onerror={(error) => {
+  onerror={(error: unknown) => {
     // The boundary swallows the error once it's handled, so without this it never
     // reaches the console and there's nothing to debug from.
     console.error("Unhandled render error:", error);
@@ -23,7 +31,7 @@
 >
   {@render children()}
 
-  {#snippet failed(error, reset)}
+  {#snippet failed(error: unknown, reset: () => void)}
     <ErrorPage {error} onReset={reset} />
   {/snippet}
 </svelte:boundary>

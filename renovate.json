@@ -24,6 +24,11 @@
       "description": "js-yaml is here only as a pnpm override, to hold orval's copy at or above 4.3.0 for CVE-2026-59869/59870 (see 3d904fe). v5 drops the CommonJS default export, and orval imports it as `import yaml from \"js-yaml\"` — so v5 breaks `pnpm generate:api` outright while clearing nothing the 4.3 line does not already clear. Revisit when orval ships a v5-compatible import.",
       "matchPackageNames": ["js-yaml"],
       "allowedVersions": "<5"
+    },
+    {
+      "description": "TypeScript 7 is installed deliberately as `@typescript/native` (an npm alias for typescript@7), NOT as `typescript`. svelte-check's --tsgo needs BOTH lines present: it runs the Go checker from the alias and still resolves the classic compiler API from `typescript`, which only the 6.x line provides. Bumping this entry to 7 would leave one TypeScript installed instead of two and break `pnpm check`. Hold at 6 until svelte-check can run on 7 alone.",
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "<7"
     }
   ]
 }
