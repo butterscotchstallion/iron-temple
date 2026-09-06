@@ -36,8 +36,32 @@ FROM nginxinc/nginx-unprivileged:1.31-alpine@sha256:aa8c9087d36d93e9d650c5365f88
 # /etc/passwd, which a runtime enforcing runAsNonRoot or a rootless engine's
 # user namespace may not read the way the image expects. 0 is unambiguous.
 USER 0
+# CACHEBUST exists because the upgrade below is worthless without it. Its layer's
+# cache key is (base digest + the command string) and NEITHER changes between
+# releases — so buildkit reuses the layer from the registry cache (release.yml
+# --import-cache) and `apk upgrade` never re-runs. The step then reports success
+# while shipping whatever Alpine packages were current the day the layer was first
+# built. That is how v0.31.1 failed its own Trivy gate on seven HIGH util-linux
+# CVEs (libuuid 2.42.1-r0, fixed in 2.42.3-r0) with this upgrade line already
+# present: `#18 [stage-1 2/4] RUN apk --no-cache upgrade` → CACHED.
+#
+# release.yml passes a fresh value per run, so the upgrade always re-runs. It busts
+# EVERY build rather than per-day because the Trivy scan here is a release-blocking
+# gate: a retry after Alpine publishes a fix has to be able to pick that fix up,
+# rather than wedging the release until the date rolls over. It is cheap — only the
+# three trailing stage-1 layers rebuild; the expensive `build` stage above is a
+# separate stage that never sees this ARG.
+#
+# DO NOT "tidy away" the ${CACHEBUST} reference in the RUN below. Declaring the ARG
+# is not enough: a build arg invalidates cache at its first USE, not its definition
+# ("a cache miss occurs upon its first usage, not its definition" — Dockerfile
+# reference, Impact on build caching). An ARG the RUN never mentions leaves the
+# command string identical, so the layer restores from cache and the upgrade goes
+# back to silently not running — the exact bug this whole block exists to fix, but
+# now wearing a cache-bust that looks like it works. The echo is the fix.
+ARG CACHEBUST=0
 # hadolint ignore=DL3017
-RUN apk --no-cache upgrade
+RUN echo "cachebust: ${CACHEBUST}" && apk --no-cache upgrade
 USER 101
 COPY src/ui/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/ui/dist /usr/share/nginx/html
