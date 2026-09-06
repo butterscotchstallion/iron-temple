@@ -120,7 +120,15 @@ jobs:
         run: |
           TAG="v${{ steps.ver.outputs.version }}"
           IMG="$REG/${IMAGE_OWNER}/iron-temple-ui"
+          # Fresh per run, so the base-image `apk upgrade` in src/ui/Dockerfile
+          # actually re-runs instead of restoring a stale layer from --import-cache
+          # below. Without this the upgrade silently stops freshening and the Trivy
+          # gate at the end of this step fails on CVEs the upgrade was meant to fix
+          # (see the CACHEBUST comment in that Dockerfile). Only stage-1's trailing
+          # layers rebuild; the pnpm build stage doesn't consume this arg.
+          CACHEBUST="$(date -u +%Y%m%dT%H%M%SZ)"
           buildctl --addr tcp://buildkitd.gitea.svc.cluster.local:1234 build \
+            --opt build-arg:CACHEBUST="${CACHEBUST}" \
             --frontend dockerfile.v0 --local context=. --local dockerfile=src/ui \
             --import-cache type=registry,ref=${IMG}:buildcache,registry.insecure=true \
             --export-cache type=registry,ref=${IMG}:buildcache,mode=max,registry.insecure=true \
