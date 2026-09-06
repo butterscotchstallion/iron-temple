@@ -6,6 +6,12 @@ dist
 # Vitest coverage output
 /coverage/
 
+# svelte-check --tsgo transpiles every .svelte file to disk here before handing
+# the result to the Go type checker, which reads a tsconfig rather than an
+# in-memory program. Rebuilt on every run; .svelte-kit would be used instead if
+# this were a SvelteKit app, but it isn't.
+/.svelte-check/
+
 # Playwright
 /test-results/
 /playwright-report/
