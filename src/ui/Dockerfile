@@ -8,7 +8,7 @@
 #
 # NOTE: needs npm-registry access at build time (buildkitd egress or the in-cluster
 # package-proxy). The API image builds offline; this one does not.
-FROM node:22-alpine AS build
+FROM node:24-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS build
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 WORKDIR /app
 # Spec first, as ../api/openapi.yaml relative to the ui workdir below.
