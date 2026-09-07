@@ -8,7 +8,7 @@
 #
 # NOTE: needs npm-registry access at build time (buildkitd egress or the in-cluster
 # package-proxy). The API image builds offline; this one does not.
-FROM node:22-alpine AS build
+FROM node:24-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS build
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 WORKDIR /app
 # Spec first, as ../api/openapi.yaml relative to the ui workdir below.
@@ -25,7 +25,7 @@ RUN pnpm generate:api && pnpm build
 # Serve the static build with a non-root nginx (uid 101, listens on :8080).
 # The UI calls the API at the RELATIVE path /api/v1, so /api/* never reaches this
 # container — Traefik path-routes it to the API service.
-FROM nginxinc/nginx-unprivileged:1.31-alpine@sha256:aa8c9087d36d93e9d650c5365f883b421e8214aedbad24ade52b844c583358f1
+FROM nginxinc/nginx-unprivileged:1.31-alpine@sha256:2ddec616f1cb58bcac057aa388f28cb81e35137641ef4226d321714499329bd1
 # Patch Alpine base packages (openssl/libcrypto3, c-ares, libexpat, libpng, …) so
 # the Trivy CRITICAL/HIGH gate passes — the pinned nginx base tag lags Alpine's
 # security releases. Runs as root at build time, then drops back to the non-root
