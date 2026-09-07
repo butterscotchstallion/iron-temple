@@ -16,9 +16,15 @@
       "groupName": "{{manager}} minor and patch"
     },
     {
-      "description": "vite-plugin-svelte v7 peers on vite ^8. On our vite 6 it silently breaks `pnpm dev`: v7 defaults prebundleSvelteLibraries to true and prebundles .svelte through vite 8's rolldown optimizer, so on vite 6 the svelte libs get dropped from optimizeDeps.exclude and esbuild dies with 'No loader is configured for .svelte files'. Only the dev server is affected, so no CI gate catches it. Hold at v6 until vite itself moves to 8.",
-      "matchPackageNames": ["@sveltejs/vite-plugin-svelte"],
-      "allowedVersions": "<7"
+      "description": "Vite majors cannot land alone. vitest carries its own vite as a real dependency, not a peer, so `vitest/config`'s defineConfig types the plugins array against THAT vite — on a mismatch every entry in vite.config.ts fails with 'No overload matches this call' (vite 8 x vitest 3 did exactly this). vite-plugin-svelte is coupled the other way: it peers on one exact vite major, and running it a major behind only degrades `pnpm dev`, which no CI gate covers. Group them so a vite major arrives with the versions that match it. The previous rule here pinned vite-plugin-svelte below 7 while vite was 6; vite 8 landed and made it correct, so grouping replaces the pin.",
+      "matchPackageNames": [
+        "vite",
+        "vitest",
+        "@vitest/coverage-v8",
+        "@sveltejs/vite-plugin-svelte"
+      ],
+      "matchUpdateTypes": ["major"],
+      "groupName": "vite ecosystem major"
     },
     {
       "description": "js-yaml is here only as a pnpm override, to hold orval's copy at or above 4.3.0 for CVE-2026-59869/59870 (see 3d904fe). v5 drops the CommonJS default export, and orval imports it as `import yaml from \"js-yaml\"` — so v5 breaks `pnpm generate:api` outright while clearing nothing the 4.3 line does not already clear. Revisit when orval ships a v5-compatible import.",
