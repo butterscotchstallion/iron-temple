@@ -32,7 +32,10 @@ describe("filenameFrom", () => {
 });
 
 describe("downloadAccountExport", () => {
-  let click: ReturnType<typeof vi.fn>;
+  // Spelled with its call signature because it is assigned to `anchor.click`:
+  // a bare vi.fn() is typed as callable *or* constructable, which HTMLElement's
+  // plain `() => void` slot will not take.
+  let click: ReturnType<typeof vi.fn<() => void>>;
   let createObjectURL: ReturnType<typeof vi.fn>;
   let revokeObjectURL: ReturnType<typeof vi.fn>;
   let anchor: HTMLAnchorElement;
@@ -40,7 +43,7 @@ describe("downloadAccountExport", () => {
   beforeEach(() => {
     vi.useFakeTimers();
 
-    click = vi.fn();
+    click = vi.fn<() => void>();
     anchor = document.createElement("a");
     anchor.click = click;
     // Only the anchor is intercepted; anything else the code under test creates
