@@ -73,14 +73,24 @@ func (s *Server) listExercises(w http.ResponseWriter, r *http.Request) {
 				PerformedOn: dateToString(e.TopPerformedOn),
 			}
 		}
+		// dateToString renders an invalid date as "", which would tell the
+		// picker a lift was performed on no day rather than never — so the
+		// pointer is taken from the validity, not from the string.
+		var lastPerformedOn *string
+		if e.LastPerformedOn.Valid {
+			s := dateToString(e.LastPerformedOn)
+			lastPerformedOn = &s
+		}
 		out = append(out, exerciseDTO{
-			ID:          e.ID,
-			Name:        e.Name,
-			MuscleGroup: e.MuscleGroup,
-			Equipment:   e.Equipment,
-			IsAccessory: e.IsAccessory,
-			IsCustom:    e.IsCustom,
-			TopSet:      top,
+			ID:                e.ID,
+			Name:              e.Name,
+			MuscleGroup:       e.MuscleGroup,
+			Equipment:         e.Equipment,
+			IsAccessory:       e.IsAccessory,
+			IsCustom:          e.IsCustom,
+			TopSet:            top,
+			LastPerformedOn:   lastPerformedOn,
+			PerformedSessions: e.PerformedSessions,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -157,8 +167,12 @@ func (s *Server) createExercise(w http.ResponseWriter, r *http.Request) {
 		IsAccessory: created.IsAccessory,
 		IsCustom:    created.IsCustom,
 		// A movement that did not exist a moment ago has nothing logged against
-		// it, so its top set is null by construction rather than by lookup.
-		TopSet: nil,
+		// it, so its top set and its history are null by construction rather
+		// than by lookup — spelled out because all three are `required` in the
+		// spec and a caller is entitled to read them off this response.
+		TopSet:            nil,
+		LastPerformedOn:   nil,
+		PerformedSessions: 0,
 	})
 }
 

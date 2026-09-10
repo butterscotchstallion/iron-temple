@@ -254,16 +254,73 @@ func TestListExercisesCarriesTopSet(t *testing.T) {
 	top.Value("performedOn").String().IsEqual(wantDate)
 }
 
-// exerciseTopSet picks one exercise's topSet out of the library listing. A
-// missing id is fatal rather than a nil return, so a caller asserting IsNull()
-// on the result cannot be reading a lift that simply wasn't in the response.
+// TestListExercisesCarriesLastPerformed pins the recency the list row carries
+// for the assistance picker, which leads with the accessories a lifter actually
+// trains so the same handful needn't be searched for every time.
+//
+// Both columns are asserted through one session on purpose. performedSessions
+// counts DISTINCT sessions, and a 5x5 day logs the same lift five times in one
+// of them — count the rows instead and a lifter who trains one movement hard
+// outranks one who trains another every week, which is the wrong answer to the
+// only question the field is asked.
+func TestListExercisesCarriesLastPerformed(t *testing.T) {
+	e := expect(t)
+	_, dayID := firstProgramAndDay(e)
+
+	created := startSession(t, e, dayID)
+	sessionID := int(created.Value("id").Number().Raw())
+	performedOn := created.Value("performedOn").String().Raw()
+
+	// Every set of the day's first lift, which on a 5x5 day is five of them.
+	exerciseID := int(created.Value("sets").Array().Value(0).Object().
+		Value("exerciseId").Number().Raw())
+	var setIDs []int
+	for _, s := range created.Value("sets").Array().Iter() {
+		set := s.Object()
+		if int(set.Value("exerciseId").Number().Raw()) == exerciseID {
+			setIDs = append(setIDs, int(set.Value("id").Number().Raw()))
+		}
+	}
+	if len(setIDs) < 2 {
+		t.Fatalf("want at least two prescribed sets of exercise %d, got %d",
+			exerciseID, len(setIDs))
+	}
+
+	// A prescribed set is not a performed one, so nothing is logged yet and the
+	// lift reports never trained — null rather than a date, and no sessions.
+	// Scoped to this test's own exercise for the reason the top set is: every
+	// test in the package shares one database.
+	lift := libraryExercise(t, e, exerciseID)
+	lift.Value("lastPerformedOn").IsNull()
+	lift.Value("performedSessions").Number().IsEqual(0)
+
+	for _, setID := range setIDs[:2] {
+		e.PATCH(fmt.Sprintf("/sessions/%d/sets/%d", sessionID, setID)).
+			WithJSON(map[string]any{"actualReps": 5, "completed": true}).
+			Expect().Status(http.StatusOK)
+	}
+
+	lift = libraryExercise(t, e, exerciseID)
+	lift.Value("lastPerformedOn").String().IsEqual(performedOn)
+	lift.Value("performedSessions").Number().IsEqual(1)
+}
+
+// exerciseTopSet picks one exercise's topSet out of the library listing.
 func exerciseTopSet(t *testing.T, e *httpexpect.Expect, exerciseID int) *httpexpect.Value {
+	t.Helper()
+	return libraryExercise(t, e, exerciseID).Value("topSet")
+}
+
+// libraryExercise picks one exercise out of the library listing. A missing id is
+// fatal rather than a nil return, so a caller asserting IsNull() on a field of
+// the result cannot be reading a lift that simply wasn't in the response.
+func libraryExercise(t *testing.T, e *httpexpect.Expect, exerciseID int) *httpexpect.Object {
 	t.Helper()
 	for _, ex := range e.GET("/exercises").Expect().Status(http.StatusOK).
 		JSON().Array().Iter() {
 		obj := ex.Object()
 		if int(obj.Value("id").Number().Raw()) == exerciseID {
-			return obj.Value("topSet")
+			return obj
 		}
 	}
 	t.Fatalf("exercise %d missing from the library listing", exerciseID)

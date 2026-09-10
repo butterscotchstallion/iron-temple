@@ -124,6 +124,47 @@ export function countByGroup(exercises: Exercise[]): Record<MuscleGroup, number>
 }
 
 /**
+ * How many movements the assistance picker's "Recent" section holds. Six fits
+ * inside the list's scroll box, so the muscle groups underneath stay visible and
+ * the section reads as a shortcut rather than as the whole list.
+ */
+export const RECENT_LIMIT = 6;
+
+/**
+ * The accessories this lifter trains, most recently performed first — what the
+ * assistance picker leads with so the same handful of movements needn't be
+ * searched for every time one is added to a day.
+ *
+ * Accessory work only. A program lift is performed every week, so it would hold
+ * the top of the section permanently while being the one thing nobody adds
+ * there: the program already prescribes it, and the picker's caller excludes it
+ * for exactly that reason.
+ *
+ * The date test is truthiness rather than `!== null`, which matters more than it
+ * looks: a caller whose exercises predate the field would have every one of them
+ * promoted, since `undefined !== null`.
+ *
+ * Ordering is total, so the section holds still between loads: last performed,
+ * then the number of sessions the lift has been trained in — a whole workout's
+ * accessories share one date, and how often is the better tie-break for "the
+ * ones I like" — then the name.
+ */
+export function recentExercises(
+  exercises: Exercise[],
+  limit: number = RECENT_LIMIT,
+): Exercise[] {
+  return exercises
+    .filter((exercise) => exercise.isAccessory && Boolean(exercise.lastPerformedOn))
+    .sort(
+      (a, b) =>
+        (b.lastPerformedOn ?? "").localeCompare(a.lastPerformedOn ?? "") ||
+        b.performedSessions - a.performedSessions ||
+        a.name.localeCompare(b.name),
+    )
+    .slice(0, limit);
+}
+
+/**
  * The line under an exercise's name in the library: its equipment, plus a note
  * for the lifts a program prescribes. Marking those matters because they are the
  * ones the progression engine drives — adding a squat as assistance to a program
