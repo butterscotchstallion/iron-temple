@@ -45,6 +45,10 @@
 -- less work than it — no per-session grouping and no sort, just the scan and two
 -- aggregates. Aggregates without GROUP BY always return a row, so ON true never
 -- drops a lift: one never performed comes back NULL and 0.
+--
+-- The ::date on the MAX is not decoration, the same way ::numeric on the top
+-- set's is not: sqlc cannot infer a bare aggregate's type and generates
+-- interface{} for it, which scans into anything and asserts nothing.
 -- name: ListExercises :many
 SELECT e.id,
        e.name,
@@ -70,7 +74,7 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) top ON true
 LEFT JOIN LATERAL (
-    SELECT MAX(s.performed_on)       AS last_performed_on,
+    SELECT MAX(s.performed_on)::date AS last_performed_on,
            COUNT(DISTINCT s.id)::int AS performed_sessions
     FROM session_sets ss
     JOIN sessions s ON s.id = ss.session_id
