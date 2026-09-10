@@ -7,6 +7,7 @@
     exerciseSubtitle,
     groupExercises,
     muscleGroupLabel,
+    recentExercises,
   } from "./library";
   import { exerciseEmoji } from "./exerciseIcon";
   import { Button } from "$lib/components/ui/button";
@@ -67,6 +68,19 @@
   const groups = $derived(groupExercises(available, { query, group }));
   const matchCount = $derived(
     groups.reduce((total, g) => total + g.exercises.length, 0),
+  );
+
+  // The accessories this lifter actually trains, so the six they always add sit
+  // above the catalogue instead of behind a search for the same names every
+  // time. Derived from `available`, so everything already on this day is out of
+  // it for free.
+  //
+  // Only while the list is unfiltered. Once a search or a group chip is on, the
+  // list below is already short and the section is no longer a shortcut to it —
+  // it is a duplicate sitting between a lifter and the match they typed for.
+  const recent = $derived(recentExercises(available));
+  const showRecent = $derived(
+    recent.length > 0 && query.trim() === "" && group === null,
   );
 
   async function load() {
@@ -236,30 +250,19 @@
           </p>
         </div>
       {/if}
+      {#if showRecent}
+        <!-- Recent lifts stay listed under their muscle group below as well.
+             Removing them from it would make a movement go missing from the
+             one place a lifter scrolls to expecting it. -->
+        {@render sectionHeading("Recent")}
+        {#each recent as exercise (exercise.id)}
+          {@render exerciseRow(exercise)}
+        {/each}
+      {/if}
       {#each groups as section (section.group)}
-        <p
-          class="sticky top-0 bg-card px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground"
-        >
-          {section.label}
-        </p>
+        {@render sectionHeading(section.label)}
         {#each section.exercises as exercise (exercise.id)}
-          <button
-            type="button"
-            class="flex w-full items-center gap-2 px-3 py-2 text-left transition hover:bg-foreground/5"
-            onclick={() => (selected = exercise)}
-          >
-            <span class="text-base" aria-hidden="true">
-              {exerciseEmoji(exercise.name)}
-            </span>
-            <span class="flex-1 leading-tight">
-              <span class="block text-sm font-medium text-card-foreground">
-                {exercise.name}
-              </span>
-              <span class="block text-[11px] text-muted-foreground">
-                {exerciseSubtitle(exercise)}
-              </span>
-            </span>
-          </button>
+          {@render exerciseRow(exercise)}
         {/each}
       {/each}
     </div>
@@ -269,3 +272,33 @@
     </Button>
   {/if}
 </div>
+
+<!-- One row and one heading, rendered by both the Recent section and the muscle
+     groups, so the two cannot drift apart. -->
+{#snippet sectionHeading(label: string)}
+  <p
+    class="sticky top-0 bg-card px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground"
+  >
+    {label}
+  </p>
+{/snippet}
+
+{#snippet exerciseRow(exercise: Exercise)}
+  <button
+    type="button"
+    class="flex w-full items-center gap-2 px-3 py-2 text-left transition hover:bg-foreground/5"
+    onclick={() => (selected = exercise)}
+  >
+    <span class="text-base" aria-hidden="true">
+      {exerciseEmoji(exercise.name)}
+    </span>
+    <span class="flex-1 leading-tight">
+      <span class="block text-sm font-medium text-card-foreground">
+        {exercise.name}
+      </span>
+      <span class="block text-[11px] text-muted-foreground">
+        {exerciseSubtitle(exercise)}
+      </span>
+    </span>
+  </button>
+{/snippet}

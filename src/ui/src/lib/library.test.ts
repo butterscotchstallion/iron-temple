@@ -8,6 +8,8 @@ import {
   groupExercises,
   matchesSearch,
   muscleGroupLabel,
+  recentExercises,
+  RECENT_LIMIT,
 } from "./library";
 
 function exercise(over: Partial<Exercise> & { name: string }): Exercise {
@@ -17,9 +19,12 @@ function exercise(over: Partial<Exercise> & { name: string }): Exercise {
     equipment: "other",
     isAccessory: true,
     isCustom: false,
-    // Nothing in this file exercises the top set — it drives the library's
-    // grouping and search — so the default is the "never performed" case.
+    // The grouping and search tests below don't care about performances, so the
+    // default is the "never performed" case; the recentExercises tests set the
+    // last two explicitly.
     topSet: null,
+    lastPerformedOn: null,
+    performedSessions: 0,
     ...over,
   };
 }
@@ -132,5 +137,84 @@ describe("exerciseSubtitle", () => {
     expect(
       exerciseSubtitle({ equipment: "other", isAccessory: true, isCustom: true }),
     ).toBe("Other · Yours");
+  });
+});
+
+describe("recentExercises", () => {
+  function performed(
+    name: string,
+    lastPerformedOn: string | null,
+    performedSessions = 1,
+    over: Partial<Exercise> = {},
+  ): Exercise {
+    return exercise({ name, lastPerformedOn, performedSessions, ...over });
+  }
+
+  const names = (exercises: Exercise[]) => exercises.map((e) => e.name);
+
+  it("puts the most recently performed lift first", () => {
+    const recent = recentExercises([
+      performed("Hammer Curl", "2026-08-20"),
+      performed("Dip", "2026-09-02"),
+      performed("Plank", "2026-08-28"),
+    ]);
+    expect(names(recent)).toEqual(["Dip", "Plank", "Hammer Curl"]);
+  });
+
+  it("breaks a shared date on how often the lift has been trained", () => {
+    // Every accessory in one workout carries that workout's date, so this is
+    // the ordinary case rather than the edge one.
+    const recent = recentExercises([
+      performed("Face Pull", "2026-09-02", 3),
+      performed("Ab Wheel", "2026-09-02", 12),
+      performed("Curl", "2026-09-02", 7),
+    ]);
+    expect(names(recent)).toEqual(["Ab Wheel", "Curl", "Face Pull"]);
+  });
+
+  it("falls back to the name so the order is total", () => {
+    const recent = recentExercises([
+      performed("Shrug", "2026-09-02", 4),
+      performed("Chin-up", "2026-09-02", 4),
+    ]);
+    expect(names(recent)).toEqual(["Chin-up", "Shrug"]);
+  });
+
+  it("leaves out the lifts a program prescribes", () => {
+    // Trained every week, and never something you'd add as assistance — it
+    // would hold the top of the section permanently for nothing.
+    const recent = recentExercises([
+      performed("Squat", "2026-09-02", 40, { isAccessory: false }),
+      performed("Dip", "2026-08-01"),
+    ]);
+    expect(names(recent)).toEqual(["Dip"]);
+  });
+
+  it("leaves out lifts that have never been performed", () => {
+    const recent = recentExercises([
+      performed("Dip", null, 0),
+      performed("Plank", "2026-09-02"),
+    ]);
+    expect(names(recent)).toEqual(["Plank"]);
+  });
+
+  it("treats a missing date as never performed rather than as most recent", () => {
+    // A caller whose payload predates the field would otherwise have its whole
+    // library promoted, since undefined !== null.
+    const stale = { ...exercise({ name: "Dip" }), lastPerformedOn: undefined };
+    expect(recentExercises([stale as unknown as Exercise])).toEqual([]);
+  });
+
+  it("caps the section and does not reorder its input", () => {
+    const library = Array.from({ length: RECENT_LIMIT + 3 }, (_, i) =>
+      performed(`Lift ${i}`, `2026-09-${String(i + 1).padStart(2, "0")}`),
+    );
+    const before = names(library);
+
+    const recent = recentExercises(library);
+
+    expect(recent).toHaveLength(RECENT_LIMIT);
+    expect(names(recent)[0]).toBe(`Lift ${RECENT_LIMIT + 2}`);
+    expect(names(library)).toEqual(before);
   });
 });

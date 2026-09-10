@@ -1537,7 +1537,18 @@ components:
     Exercise:
       description: One movement in the library.
       type: object
-      required: [id, name, muscleGroup, equipment, isAccessory, isCustom, topSet]
+      required:
+        [
+          id,
+          name,
+          muscleGroup,
+          equipment,
+          isAccessory,
+          isCustom,
+          topSet,
+          lastPerformedOn,
+          performedSessions,
+        ]
       properties:
         id:
           type: integer
@@ -1570,6 +1581,30 @@ components:
             card per lift from the list alone: it used to fetch every lift's
             entire history just to take the maximum, which was one request per
             card and a whole history transferred to compute one number.
+        lastPerformedOn:
+          type: string
+          format: date
+          nullable: true
+          description: >-
+            The most recent session in which this lifter logged real sets of the
+            movement, or null if they never have. "Real" means the same thing it
+            means everywhere else here — a set with actual_reps > 0 — so a lift
+            has a last performance exactly when it has a history to chart.
+
+            This is what the assistance picker leads with, so a lifter adding
+            accessory work sees the movements they actually train first instead
+            of searching the catalogue for the same six every time. Deliberately
+            not the date the lift was last ADDED as assistance: one added to a
+            day months ago and trained every week since is precisely a
+            favourite, and the plan row's timestamp cannot say so.
+        performedSessions:
+          type: integer
+          minimum: 0
+          description: >-
+            How many sessions this lifter has logged real sets of the movement
+            in; 0 if none. It exists to break ties on lastPerformedOn, which a
+            whole workout's accessories share — ordering on the date alone
+            leaves them arbitrary, and "how often" is the better second key.
 
     ExerciseTopSet:
       description: >

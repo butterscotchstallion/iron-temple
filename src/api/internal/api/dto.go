@@ -93,6 +93,14 @@ type exerciseDTO struct {
 	// the field is `required` and nullable in the spec: the key is always
 	// present, and null is meaningfully different from a set at zero pounds.
 	TopSet *exerciseTopSetDTO `json:"topSet"`
+	// LastPerformedOn and PerformedSessions rank the assistance picker: the
+	// movements a lifter actually trains, most recent first, so the six they
+	// always add are the first thing in the box rather than something to search
+	// the catalogue for. A pointer for the date because "never performed" is
+	// null and not a zero date; a plain int for the count because zero sessions
+	// is a real answer.
+	LastPerformedOn   *string `json:"lastPerformedOn"`
+	PerformedSessions int32   `json:"performedSessions"`
 }
 
 // exerciseTopSetDTO is the heaviest set a lifter has worked on one movement.

@@ -26,6 +26,25 @@
 -- the weight, which is what the browser's oldest-first scan did with its
 -- strictly-greater comparison. NULL for a lift never performed, which is why
 -- both columns are nullable and the DTO carries them as one nullable object.
+--
+-- last_performed_on/performed_sessions answer "when did I last train this, and
+-- how often have I", which is what puts a lifter's usual accessories at the top
+-- of the assistance picker instead of making them search the catalogue for the
+-- same six movements every time. Recency is read from performances rather than
+-- from program_day_assistance.created_at on purpose: a lift added to a day six
+-- months ago and trained every week since is exactly one of the favourites, and
+-- the timestamp on the plan row has no way to say so.
+--
+-- performed_sessions is a tie-break, not a statistic. A whole workout's
+-- accessories share one performed_on, so ordering on the date alone leaves them
+-- in arbitrary order; how often the lift has been trained is the better second
+-- key for "the ones I like".
+--
+-- The second lateral is a second pass over session_sets per row, but it rides
+-- the same (exercise_id, session_id) index 0016 added for the first, and does
+-- less work than it — no per-session grouping and no sort, just the scan and two
+-- aggregates. Aggregates without GROUP BY always return a row, so ON true never
+-- drops a lift: one never performed comes back NULL and 0.
 -- name: ListExercises :many
 SELECT e.id,
        e.name,
@@ -34,7 +53,9 @@ SELECT e.id,
        e.is_accessory,
        (e.created_by_user_id IS NOT NULL)::bool AS is_custom,
        top.weight_lb                            AS top_weight_lb,
-       top.performed_on                         AS top_performed_on
+       top.performed_on                         AS top_performed_on,
+       recent.last_performed_on,
+       recent.performed_sessions
 FROM exercises e
 LEFT JOIN LATERAL (
     SELECT MAX(ss.weight_lb)::numeric AS weight_lb,
@@ -48,6 +69,15 @@ LEFT JOIN LATERAL (
     ORDER BY MAX(ss.weight_lb) DESC, s.performed_on, s.id
     LIMIT 1
 ) top ON true
+LEFT JOIN LATERAL (
+    SELECT MAX(s.performed_on)       AS last_performed_on,
+           COUNT(DISTINCT s.id)::int AS performed_sessions
+    FROM session_sets ss
+    JOIN sessions s ON s.id = ss.session_id
+    WHERE ss.exercise_id = e.id
+      AND s.user_id = sqlc.arg('user_id')::int
+      AND ss.actual_reps > 0
+) recent ON true
 WHERE (e.created_by_user_id IS NULL OR e.created_by_user_id = sqlc.arg('user_id')::int)
   AND (NOT sqlc.arg('performed_only')::bool
        OR EXISTS (

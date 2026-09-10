@@ -51,12 +51,18 @@ const program1 = {
 };
 
 // The exercise library, as GET /exercises returns it.
+//
+// lastPerformedOn is null throughout, which is load-bearing rather than tidy:
+// the assistance picker leads with recently trained accessories, and a lift with
+// a date renders BOTH in that section and under its muscle group. The assistance
+// test below clicks getByRole("button", { name: /Dip/ }), which would then be a
+// strict-mode violation. The recents section has its own test.
 const libraryExercises = [
-  { id: 1, name: "Squat", muscleGroup: "legs", equipment: "barbell", isAccessory: false, isCustom: false },
-  { id: 2, name: "Bench Press", muscleGroup: "chest", equipment: "barbell", isAccessory: false, isCustom: false },
-  { id: 3, name: "Dip", muscleGroup: "chest", equipment: "bodyweight", isAccessory: true, isCustom: false },
-  { id: 4, name: "Barbell Curl", muscleGroup: "arms", equipment: "barbell", isAccessory: true, isCustom: false },
-  { id: 5, name: "Plank", muscleGroup: "core", equipment: "bodyweight", isAccessory: true, isCustom: false },
+  { id: 1, name: "Squat", muscleGroup: "legs", equipment: "barbell", isAccessory: false, isCustom: false, lastPerformedOn: null, performedSessions: 0 },
+  { id: 2, name: "Bench Press", muscleGroup: "chest", equipment: "barbell", isAccessory: false, isCustom: false, lastPerformedOn: null, performedSessions: 0 },
+  { id: 3, name: "Dip", muscleGroup: "chest", equipment: "bodyweight", isAccessory: true, isCustom: false, lastPerformedOn: null, performedSessions: 0 },
+  { id: 4, name: "Barbell Curl", muscleGroup: "arms", equipment: "barbell", isAccessory: true, isCustom: false, lastPerformedOn: null, performedSessions: 0 },
+  { id: 5, name: "Plank", muscleGroup: "core", equipment: "bodyweight", isAccessory: true, isCustom: false, lastPerformedOn: null, performedSessions: 0 },
 ];
 
 const nextSession = {
