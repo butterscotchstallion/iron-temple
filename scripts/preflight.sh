@@ -179,6 +179,20 @@ ui_toolchain() {
   node_cache="$root/.cache/node"
   node_bin="$node_cache/node_modules/node/bin/node"
 
+  # A cached Node is only good while it still clears the floor, and the floor
+  # moves — a dependency bump raises engines. The check above compared the
+  # SYSTEM Node, so on a 22 -> 24 bump it would send us here, find the cached 22
+  # executable, skip the install and run the gates on the stale major: precisely
+  # the confusion the comment above claims this cache avoids. Re-validate.
+  if [ -x "$node_bin" ]; then
+    cached=$("$node_bin" -p "process.versions.node.split('.')[0]" 2>/dev/null) || cached=""
+    if [ -z "$cached" ] || ! [ "$cached" -ge "$want" ] 2>/dev/null; then
+      printf '  toolchain: cached Node %s no longer clears the floor (%s); refetching\n' \
+        "${cached:-unknown}" "$want"
+      rm -rf "$node_cache"
+    fi
+  fi
+
   if [ ! -x "$node_bin" ]; then
     printf '  toolchain: Node %s is below the floor src/ui declares (%s).\n' "$have" "$want"
     printf '  toolchain: installing node@%s into %s (~185 MB, once)\n' "$want" "$node_cache"
