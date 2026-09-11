@@ -65,7 +65,7 @@ export function warmupSets(
  * the lifter came in for.
  *
  * Lightest first, because the rungs nearest the work weight are the ones doing
- * the preparing. Given room for two sets before a 315 lb squat, 195 and 255 get
+ * the preparing. Given room for two sets before a 315 lb squat, 220 and 280 get
  * a lifter ready for it and two sets with the empty bar do not. The empty-bar
  * entry gives up its second set before it is dropped outright, so a ramp only
  * one over the cap keeps a light opener.
