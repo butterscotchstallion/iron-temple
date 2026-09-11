@@ -1,6 +1,7 @@
 import type { SessionSummary } from "./api";
 import { todayIso } from "./calendar";
 import { isSessionComplete } from "./streak";
+import { todayWeekday } from "./weekday";
 
 /**
  * The shape this module needs off a session — a subset of SessionSummary, so a
@@ -54,4 +55,40 @@ export function todayStatus(
   const finished = forDay.find((s) => isSessionComplete(s) || s.isOver);
   if (finished) return { sessionId: finished.id, done: true };
   return { sessionId: forDay[0].id, done: false };
+}
+
+/** The bit of a program day that places it in the week. */
+type Scheduled = { id: number; weekday: number | null };
+
+/**
+ * Whether this day is the one scheduled for today and the work is already done.
+ *
+ * The program screen drops such a card entirely. Once today's workout is behind
+ * you it is no longer a decision you have to make, and a card is a screenful of
+ * prescribed weights offering to start something you just finished — the badge
+ * and the demoted "Start again" said so, but they still asked to be read. What
+ * the screen should show is what's left, which on a rest day is the rest of the
+ * program and on a done day is the same.
+ *
+ * Only the day actually scheduled for today. A day trained off its weekday —
+ * Workout B on the Wednesday Workout A is booked for — keeps its card and its
+ * "Done today" badge: the schedule never claimed it was today's work, and
+ * hiding it would quietly shorten the program the lifter came here to look at.
+ * An unscheduled day is never today's, so it is never hidden.
+ *
+ * Done means finished, not merely started. A session left open keeps its card,
+ * because that workout is still ahead of the lifter and Resume is the whole
+ * reason the card is worth the room.
+ *
+ * `weekday` and `today` default to the browser's clock and are injectable for
+ * testing; they must agree, so a caller overriding one should override both.
+ */
+export function isTodaysWorkoutDone(
+  sessions: Trainable[],
+  day: Scheduled,
+  weekday: number = todayWeekday(),
+  today: string = todayIso(),
+): boolean {
+  if (day.weekday !== weekday) return false;
+  return todayStatus(sessions, day.id, today)?.done === true;
 }
