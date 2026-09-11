@@ -42,9 +42,10 @@ the prescribed lifts, sets and reps.
   sent when you walk out. (A **reload** while offline is the one gap: the queued
   work is safe and will sync, but the screen can't be rebuilt without the server,
   so it waits.)
-- **A rest timer that knows the lift.** Rest is a property of the movement, not a
-  flat three minutes: a deadlift and a lateral raise get their own lengths, and
-  assistance work inherits one automatically.
+- **A rest timer that knows the lift.** Rest is a property of the movement, not
+  one number for everything: a squat and a lateral raise get their own lengths,
+  and assistance work inherits one automatically. Three minutes is the ceiling —
+  nothing rests longer than that.
 - **Plate math**, drawn as a loaded bar, so you don't do the arithmetic in your
   head — and drawn with **your** bar and **your** plates, so it never calls for a
   fourth pair of 45s you don't own. A weight the rack can't build rounds down to

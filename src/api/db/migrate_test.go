@@ -96,20 +96,26 @@ func TestMigrateAppliesSchemaAndSeed(t *testing.T) {
 	// Nothing seeded belongs to a user; every seeded row is shared.
 	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE created_by_user_id IS NOT NULL", 0)
 
-	// 0011's three rest tiers. Asserted as a partition — the three counts sum to
-	// the 53 above — because the tiers are applied as successive UPDATEs that
-	// narrow one another, and the failure mode worth catching is a lift left
-	// behind in the tier before, which a spot check of one row would miss.
-	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE rest_seconds = 300", 6)
-	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE rest_seconds = 180", 23)
+	// 0011's rest tiers, as 0017's three-minute cap leaves them: two, not three.
+	// Asserted as a partition — the counts sum to the 53 above — because the
+	// tiers are applied as successive UPDATEs that narrow one another, and the
+	// failure mode worth catching is a lift left behind in the tier before,
+	// which a spot check of one row would miss. The 29 is 0011's 23 plus the six
+	// the cap brought down from 300.
+	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE rest_seconds > 180", 0)
+	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE rest_seconds = 180", 29)
 	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE rest_seconds = 90", 24)
-	// The two ends of the range, named: the lift a five-minute rest exists for,
-	// and an isolation movement that must not have inherited one.
-	assertRest(t, sqlDB, "Deadlift", 300)
+	// The two ends of the range, named: the lift the five-minute tier used to
+	// exist for, now capped, and an isolation movement that must not have
+	// inherited a compound's rest.
+	assertRest(t, sqlDB, "Deadlift", 180)
 	assertRest(t, sqlDB, "Lateral Raise", 90)
 	// An accessory promoted back up to a prescribed lift's rest, which is the
 	// tier that only exists because is_accessory alone gets it wrong.
 	assertRest(t, sqlDB, "Leg Press", 180)
+	// 0017 put the cap in the schema, not just in the data. Asserted by trying
+	// to break it: the rail is what holds for rows no migration wrote.
+	assertRestRejected(t, sqlDB, 181)
 }
 
 func assertRest(t *testing.T, db *sql.DB, name string, want int) {
@@ -121,6 +127,17 @@ func assertRest(t *testing.T, db *sql.DB, name string, want int) {
 	}
 	if got != want {
 		t.Errorf("rest_seconds for %q = %d, want %d", name, got, want)
+	}
+}
+
+// assertRestRejected proves the CHECK refuses a rest length, by writing one. The
+// statement fails atomically, so a rejected write leaves the row as it was and
+// an accepted one is the failure being reported.
+func assertRestRejected(t *testing.T, db *sql.DB, seconds int) {
+	t.Helper()
+	_, err := db.Exec("UPDATE exercises SET rest_seconds = $1 WHERE name = 'Deadlift'", seconds)
+	if err == nil {
+		t.Errorf("rest_seconds = %d was accepted; the 30-180 CHECK is missing", seconds)
 	}
 }
 

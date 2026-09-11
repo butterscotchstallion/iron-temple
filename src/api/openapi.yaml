@@ -1898,13 +1898,17 @@ components:
           example: 45
         restSeconds:
           type: integer
+          minimum: 30
+          maximum: 180
           description: >-
             Prescribed rest between sets, in seconds. A property of the movement
             rather than of the day it was prescribed on, so the same lift rests
-            the same wherever it appears: five minutes for the squat and deadlift
-            families, three for the other compounds, ninety seconds for isolation
-            work. A custom exercise inherits the three-minute default.
-          example: 300
+            the same wherever it appears: three minutes for compound work,
+            ninety seconds for isolation work. A custom exercise inherits the
+            three-minute default. Three minutes is also the ceiling — no
+            movement, including the squat and deadlift families, prescribes a
+            longer rest.
+          example: 180
 
     PrescribedSession:
       description: A day's prescription with progression-computed weights, not yet saved.
@@ -2045,7 +2049,7 @@ components:
           type: integer
           description: >-
             Prescribed rest between sets, in seconds — see ProgramDayExercise.
-          example: 300
+          example: 180
         repMin:
           type: integer
           description: >-
@@ -2349,9 +2353,9 @@ components:
           type: integer
           description: >-
             Prescribed rest after this set, in seconds — see ProgramDayExercise.
-            The session screen's countdown starts from it, so a set of deadlifts
-            and a set of curls no longer ask for the same three minutes.
-          example: 300
+            The session screen's countdown starts from it, so a set of squats and
+            a set of curls no longer ask for the same length.
+          example: 180
 
     SessionExerciseWeight:
       description: An exercise's set/rep prescription and top weight for a session.
