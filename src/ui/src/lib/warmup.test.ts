@@ -86,6 +86,20 @@ describe("warmupSets", () => {
     expect(warmupSets(200, BAR, RACK, 0)).toEqual([]);
   });
 
+  it("puts whole plate weights on the rungs, not float arithmetic", () => {
+    // A 165 lb bench: 50/70/90% are 82.5, 115.49999999999999 and 148.5. Every
+    // rung is a number a lifter reads off a card and loads, so none of them may
+    // carry the dust from the multiplication that produced it.
+    for (const w of warmupSets(165, BAR, RACK)) {
+      expect(w.weightLb).toBe(Math.round(w.weightLb * 2) / 2);
+    }
+    expect(warmupSets(165, BAR, RACK)).toEqual([
+      { weightLb: 80, reps: 5, sets: 2 },
+      { weightLb: 115, reps: 3, sets: 1 },
+      { weightLb: 145, reps: 2, sets: 1 },
+    ]);
+  });
+
   it("only proposes rungs the rack can build", () => {
     // 50/70/90% of 185 are 92.5, 129.5 and 166.5 — none of them loadable on a
     // rack of 45s alone. Every rung that survives must be a weight this gym can
