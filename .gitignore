@@ -1,2 +1,7 @@
 node_modules
 
+# Toolchain that scripts/preflight.sh fetches when the box's own is below the
+# floor src/ui/package.json declares — currently a conforming Node. Build
+# output of a sort: derived, large, and reproducible from the registry.
+.cache/
+
