@@ -26,7 +26,7 @@
     invalidateTraining,
   } from "../lib/cache.svelte";
   import { loadHomeSessions, type HomeSessions } from "../lib/homeData";
-  import { todayStatus } from "../lib/trainedToday";
+  import { isTodaysWorkoutDone, todayStatus } from "../lib/trainedToday";
   import { Card } from "$lib/components/ui/card";
   import { Button, buttonVariants } from "$lib/components/ui/button";
   import { Badge } from "$lib/components/ui/badge";
@@ -86,10 +86,16 @@
   // "Friday, August 7". Computed once from today when the card mounts.
   const dayChoices = weekdayOptions();
 
+  // Today's workout comes off the screen once it is done — see
+  // isTodaysWorkoutDone for why, and for why only the day scheduled for today.
+  // Filtered before the sort, so what floats to the top is a day still to do
+  // rather than the one the lifter already finished this morning.
+  let shownDays = $derived(days.filter((d) => !isTodaysWorkoutDone(recent, d)));
+
   // Float today's scheduled workout to the top so the highlighted day leads.
   // Stable sort keeps every other day in its original order.
   let orderedDays = $derived(
-    [...days].sort(
+    [...shownDays].sort(
       (a, b) =>
         Number(b.weekday === todayWeekday()) -
         Number(a.weekday === todayWeekday()),
@@ -749,5 +755,15 @@
         </div>
       </Card>
     {/each}
+
+    <!-- Every day hidden: a one-day program, scheduled for today, trained. Rare
+         enough to be a footnote and too bleak to leave as a bare heading over
+         nothing — a screen with no cards and no sentence reads as a load that
+         failed rather than a program with nothing left in it. -->
+    {#if orderedDays.length === 0 && days.length > 0}
+      <p class="text-sm text-muted-foreground">
+        That's this program done for today. Rest up.
+      </p>
+    {/if}
   {/if}
 </div>
