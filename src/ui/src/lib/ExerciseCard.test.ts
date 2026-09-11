@@ -86,11 +86,11 @@ describe("ExerciseCard", () => {
   it("shows the lift's prescribed rest alongside the rep target", () => {
     render(ExerciseCard, {
       name: "Deadlift",
-      sets: workSets(80, 1, 300),
+      sets: workSets(80, 1, 180),
       onCycle: vi.fn(),
       onChangeWeight: vi.fn(),
     });
-    expect(screen.getByText(/5 reps · 5:00 rest/)).toBeInTheDocument();
+    expect(screen.getByText(/5 reps · 3:00 rest/)).toBeInTheDocument();
   });
 
   it("adjusts weight by ±5 via the stepper buttons", async () => {

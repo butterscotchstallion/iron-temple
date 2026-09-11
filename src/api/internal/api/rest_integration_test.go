@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"testing"
@@ -14,35 +15,76 @@ import (
 // exercise; these tests pin that it reaches all three surfaces that advertise
 // it, because each one assembles its response from a different query and
 // nothing but a test stops one of them regressing to a constant.
+//
+// 0017 capped rest at three minutes, which collapsed the compound tiers into one
+// and made 180 both the commonest answer and the old constant. Where that leaves
+// a test unable to distinguish the two, it moves a lift's rest itself rather
+// than leaning on a number the seed happens to provide.
 
-// The day the seeded programs open with is squat-led, which is the lift the
-// five-minute tier exists for.
+// The day the seeded programs open with is squat-led.
+//
+// Every lift a program prescribes rests the same three minutes since 0017 capped
+// the squat and deadlift families, so the day's own numbers can no longer tell a
+// column read apart from the constant it replaced — 180 IS the old constant. The
+// test makes the difference by moving one lift's rest in the database and
+// reading the day back: a response that still says 180 for the squat is not
+// reading the column.
 func TestProgramDayCarriesEachLiftsRest(t *testing.T) {
 	e := expect(t)
 	programID, _ := firstProgramAndDay(e)
+	setExerciseRest(t, "Squat", 150)
 
 	day := e.GET(fmt.Sprintf("/programs/%d", programID)).Expect().
 		Status(http.StatusOK).JSON().Object().
 		Value("days").Array().Value(0).Object()
 
 	var seen []float64
+	var sawSquat bool
 	exercises := day.Value("exercises").Array()
 	for i := 0; i < int(exercises.Length().Raw()); i++ {
 		ex := exercises.Value(i).Object()
 		rest := ex.Value("restSeconds").Number().Raw()
 		seen = append(seen, rest)
 		if ex.Value("exerciseName").String().Raw() == "Squat" {
-			ex.Value("restSeconds").Number().IsEqual(300)
+			sawSquat = true
+			ex.Value("restSeconds").Number().IsEqual(150)
 		}
 	}
-	// Not merely "the squat is 300": a day whose lifts all report the same
-	// number is the bug this replaced, and it would survive the check above.
+	if !sawSquat {
+		t.Fatal("the opening day is not squat-led; this test picked the wrong day")
+	}
+	// Not merely "the squat is 150": a day whose lifts all moved with it is a
+	// response assembled from one number, which is the bug this replaced.
 	if len(seen) < 2 {
 		t.Fatalf("day has %d exercises; expected a multi-lift day", len(seen))
 	}
 	if allEqual(seen) {
 		t.Errorf("every lift on the day rests %v — the fixed default is back", seen[0])
 	}
+}
+
+// setExerciseRest moves one lift's prescribed rest for the duration of a test.
+// The column has no write path through the API — it is seeded and read — so the
+// database is the only way to give a lift a rest no other lift has.
+func setExerciseRest(t *testing.T, name string, seconds int) {
+	t.Helper()
+	ctx := context.Background()
+	var was int32
+	err := testPool.QueryRow(ctx,
+		"SELECT rest_seconds FROM exercises WHERE name = $1", name).Scan(&was)
+	if err != nil {
+		t.Fatalf("read rest for %q: %v", name, err)
+	}
+	if _, err := testPool.Exec(ctx,
+		"UPDATE exercises SET rest_seconds = $1 WHERE name = $2", seconds, name); err != nil {
+		t.Fatalf("set rest for %q: %v", name, err)
+	}
+	t.Cleanup(func() {
+		if _, err := testPool.Exec(ctx,
+			"UPDATE exercises SET rest_seconds = $1 WHERE name = $2", was, name); err != nil {
+			t.Errorf("restore rest for %q: %v", name, err)
+		}
+	})
 }
 
 // The preview is assembled by a different query than the program detail, and
@@ -65,7 +107,7 @@ func TestNextSessionRestCoversMainAndAssistance(t *testing.T) {
 		case "Squat":
 			sawSquat = true
 			ex.Value("kind").String().IsEqual("main")
-			ex.Value("restSeconds").Number().IsEqual(300)
+			ex.Value("restSeconds").Number().IsEqual(180)
 		case "Barbell Curl":
 			sawCurl = true
 			// Isolation work the lifter bolted on: ninety seconds, and
