@@ -55,6 +55,22 @@ export function muscleGroupLabel(group: string): string {
   return MUSCLE_GROUP_LABELS[group as MuscleGroup] ?? group;
 }
 
+/**
+ * The smallest weight change a kind of equipment admits, in lb.
+ *
+ * Five for a barbell — 2.5 a side — and ten for dumbbells, because every weight
+ * in this app is the whole load and a dumbbell lift is two bells: a rack steps
+ * 5 lb a bell, so the pair steps 10. Anything else is loaded in units this app
+ * does not model, and the bar's is the only guess available.
+ *
+ * This mirrors progression.Ladder on the API side, which is what actually moves
+ * the weight. It exists here so the copy that promises a lifter a number can
+ * promise the one they will get.
+ */
+export function equipmentStepLb(equipment: string): number {
+  return equipment === "dumbbell" ? 10 : 5;
+}
+
 /** Display name for an equipment kind; unknown values pass through unchanged. */
 export function equipmentLabel(equipment: string): string {
   return EQUIPMENT_LABELS[equipment as Equipment] ?? equipment;

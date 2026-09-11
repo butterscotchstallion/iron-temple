@@ -32,7 +32,7 @@ var (
 )
 
 func TestResolveRampClimbsToTheTopSet(t *testing.T) {
-	got := progression.ResolveRamp(200, volumeRamp)
+	got := progression.ResolveRamp(200, volumeRamp, progression.BarLadder)
 	want := []float64{100, 125, 150, 175, 200}
 	if len(got) != len(want) {
 		t.Fatalf("got %d sets, want %d", len(got), len(want))
@@ -50,7 +50,7 @@ func TestResolveRampClimbsToTheTopSet(t *testing.T) {
 // The intensity day is the reason pct_of_top may exceed 100: a triple heavier
 // than the volume day's top, then a backoff set of eight well below it.
 func TestResolveRampHandlesTheIntensityDay(t *testing.T) {
-	got := progression.ResolveRamp(200, intensityRamp)
+	got := progression.ResolveRamp(200, intensityRamp, progression.BarLadder)
 	if len(got) != 6 {
 		t.Fatalf("got %d sets, want 6", len(got))
 	}
@@ -72,7 +72,7 @@ func TestResolveRampHandlesTheIntensityDay(t *testing.T) {
 // Every rung has to be loadable. 62.5% of 185 is 115.625, which is not a weight.
 func TestResolveRampSnapsToTheBar(t *testing.T) {
 	for _, top := range []float64{185, 137.5, 95, 245} {
-		for _, set := range progression.ResolveRamp(top, intensityRamp) {
+		for _, set := range progression.ResolveRamp(top, intensityRamp, progression.BarLadder) {
 			if rem := set.WeightLb / progression.BarIncrementLb; rem != float64(int(rem)) {
 				t.Errorf("top %v: set %d is %v lb, not a multiple of %v",
 					top, set.SetNumber, set.WeightLb, progression.BarIncrementLb)
@@ -85,7 +85,7 @@ func TestResolveRampSnapsToTheBar(t *testing.T) {
 // matching it, which is what makes it a recovery day.
 func TestLightDayStaysBelowTheTopSet(t *testing.T) {
 	top := 200.0
-	for _, set := range progression.ResolveRamp(top, lightRamp) {
+	for _, set := range progression.ResolveRamp(top, lightRamp, progression.BarLadder) {
 		if set.WeightLb >= top {
 			t.Errorf("light-day set %d is %v lb, not below the %v top set",
 				set.SetNumber, set.WeightLb, top)
@@ -115,7 +115,7 @@ func TestTopSetAdvancesOncePerReferenceDaySession(t *testing.T) {
 	history := []progression.SessionResult{
 		{WeightLb: 200, Success: true},
 	}
-	got := progression.TopSet(45, progression.IncrementDefault, history)
+	got := progression.TopSet(45, progression.BarLadder, history)
 	if got.WeightLb != 205 {
 		t.Errorf("top set = %v, want 205", got.WeightLb)
 	}
@@ -130,7 +130,7 @@ func TestTopSetAdvancesOncePerReferenceDaySession(t *testing.T) {
 		{WeightLb: 200, Success: false},
 		{WeightLb: 200, Success: false},
 	}
-	if d := progression.TopSet(45, progression.IncrementDefault, stalled); d.Status != progression.StatusDeload {
+	if d := progression.TopSet(45, progression.BarLadder, stalled); d.Status != progression.StatusDeload {
 		t.Errorf("three failed weeks gave %q, want deload", d.Status)
 	}
 }
@@ -152,7 +152,7 @@ func TestUniformRampIsAFlatPlan(t *testing.T) {
 // A percentage of a very light top set is not a set. Emitting it at 0 lb would
 // put an empty row in the session for the lifter to tick off.
 func TestResolveRampDropsRungsThatRoundToNothing(t *testing.T) {
-	for _, set := range progression.ResolveRamp(4, volumeRamp) {
+	for _, set := range progression.ResolveRamp(4, volumeRamp, progression.BarLadder) {
 		if set.WeightLb <= 0 {
 			t.Errorf("set %d came back at %v lb", set.SetNumber, set.WeightLb)
 		}

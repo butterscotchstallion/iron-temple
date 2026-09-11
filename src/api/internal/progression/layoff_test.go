@@ -37,7 +37,7 @@ func TestLayoffWeight(t *testing.T) {
 		{name: "no layoff leaves the weight alone", previousLb: 225, weeks: 0, want: 225},
 		{name: "one week off", previousLb: 225, weeks: 1, want: 205}, // 202.5 -> 205
 		{name: "two weeks off", previousLb: 225, weeks: 2, want: 180},
-		// roundToBar rounds a half increment up, as it does for a stall deload
+		// roundToStep rounds a half increment up, as it does for a stall deload
 		// (202.5 -> 205), so these land above the exact fraction, not below.
 		{name: "three weeks off", previousLb: 225, weeks: 3, want: 160}, // 157.5 -> 160
 		{name: "capped at half", previousLb: 225, weeks: 40, want: 115}, // 112.5 -> 115
@@ -45,22 +45,42 @@ func TestLayoffWeight(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := LayoffWeight(tt.previousLb, tt.weeks); got != tt.want {
-				t.Errorf("LayoffWeight(%v, %d) = %v, want %v", tt.previousLb, tt.weeks, got, tt.want)
+			if got := LayoffWeight(tt.previousLb, tt.weeks, BarLadder); got != tt.want {
+				t.Errorf("LayoffWeight(%v, %d, bar) = %v, want %v",
+					tt.previousLb, tt.weeks, got, tt.want)
 			}
 		})
 	}
 }
 
 // Every result is loadable on a standard bar, which is the property the
-// table above only samples.
+// table above only samples. See TestLayoffWeightSnapsToTheBells for the same
+// property on the grid a dumbbell lift actually has.
 func TestLayoffWeightSnapsToTheBar(t *testing.T) {
 	for previous := 45.0; previous <= 500; previous += 5 {
 		for weeks := 1; weeks <= 8; weeks++ {
-			got := LayoffWeight(previous, weeks)
+			got := LayoffWeight(previous, weeks, BarLadder)
 			if r := got / BarIncrementLb; r != float64(int(r)) {
 				t.Errorf("LayoffWeight(%v, %d) = %v, not a multiple of %v",
 					previous, weeks, got, BarIncrementLb)
+			}
+		}
+	}
+}
+
+// A layoff off a dumbbell lift lands on a pair of bells that exists. Before
+// ladders this used the bar's 5 lb grid and could prescribe a weight with half
+// a bell in it — 225 down three weeks is 157.5, which snapped to 160 and asked
+// for a 80 lb bell in each hand when the rack has 75s and 80s but nothing that
+// makes 160... it does, so the case that bites is any odd multiple of 5.
+func TestLayoffWeightSnapsToTheBells(t *testing.T) {
+	db := LadderFor("Dumbbell Shoulder Press", "dumbbell")
+	for previous := 20.0; previous <= 300; previous += 10 {
+		for weeks := 1; weeks <= 8; weeks++ {
+			got := LayoffWeight(previous, weeks, db)
+			if r := got / DumbbellIncrementLb; r != float64(int(r)) {
+				t.Errorf("LayoffWeight(%v, %d, dumbbell) = %v, not a multiple of %v",
+					previous, weeks, got, DumbbellIncrementLb)
 			}
 		}
 	}
@@ -130,7 +150,7 @@ func TestApplyLayoff(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ApplyLayoff(tt.plan, tt.weeks)
+			got := ApplyLayoff(tt.plan, tt.weeks, BarLadder)
 			if got.WeightLb != tt.wantWeight {
 				t.Errorf("weight = %v, want %v", got.WeightLb, tt.wantWeight)
 			}
@@ -162,8 +182,8 @@ func TestApplyLayoffNeverAddsWeight(t *testing.T) {
 	}
 	for _, p := range plans {
 		for weeks := 0; weeks <= 20; weeks++ {
-			if got := ApplyLayoff(p, weeks).WeightLb; got > p.WeightLb {
-				t.Errorf("ApplyLayoff(%+v, %d) raised the weight to %v", p, weeks, got)
+			if got := ApplyLayoff(p, weeks, BarLadder).WeightLb; got > p.WeightLb {
+				t.Errorf("ApplyLayoff(%+v, %d, bar) raised the weight to %v", p, weeks, got)
 			}
 		}
 	}

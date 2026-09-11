@@ -20,7 +20,10 @@
 --
 -- rest_seconds rides along from the exercise so a prescribed session can carry a
 -- rest for assistance work too, without this table needing a column for it — the
--- same reason 0011 put it on exercises in the first place.
+-- same reason 0011 put it on exercises in the first place. equipment comes with
+-- it and for the same reason: double progression moves the weight by the
+-- smallest jump the rack allows, and only the exercise knows whether that is a
+-- bar's 5 lb or a pair of bells' 10.
 -- name: ListAssistanceByDay :many
 SELECT pda.id,
        pda.program_day_id,
@@ -32,7 +35,8 @@ SELECT pda.id,
        pda.weight_lb,
        pda.rep_min,
        pda.rep_max,
-       e.rest_seconds
+       e.rest_seconds,
+       e.equipment
 FROM program_day_assistance pda
 JOIN exercises e ON e.id = pda.exercise_id
 WHERE pda.program_day_id = sqlc.arg('program_day_id')

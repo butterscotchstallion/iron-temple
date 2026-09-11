@@ -66,6 +66,11 @@ again after a failure, and a **deload to 90%** after three consecutive failures 
 one weight. It also says *why* it picked a number, so a deload or an approaching
 stall reads as a decision rather than a mystery.
 
+Every jump is one the equipment can make. A **dumbbell** lift moves **+10 lb** and
+deloads onto the same grid, because a weight here is the whole load and a rack
+steps 5 lb a *bell* — so the pair steps 10, and there is nothing in between. The
+same rule sets the increase when assistance work tops out its rep range.
+
 History follows the **lift**, not the program — so taking Advanced 3x5 when your
 5x5 stalls picks the bar up where you left it instead of sending you back to an
 empty one.

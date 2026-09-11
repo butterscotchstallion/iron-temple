@@ -4,6 +4,7 @@ import {
   MUSCLE_GROUPS,
   countByGroup,
   equipmentLabel,
+  equipmentStepLb,
   exerciseSubtitle,
   groupExercises,
   matchesSearch,
@@ -216,5 +217,24 @@ describe("recentExercises", () => {
     expect(recent).toHaveLength(RECENT_LIMIT);
     expect(names(recent)[0]).toBe(`Lift ${RECENT_LIMIT + 2}`);
     expect(names(library)).toEqual(before);
+  });
+});
+
+describe("equipmentStepLb", () => {
+  // Ten, not five: every weight in this app is the whole load, so a dumbbell
+  // lift is two bells and a rack that steps 5 lb a bell steps 10 on the pair.
+  // Promising a lifter 5 promised them half a bell.
+  it("is a pair of bells for dumbbells", () => {
+    expect(equipmentStepLb("dumbbell")).toBe(10);
+  });
+
+  it("is the bar's own for a barbell", () => {
+    expect(equipmentStepLb("barbell")).toBe(5);
+  });
+
+  it("falls back to the bar for equipment this app does not model", () => {
+    for (const kind of ["machine", "cable", "bodyweight", "other", "kettlebell", ""]) {
+      expect(equipmentStepLb(kind)).toBe(5);
+    }
   });
 });
