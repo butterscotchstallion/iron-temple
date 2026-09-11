@@ -25,6 +25,7 @@ sql:
       # 0015 is mixed: the CHECK swap and program_day_exercise_sets are schema,
       # the Madcow reseed below them is DML.
       - "db/migrations/0015_madcow.up.sql"
+      # 0018 is seed DML only, so it has no schema to declare here.
     queries: "db/queries"
     gen:
       go:

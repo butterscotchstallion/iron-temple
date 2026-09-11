@@ -66,12 +66,13 @@ func TestMigrateAppliesSchemaAndSeed(t *testing.T) {
 	// the five variation lifts the Intermediate program needs; 0009 adds the
 	// accessory catalogue the exercise library browses; 0012 adds Madcow 5x5 and
 	// 0015 reshapes it from two days to three — nine prescriptions where 0012 had
-	// six. Neither prescribes a lift 0002 had not already seeded, which is why
-	// every exercise count in this test is untouched by both.
+	// six; 0018 clones Lite with a dumbbell press, for two more days and six more
+	// prescriptions. None prescribes a lift the seed did not already hold, which
+	// is why the exercise total here is untouched by all of them.
 	assertCount(t, sqlDB, "SELECT count(*) FROM exercises", 53)
-	assertCount(t, sqlDB, "SELECT count(*) FROM programs", 6)
-	assertCount(t, sqlDB, "SELECT count(*) FROM program_days", 14)
-	assertCount(t, sqlDB, "SELECT count(*) FROM program_day_exercises", 40)
+	assertCount(t, sqlDB, "SELECT count(*) FROM programs", 7)
+	assertCount(t, sqlDB, "SELECT count(*) FROM program_days", 16)
+	assertCount(t, sqlDB, "SELECT count(*) FROM program_day_exercises", 46)
 
 	// Madcow is the only program with per-set prescriptions, and the only one
 	// with a progression kind of its own. Every other program is a uniform block
@@ -88,11 +89,19 @@ func TestMigrateAppliesSchemaAndSeed(t *testing.T) {
 	assertCount(t, sqlDB,
 		"SELECT count(*) FROM program_day_exercise_sets WHERE pct_of_top = 100", 5)
 
-	// The split 0009 draws: the ten lifts the programs prescribe are not
-	// accessories, and everything it seeded is. Asserted as a split rather than
-	// two magic numbers because it is what the library's default view leans on.
-	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE NOT is_accessory", 10)
-	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE is_accessory", 43)
+	// The split 0009 draws: the lifts the programs prescribe are not accessories,
+	// and everything else it seeded is. Asserted as a split rather than two magic
+	// numbers because it is what the library's default view leans on — and
+	// because the split is what moves when a program picks up a catalogue
+	// movement, as 0018 does with the dumbbell press. Eleven and forty-two where
+	// 0009 left ten and forty-three; the total is unchanged.
+	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE NOT is_accessory", 11)
+	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE is_accessory", 42)
+	// The promotion itself, named. It must not have dragged the rest tier with
+	// it: 0011 had already given this lift a compound's 180s, so 0018 changing
+	// what it is classed as must leave what it rests unchanged.
+	assertAccessory(t, sqlDB, "Dumbbell Shoulder Press", false)
+	assertRest(t, sqlDB, "Dumbbell Shoulder Press", 180)
 	// Nothing seeded belongs to a user; every seeded row is shared.
 	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE created_by_user_id IS NOT NULL", 0)
 
@@ -138,6 +147,20 @@ func assertRestRejected(t *testing.T, db *sql.DB, seconds int) {
 	_, err := db.Exec("UPDATE exercises SET rest_seconds = $1 WHERE name = 'Deadlift'", seconds)
 	if err == nil {
 		t.Errorf("rest_seconds = %d was accepted; the 30-180 CHECK is missing", seconds)
+	}
+}
+
+func assertAccessory(t *testing.T, db *sql.DB, name string, want bool) {
+	t.Helper()
+	var got bool
+	err := db.QueryRow(
+		"SELECT is_accessory FROM exercises WHERE name = $1 AND created_by_user_id IS NULL",
+		name).Scan(&got)
+	if err != nil {
+		t.Fatalf("is_accessory for %q: %v", name, err)
+	}
+	if got != want {
+		t.Errorf("is_accessory for %q = %t, want %t", name, got, want)
 	}
 }
 
