@@ -370,13 +370,13 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32, 
 		if b, ok := baseline[p.ExerciseID]; ok {
 			start = b
 		}
-		plan := progression.NextPlan(
-			start,
-			progression.IncrementFor(p.ExerciseName),
-			history,
-		)
+		// What this lift can jump by, from the movement and the equipment it
+		// uses. A dumbbell press moves 10 lb because that is 5 lb a bell and a
+		// rack has nothing between; a barbell lift still moves 5.
+		ladder := progression.LadderFor(p.ExerciseName, p.Equipment)
+		plan := progression.NextPlan(start, ladder, history)
 		if lay.active() {
-			plan = progression.ApplyLayoff(plan, lay.weeks)
+			plan = progression.ApplyLayoff(plan, lay.weeks, ladder)
 		}
 
 		// plan.WeightLb is the top set for a ramping lift and the working weight
@@ -385,7 +385,7 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32, 
 		// render instead of two.
 		setPlan := progression.UniformRamp(p.Sets, p.Reps, plan.WeightLb)
 		if len(steps) > 0 {
-			setPlan = progression.ResolveRamp(plan.WeightLb, steps)
+			setPlan = progression.ResolveRamp(plan.WeightLb, steps, ladder)
 		}
 		// A prescription is a handful of rows and cannot approach int32, but the
 		// clamp is written out rather than assumed so the conversion is provably
@@ -463,8 +463,13 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32, 
 			}
 		}
 
+		// The same ladder the prescribed lifts get. Topping a rep range earns
+		// the smallest move the equipment allows, so a dumbbell curl goes up 10
+		// on the pair and a barbell curl 5 — before this, both went up 5 and the
+		// dumbbell one asked for half a bell.
+		ladder := progression.LadderFor(a.ExerciseName, a.Equipment)
 		plan := progression.NextAssistance(
-			numericToFloat(a.WeightLb), derefInt32(a.RepMin), derefInt32(a.RepMax), last,
+			numericToFloat(a.WeightLb), derefInt32(a.RepMin), derefInt32(a.RepMax), last, ladder,
 		)
 		weight := plan.WeightLb
 		previous := plan.PreviousLb
@@ -490,7 +495,7 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32, 
 		// something to detrain off.
 		layoffPct := 0.0
 		if lay.active() && previous > 0 {
-			weight = progression.LayoffWeight(previous, lay.weeks)
+			weight = progression.LayoffWeight(previous, lay.weeks, ladder)
 			layoffPct = progression.LayoffPct(lay.weeks)
 		}
 

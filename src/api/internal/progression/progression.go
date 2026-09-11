@@ -5,16 +5,22 @@
 //
 // Rules (pounds):
 //   - Advance by a per-lift increment after a successful session:
-//     +10 lb on the deadlift, +5 lb on every other lift.
+//     +10 lb on the deadlift, +10 lb on a dumbbell lift, +5 lb on every other
+//     lift. See Ladder for why the dumbbell number is what it is.
 //   - Repeat the same weight after a failed session.
 //   - After 3 consecutive failed sessions at the same weight, deload to 90%
-//     of that weight (rounded to the nearest 5 lb), giving a fresh run-up.
+//     of that weight, snapped to what the equipment can build, giving a fresh
+//     run-up.
 //   - After time away from training, optionally deload by 10% per week off,
 //     capped at 50%. This one is the lifter's to ask for; see layoff.go.
 //
+// Both the advance and the snap come off the lift's Ladder, because neither is
+// a property of the program: a pair of dumbbells has nothing between 10 lb
+// however the sets and reps are arranged.
+//
 // The engine is pure: it takes a history and returns a number, with no I/O.
 // The data layer supplies the history; the API layer maps exercises to
-// increments and rounds for display.
+// ladders and rounds for display.
 package progression
 
 import "math"
@@ -34,18 +40,62 @@ const (
 	// BarIncrementLb is the smallest change a standard barbell admits
 	// (2.5 lb per side); computed weights snap to this.
 	BarIncrementLb = 5.0
+	// DumbbellIncrementLb is the smallest change a pair of dumbbells admits.
+	//
+	// Ten, not five, because every weight in this app is the WHOLE load and a
+	// dumbbell lift is two bells. A rack steps 5 lb a bell, so the smallest
+	// move a lifter can actually make is 10 lb on the pair. Asking for 5 is
+	// asking for a bell that is not on the rack.
+	DumbbellIncrementLb = 10.0
 )
 
 // deadliftName is the seeded exercise name that progresses at the faster rate.
 const deadliftName = "Deadlift"
 
-// IncrementFor returns the linear per-session increment for a lift, in lb,
-// keyed by its (seeded) exercise name. Unknown names take the default +5.
-func IncrementFor(exerciseName string) float64 {
-	if exerciseName == deadliftName {
-		return IncrementDeadlift
+// equipmentDumbbell is the exercises.equipment value for a dumbbell lift, as
+// 0009 constrained it.
+const equipmentDumbbell = "dumbbell"
+
+// Ladder is the set of jumps a lift's equipment can make: how much it goes up
+// after a good session, and the smallest change it admits at all.
+//
+// The two are not the same number and never were. A deadlift advances 10 lb a
+// session but is still loaded on a bar that moves in 5s, so its deload snaps to
+// 5. Keeping them apart is what lets equipment decide reachability while the
+// programme decides pace.
+//
+// It exists because "+5 lb" was baked in as a universal truth about barbells,
+// and 0018 put a dumbbell press in a program for the first time. On the pair,
+// +5 lb is half a bell — a weight no rack can build, prescribed every session.
+type Ladder struct {
+	// Increment is the per-session advance after a successful session.
+	Increment float64
+	// Step is the smallest change the equipment admits. Deloads and layoff
+	// cuts snap to it; it is never zero.
+	Step float64
+}
+
+// BarLadder is the ladder for anything loaded on a barbell, which is every
+// lift the app knew about before dumbbells were prescribed.
+var BarLadder = Ladder{Increment: IncrementDefault, Step: BarIncrementLb}
+
+// LadderFor returns the jumps a lift can make, from its (seeded) exercise name
+// and its equipment. Unknown names and unknown equipment take the bar's.
+//
+// Equipment is checked first and wins outright, because it answers a stricter
+// question. The deadlift's +10 is a claim about how fast the movement should be
+// pushed; a pair of dumbbells stepping 10 is a claim about which weights exist
+// at all. A preference can be overruled by a constraint, never the other way
+// round — so a dumbbell deadlift, if a program ever prescribes one, takes the
+// pair's grid rather than the bar's.
+func LadderFor(exerciseName, equipment string) Ladder {
+	if equipment == equipmentDumbbell {
+		return Ladder{Increment: DumbbellIncrementLb, Step: DumbbellIncrementLb}
 	}
-	return IncrementDefault
+	if exerciseName == deadliftName {
+		return Ladder{Increment: IncrementDeadlift, Step: BarIncrementLb}
+	}
+	return BarLadder
 }
 
 // SessionResult is the outcome of one past performance of a single lift,
@@ -101,20 +151,20 @@ type Plan struct {
 
 // Next returns the target weight for the upcoming session of a lift. It is a
 // thin wrapper over NextPlan for callers that only need the number.
-func Next(startingWeight, increment float64, history []SessionResult) float64 {
-	return NextPlan(startingWeight, increment, history).WeightLb
+func Next(startingWeight float64, l Ladder, history []SessionResult) float64 {
+	return NextPlan(startingWeight, l, history).WeightLb
 }
 
 // NextPlan computes the next session's weight and the reasoning behind it.
 //
 // startingWeight is the program's prescribed starting weight, returned when
-// there is no history. increment is the per-session jump for this lift (see
-// IncrementFor). history is chronological, oldest first.
+// there is no history. l is the ladder this lift's equipment admits (see
+// LadderFor). history is chronological, oldest first.
 //
 // A failure streak is only counted at the most recent weight: a deload lowers
 // the weight, so failures before the drop belong to the old weight and do not
 // re-trigger a deload on the next attempt.
-func NextPlan(startingWeight, increment float64, history []SessionResult) Plan {
+func NextPlan(startingWeight float64, l Ladder, history []SessionResult) Plan {
 	if len(history) == 0 {
 		return Plan{WeightLb: startingWeight, Status: StatusStart}
 	}
@@ -122,7 +172,7 @@ func NextPlan(startingWeight, increment float64, history []SessionResult) Plan {
 	last := history[len(history)-1]
 	if last.Success {
 		return Plan{
-			WeightLb:   last.WeightLb + increment,
+			WeightLb:   last.WeightLb + l.Increment,
 			Status:     StatusAdvance,
 			PreviousLb: last.WeightLb,
 		}
@@ -140,7 +190,7 @@ func NextPlan(startingWeight, increment float64, history []SessionResult) Plan {
 
 	if fails >= FailuresBeforeDeload {
 		return Plan{
-			WeightLb:     roundToBar(last.WeightLb * DeloadFactor),
+			WeightLb:     roundToStep(last.WeightLb*DeloadFactor, l.Step),
 			Status:       StatusDeload,
 			FailureCount: fails,
 			PreviousLb:   last.WeightLb,
@@ -154,7 +204,15 @@ func NextPlan(startingWeight, increment float64, history []SessionResult) Plan {
 	}
 }
 
-// roundToBar snaps a weight to the nearest loadable barbell increment.
-func roundToBar(w float64) float64 {
-	return math.Round(w/BarIncrementLb) * BarIncrementLb
+// roundToStep snaps a weight to the nearest change the equipment admits.
+//
+// A zero or negative step is treated as the bar's. Callers get their step from
+// a Ladder, which never carries one — but this function divides by it, and a
+// silent Inf reaching a prescription is worse than quietly using the number
+// that was the only option before ladders existed.
+func roundToStep(w, step float64) float64 {
+	if step <= 0 {
+		step = BarIncrementLb
+	}
+	return math.Round(w/step) * step
 }

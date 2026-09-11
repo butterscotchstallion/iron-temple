@@ -20,9 +20,16 @@ package progression
 //
 // Like the linear engine this is pure — history in, a number out, no I/O.
 
-// AssistanceIncrement is how much a lift goes up when every set tops the range.
-// The same 5 lb the main lifts use: it is the smallest change a standard barbell
-// admits, and the dumbbell rack it usually means is no finer.
+// AssistanceIncrement is how much a BARBELL lift goes up when every set tops the
+// range: the same 5 lb the main lifts use, and the smallest change a standard
+// barbell admits.
+//
+// It is no longer the answer for every accessory, which is what it used to
+// claim. The old note here read "the dumbbell rack it usually means is no
+// finer", and that is only true of ONE bell — every weight in this app is the
+// whole load, so a dumbbell accessory is two bells and the smallest move the
+// rack allows is 10 lb. A curl that topped its range was being sent up 5, to a
+// pair of bells that does not exist. See Ladder, and use LadderFor.
 const AssistanceIncrement = 5.0
 
 // AssistancePerformance is what a lift did the last time it was performed: the
@@ -65,7 +72,9 @@ const StatusFixed Status = "fixed"
 //
 // fallbackLb is the weight stored on the assistance row, used only when the lift
 // has never been performed. repMin and repMax bound the range. last is the most
-// recent performance, or nil when there is none.
+// recent performance, or nil when there is none. l is the lift's ladder: only
+// its Step is read, because topping a range earns the smallest move the
+// equipment allows and nothing faster — a curl is not a deadlift.
 //
 // A zero or inverted range is treated as no range at all, which collapses to the
 // carry-forward behaviour. The database constrains both columns to be set
@@ -75,6 +84,7 @@ func NextAssistance(
 	fallbackLb float64,
 	repMin, repMax int32,
 	last *AssistancePerformance,
+	l Ladder,
 ) AssistancePlan {
 	ranged := repMin > 0 && repMax >= repMin
 
@@ -100,7 +110,7 @@ func NextAssistance(
 
 	if toppedOut(last.Reps, repMax) {
 		return AssistancePlan{
-			WeightLb:   last.WeightLb + AssistanceIncrement,
+			WeightLb:   last.WeightLb + assistanceStep(l),
 			TargetReps: repMin,
 			Status:     StatusProgressing,
 			PreviousLb: last.WeightLb,
@@ -131,4 +141,16 @@ func toppedOut(reps []int32, repMax int32) bool {
 		}
 	}
 	return true
+}
+
+// assistanceStep is how much a ranged lift goes up when every set tops out: the
+// smallest change its equipment admits. A zero ladder — one a caller built
+// itself rather than taking from LadderFor — falls back to the barbell 5 this
+// function replaced, so a missed call site keeps the old behaviour rather than
+// prescribing a weight of zero.
+func assistanceStep(l Ladder) float64 {
+	if l.Step <= 0 {
+		return AssistanceIncrement
+	}
+	return l.Step
 }

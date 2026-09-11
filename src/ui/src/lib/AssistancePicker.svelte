@@ -4,6 +4,7 @@
   import {
     MUSCLE_GROUPS,
     countByGroup,
+    equipmentStepLb,
     exerciseSubtitle,
     groupExercises,
     muscleGroupLabel,
@@ -56,12 +57,18 @@
 
   // Off by default. A rep range turns the lift onto double progression — add
   // reps inside the range week to week, and when every set reaches the top the
-  // weight goes up 5 lb and the reps reset to the bottom. Without it the lift
-  // carries its weight forward and nothing moves it, which is what accessories
-  // have always done here and is still the right default for most of them.
+  // weight goes up by one step of the equipment and the reps reset to the
+  // bottom. Without it the lift carries its weight forward and nothing moves it,
+  // which is what accessories have always done here and is still the right
+  // default for most of them.
   let ranged = $state(false);
   let repMin = $state(8);
   let repMax = $state(12);
+
+  // What the chosen movement's weight moves in: 5 lb on a bar, 10 on a pair of
+  // dumbbells. Drives both the copy below and the number input's step, so the
+  // arrows offer weights the rack can actually make.
+  const stepLb = $derived(selected ? equipmentStepLb(selected.equipment) : 5);
 
   const available = $derived(exercises.filter((e) => !exclude.includes(e.id)));
   const counts = $derived(countByGroup(available));
@@ -184,7 +191,7 @@
         <input
           type="number"
           min="0"
-          step="5"
+          step={stepLb}
           bind:value={weightLb}
           class="rounded-md border border-input bg-transparent px-2 py-1.5 text-sm tabular-nums text-foreground outline-none transition focus:border-primary"
         />
@@ -197,8 +204,8 @@
     <p class="text-xs text-muted-foreground">
       Leave the weight at 0 for bodyweight work.
       {#if ranged}
-        With a range, hit the top on every set and the weight goes up 5 lb next
-        time, with the reps back at the bottom. It never deloads.
+        With a range, hit the top on every set and the weight goes up {stepLb} lb
+        next time, with the reps back at the bottom. It never deloads.
       {:else}
         After the first time you log it, the weight carries over from your last
         session — nothing moves it but you.

@@ -46,7 +46,7 @@ func TestNextAssistanceWithoutARange(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := progression.NextAssistance(tc.fallback, 0, 0, tc.last)
+			got := progression.NextAssistance(tc.fallback, 0, 0, tc.last, progression.BarLadder)
 			if got.WeightLb != tc.wantWeight {
 				t.Errorf("weight = %v, want %v", got.WeightLb, tc.wantWeight)
 			}
@@ -110,7 +110,7 @@ func TestNextAssistanceDoubleProgression(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := progression.NextAssistance(25, 8, 12, tc.last)
+			got := progression.NextAssistance(25, 8, 12, tc.last, progression.BarLadder)
 			if got.WeightLb != tc.wantWeight {
 				t.Errorf("weight = %v, want %v", got.WeightLb, tc.wantWeight)
 			}
@@ -135,7 +135,7 @@ func TestNextAssistanceNeverDeloads(t *testing.T) {
 		perf(40, 0),
 	}
 	for _, last := range histories {
-		got := progression.NextAssistance(25, 8, 12, last)
+		got := progression.NextAssistance(25, 8, 12, last, progression.BarLadder)
 		if got.WeightLb < last.WeightLb {
 			t.Errorf("reps %v cut the weight %v → %v", last.Reps, last.WeightLb, got.WeightLb)
 		}
@@ -151,7 +151,7 @@ func TestNextAssistanceNeverDeloads(t *testing.T) {
 func TestNextAssistanceIgnoresAnUnusableRange(t *testing.T) {
 	last := perf(40, 12, 12, 12)
 	for _, r := range [][2]int32{{0, 12}, {8, 0}, {12, 8}, {0, 0}} {
-		got := progression.NextAssistance(25, r[0], r[1], last)
+		got := progression.NextAssistance(25, r[0], r[1], last, progression.BarLadder)
 		if got.WeightLb != 40 || got.Status != progression.StatusFixed {
 			t.Errorf("range %v: got %v/%q, want 40/fixed", r, got.WeightLb, got.Status)
 		}
@@ -165,8 +165,44 @@ func TestNextAssistanceTreatsNoLoggedSetsAsNoHistory(t *testing.T) {
 	got := progression.NextAssistance(25, 8, 12, &progression.AssistancePerformance{
 		WeightLb: 40,
 		Reps:     nil,
-	})
+	}, progression.BarLadder)
 	if got.WeightLb != 25 || got.Status != progression.StatusFixed {
 		t.Errorf("got %v/%q, want the fallback 25/fixed", got.WeightLb, got.Status)
+	}
+}
+
+// Topping the range moves the weight by what the equipment can build, which is
+// the bug this pairs with the prescribed lifts' +5. A dumbbell accessory used to
+// be sent up 5 lb on the pair — half a bell, a weight no rack makes — because
+// the increment was a barbell constant with a comment claiming dumbbells were
+// "no finer". They are coarser: 5 lb a bell is 10 on the pair.
+func TestNextAssistanceStepsByEquipment(t *testing.T) {
+	toppedOut := perf(40, 12, 12, 12)
+
+	bar := progression.NextAssistance(25, 8, 12, toppedOut, progression.BarLadder)
+	if bar.WeightLb != 45 {
+		t.Errorf("barbell accessory = %v, want 45", bar.WeightLb)
+	}
+
+	db := progression.LadderFor("Hammer Curl", "dumbbell")
+	got := progression.NextAssistance(25, 8, 12, toppedOut, db)
+	if got.WeightLb != 50 {
+		t.Errorf("dumbbell accessory = %v, want 50 (a pair that exists)", got.WeightLb)
+	}
+	if got.Status != progression.StatusProgressing {
+		t.Errorf("status = %q, want %q", got.Status, progression.StatusProgressing)
+	}
+	// The range still resets to the bottom — only the size of the jump moved.
+	if got.TargetReps != 8 {
+		t.Errorf("target reps = %d, want 8", got.TargetReps)
+	}
+}
+
+// A caller that builds a Ladder itself rather than taking one from LadderFor
+// gets the barbell increment this replaced, not a weight that never moves.
+func TestNextAssistanceZeroLadderKeepsTheOldBehaviour(t *testing.T) {
+	got := progression.NextAssistance(25, 8, 12, perf(40, 12, 12, 12), progression.Ladder{})
+	if got.WeightLb != 40+progression.AssistanceIncrement {
+		t.Errorf("zero ladder = %v, want %v", got.WeightLb, 40+progression.AssistanceIncrement)
 	}
 }

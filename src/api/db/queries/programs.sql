@@ -48,6 +48,11 @@ WHERE pd.program_id = $1
 ORDER BY pd.position, pde.position;
 
 -- ListPrescriptionsByDay returns the prescribed exercises for a single day.
+--
+-- This is the one the progression engine reads, which is why equipment is here
+-- and not on ListPrescriptionsByProgram above: what a lift can jump by is a
+-- fact about the bar or the bells it uses (progression.LadderFor), and the
+-- program listing prescribes nothing and needs no ladder.
 -- name: ListPrescriptionsByDay :many
 SELECT pde.id,
        pde.program_day_id,
@@ -57,7 +62,8 @@ SELECT pde.id,
        pde.sets,
        pde.reps,
        pde.starting_weight_lb,
-       e.rest_seconds
+       e.rest_seconds,
+       e.equipment
 FROM program_day_exercises pde
 JOIN exercises e ON e.id = pde.exercise_id
 WHERE pde.program_day_id = $1

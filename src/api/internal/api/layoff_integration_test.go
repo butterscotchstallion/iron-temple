@@ -98,7 +98,7 @@ func TestLayoffDeloadCutsThePreviewedWeights(t *testing.T) {
 	body.Value("layoff").Object().Value("applied").Boolean().IsTrue()
 
 	first := body.Value("exercises").Array().Value(0).Object()
-	first.Value("weightLb").Number().IsEqual(progression.LayoffWeight(worked, 3))
+	first.Value("weightLb").Number().IsEqual(progression.LayoffWeight(worked, 3, progression.BarLadder))
 	first.Value("weightLb").Number().Lt(worked)
 
 	prog := first.Value("progression").Object()
@@ -150,7 +150,7 @@ func TestLayoffDeloadReachesTheCreatedSession(t *testing.T) {
 		e.DELETE(fmt.Sprintf("/sessions/%d", id)).Expect().Status(http.StatusNoContent)
 	})
 	created.Value("sets").Array().Value(0).Object().
-		Value("weightLb").Number().IsEqual(progression.LayoffWeight(worked, 3))
+		Value("weightLb").Number().IsEqual(progression.LayoffWeight(worked, 3, progression.BarLadder))
 
 	// Omitting the flag is the old behaviour exactly, which is what lets a
 	// client that has never heard of this ship unchanged. Sound because neither
@@ -199,7 +199,7 @@ func TestLayoffDeepensWithTimeAwayAndThenCaps(t *testing.T) {
 			body.Value("layoff").Object().Value("deloadPct").Number().IsEqual(tc.wantPct)
 			body.Value("exercises").Array().Value(0).Object().
 				Value("weightLb").Number().
-				IsEqual(progression.LayoffWeight(worked, tc.weeks))
+				IsEqual(progression.LayoffWeight(worked, tc.weeks, progression.BarLadder))
 		})
 	}
 }

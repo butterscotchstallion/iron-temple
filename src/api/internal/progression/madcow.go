@@ -32,16 +32,16 @@ import "math"
 // TopSet computes the weight a lift's 100% set should be this week.
 //
 // history is the lift's performances ON ITS REFERENCE DAY, oldest first —
-// nothing else. startingWeight is the top set's starting weight, and increment
-// is the per-week jump (Madcow proper moves 2.5% a week; this uses the same
-// per-lift pounds the rest of the app does, which is close enough at these
-// weights and keeps one rule rather than two).
+// nothing else. startingWeight is the top set's starting weight, and l is the
+// lift's ladder, whose Increment is the per-week jump (Madcow proper moves 2.5%
+// a week; this uses the same per-lift pounds the rest of the app does, which is
+// close enough at these weights and keeps one rule rather than two).
 //
 // This is NextPlan, unchanged, and deliberately so: hold after a failure and
 // deload after three are as right for a ramping program as for a linear one, and
 // a lifter who has stalled three weeks running needs the same answer either way.
-func TopSet(startingWeight, increment float64, history []SessionResult) Plan {
-	return NextPlan(startingWeight, increment, history)
+func TopSet(startingWeight float64, l Ladder, history []SessionResult) Plan {
+	return NextPlan(startingWeight, l, history)
 }
 
 // RampSet is one set of a resolved ramp: what to load and for how many reps.
@@ -61,20 +61,25 @@ type RampStep struct {
 
 // ResolveRamp turns a prescription into weights for a given top set.
 //
-// Every rung snaps to the nearest 5 lb, the smallest change a standard barbell
-// admits. It rounds rather than floors: a warm-up rung is not a working set, and
-// putting 2.5 lb more on a 62.5% rung matters far less than the arithmetic
-// staying legible. Where it does matter — a weight the lifter's rack cannot
-// build — the client rounds again against the plates actually owned, and rounds
-// DOWN, which is the direction that cannot hurt.
+// Every rung snaps to the smallest change the lift's equipment admits — 5 lb on
+// a bar, 10 on a pair of dumbbells. It rounds rather than floors: a warm-up rung
+// is not a working set, and putting 2.5 lb more on a 62.5% rung matters far less
+// than the arithmetic staying legible. Where it does matter — a weight the
+// lifter's rack cannot build — the client rounds again against the plates
+// actually owned, and rounds DOWN, which is the direction that cannot hurt.
+//
+// Madcow prescribes only barbell lifts today, so l is the bar's in practice.
+// It is a parameter rather than an assumption because a ramp resolved in 5 lb
+// rungs is exactly the bug this change exists to remove, and the next program
+// to ramp something is not guaranteed to ramp a barbell.
 //
 // A rung that lands at or below zero is dropped rather than emitted at 0: the
 // top set is the only number a lifter chose, and a percentage of a very light
 // top set is not a set at all.
-func ResolveRamp(topSetLb float64, steps []RampStep) []RampSet {
+func ResolveRamp(topSetLb float64, steps []RampStep, l Ladder) []RampSet {
 	out := make([]RampSet, 0, len(steps))
 	for _, s := range steps {
-		w := roundToBar(topSetLb * s.PctOfTop / 100)
+		w := roundToStep(topSetLb*s.PctOfTop/100, l.Step)
 		if w <= 0 {
 			continue
 		}

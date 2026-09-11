@@ -199,7 +199,8 @@ SELECT pde.id,
        pde.sets,
        pde.reps,
        pde.starting_weight_lb,
-       e.rest_seconds
+       e.rest_seconds,
+       e.equipment
 FROM program_day_exercises pde
 JOIN exercises e ON e.id = pde.exercise_id
 WHERE pde.program_day_id = $1
@@ -216,9 +217,15 @@ type ListPrescriptionsByDayRow struct {
 	Reps             int32          `json:"reps"`
 	StartingWeightLb pgtype.Numeric `json:"starting_weight_lb"`
 	RestSeconds      int32          `json:"rest_seconds"`
+	Equipment        string         `json:"equipment"`
 }
 
 // ListPrescriptionsByDay returns the prescribed exercises for a single day.
+//
+// This is the one the progression engine reads, which is why equipment is here
+// and not on ListPrescriptionsByProgram above: what a lift can jump by is a
+// fact about the bar or the bells it uses (progression.LadderFor), and the
+// program listing prescribes nothing and needs no ladder.
 func (q *Queries) ListPrescriptionsByDay(ctx context.Context, programDayID int32) ([]ListPrescriptionsByDayRow, error) {
 	rows, err := q.db.Query(ctx, listPrescriptionsByDay, programDayID)
 	if err != nil {
@@ -238,6 +245,7 @@ func (q *Queries) ListPrescriptionsByDay(ctx context.Context, programDayID int32
 			&i.Reps,
 			&i.StartingWeightLb,
 			&i.RestSeconds,
+			&i.Equipment,
 		); err != nil {
 			return nil, err
 		}

@@ -57,18 +57,18 @@ func LayoffPct(weeks int) float64 {
 	return float64(weeks*LayoffPctPerWeek) / 100
 }
 
-// LayoffWeight applies the layoff cut to a weight, snapped to the bar. Returns
-// previousLb unchanged when the time away is too short to count, so a caller
-// need not check the threshold itself.
+// LayoffWeight applies the layoff cut to a weight, snapped to what the lift's
+// equipment can build. Returns previousLb unchanged when the time away is too
+// short to count, so a caller need not check the threshold itself.
 //
 // This is the whole calculation for a lift the engine does not drive — see
 // ApplyLayoff for one it does.
-func LayoffWeight(previousLb float64, weeks int) float64 {
+func LayoffWeight(previousLb float64, weeks int, l Ladder) float64 {
 	pct := LayoffPct(weeks)
 	if pct == 0 {
 		return previousLb
 	}
-	return roundToBar(previousLb * (1 - pct))
+	return roundToStep(previousLb*(1-pct), l.Step)
 }
 
 // ApplyLayoff adjusts a Plan for weeks spent away from the gym, returning it
@@ -89,11 +89,11 @@ func LayoffWeight(previousLb float64, weeks int) float64 {
 //     two answers to "how light should this be", so the deeper one wins outright
 //     and the other is a no-op. A week off after a stall changes nothing; a month
 //     off after one takes over.
-func ApplyLayoff(p Plan, weeks int) Plan {
+func ApplyLayoff(p Plan, weeks int, l Ladder) Plan {
 	if LayoffPct(weeks) == 0 || p.Status == StatusStart {
 		return p
 	}
-	weight := LayoffWeight(p.PreviousLb, weeks)
+	weight := LayoffWeight(p.PreviousLb, weeks, l)
 	if weight >= p.WeightLb {
 		return p
 	}
