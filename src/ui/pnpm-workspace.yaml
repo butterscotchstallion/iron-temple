@@ -30,3 +30,19 @@ overrides:
   # ^4.3.0 was set to clear CVE-2026-59869/59870.
   js-yaml: ^4.3.2
   nanoid: ^6.0.0
+
+# Dependencies permitted to run install scripts. pnpm 10+ refuses to run them
+# by default — arbitrary code execution on `install` is the npm ecosystem's
+# widest supply-chain surface — and aborts with ERR_PNPM_IGNORED_BUILDS rather
+# than continuing, so this list is the complete set of packages we grant that.
+#
+# Worth contrasting with the overrides above, because the same migration
+# produced opposite failure modes: dropping the overrides failed OPEN (a warning,
+# a still-valid install, a silently vulnerable lockfile), while withholding
+# build scripts fails CLOSED (hard error, nothing installs). Only one of those
+# needed a CVE scanner to notice.
+#
+# esbuild: postinstall resolves its platform-specific native binary. Without it
+# vite and vitest cannot start, so the build fails loudly rather than subtly.
+onlyBuiltDependencies:
+  - esbuild
