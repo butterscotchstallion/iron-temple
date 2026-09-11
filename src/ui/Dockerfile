@@ -15,7 +15,23 @@ WORKDIR /app
 COPY src/api/openapi.yaml ./api/openapi.yaml
 WORKDIR /app/ui
 # Install against the committed lockfile first for better layer caching.
-COPY src/ui/package.json src/ui/pnpm-lock.yaml ./
+#
+# pnpm-workspace.yaml comes along because since pnpm 12 it is the ONLY place
+# `overrides` and `allowBuilds` are read from — the package.json "pnpm" field is
+# ignored outright. A frozen install compares the overrides it can see against
+# the ones recorded in the lockfile, so without this file the build stops before
+# it fetches anything:
+#   ERR_PNPM_LOCKFILE_CONFIG_MISMATCH: The current "overrides" configuration
+#   doesn't match the value found in the lockfile
+# It is not optional even past that check: `allowBuilds` is what permits
+# esbuild's postinstall to resolve its native binary, without which `pnpm build`
+# below cannot start vite.
+#
+# This is a copy list, so it does not fail loudly when it falls behind — the
+# repo checkout that CI's ui.yml runs in has every one of these files, so the
+# gates stay green and only the image build breaks. Anything added to src/ui/
+# that `pnpm install` reads has to be added here too.
+COPY src/ui/package.json src/ui/pnpm-lock.yaml src/ui/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY src/ui/ ./
 # Generate the typed client (orval → src/lib/api/generated, gitignored) then build.
