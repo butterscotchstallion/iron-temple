@@ -104,6 +104,114 @@ unavailable() {
   failed=1
 }
 
+# ===================== UI toolchain: make pnpm runnable ======================
+#
+# The UI gates below shell out to pnpm, and a box can be set up so that pnpm
+# cannot start AT ALL — not because anything is wrong with the project, but
+# because the environment points it at directories it may not write or a Node it
+# may not use. Every one of those failures reads like a broken gate. They are
+# not; they are a broken box, and the fix belongs here rather than in a dotfile
+# on one machine, which is lost the moment you work anywhere else.
+#
+# Everything below is conditional on detecting the problem, so a conforming box
+# (CI, a laptop) runs none of it and is unchanged.
+
+# A directory we can actually create files in. `[ -w ]` alone is false for a path
+# that does not exist yet, so try to create it first and test what we end up with.
+writable_dir() { mkdir -p "$1" 2>/dev/null && [ -w "$1" ]; }
+
+# The npm registry the environment has already declared, if any. pnpm 12 does not
+# read these itself (see below), but npm and corepack do, and it is the only
+# statement of intent available to us — on an air-gapped box it names the local
+# mirror that is the sole reachable source of packages.
+configured_registry() { printf '%s' "${NPM_CONFIG_REGISTRY:-${npm_config_registry:-}}"; }
+
+ui_toolchain() {
+  # ---- corepack's cache ------------------------------------------------------
+  # /usr/local/bin/pnpm is corepack's shim in the Node images, so if COREPACK_HOME
+  # is not writable then EVERY pnpm gate below dies with "Failed to create cache
+  # directory" before it reads a line of project code. Images that bake a
+  # root-owned cache to share it between users hit this for every non-root user.
+  if [ -n "${COREPACK_HOME:-}" ] && ! writable_dir "$COREPACK_HOME"; then
+    printf '  toolchain: COREPACK_HOME=%s is not writable; using %s\n' \
+      "$COREPACK_HOME" "${XDG_CACHE_HOME:-$HOME/.cache}/corepack"
+    COREPACK_HOME="${XDG_CACHE_HOME:-$HOME/.cache}/corepack"
+    export COREPACK_HOME
+  fi
+
+  # Corepack downloads the pnpm pinned in package.json, and resolves it from
+  # registry.npmjs.org unless told otherwise — a SEPARATE knob from npm's own
+  # registry, and one with no config-file equivalent. Without it a cold corepack
+  # cache on an air-gapped box hangs until it times out.
+  #
+  # The trailing slash has to go. npm's own registry value conventionally carries
+  # one and npm copes, but corepack concatenates rather than joins: it would ask
+  # for "<registry>//pnpm/<version>" and take the 404 at face value.
+  if [ -z "${COREPACK_NPM_REGISTRY:-}" ] && [ -n "$(configured_registry)" ]; then
+    COREPACK_NPM_REGISTRY=$(configured_registry | sed 's:/*$::')
+    export COREPACK_NPM_REGISTRY
+  fi
+
+  # ---- Node ------------------------------------------------------------------
+  # src/ui/package.json declares the floor, and it is not decorative: under an
+  # older Node every vitest run dies inside jsdom's undici with
+  # "webidl.util.markAsUncloneable is not a function", which reads like a test
+  # failure and is nothing of the sort.
+  #
+  # Reading package.json with a Node that is itself too old is fine — parsing
+  # JSON is not what the floor is about.
+  want=$(node -p \
+    "(require('$root/src/ui/package.json').engines.node.match(/[0-9]+/)||[''])[0]" \
+    2>/dev/null) || want=""
+  have=$(node -p "process.versions.node.split('.')[0]" 2>/dev/null) || have=""
+  [ -n "$want" ] && [ -n "$have" ] || return 0
+  [ "$have" -lt "$want" ] 2>/dev/null || return 0
+
+  # Below the floor. Fetch a conforming Node from the registry the environment
+  # already uses and put it in front on PATH. The `node` package resolves an
+  # arch-specific package from the SAME registry in its preinstall (it does not
+  # reach nodejs.org), which is what makes this work air-gapped — the local
+  # mirror that serves every other dependency serves this one too.
+  #
+  # Cached in the repo (git-ignored) rather than under $HOME on purpose: it is
+  # keyed to this checkout's engines floor, and a stale copy of the wrong major
+  # lying in a shared cache is a confusing thing to debug.
+  node_cache="$root/.cache/node"
+  node_bin="$node_cache/node_modules/node/bin/node"
+
+  # A cached Node is only good while it still clears the floor, and the floor
+  # moves — a dependency bump raises engines. The check above compared the
+  # SYSTEM Node, so on a 22 -> 24 bump it would send us here, find the cached 22
+  # executable, skip the install and run the gates on the stale major: precisely
+  # the confusion the comment above claims this cache avoids. Re-validate.
+  if [ -x "$node_bin" ]; then
+    cached=$("$node_bin" -p "process.versions.node.split('.')[0]" 2>/dev/null) || cached=""
+    if [ -z "$cached" ] || ! [ "$cached" -ge "$want" ] 2>/dev/null; then
+      printf '  toolchain: cached Node %s no longer clears the floor (%s); refetching\n' \
+        "${cached:-unknown}" "$want"
+      rm -rf "$node_cache"
+    fi
+  fi
+
+  if [ ! -x "$node_bin" ]; then
+    printf '  toolchain: Node %s is below the floor src/ui declares (%s).\n' "$have" "$want"
+    printf '  toolchain: installing node@%s into %s (~185 MB, once)\n' "$want" "$node_cache"
+    reg=$(configured_registry)
+    # shellcheck disable=SC2086  # ${reg:+--registry ...} is a deliberate word split
+    if ! npm install --prefix "$node_cache" "node@$want" \
+        ${reg:+--registry "$reg"} --no-audit --no-fund --loglevel=error; then
+      printf '  toolchain: could not install node@%s — the UI gates will run on Node %s\n' \
+        "$want" "$have"
+      rm -rf "$node_cache"
+      return 0
+    fi
+  fi
+
+  [ -x "$node_bin" ] || return 0
+  PATH="$(dirname "$node_bin"):$PATH"
+  export PATH
+}
+
 # ============================ backend (src/api) ==============================
 if [ "$run_api" -eq 1 ]; then
   if [ -f "$root/src/api/go.mod" ]; then
@@ -168,6 +276,8 @@ if [ "$run_ui" -eq 1 ]; then
   elif ! command -v pnpm >/dev/null 2>&1; then
     unavailable "frontend (src/ui)" "  pnpm is not installed."
   else
+    ui_toolchain
+
     # --frozen-lockfile is the lockfile-freshness gate ui.yml runs: it fails when
     # package.json and pnpm-lock.yaml disagree, so a dependency edit without a
     # lockfile refresh is caught here instead of in CI. Doubles as the guarantee
