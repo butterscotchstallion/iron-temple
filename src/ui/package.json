@@ -3,15 +3,9 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "packageManager": "pnpm@9.15.9",
+  "packageManager": "pnpm@12.3.4",
   "engines": {
     "node": ">=20"
-  },
-  "pnpm": {
-    "overrides": {
-      "js-yaml": "^4.3.2",
-      "nanoid": "^6.0.0"
-    }
   },
   "scripts": {
     "dev": "pnpm generate:api && vite",
