@@ -1,0 +1,54 @@
+# pnpm settings. As of pnpm 12 this file is the ONLY place they are read from —
+# the "pnpm" field in package.json is ignored outright, with a warning:
+#   The "pnpm" field in package.json is no longer read by pnpm.
+#   The following keys were ignored: "pnpm.overrides".
+# That field has been deleted rather than kept "just in case": a retired setting
+# left lying around is indistinguishable from a live one, which is the exact
+# failure this migration hit twice (see allowBuilds below).
+#
+# Measured, not taken from release notes: pnpm 9.15.9 and 10.34.5 both still
+# APPLY package.json overrides (verified by resolved version, not by absence of
+# a warning); 12.3.4 ignores them. pnpm 10 introduced this file, it did not
+# retire the old location. pnpm 11 was not testable here — it requires
+# Node >=22.13 — so the cutover is 11 or 12.
+
+overrides:
+  # js-yaml: floor at the PATCHED version, not merely a satisfiable range.
+  # pnpm reuses a locked version whenever it still satisfies the range, so
+  # ^4.3.0 let a lockfile regeneration resolve *downwards* onto 4.3.1 and
+  # reintroduce CVE-2026-84375. That is not hypothetical — it is what the first
+  # attempt at this upgrade shipped, and only Trivy caught it.
+  js-yaml: ^4.3.2
+  # nanoid: the same regeneration dropped this to 3.3.18 — a version ^6.0.0
+  # does not even permit — and nothing flagged it, because it carries no
+  # fixable HIGH/CRITICAL. The scanner caught one of the two by luck of CVE
+  # coverage; the override going dead was the actual defect.
+  nanoid: ^6.0.0
+
+# Dependencies permitted to run install scripts. pnpm 10+ blocks them by
+# default — arbitrary code execution on `install` is the npm ecosystem's widest
+# supply-chain surface — and aborts with ERR_PNPM_IGNORED_BUILDS rather than
+# continuing. This is the complete set granted that permission.
+#
+# The key is `allowBuilds`, a MAPPING of name to boolean. It is NOT
+# `onlyBuiltDependencies` (a list), which pnpm 11 replaced and has "silently
+# ignored since" — pnpm's own changelog wording. That key parses, validates,
+# and does nothing, so an install keeps failing with the error the setting was
+# added to fix. pnpm rejects keys it does not know, but not keys it has retired.
+#
+# esbuild: postinstall resolves its platform-specific native binary; vite and
+# vitest cannot start without it.
+allowBuilds:
+  esbuild: true
+
+# minimumReleaseAge is deliberately NOT set here, so pnpm 12's built-in
+# 1440-minute (24h) default applies: a dependency published in the last day is
+# refused. Fresh resolution simply picks the newest version old enough, but a
+# committed lockfile naming a too-new version fails hard with
+# ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION.
+#
+# Consequence worth knowing before it surprises someone: a Renovate PR that
+# bumps to a same-day release will go red until the version ages out, and needs
+# a re-run rather than a fix. That cooling-off is the point — compromised
+# packages are typically caught within hours — so raise the frequency question
+# with renovate.json's schedule, not by lowering this.
