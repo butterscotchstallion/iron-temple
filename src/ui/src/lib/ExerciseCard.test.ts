@@ -134,12 +134,13 @@ describe("ExerciseCard", () => {
   it("shows warm-up circles for a heavier lift and counts reps on tap", async () => {
     const { container } = render(ExerciseCard, {
       name: "Squat",
-      sets: workSets(200, 1),
+      sets: workSets(200, 5),
       onCycle: vi.fn(),
       onChangeWeight: vi.fn(),
     });
 
-    // warmupSets(200) → bar×2, then 100 / 140 / 180 = 5 expanded warm-up steps.
+    // warmupSets(200) → bar×2, then 100 / 140 / 180 = 5 expanded warm-up steps,
+    // which a 5x5 has room for.
     const warmups = container.querySelectorAll<HTMLButtonElement>('button[aria-label^="Warm-up"]');
     expect(warmups).toHaveLength(5);
 
@@ -147,6 +148,23 @@ describe("ExerciseCard", () => {
     expect(first).toHaveTextContent("0");
     await fireEvent.click(first);
     expect(first).toHaveTextContent("1"); // reps count up locally
+  });
+
+  it("never shows more warm-up circles than the day has work sets", () => {
+    // A 2x5 on the Lite program. The full ramp for 200 is five sets, which
+    // would leave the lifter doing more warming up than lifting.
+    const { container } = render(ExerciseCard, {
+      name: "Squat",
+      sets: workSets(200, 2),
+      onCycle: vi.fn(),
+      onChangeWeight: vi.fn(),
+    });
+
+    const warmups = container.querySelectorAll<HTMLButtonElement>('button[aria-label^="Warm-up"]');
+    expect(warmups).toHaveLength(2);
+    // The two kept are the heaviest, the ones that actually prepare the lift.
+    expect(warmups[0]).toHaveAttribute("aria-label", expect.stringContaining("Warm-up 140 lb"));
+    expect(warmups[1]).toHaveAttribute("aria-label", expect.stringContaining("Warm-up 180 lb"));
   });
 
   describe("when readonly (the session is over)", () => {

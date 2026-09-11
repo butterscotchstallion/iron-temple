@@ -86,10 +86,20 @@
   // A ramp is its own warm-up — that is what the first three rungs of a Madcow
   // day are — so bolting a second one in front of it would have the lifter warm
   // up to warm up.
+  //
+  // Capped at the number of work sets: the warm-up never outnumbers the lift it
+  // is warming up for. This card is where the cap belongs because this is what
+  // knows how many sets today prescribes — a 5x5 keeps the whole ramp, a 2x5
+  // gets the two rungs closest to the work weight.
   const warmups = $derived.by(() => {
     const out: { weightLb: number; reps: number }[] = [];
     if (ramping) return out;
-    for (const w of warmupSets(workWeight, barWeightLb(), plateInventory())) {
+    for (const w of warmupSets(
+      workWeight,
+      barWeightLb(),
+      plateInventory(),
+      sets.length,
+    )) {
       for (let k = 0; k < w.sets; k++) {
         out.push({ weightLb: w.weightLb, reps: w.reps });
       }
