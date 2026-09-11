@@ -62,6 +62,30 @@ describe("warmupSets", () => {
     });
   });
 
+  it("never prescribes more warm-up sets than work sets", () => {
+    // The full ramp for 200 is five sets. A program that squats twice gets the
+    // two heaviest rungs — 140 and 180 — and not two sets with the empty bar.
+    expect(warmupSets(200, BAR, RACK, 2)).toEqual([
+      { weightLb: 140, reps: 3, sets: 1 },
+      { weightLb: 180, reps: 2, sets: 1 },
+    ]);
+    expect(warmupSets(200, BAR, RACK, 5)).toHaveLength(4); // 5x5 keeps it all
+  });
+
+  it("sheds the second empty-bar set before dropping the bar entirely", () => {
+    // One over the cap: the opener stays, it just happens once.
+    expect(warmupSets(200, BAR, RACK, 4)).toEqual([
+      { weightLb: 80, reps: 5, sets: 1 },
+      { weightLb: 100, reps: 5, sets: 1 },
+      { weightLb: 140, reps: 3, sets: 1 },
+      { weightLb: 180, reps: 2, sets: 1 },
+    ]);
+  });
+
+  it("returns no warm-ups when there are no work sets to warm up for", () => {
+    expect(warmupSets(200, BAR, RACK, 0)).toEqual([]);
+  });
+
   it("only proposes rungs the rack can build", () => {
     // 50/70/90% of 185 are 92.5, 129.5 and 166.5 — none of them loadable on a
     // rack of 45s alone. Every rung that survives must be a weight this gym can
