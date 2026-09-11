@@ -1,9 +1,16 @@
-# Dependency overrides — the canonical home as of pnpm 10+.
+# Dependency overrides — the canonical home for pnpm 12.
 #
-# These MUST live here, not in package.json's "pnpm" field. pnpm 10 stopped
-# reading that field and pnpm 12 ignores it outright, warning:
+# These MUST live here, not in package.json's "pnpm" field, which pnpm 12
+# ignores outright, warning:
 #   The "pnpm" field in package.json is no longer read by pnpm.
 #   The following keys were ignored: "pnpm.overrides".
+#
+# Measured, rather than taken from the migration notes: pnpm 10.34.5 still
+# reads the package.json field and emits no warning; 12.0.0 warns and ignores.
+# So the cutover is in 11 or 12, NOT in 10. pnpm 11 needs Node >=22.13 and was
+# not testable here, which is the whole gap — this project jumped 9.15.9 ->
+# 12.3.4 in one Renovate PR and never ran 11, so whatever that release said
+# about the move was never seen.
 # The warning is non-fatal, so the overrides simply stop applying and the
 # affected packages silently revert to whatever their dependents resolve.
 # That is exactly what the pnpm 9 -> 12 bump did: js-yaml went 4.3.2 -> 4.3.1
