@@ -17,11 +17,18 @@
     type PrescribedExercise,
     type Program,
     type ProgramDayAssistance,
+    type SessionSummary,
   } from "../lib/api";
   import { auth, setMe } from "../lib/auth.svelte";
-  import { invalidateTraining } from "../lib/cache.svelte";
+  import {
+    CACHE_KEYS,
+    cachedValue,
+    invalidateTraining,
+  } from "../lib/cache.svelte";
+  import { loadHomeSessions, type HomeSessions } from "../lib/homeData";
+  import { todayStatus } from "../lib/trainedToday";
   import { Card } from "$lib/components/ui/card";
-  import { Button } from "$lib/components/ui/button";
+  import { Button, buttonVariants } from "$lib/components/ui/button";
   import { Badge } from "$lib/components/ui/badge";
   import ErrorCard from "../lib/ErrorCard.svelte";
   import ErrorBanner from "../lib/ErrorBanner.svelte";
@@ -34,6 +41,7 @@
     shouldPrompt,
   } from "../lib/layoff";
   import Calendar from "@lucide/svelte/icons/calendar";
+  import Check from "@lucide/svelte/icons/check";
   import Play from "@lucide/svelte/icons/play";
   import Plus from "@lucide/svelte/icons/plus";
   import TrendingDown from "@lucide/svelte/icons/trending-down";
@@ -65,6 +73,14 @@
 
   let program = $state<Program | null>(null);
   let days = $state<DayView[]>([]);
+
+  // Recent sessions, read only to answer "have I already trained this day
+  // today?" — a day card that offers Start for a workout that is behind you is
+  // the screen lying about the one thing it exists to say.
+  //
+  // The same cached list Home draws its streak and heatmap from, by the same
+  // key, so on the landing route this is a join rather than a request.
+  let recent = $state<SessionSummary[]>([]);
 
   // Weekday choices labeled with each day's next upcoming date, e.g.
   // "Friday, August 7". Computed once from today when the card mounts.
@@ -111,15 +127,26 @@
     failed = false;
     previewFailed = false;
 
+    // Whatever the cache already holds, so a day trained this morning is badged
+    // on the first paint rather than after the round trip below corrects it.
+    const remembered = cachedValue<HomeSessions>(CACHE_KEYS.homeSessions);
+    if (remembered) recent = remembered.items;
+
     // Fired together rather than chained. The previews are keyed by program id,
     // not by the day ids the program response carries, so nothing here has to
     // wait to learn what to ask for — this screen used to cost getProgram plus
     // one preview PER DAY, arranged so the days could not even start until the
     // program came back.
-    const [prog, previews] = await Promise.all([
+    const [prog, previews, sessions] = await Promise.all([
       getProgram(programId),
       previewNextSessions(programId, { deload }),
+      loadHomeSessions(),
     ]);
+
+    // A session list that didn't load costs the "Done today" badge and nothing
+    // else, so it raises no banner and keeps whatever the cache painted: the
+    // prescription is what this screen is for, and it is still on its way.
+    if (sessions.status === 200) recent = sessions.data.items;
 
     if (prog.status !== 200) {
       failed = true;
@@ -477,6 +504,7 @@
     {/if}
 
     {#each orderedDays as day (day.id)}
+      {@const trained = todayStatus(recent, day.id)}
       <Card
         class="p-5 {day.weekday === todayWeekday() ? 'ring-2 ring-primary' : ''}"
       >
@@ -489,6 +517,17 @@
               >
                 Today
               </span>
+            {/if}
+            <!-- Said next to the day's name rather than in place of "Today",
+                 because the two answer different questions: which day is
+                 scheduled, and whether it has been done. -->
+            {#if trained?.done}
+              <Badge variant="secondary">
+                <Check aria-hidden="true" />
+                Done today
+              </Badge>
+            {:else if trained}
+              <Badge variant="outline">In progress</Badge>
             {/if}
             <label
               class="flex items-center gap-1 rounded-md border border-input px-2 py-1 text-xs text-muted-foreground"
@@ -506,14 +545,44 @@
               </select>
             </label>
           </div>
-          <Button
-            size="sm"
-            onclick={() => start(day.id)}
-            disabled={startingDayId !== null || deloading}
-          >
-            <Play />
-            {startingDayId === day.id ? "Starting…" : "Start"}
-          </Button>
+          <!-- Three states, one slot. A day already trained demotes Start to
+               "Start again" — the second session of the day is a real thing a
+               lifter does, but it is not what the button should invite — and an
+               open one replaces it outright, because resuming and starting over
+               are not the same act and only one of them keeps the sets already
+               logged. -->
+          <div class="flex shrink-0 items-center gap-1">
+            {#if trained}
+              <a
+                use:link
+                href="/sessions/{trained.sessionId}"
+                class={buttonVariants({
+                  variant: trained.done ? "ghost" : "default",
+                  size: "sm",
+                })}
+              >
+                {#if !trained.done}
+                  <Play aria-hidden="true" />
+                {/if}
+                {trained.done ? "View" : "Resume"}
+              </a>
+            {/if}
+            {#if !trained || trained.done}
+              <Button
+                size="sm"
+                variant={trained ? "outline" : "default"}
+                onclick={() => start(day.id)}
+                disabled={startingDayId !== null || deloading}
+              >
+                <Play />
+                {#if startingDayId === day.id}
+                  Starting…
+                {:else}
+                  {trained ? "Start again" : "Start"}
+                {/if}
+              </Button>
+            {/if}
+          </div>
         </div>
         <ul class="mt-3 flex flex-col gap-1.5">
           {#each day.exercises.filter((e) => e.kind !== "assistance") as ex (ex.exerciseId)}
