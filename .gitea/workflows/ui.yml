@@ -2,7 +2,7 @@
 name: UI Check & Test
 
 # Frontend CI for src/ui (Svelte + Vite + pnpm). Type-check, unit tests (Vitest),
-# and e2e (Playwright/Firefox). Runs on the shared host-executor runner: Node 20 +
+# and e2e (Playwright/Firefox). Runs on the shared host-executor runner: Node +
 # corepack ship in the base image; the Playwright Firefox *system libs* are baked
 # into the runner image (see homelab-gitops services/act-runner/Dockerfile), so this
 # job only downloads the Firefox *browser* — and that is cached across runs.
@@ -99,6 +99,15 @@ jobs:
           corepack prepare pnpm@12.3.4 --activate
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           export PATH="$HOME/.local/bin:$PATH"
+          # Record the runner's Node alongside pnpm's. The toolchain floor is
+          # Node >=22 (jsdom 30 -> undici 8 needs worker_threads.markAsUncloneable,
+          # added in 22.10; on Node 20 every Vitest worker dies at import), and
+          # nothing in this repo pins the runner's Node — it comes from the base
+          # image and can move without a commit here. Printing it makes the
+          # version a fact in each run log instead of a claim in a comment: the
+          # header used to assert "Node 20", which was stale and misleading
+          # enough to be read as evidence that this job could not work.
+          node --version
           pnpm --version
 
       # Cache the pnpm content-addressable store so packages aren't re-fetched.
