@@ -92,16 +92,19 @@ export function loadBar(
   const target = Math.round(targetPerSide * UNIT);
 
   const greedy = greedyLoad(target, rack);
-  if (greedy.total === target) {
-    return { plates: toLb(greedy.picked), weightLb, rounded: false };
-  }
+  const best = greedy.total === target ? greedy : closestLoad(target, rack);
 
-  const best = closestLoad(target, rack);
+  // The weight reported is the one the plates add up to, never the one that was
+  // asked for — including on the greedy path, where the two differ by whatever
+  // `target` rounded off. Targets arrive as percentages: 70% of a 165 lb bench
+  // is 115.49999999999999, the rack builds 115, and 115 is what belongs on the
+  // screen. A gap under a hundredth of a pound is float noise from that
+  // arithmetic rather than a plate, so it is not announced as a rounding.
   const achieved = bar + (best.total / UNIT) * 2;
   return {
     plates: toLb(best.picked),
     weightLb: achieved,
-    rounded: achieved !== weightLb,
+    rounded: Math.abs(achieved - weightLb) > 0.01,
   };
 }
 

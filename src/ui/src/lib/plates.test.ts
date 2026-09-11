@@ -88,6 +88,27 @@ describe("loadBar with a finite rack", () => {
     expect(loaded.weightLb).toBe(BAR);
   });
 
+  it("reports the weight the plates make, not the one that was asked for", () => {
+    // The percentage rungs of a warm-up ramp arrive with float dust on them:
+    // 70% of a 165 lb bench is 115.49999999999999. The rack builds 17.5 a side,
+    // so the bar weighs 115, and 115 is the number that has to come back out —
+    // it is the one that gets stored, rendered, and read off the screen.
+    const loaded = loadBar(165 * 0.7, BAR, RACK);
+    expect(loaded.weightLb).toBe(115);
+    expect(loaded.plates).toEqual([10, 5, 2.5]);
+    expect(loaded.rounded).toBe(true);
+  });
+
+  it("does not call float dust a rounding", () => {
+    // 70% of a 350 lb squat is 244.99999999999997, which is 245 with a rack
+    // built for it — a loadable weight wearing float dust, not a compromise.
+    // Announcing that as a rounding would cry wolf on an exact rung.
+    const loaded = loadBar(350 * 0.7, BAR, RACK);
+    expect(loaded.weightLb).toBe(245);
+    expect(loaded.plates).toEqual([45, 35, 2.5]);
+    expect(loaded.rounded).toBe(false);
+  });
+
   it("keeps the pair count honest across denominations", () => {
     // 1x10 + 2x5 = 20 a side. Nothing may use a third 5.
     const small: PlateInventory = [
