@@ -1,0 +1,25 @@
+# Dependency overrides — the canonical home as of pnpm 10+.
+#
+# These MUST live here, not in package.json's "pnpm" field. pnpm 10 stopped
+# reading that field and pnpm 12 ignores it outright, warning:
+#   The "pnpm" field in package.json is no longer read by pnpm.
+#   The following keys were ignored: "pnpm.overrides".
+# The warning is non-fatal, so the overrides simply stop applying and the
+# affected packages silently revert to whatever their dependents resolve.
+# That is exactly what the pnpm 9 -> 12 bump did: js-yaml went 4.3.2 -> 4.3.1
+# (reintroducing CVE-2026-84375) and nanoid went 6.0.1 -> 3.3.18, a range the
+# override below does not even permit. Only js-yaml had a CVE, so the scanner
+# caught one of the two; nanoid was silent.
+#
+# package.json keeps a copy of these overrides so a pnpm 9 install still honours
+# them (pnpm 9 reads package.json and ignores this file; pnpm 12 does the
+# reverse). Keep the two in sync until every consumer is on pnpm 10+.
+#
+# Pin the FLOOR to the patched version, not just a satisfiable range: pnpm reuses
+# the locked version whenever it still satisfies the range, so "^4.3.0" happily
+# keeps a vulnerable 4.3.1 already in the lockfile.
+overrides:
+  # CVE-2026-84375 (DoS in YAML parsing), fixed in 4.3.2. Earlier floor of
+  # ^4.3.0 was set to clear CVE-2026-59869/59870.
+  js-yaml: ^4.3.2
+  nanoid: ^6.0.0
