@@ -26,14 +26,15 @@
     invalidateTraining,
   } from "../lib/cache.svelte";
   import { loadHomeSessions, type HomeSessions } from "../lib/homeData";
-  import { isTodaysWorkoutDone, todayStatus } from "../lib/trainedToday";
+  import { nextDueOn, todayStatus } from "../lib/trainedToday";
   import { Card } from "$lib/components/ui/card";
   import { Button, buttonVariants } from "$lib/components/ui/button";
   import { Badge } from "$lib/components/ui/badge";
   import ErrorCard from "../lib/ErrorCard.svelte";
   import ErrorBanner from "../lib/ErrorBanner.svelte";
   import AssistancePicker from "../lib/AssistancePicker.svelte";
-  import { weekdayOptions, todayWeekday } from "../lib/weekday";
+  import { weekdayOptions, dueLabel } from "../lib/weekday";
+  import { todayIso } from "../lib/calendar";
   import {
     deloadLabel,
     layoffHeadline,
@@ -86,20 +87,23 @@
   // "Friday, August 7". Computed once from today when the card mounts.
   const dayChoices = weekdayOptions();
 
-  // Today's workout comes off the screen once it is done — see
-  // isTodaysWorkoutDone for why, and for why only the day scheduled for today.
-  // Filtered before the sort, so what floats to the top is a day still to do
-  // rather than the one the lifter already finished this morning.
-  let shownDays = $derived(days.filter((d) => !isTodaysWorkoutDone(recent, d)));
-
-  // Float today's scheduled workout to the top so the highlighted day leads.
-  // Stable sort keeps every other day in its original order.
+  // The page as a queue: every day carries the date it next comes round, and the
+  // soonest leads. Nothing is hidden, so the top two cards are always the next
+  // two workouts — finish today's and its card moves to the back wearing next
+  // week's date instead of disappearing, which is what keeps a two-day program
+  // showing the rest of this week and the start of the next. See nextDueOn.
   let orderedDays = $derived(
-    [...shownDays].sort(
-      (a, b) =>
-        Number(b.weekday === todayWeekday()) -
-        Number(a.weekday === todayWeekday()),
-    ),
+    days
+      .map((d) => ({ ...d, dueOn: nextDueOn(recent, d) }))
+      .sort((a, b) => {
+        // Unscheduled days last: they are not due anything, so they cannot take
+        // a place in the order, and the one control that fixes that — the
+        // weekday picker — is on the card, so they must stay reachable.
+        if (a.dueOn === b.dueOn) return 0;
+        if (a.dueOn === null) return 1;
+        if (b.dueOn === null) return -1;
+        return a.dueOn < b.dueOn ? -1 : 1;
+      }),
   );
   let loading = $state(true);
   let failed = $state(false);
@@ -511,22 +515,30 @@
 
     {#each orderedDays as day (day.id)}
       {@const trained = todayStatus(recent, day.id)}
-      <Card
-        class="p-5 {day.weekday === todayWeekday() ? 'ring-2 ring-primary' : ''}"
-      >
+      {@const dueToday = day.dueOn === todayIso()}
+      <Card class="p-5 {dueToday ? 'ring-2 ring-primary' : ''}">
         <div class="flex items-center justify-between gap-3">
           <div class="flex flex-wrap items-center gap-2">
             <h3 class="text-lg font-bold text-card-foreground">{day.name}</h3>
-            {#if day.weekday === todayWeekday()}
+            <!-- When this day next comes round. Keyed off the due date rather
+                 than the weekday, so a day finished this morning reads as next
+                 week's rather than still claiming to be today's workout. The
+                 date is what tells two cards for the SAME day a week apart
+                 apart, which is the whole reason it is spelled out. -->
+            {#if day.dueOn}
               <span
-                class="rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary-foreground"
+                class="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide {dueToday
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-muted text-muted-foreground'}"
               >
-                Today
+                {dueLabel(day.dueOn)}
               </span>
             {/if}
-            <!-- Said next to the day's name rather than in place of "Today",
-                 because the two answer different questions: which day is
-                 scheduled, and whether it has been done. -->
+            <!-- Kept alongside the due chip rather than folded into it: the two
+                 answer different questions, and together they explain each
+                 other. "Done today" next to next week's date is the card saying
+                 why it moved — without it, a day that was due today and is
+                 suddenly dated a week out looks like a scheduling bug. -->
             {#if trained?.done}
               <Badge variant="secondary">
                 <Check aria-hidden="true" />
@@ -755,15 +767,5 @@
         </div>
       </Card>
     {/each}
-
-    <!-- Every day hidden: a one-day program, scheduled for today, trained. Rare
-         enough to be a footnote and too bleak to leave as a bare heading over
-         nothing — a screen with no cards and no sentence reads as a load that
-         failed rather than a program with nothing left in it. -->
-    {#if orderedDays.length === 0 && days.length > 0}
-      <p class="text-sm text-muted-foreground">
-        That's this program done for today. Rest up.
-      </p>
-    {/if}
   {/if}
 </div>

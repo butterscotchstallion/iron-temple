@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildCalendar, volumeLevel } from "./calendar";
+import { addDaysIso, buildCalendar, volumeLevel } from "./calendar";
 
 describe("buildCalendar", () => {
   // 2026-08-06 is a Thursday.
@@ -53,5 +53,27 @@ describe("volumeLevel", () => {
 
   it("clamps a day heavier than the stated maximum", () => {
     expect(volumeLevel(200, 100)).toBe(3);
+  });
+});
+
+describe("addDaysIso", () => {
+  it("adds days within a month", () => {
+    expect(addDaysIso(new Date(2026, 8, 11), 7)).toBe("2026-09-18");
+  });
+
+  it("returns the same date for 0", () => {
+    expect(addDaysIso(new Date(2026, 8, 11), 0)).toBe("2026-09-11");
+  });
+
+  it("crosses a month boundary", () => {
+    expect(addDaysIso(new Date(2026, 8, 28), 7)).toBe("2026-10-05");
+  });
+
+  it("crosses a year boundary", () => {
+    expect(addDaysIso(new Date(2026, 11, 30), 7)).toBe("2027-01-06");
+  });
+
+  it("handles a leap day", () => {
+    expect(addDaysIso(new Date(2028, 1, 26), 7)).toBe("2028-03-04");
   });
 });

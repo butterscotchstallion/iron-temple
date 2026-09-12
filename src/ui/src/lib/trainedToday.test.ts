@@ -1,9 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { isTodaysWorkoutDone, todayStatus } from "./trainedToday";
+import { nextDueOn, todayStatus } from "./trainedToday";
 
 const TODAY = "2026-09-11";
-// 2026-09-11 is a Friday. The two have to agree: isTodaysWorkoutDone asks both
-// "is this day scheduled for today" and "was it trained today".
+// 2026-09-11 is a Friday.
 const FRIDAY = 5;
 
 function session(over: Partial<Parameters<typeof todayStatus>[0][number]> = {}) {
@@ -80,53 +79,91 @@ describe("todayStatus", () => {
   });
 });
 
-describe("isTodaysWorkoutDone", () => {
-  const friday = { id: 7, weekday: FRIDAY };
+describe("nextDueOn", () => {
+  // 2026-09-11 is a Friday. Passing one Date keeps the weekday arithmetic and
+  // the returned date on the same clock, which is the bug the old two-argument
+  // shape invited.
+  const FRI_11 = new Date(2026, 8, 11);
 
-  function done(day: { id: number; weekday: number | null }, sessions = [session()]) {
-    return isTodaysWorkoutDone(sessions, day, FRIDAY, TODAY);
+  function due(weekday: number | null, sessions: ReturnType<typeof session>[] = []) {
+    return nextDueOn(sessions, { id: 7, weekday }, FRI_11);
   }
 
-  it("hides today's day once it is trained to completion", () => {
-    expect(done(friday)).toBe(true);
+  it("is null for an unscheduled day, trained today or not", () => {
+    expect(due(null)).toBeNull();
+    expect(due(null, [session()])).toBeNull();
   });
 
-  it("hides today's day when the session was closed out short", () => {
-    expect(done(friday, [session({ completedSetCount: 18, isOver: true })])).toBe(true);
+  it("is today for the day scheduled today with nothing logged", () => {
+    expect(due(FRIDAY)).toBe("2026-09-11");
   });
 
-  it("keeps today's day when nothing has been logged", () => {
-    expect(done(friday, [])).toBe(false);
+  it("counts the days ahead to a later weekday in the same week", () => {
+    expect(due(0)).toBe("2026-09-13"); // Sunday
   });
 
-  it("keeps today's day while its session is still open", () => {
-    expect(done(friday, [session({ completedSetCount: 3, isOver: false })])).toBe(false);
+  it("wraps to next week for a weekday already past", () => {
+    expect(due(3)).toBe("2026-09-16"); // Wednesday
   });
 
-  it("keeps today's day when only yesterday's session is in the list", () => {
-    expect(done(friday, [session({ performedOn: "2026-09-10" })])).toBe(false);
+  it("pushes today's day to next week once it is trained to completion", () => {
+    expect(due(FRIDAY, [session()])).toBe("2026-09-18");
   });
 
-  it("keeps a day scheduled for another weekday, trained today or not", () => {
-    expect(done({ id: 7, weekday: 3 })).toBe(false);
+  it("pushes it out when the session was closed out short of every set", () => {
+    expect(due(FRIDAY, [session({ completedSetCount: 18, isOver: true })])).toBe(
+      "2026-09-18",
+    );
   });
 
-  it("keeps an unscheduled day trained today", () => {
-    expect(done({ id: 7, weekday: null })).toBe(false);
+  it("keeps today's day due today while its session is still open", () => {
+    expect(due(FRIDAY, [session({ completedSetCount: 3, isOver: false })])).toBe(
+      "2026-09-11",
+    );
   });
 
-  it("keeps today's day when it was another day of the program that got trained", () => {
-    expect(done(friday, [session({ programDayId: 8 })])).toBe(false);
+  it("ignores yesterday's session for the same day", () => {
+    expect(due(FRIDAY, [session({ performedOn: "2026-09-10" })])).toBe("2026-09-11");
   });
 
-  it("defaults to the browser's weekday and date", () => {
+  it("ignores a session for another day of the program", () => {
+    expect(due(FRIDAY, [session({ programDayId: 8 })])).toBe("2026-09-11");
+  });
+
+  it("leaves a day trained off its own weekday due on its own weekday", () => {
+    // Trained today (Friday), but this day is booked for Wednesday. The schedule
+    // never said Friday was its day, so it is still next due on Wednesday.
+    expect(due(3, [session()])).toBe("2026-09-16");
+  });
+
+  it("crosses a month boundary", () => {
+    // Monday 2026-09-28 + a week is October.
+    const mon28 = new Date(2026, 8, 28);
+    expect(nextDueOn([], { id: 7, weekday: 0 }, mon28)).toBe("2026-10-04");
+  });
+
+  it("defaults to the browser's clock", () => {
     const now = new Date();
     const iso = [
       now.getFullYear(),
       String(now.getMonth() + 1).padStart(2, "0"),
       String(now.getDate()).padStart(2, "0"),
     ].join("-");
-    const today = { id: 7, weekday: now.getDay() };
-    expect(isTodaysWorkoutDone([session({ performedOn: iso })], today)).toBe(true);
+    expect(nextDueOn([], { id: 7, weekday: now.getDay() })).toBe(iso);
+  });
+
+  // The behaviour the screen is actually built on: a two-day program keeps
+  // showing two upcoming workouts after one of them is done today.
+  it("orders a finished day behind the rest of the week", () => {
+    const tue = { id: 1, weekday: 2 };
+    const fri = { id: 2, weekday: FRIDAY };
+    const trainedFri = [session({ programDayId: 2 })];
+    const dues = [tue, fri]
+      .map((d) => ({ id: d.id, on: nextDueOn(trainedFri, d, FRI_11) }))
+      .sort((a, b) => String(a.on).localeCompare(String(b.on)));
+    expect(dues).toEqual([
+      { id: 1, on: "2026-09-15" }, // Tuesday, the rest of this week
+      { id: 2, on: "2026-09-18" }, // Friday, the start of the next
+    ]);
   });
 });

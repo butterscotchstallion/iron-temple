@@ -23,6 +23,16 @@ export function todayIso(): string {
 }
 
 /**
+ * The ISO date `n` days after `from`, local time. Goes through the same
+ * day-arithmetic the heatmap uses, so it crosses months, years and DST the same
+ * way — `addDays` builds a fresh local Date from the parts rather than adding
+ * milliseconds, which is what keeps a 23-hour day from landing on the wrong one.
+ */
+export function addDaysIso(from: Date, n: number): string {
+  return toIso(addDays(from, n));
+}
+
+/**
  * Shade step (0–3) for a day's tonnage against the heaviest day on the grid.
  *
  * Quartiles of the maximum rather than fixed pound thresholds, because the same
