@@ -30,11 +30,13 @@ prescribed lifts, sets and reps.
   carries forward whatever you last lifted.
 - **See the next session before you start it.** Every day previews its target
   weights, so you know what's coming without opening a session.
-- **Know what you've already done.** Finish the workout scheduled for today and
-  its card leaves the screen — what's left on the program page is what's left to
-  do. A day trained off its scheduled weekday stays put, marked done, offering to
-  show you the session rather than start another; a session you walked away from
-  mid-workout keeps its card and offers to pick it back up.
+- **Always know what's next.** The program page is a queue: every day carries the
+  date it next comes round, soonest first, so the top two cards are the next two
+  workouts. Finish today's and it doesn't vanish — it moves to the back wearing
+  next week's date, which on a two-day program leaves you looking at the rest of
+  this week and the start of the next. A day you trained today is marked done,
+  and offers to show you that session rather than start another; one you walked
+  away from mid-workout stays due today and offers to pick it back up.
 
 ### Sessions
 

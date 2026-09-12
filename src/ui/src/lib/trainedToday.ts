@@ -1,7 +1,6 @@
 import type { SessionSummary } from "./api";
-import { todayIso } from "./calendar";
+import { addDaysIso, todayIso } from "./calendar";
 import { isSessionComplete } from "./streak";
-import { todayWeekday } from "./weekday";
 
 /**
  * The shape this module needs off a session — a subset of SessionSummary, so a
@@ -61,34 +60,44 @@ export function todayStatus(
 type Scheduled = { id: number; weekday: number | null };
 
 /**
- * Whether this day is the one scheduled for today and the work is already done.
+ * The date this program day next comes round, as YYYY-MM-DD — or null when it
+ * has no weekday and so is not due anything.
  *
- * The program screen drops such a card entirely. Once today's workout is behind
- * you it is no longer a decision you have to make, and a card is a screenful of
- * prescribed weights offering to start something you just finished — the badge
- * and the demoted "Start again" said so, but they still asked to be read. What
- * the screen should show is what's left, which on a rest day is the rest of the
- * program and on a done day is the same.
+ * This is what orders the program screen. Sorting the days by it turns the page
+ * into a queue: whatever is soonest leads, and the top two cards are always the
+ * next two workouts. That holds after training, which is the point — finish
+ * today's session and the card does not vanish, it moves to the back with next
+ * week's date on it, so a two-day program still shows the rest of this week and
+ * the start of the next rather than dwindling to a single card.
  *
- * Only the day actually scheduled for today. A day trained off its weekday —
- * Workout B on the Wednesday Workout A is booked for — keeps its card and its
- * "Done today" badge: the schedule never claimed it was today's work, and
- * hiding it would quietly shorten the program the lifter came here to look at.
- * An unscheduled day is never today's, so it is never hidden.
+ * Done today means this day has been and gone for the week, so it is due again
+ * on the same weekday next week. An OPEN session is still due TODAY: that
+ * workout is ahead of the lifter and Resume is the point of the card. Finished
+ * outranks open for the same day — see todayStatus.
  *
- * Done means finished, not merely started. A session left open keeps its card,
- * because that workout is still ahead of the lifter and Resume is the whole
- * reason the card is worth the room.
+ * A day trained off its scheduled weekday — Workout B on the Wednesday Workout A
+ * is booked for — is untouched here. It is still due on its own weekday, because
+ * the schedule never claimed Wednesday was its day; what it gets is the "Done
+ * today" badge, which is a statement about today rather than about the schedule.
  *
- * `weekday` and `today` default to the browser's clock and are injectable for
- * testing; they must agree, so a caller overriding one should override both.
+ * `today` is one Date rather than a weekday and a date string, so the two cannot
+ * disagree — the weekday arithmetic and the returned date are read off the same
+ * clock. Local time throughout, matching every other date judgement the client
+ * makes; the server stamps performedOn from its own clock, so a lifter training
+ * either side of midnight far from the server's zone may see this a day out.
  */
-export function isTodaysWorkoutDone(
+export function nextDueOn(
   sessions: Trainable[],
   day: Scheduled,
-  weekday: number = todayWeekday(),
-  today: string = todayIso(),
-): boolean {
-  if (day.weekday !== weekday) return false;
-  return todayStatus(sessions, day.id, today)?.done === true;
+  today: Date = new Date(),
+): string | null {
+  if (day.weekday === null) return null;
+
+  // 0 when the day is scheduled for today, else how many days until it comes up.
+  const daysAhead = (day.weekday - today.getDay() + 7) % 7;
+  const done =
+    daysAhead === 0 &&
+    todayStatus(sessions, day.id, addDaysIso(today, 0))?.done === true;
+
+  return addDaysIso(today, done ? 7 : daysAhead);
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { weekdayLabel, weekdayOptions } from "./weekday";
+import { dueLabel, weekdayLabel, weekdayOptions } from "./weekday";
 
 describe("weekdayLabel", () => {
   it("names weekdays 0..6", () => {
@@ -39,5 +39,32 @@ describe("weekdayOptions", () => {
     expect(byValue[0]).toBe("Sunday, August 30");
     expect(byValue[1]).toBe("Monday, August 31");
     expect(byValue[2]).toBe("Tuesday, September 1");
+  });
+});
+
+describe("dueLabel", () => {
+  const TODAY = "2026-09-11"; // a Friday
+
+  it("says Today for today", () => {
+    expect(dueLabel(TODAY, TODAY)).toBe("Today");
+  });
+
+  it("names the weekday and date for any other day", () => {
+    expect(dueLabel("2026-09-18", TODAY)).toBe("Friday, September 18");
+    expect(dueLabel("2026-09-15", TODAY)).toBe("Tuesday, September 15");
+  });
+
+  // The case the label exists for: two cards for the same program day a week
+  // apart have to be tellable apart, and only the date does that.
+  it("distinguishes the same weekday a week apart", () => {
+    expect(dueLabel("2026-09-18", TODAY)).not.toBe(dueLabel("2026-09-25", TODAY));
+  });
+
+  it("crosses a month boundary", () => {
+    expect(dueLabel("2026-10-02", TODAY)).toBe("Friday, October 2");
+  });
+
+  it("returns a malformed date unchanged rather than Invalid Date", () => {
+    expect(dueLabel("not-a-date", TODAY)).toBe("not-a-date");
   });
 });
