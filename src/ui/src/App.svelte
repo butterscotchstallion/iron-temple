@@ -56,6 +56,11 @@
     "/programs": Programs,
     "/programs/:id": ProgramDetail,
     "/sessions/:id": wrap({ asyncComponent: () => import("./routes/ActiveSession.svelte") }),
+    // Where finishing a workout lands, and reachable afterwards by its own URL.
+    // Split for the reason /racked is: it drags in the share-card renderer.
+    "/sessions/:id/recap": wrap({
+      asyncComponent: () => import("./routes/SessionRecap.svelte"),
+    }),
     "/library": wrap({ asyncComponent: () => import("./routes/Library.svelte") }),
     "/history": wrap({ asyncComponent: () => import("./routes/History.svelte") }),
     "/progress": wrap({ asyncComponent: () => import("./routes/Progress.svelte") }),

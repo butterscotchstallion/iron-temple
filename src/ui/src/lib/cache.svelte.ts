@@ -137,6 +137,25 @@ export function rackedKey(period: string): string {
 }
 
 /**
+ * A finished session's recap, keyed by session.
+ *
+ * Note what invalidateTraining does NOT do below: it never drops these. A
+ * recap is a statement about a workout that has already happened, and every
+ * figure in it — the records it set, how it compared to the session before it —
+ * was settled the moment it ended. Later training cannot change any of it.
+ *
+ * That is not merely an optimisation. invalidateTraining fires when the active
+ * session screen goes away, which is exactly the moment the lifter navigates TO
+ * the recap: dropping the key there would throw away the answer on the way in
+ * and make the one screen that must survive a dead network the one guaranteed
+ * to refetch. clearCache still forgets them on sign-out, which is the case that
+ * matters for privacy.
+ */
+export function sessionRecapKey(sessionId: number): string {
+  return `recap:${sessionId}`;
+}
+
+/**
  * The last good value for a key, or undefined if there has never been one.
  *
  * Undefined is the "nothing to show yet" signal a caller keys its skeleton off,

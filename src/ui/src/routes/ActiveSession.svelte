@@ -21,7 +21,7 @@
     onDrained,
     type PendingWrite,
   } from "../lib/writeQueue.svelte";
-  import type { Options as ConfettiOptions } from "canvas-confetti";
+  import { celebrate } from "../lib/celebrate";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import Dumbbell from "@lucide/svelte/icons/dumbbell";
   import Flag from "@lucide/svelte/icons/flag";
@@ -60,32 +60,6 @@
   let confirmFinish = $state(false);
   // A finish request is in flight (guards a double-tap).
   let finishing = $state(false);
-
-  // canvas-confetti is physics that only runs when something goes right, so it
-  // is fetched at the first celebration rather than carried in the route's
-  // chunk. The promise is cached, so a session full of PRs imports it once.
-  type ConfettiFn = (options?: ConfettiOptions) => unknown;
-  let confettiLoader: Promise<ConfettiFn> | undefined;
-
-  /**
-   * Fire the confetti, loading it if this is the first time.
-   *
-   * Deliberately not awaited by callers: the celebration must never sit in
-   * front of finishing a set. A failed chunk fetch is swallowed for the same
-   * reason — losing the confetti is not losing the PR.
-   *
-   * The cast reconciles a mismatch in the package itself: canvas-confetti's
-   * types are written for its CJS entry (`export = confetti`, so TypeScript
-   * types the dynamic import as the bare callable), while the bundler resolves
-   * its ESM build, which has a real default export. `.default` is what is
-   * actually there at runtime.
-   */
-  function celebrate(options: ConfettiOptions): void {
-    const loader = (confettiLoader ??= import("canvas-confetti").then(
-      (m) => (m as unknown as { default: ConfettiFn }).default,
-    ));
-    void loader.then((fire) => fire(options)).catch(() => {});
-  }
 
   // Personal-record tracking: the record to beat per lift, which the session
   // response now carries. It used to be one history request per distinct lift
