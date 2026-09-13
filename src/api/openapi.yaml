@@ -927,6 +927,67 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /sessions/{sessionId}/assistance:
+    parameters:
+      - $ref: "#/components/parameters/SessionId"
+    post:
+      tags: [sessions]
+      operationId: addSessionAssistance
+      summary: Add an assistance lift to this workout, and to the day it came from
+      description: >
+        For the lifter who reaches the rack and decides to do some curls.
+
+        This is the one write that reaches both a session and a program. It adds
+        the movement to the caller's assistance overlay on this session's program
+        day — so it is prescribed every time that day comes round, with the
+        weight carry-forward and rep progression that implies — and it
+        materialises the sets into the session in progress, which
+        `/programs/{programId}/days/{dayId}/assistance` deliberately does not.
+
+        Both halves are one transaction. A program that gained curls while the
+        workout the lifter is standing in did not is a worse state than either
+        outcome, and nothing in the app could explain it to them.
+
+        The weight and reps are used verbatim rather than run through the
+        carry-forward the next session will use. The lifter has just typed a
+        number; honouring it is less surprising than overriding it, and it is
+        what lets a client show the sets before the server has answered.
+
+        Refused once the session is over, for the same reason as adding a set:
+        changing a closed session's shape can retroactively turn a successful
+        lift into a failed one.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddSessionAssistanceRequest"
+      responses:
+        "201":
+          description: >
+            The sets created in this session, in set order. Ordered because a
+            client that queued this write offline matches these against the
+            placeholder rows it drew, and an unordered answer would put the
+            lifter's logged reps on the wrong set.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SessionSet"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: No such session, or no such exercise
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /sessions/{sessionId}/recap:
     parameters:
       - $ref: "#/components/parameters/SessionId"
@@ -1575,6 +1636,7 @@ components:
           equipment,
           isAccessory,
           isCustom,
+          restSeconds,
           topSet,
           lastPerformedOn,
           performedSessions,
@@ -1601,6 +1663,20 @@ components:
           description: >-
             True for a movement this lifter created. Only custom exercises can be
             deleted, and only by their owner; the seeded catalogue is shared.
+        restSeconds:
+          type: integer
+          example: 180
+          description: >-
+            How long this movement rests between sets — a property of the lift,
+            not one number for everything, so a squat and a lateral raise get
+            their own lengths.
+
+            On the list because a client that adds a movement to a workout has
+            to be able to say what the rest will be before the server has
+            answered. Assistance added at the rack without a signal shows its
+            sets immediately; without this the countdown would fall back to a
+            default and start three minutes on a set of curls, which is the
+            exact thing per-lift rest exists to stop.
         topSet:
           allOf:
             - $ref: "#/components/schemas/ExerciseTopSet"
@@ -2226,6 +2302,39 @@ components:
           description: >
             The lift to add a set to. Must already be in the session — this adds
             a set, not an exercise.
+
+    AddSessionAssistanceRequest:
+      type: object
+      required: [exerciseId, sets, reps]
+      description: >
+        The same shape as CreateAssistanceRequest minus the rep range, which
+        stays on the program page — double progression needs explaining, and the
+        rack is not where to do it. A lift added here can be given a range later
+        by editing the day.
+      properties:
+        exerciseId:
+          type: integer
+          format: int64
+          description: >
+            The movement to add. Must not already be in this session, already
+            prescribed on this day, or already on it as assistance — all three
+            are 409s, and a client should be filtering them out of its picker
+            rather than relying on them.
+        sets:
+          type: integer
+          minimum: 1
+          maximum: 20
+          example: 3
+        reps:
+          type: integer
+          minimum: 1
+          maximum: 100
+          example: 10
+        weightLb:
+          type: number
+          minimum: 0
+          default: 0
+          description: Omit or send 0 for bodyweight work.
 
     UpdateSessionSetRequest:
       type: object

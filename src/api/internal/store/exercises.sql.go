@@ -65,7 +65,7 @@ func (q *Queries) CountExerciseUses(ctx context.Context, exerciseID int32) (Coun
 const createExercise = `-- name: CreateExercise :one
 INSERT INTO exercises (name, muscle_group, equipment, created_by_user_id)
 VALUES ($1, $2, $3, $4::int)
-RETURNING id, name, muscle_group, equipment, is_accessory,
+RETURNING id, name, muscle_group, equipment, is_accessory, rest_seconds,
           (created_by_user_id IS NOT NULL)::bool AS is_custom
 `
 
@@ -82,6 +82,7 @@ type CreateExerciseRow struct {
 	MuscleGroup string `json:"muscle_group"`
 	Equipment   string `json:"equipment"`
 	IsAccessory bool   `json:"is_accessory"`
+	RestSeconds int32  `json:"rest_seconds"`
 	IsCustom    bool   `json:"is_custom"`
 }
 
@@ -99,6 +100,7 @@ func (q *Queries) CreateExercise(ctx context.Context, arg CreateExerciseParams) 
 		&i.MuscleGroup,
 		&i.Equipment,
 		&i.IsAccessory,
+		&i.RestSeconds,
 		&i.IsCustom,
 	)
 	return i, err
@@ -228,6 +230,7 @@ SELECT e.id,
        e.muscle_group,
        e.equipment,
        e.is_accessory,
+       e.rest_seconds,
        (e.created_by_user_id IS NOT NULL)::bool AS is_custom,
        top.weight_lb                            AS top_weight_lb,
        top.performed_on                         AS top_performed_on,
@@ -278,6 +281,7 @@ type ListExercisesRow struct {
 	MuscleGroup       string         `json:"muscle_group"`
 	Equipment         string         `json:"equipment"`
 	IsAccessory       bool           `json:"is_accessory"`
+	RestSeconds       int32          `json:"rest_seconds"`
 	IsCustom          bool           `json:"is_custom"`
 	TopWeightLb       pgtype.Numeric `json:"top_weight_lb"`
 	TopPerformedOn    pgtype.Date    `json:"top_performed_on"`
@@ -350,6 +354,7 @@ func (q *Queries) ListExercises(ctx context.Context, arg ListExercisesParams) ([
 			&i.MuscleGroup,
 			&i.Equipment,
 			&i.IsAccessory,
+			&i.RestSeconds,
 			&i.IsCustom,
 			&i.TopWeightLb,
 			&i.TopPerformedOn,

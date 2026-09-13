@@ -24,6 +24,7 @@ function exercise(over: Partial<Exercise> & { name: string }): Exercise {
     equipment: "other",
     isAccessory: true,
     isCustom: false,
+    restSeconds: 90,
     topSet: null,
     lastPerformedOn: null,
     performedSessions: 0,

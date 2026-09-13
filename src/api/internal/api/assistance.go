@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -66,6 +67,72 @@ func validRepRange(repMin, repMax *int32) (string, bool) {
 	return "", true
 }
 
+// validAssistancePrescription checks the numbers a prescription is made of and
+// resolves the weight. Shared by the program-day path and by adding assistance
+// from inside a workout, so the two cannot drift about what is acceptable.
+//
+// An absent weight means bodyweight, which is the common case for assistance —
+// dips, chin-ups, planks — so it is a default rather than a required field.
+func validAssistancePrescription(sets, reps int32, weightLb *float64) (float64, string, bool) {
+	if sets < 1 || sets > maxAssistanceSets {
+		return 0, "sets must be between 1 and 20", false
+	}
+	if reps < 1 || reps > maxAssistanceReps {
+		return 0, "reps must be between 1 and 100", false
+	}
+	if weightLb == nil {
+		return 0, "", true
+	}
+	if *weightLb < 0 {
+		return 0, "weightLb must be a non-negative number", false
+	}
+	return *weightLb, "", true
+}
+
+// assistanceFitsDay reports whether a lift may be added to a day's assistance,
+// returning the conflict code and message when it may not.
+//
+// Two ways it cannot. The lift is already prescribed by the program on this day,
+// which the database cannot express because the prescription lives in another
+// table — and which is not merely mislabelling: prescribe() would return the
+// lift twice, createSession would materialise two set-number-1 rows, and the
+// UNIQUE on session_sets would make every attempt to start that workout 500
+// until somebody deleted the row. Or it is already assistance on the day, which
+// the UNIQUE does cover, and which is an edit of the existing entry rather than
+// a second one.
+//
+// A read that fails reports "fits": the caller is about to insert, and the
+// database is the backstop for both rules. Better to let the real constraint
+// speak than to refuse a legitimate add because a check query hiccuped.
+func (s *Server) assistanceFitsDay(
+	ctx context.Context, userID, programDayID, exerciseID int32,
+) (code string, message string, ok bool) {
+	prescribed, err := s.q.ListPrescriptionsByDay(ctx, programDayID)
+	if err != nil {
+		return "", "", true
+	}
+	for _, p := range prescribed {
+		if p.ExerciseID == exerciseID {
+			return "already_prescribed",
+				"this day already prescribes that lift — assistance is for work the program doesn't cover",
+				false
+		}
+	}
+
+	existing, err := s.q.ListAssistanceByDay(ctx, store.ListAssistanceByDayParams{
+		UserID: userID, ProgramDayID: programDayID,
+	})
+	if err != nil {
+		return "", "", true
+	}
+	for _, a := range existing {
+		if a.ExerciseID == exerciseID {
+			return "duplicate_assistance", "that exercise is already on this day", false
+		}
+	}
+	return "", "", true
+}
+
 func (s *Server) addAssistance(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	day, ok := s.programDay(w, r)
@@ -82,27 +149,16 @@ func (s *Server) addAssistance(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "exerciseId is required")
 		return
 	}
-	if req.Sets < 1 || req.Sets > maxAssistanceSets {
-		badRequest(w, "sets must be between 1 and 20")
-		return
-	}
-	if req.Reps < 1 || req.Reps > maxAssistanceReps {
-		badRequest(w, "reps must be between 1 and 100")
-		return
-	}
-	if msg, ok := validRepRange(req.RepMin, req.RepMax); !ok {
+	weight, msg, ok := validAssistancePrescription(req.Sets, req.Reps, req.WeightLb)
+	if !ok {
 		badRequest(w, msg)
 		return
 	}
-	// Absent means bodyweight, which is the common case for assistance — dips,
-	// chin-ups, planks — so it is a default rather than a required field.
-	weight := 0.0
-	if req.WeightLb != nil {
-		if *req.WeightLb < 0 {
-			badRequest(w, "weightLb must be a non-negative number")
-			return
-		}
-		weight = *req.WeightLb
+	// The rep range is this path's alone — the session path does not offer one,
+	// so it is validated here rather than in the shared helper.
+	if msg, ok := validRepRange(req.RepMin, req.RepMax); !ok {
+		badRequest(w, msg)
+		return
 	}
 
 	userID := userFrom(ctx).ID
@@ -120,32 +176,13 @@ func (s *Server) addAssistance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A lift the program already prescribes on this day cannot also be assistance
-	// on it, and the database cannot say so: the UNIQUE on program_day_assistance
-	// covers that table alone, and the prescription lives in another one.
-	//
-	// Without this check the day is not merely mislabelled, it is unusable.
-	// prescribe() would return the lift twice — once from the prescription, once
-	// from assistance — and createSession materializes both, so the second set
-	// number 1 collides with the first on session_sets' UNIQUE (session_id,
-	// exercise_id, set_number). Every attempt to start that workout 500s, and
-	// keeps 500ing until the assistance entry is deleted.
-	//
-	// It would be wrong even if it worked. is_assistance is derived from whether
-	// a program_day_exercises row exists, so the duplicate's sets would come back
-	// labelled "main" and ordered by the prescription's position — the engine's
-	// weight and the carried-forward weight fighting over the same bar.
-	prescribed, err := s.q.ListPrescriptionsByDay(ctx, day.ID)
-	if err != nil {
-		internalError(w)
+	// Both ways a lift can fail to belong on this day, checked in one place so
+	// this path and the in-session one cannot disagree. The rationale — including
+	// why the prescribed case is unusable rather than merely mislabelled — is on
+	// assistanceFitsDay.
+	if code, msg, ok := s.assistanceFitsDay(ctx, userID, day.ID, ex.ID); !ok {
+		conflict(w, code, msg)
 		return
-	}
-	for _, p := range prescribed {
-		if p.ExerciseID == ex.ID {
-			conflict(w, "already_prescribed",
-				"this day already prescribes that lift — assistance is for work the program doesn't cover")
-			return
-		}
 	}
 
 	created, err := s.q.CreateAssistance(ctx, store.CreateAssistanceParams{

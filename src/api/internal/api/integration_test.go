@@ -328,6 +328,21 @@ func libraryExercise(t *testing.T, e *httpexpect.Expect, exerciseID int) *httpex
 	return nil
 }
 
+// Rest is a property of the movement, and the library says so — which is what
+// lets a client adding a lift to a workout know the countdown before the server
+// has answered. Without it, assistance added at the rack with no signal would
+// fall back to a default and start three minutes on a set of curls.
+func TestListExercisesCarriesRestSeconds(t *testing.T) {
+	e := expect(t)
+
+	for _, ex := range e.GET("/exercises").Expect().Status(http.StatusOK).
+		JSON().Array().Iter() {
+		// Migration 0011 constrains the column to 30..900, so every row in the
+		// library has a usable number rather than a zero value.
+		ex.Object().Value("restSeconds").Number().InRange(30, 900)
+	}
+}
+
 func TestGetProgramAndUnknown(t *testing.T) {
 	e := expect(t)
 

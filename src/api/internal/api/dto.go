@@ -88,6 +88,11 @@ type exerciseDTO struct {
 	// IsCustom marks a movement this lifter created, which is the only kind
 	// anyone may delete.
 	IsCustom bool `json:"isCustom"`
+	// RestSeconds is how long this movement rests between sets. On the list
+	// because a client adding it to a workout has to know the rest before the
+	// server has answered — assistance added at the rack without a signal shows
+	// its sets straight away, and a default would start three minutes on curls.
+	RestSeconds int32 `json:"restSeconds"`
 	// TopSet is this lifter's heaviest working set on the movement, or nil if
 	// they have never performed it. A pointer rather than a zero value because
 	// the field is `required` and nullable in the spec: the key is always

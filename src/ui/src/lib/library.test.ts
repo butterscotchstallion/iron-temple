@@ -20,6 +20,7 @@ function exercise(over: Partial<Exercise> & { name: string }): Exercise {
     equipment: "other",
     isAccessory: true,
     isCustom: false,
+    restSeconds: 90,
     // The grouping and search tests below don't care about performances, so the
     // default is the "never performed" case; the recentExercises tests set the
     // last two explicitly.

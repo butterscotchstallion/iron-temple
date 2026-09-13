@@ -220,6 +220,7 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 				r.Delete("/{sessionId}", s.deleteSession)
 				r.Post("/{sessionId}/finish", s.finishSession)
 				r.Get("/{sessionId}/recap", s.getSessionRecap)
+				r.Post("/{sessionId}/assistance", s.addSessionAssistance)
 				r.Post("/{sessionId}/sets", s.addSessionSet)
 				r.Patch("/{sessionId}/sets/{setId}", s.updateSessionSet)
 				r.Delete("/{sessionId}/sets/{setId}", s.removeSessionSet)
