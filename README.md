@@ -64,14 +64,19 @@ prescribed lifts, sets and reps.
   land on a **recap** of what it was worth: how long it took and where that
   ranks among your other goes at the same workout, the tonnage restated as
   something you can picture, the **percentage the weights moved** since that day
-  last came round, any **records and milestones** you hit, your streak, and every
-  lift with its own before-and-after. It's a page of its own, so you can come
-  back to it, and there's a **share card** to export. The statistics are the ones
+  last came round, any **records and milestones** you hit, your streak, which
+  **muscle groups** the work went to, and every lift with its own
+  before-and-after. It ends with **what you earned** — the weights your next
+  session of that day will prescribe, and the engine's reasoning, so a deload
+  reads as a decision rather than a surprise a week later.
+
+  It's a page of its own, reachable again from **history** or from any finished
+  session, and there's a **share card** to export. The statistics are the ones
   Racked computes over a month, pointed at a single session — a record announced
   at the rack and the same record listed in March are decided by the same code.
   It's also the one screen built to survive a dead network: what can be worked
-  out from the workout you just did is drawn from memory, and the rest fills in
-  when you're next on signal.
+  out from the workout you just did is drawn from memory, the rest is marked as
+  waiting, and it fills itself in the moment you're back on signal.
 
 ### Progression
 
