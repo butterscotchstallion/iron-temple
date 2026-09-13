@@ -927,6 +927,36 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /sessions/{sessionId}/recap:
+    parameters:
+      - $ref: "#/components/parameters/SessionId"
+    get:
+      tags: [sessions]
+      operationId: getSessionRecap
+      summary: A finished session, in review
+      description: >
+        What the session was worth: how long it took and how that compares to
+        the same workout's history, what moved, which records and milestones
+        fell, and how the weights sit against the last time this program day was
+        performed.
+
+        Served for a session in any state, not only a finished one. Finishing is
+        a write, and a write made in a basement is queued rather than sent, so a
+        recap that refused an unfinished session would refuse exactly the lifter
+        whose Finish has not landed yet. An unfinished session simply has no
+        duration and no pace; everything else is computed from what was logged.
+      responses:
+        "200":
+          description: The recap
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionRecap"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /sessions/{sessionId}/sets:
     parameters:
       - $ref: "#/components/parameters/SessionId"
@@ -2438,6 +2468,311 @@ components:
           type: integer
         offset:
           type: integer
+
+    # ---- Session recap ----
+    # One session, in review. The statistics are the same ones Racked computes
+    # over a month — internal/racked reduces a slice of sessions, and a recap is
+    # that slice with one session in it — so a record here and a record there are
+    # the same claim, decided by the same code.
+
+    SessionRecap:
+      type: object
+      required:
+        [session, durationSeconds, pace, volume, progress, lifts, prs, milestones, streak]
+      properties:
+        session:
+          $ref: "#/components/schemas/SessionRecapHeader"
+        durationSeconds:
+          type: integer
+          nullable: true
+          description: >
+            Elapsed time from the session's creation to the lifter pressing
+            Finish. Null when they never did, and null when the gap exceeds 12
+            hours — a session left open overnight measures the tab, not the
+            training, and the same cap applies wherever a duration is quoted.
+        pace:
+          allOf:
+            - $ref: "#/components/schemas/SessionRecapPace"
+          nullable: true
+          description: >
+            How this session's length sits against the same program day's other
+            lengths. Null when the session has no duration of its own, or when
+            no earlier session of this day was ever finished.
+        volume:
+          $ref: "#/components/schemas/SessionRecapVolume"
+        progress:
+          $ref: "#/components/schemas/SessionRecapProgress"
+        lifts:
+          type: array
+          description: >
+            One entry per lift with at least one rep logged, in the order the
+            session prescribed them. A lift whose every set went unlogged is
+            absent: it was not performed.
+          items:
+            $ref: "#/components/schemas/SessionRecapLift"
+        prs:
+          type: array
+          description: >
+            Records set in this session, measured against every session before
+            it. Same rules as the Racked recap: at most one record of each kind
+            per lift, and a weight record suppresses the estimated-max record it
+            implies.
+          items:
+            $ref: "#/components/schemas/RackedPR"
+        milestones:
+          type: array
+          items:
+            $ref: "#/components/schemas/RackedMilestone"
+        streak:
+          $ref: "#/components/schemas/SessionRecapStreak"
+
+    SessionRecapHeader:
+      description: Which session this is, for a recap that can be linked to and revisited.
+      type: object
+      required:
+        [sessionId, programId, programName, programDayId, programDayName, performedOn,
+         startedAt, finishedAt, isOver]
+      properties:
+        sessionId:
+          type: integer
+          format: int64
+        programId:
+          type: integer
+          format: int64
+        programName:
+          type: string
+        programDayId:
+          type: integer
+          format: int64
+        programDayName:
+          type: string
+          example: Workout A
+        performedOn:
+          type: string
+          format: date
+        startedAt:
+          type: string
+          format: date-time
+          description: >
+            When the session row was created, which is when the lifter opened it
+            at the rack. There is no separate started_at column and no need for
+            one — a session is created by starting it.
+        finishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        isOver:
+          type: boolean
+
+    SessionRecapPace:
+      description: This session's length against the same program day's history.
+      type: object
+      required: [medianSeconds, deltaPct, rank, of, sampleSize]
+      properties:
+        medianSeconds:
+          type: integer
+          description: >
+            The median length of the earlier finished sessions of this program
+            day. Median rather than mean because one session the lifter forgot
+            to finish until the cap caught it drags a mean upward and makes
+            every subsequent workout look brisk.
+        deltaPct:
+          type: number
+          description: >
+            (this − median) ÷ median, as a fraction. NEGATIVE IS FASTER — this
+            is the one figure in the API where a drop is the good news, so it
+            must not be rendered through the same signed-percentage formatter as
+            volume and weight deltas, which would print a minus beside an
+            improvement.
+        rank:
+          type: integer
+          minimum: 1
+          description: 1 when this is the fastest this day has ever been done.
+        of:
+          type: integer
+          description: How many finished sessions of this day exist, this one included.
+        sampleSize:
+          type: integer
+          description: >
+            The number the median is drawn from, `of` minus this session.
+            Carried separately so a surface can decline to make a claim about a
+            lifter's usual pace on the strength of a single previous workout.
+
+    SessionRecapVolume:
+      description: What the session moved, and how that compares.
+      type: object
+      required:
+        [totalLb, previousLb, deltaPct, comparison, setsLogged, setsPrescribed,
+         repsLogged, repsTargeted]
+      properties:
+        totalLb:
+          type: number
+          minimum: 0
+          description: >
+            Reps actually performed times the weight on the bar, summed — the
+            same formula as SessionSummary.volumeLb, so a session's tonnage
+            reads the same here as it does in the history list.
+        previousLb:
+          type: number
+          nullable: true
+          description: The same figure for the previous session of this program day.
+        deltaPct:
+          type: number
+          nullable: true
+          description: Fraction, so 0.08 is +8%. Null when there is nothing to compare to.
+        comparison:
+          $ref: "#/components/schemas/RackedComparison"
+        setsLogged:
+          type: integer
+          description: Sets with at least one rep against them.
+        setsPrescribed:
+          type: integer
+          description: >
+            Every set the session carried, logged or not — so a workout cut
+            short reads as the fraction it was rather than as a whole one.
+        repsLogged:
+          type: integer
+        repsTargeted:
+          type: integer
+
+    SessionRecapProgress:
+      description: >
+        How the weights sit against the last time this program day was performed.
+
+        The headline is a ratio of summed top-set weights, taken over only the
+        lifts that appear in BOTH sessions. Tonnage would have been the easier
+        number and the wrong one: it moves when a lifter adds a set or misses
+        reps, neither of which is the bar getting heavier. Averaging each lift's
+        own percentage is worse still — it lets ten pounds on a curl outweigh
+        ten pounds on a squat. Pairing means a lift skipped today cannot move the
+        figure, which is what makes "up 3.5%" a claim about the weight.
+      type: object
+      required:
+        [previousSessionId, previousPerformedOn, weightDeltaPct, liftsCompared, liftsNew]
+      properties:
+        previousSessionId:
+          type: integer
+          format: int64
+          nullable: true
+          description: Null when this is the first time the lifter has performed this day.
+        previousPerformedOn:
+          type: string
+          format: date
+          nullable: true
+        weightDeltaPct:
+          type: number
+          nullable: true
+          description: >
+            Fraction, so 0.035 is +3.5%. Null when there is no previous session,
+            when no lift appears in both, or when the previous top sets summed to
+            zero — a rise from nothing is a ratio with no meaning.
+        liftsCompared:
+          type: integer
+          description: >
+            How many lifts the figure is drawn from. Shown alongside it, because
+            a percentage measured across one lift of five is a different claim
+            from one measured across all five.
+        liftsNew:
+          type: integer
+          description: Lifts performed today that the previous session did not carry.
+
+    SessionRecapLift:
+      description: One lift's showing, and how it moved since this day was last performed.
+      type: object
+      required:
+        [exerciseId, exerciseName, kind, topWeightLb, topReps, topE1rmLb, setsLogged,
+         setsPrescribed, repsLogged, repsTargeted, volumeLb, hitEveryTarget, previous,
+         weightDeltaLb, weightDeltaPct, e1rmDeltaPct]
+      properties:
+        exerciseId:
+          type: integer
+          format: int64
+        exerciseName:
+          type: string
+        kind:
+          $ref: "#/components/schemas/ExerciseKind"
+        topWeightLb:
+          type: number
+          description: The heaviest weight carried for at least one rep.
+        topReps:
+          type: integer
+          description: Reps at that weight, taking the best set when several matched it.
+        topE1rmLb:
+          type: number
+          description: >
+            The lift's best estimated max in this session — Epley, rounded to
+            the pound, with a single worth exactly what was on the bar. Not
+            always the top set: five reps at 225 estimates above one at 245.
+        setsLogged:
+          type: integer
+        setsPrescribed:
+          type: integer
+        repsLogged:
+          type: integer
+        repsTargeted:
+          type: integer
+        volumeLb:
+          type: number
+          minimum: 0
+        hitEveryTarget:
+          type: boolean
+          description: >
+            True when every prescribed set of this lift was completed — the same
+            judgement the progression engine makes when it decides whether the
+            weight goes up.
+        previous:
+          allOf:
+            - $ref: "#/components/schemas/SessionRecapLiftPrevious"
+          nullable: true
+          description: Null when the previous session of this day did not carry this lift.
+        weightDeltaLb:
+          type: number
+          nullable: true
+        weightDeltaPct:
+          type: number
+          nullable: true
+          description: Fraction, so 0.021 is +2.1%.
+        e1rmDeltaPct:
+          type: number
+          nullable: true
+          description: >
+            Movement in the estimated max, which catches the session where the
+            bar stayed put but the reps went up.
+
+    SessionRecapLiftPrevious:
+      description: The same lift, the last time this program day came round.
+      type: object
+      required: [performedOn, topWeightLb, topReps, topE1rmLb]
+      properties:
+        performedOn:
+          type: string
+          format: date
+        topWeightLb:
+          type: number
+        topReps:
+          type: integer
+        topE1rmLb:
+          type: number
+
+    SessionRecapStreak:
+      description: >
+        Two counts, because they answer different questions and the app already
+        asks both. Sessions is the run of workouts finished to the letter, which
+        a single missed rep ends. Weeks is the run of calendar weeks trained at
+        all, which survives a bad day — no program trains daily, so weeks is the
+        one that measures showing up.
+      type: object
+      required: [sessions, weeks]
+      properties:
+        sessions:
+          type: integer
+          description: >
+            Consecutive sessions ending at this one in which every prescribed set
+            was completed. Counted over at most a year of training, so a longer
+            run than that is reported as that year.
+        weeks:
+          type: integer
+          description: Consecutive calendar weeks with a session, ending at this one.
 
     # ---- Racked ----
     # The recap. Every statistic is computed server-side so that the page and
