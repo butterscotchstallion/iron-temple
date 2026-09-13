@@ -8,12 +8,52 @@
  */
 
 import type { SessionRecap } from "./api";
-import { formatDelta } from "./racked";
+import { barFraction, formatDelta, formatSessionLength, joinNames } from "./racked";
 import { formatVolume } from "./volume";
 import { formatOrdinal, formatPace } from "./recap";
-import { barFraction } from "./racked";
 import { LIFT_ROWS, MOMENT_ROWS, type MomentRow, type ShareCardContent } from "./shareCard";
-import { formatSessionLength } from "./racked";
+
+/**
+ * The most comma-separated parts the records row will carry.
+ *
+ * Three either way: three names when that is all there are, or two names and a
+ * count when there are more. The row is painted right-aligned into 560px at
+ * 26px semibold, and fitText clips what does not fit — "Squat, Bench Press,
+ * Barbell Row and 2 more" already sits on that limit, and lifts are not always
+ * called "Squat". Two names plus a count leaves room for the ones that aren't.
+ */
+const PR_PARTS = 3;
+
+/**
+ * The records, as one line: "Squat 245 lb", or "Squat, Bench Press and Row".
+ *
+ * A single record has room for its weight, which is the interesting part when
+ * there is only one. Beyond that the names are what the lifter wants to see, so
+ * they are joined the way a person says them — the same joinNames the recap
+ * email and the Racked page use, rather than a third spelling of the same list.
+ *
+ * The row never states a count it does not then show. It used to read
+ * "Personal records (3)" against a single lift's name, which looks like a card
+ * that failed to render the other two. Where there are more records than the
+ * line can carry, the overflow is named as an overflow ("and 2 more") — which
+ * is a promise the line keeps.
+ *
+ * Sorted heaviest first, so the lift that leads is the one worth leading with
+ * and the ones dropped are the least impressive. The server returns records in
+ * alphabetical order — fine for a list, arbitrary for a headline, and the
+ * reason this used to put whichever lift sorted first beside a count of three.
+ */
+function prsValue(prs: SessionRecap["prs"]): string {
+  const ranked = [...prs].sort((a, b) => b.valueLb - a.valueLb);
+  if (ranked.length === 1) {
+    return `${ranked[0].exerciseName} ${formatVolume(ranked[0].valueLb)} lb`;
+  }
+  if (ranked.length <= PR_PARTS) {
+    return joinNames(ranked.map((p) => p.exerciseName));
+  }
+  const named = ranked.slice(0, PR_PARTS - 1).map((p) => p.exerciseName);
+  return joinNames([...named, `${ranked.length - named.length} more`]);
+}
 
 export function sessionShareCardContent(
   recap: SessionRecap,
@@ -58,10 +98,9 @@ export function sessionShareCardContent(
     });
   }
   if (recap.prs.length > 0) {
-    const best = recap.prs[0];
     moments.push({
-      label: recap.prs.length === 1 ? "Personal record" : `Personal records (${recap.prs.length})`,
-      value: `${best.exerciseName} ${formatVolume(best.valueLb)} lb`,
+      label: recap.prs.length === 1 ? "Personal record" : "Personal records",
+      value: prsValue(recap.prs),
     });
   }
   if (recap.milestones.length > 0) {

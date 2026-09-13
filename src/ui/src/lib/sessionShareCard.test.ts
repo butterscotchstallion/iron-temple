@@ -50,6 +50,19 @@ function mkRecap(over: Partial<SessionRecap> = {}): SessionRecap {
   };
 }
 
+function mkPR(exerciseName: string, valueLb: number) {
+  return {
+    kind: "weight" as const,
+    performedOn: "2026-09-13",
+    exerciseId: exerciseName.length,
+    exerciseName,
+    weightLb: valueLb,
+    reps: 5,
+    valueLb,
+    previousLb: valueLb - 5,
+  };
+}
+
 function mkLift(name: string, volumeLb: number, topWeightLb: number) {
   return {
     exerciseId: name.length,
@@ -169,24 +182,61 @@ describe("sessionShareCardContent", () => {
       expect(c.moments[0]).toEqual({ label: "Pace", value: "12% slower · 4th of 12" });
     });
 
-    it("names the record and counts the rest", () => {
-      const pr = {
-        kind: "weight" as const,
-        performedOn: "2026-09-13",
-        exerciseId: 1,
-        exerciseName: "Squat",
-        weightLb: 245,
-        reps: 5,
-        valueLb: 245,
-        previousLb: 240,
-      };
-      const one = sessionShareCardContent(mkRecap({ prs: [pr] }));
+    it("gives a lone record its weight", () => {
+      const one = sessionShareCardContent(mkRecap({ prs: [mkPR("Squat", 245)] }));
       expect(one.moments[0]).toEqual({ label: "Personal record", value: "Squat 245 lb" });
+    });
 
-      const two = sessionShareCardContent(
-        mkRecap({ prs: [pr, { ...pr, exerciseId: 2, exerciseName: "Row" }] }),
+    // The row used to read "Personal records (3)" beside a single lift's name,
+    // which looks like a card that failed to render the other two. It never
+    // states a count it does not then show.
+    it("names every record rather than counting them", () => {
+      const c = sessionShareCardContent(
+        mkRecap({
+          prs: [mkPR("Bench Press", 160), mkPR("Squat", 245), mkPR("Barbell Row", 135)],
+        }),
       );
-      expect(two.moments[0].label).toBe("Personal records (2)");
+      expect(c.moments[0]).toEqual({
+        label: "Personal records",
+        // Heaviest first: the server returns them alphabetically, which is fine
+        // for a list and arbitrary for a headline.
+        value: "Squat, Bench Press and Barbell Row",
+      });
+    });
+
+    // Past three the line runs out of room, so the overflow is named as an
+    // overflow — a promise the row keeps — and the lifts dropped are the
+    // lightest. Two names rather than three: the count has to fit beside them.
+    it("counts the overflow past three", () => {
+      const c = sessionShareCardContent(
+        mkRecap({
+          prs: [
+            mkPR("Curl", 40),
+            mkPR("Squat", 245),
+            mkPR("Bench Press", 160),
+            mkPR("Barbell Row", 135),
+            mkPR("Overhead Press", 95),
+          ],
+        }),
+      );
+      expect(c.moments[0].value).toBe("Squat, Bench Press and 3 more");
+    });
+
+    // Whatever the count, the row is three comma-separated parts at most — it
+    // is painted into a fixed width and clipped past it.
+    it("never runs to more than three parts", () => {
+      for (const n of [2, 3, 4, 8, 20]) {
+        const prs = Array.from({ length: n }, (_, i) => mkPR(`Lift ${i}`, 300 - i));
+        const value = sessionShareCardContent(mkRecap({ prs })).moments[0].value;
+        expect(value.split(/, | and /)).toHaveLength(Math.min(n, 3));
+      }
+    });
+
+    it("treats an estimated-max record the same as a heavier bar", () => {
+      const c = sessionShareCardContent(
+        mkRecap({ prs: [{ ...mkPR("Squat", 286), kind: "e1rm" }] }),
+      );
+      expect(c.moments[0]).toEqual({ label: "Personal record", value: "Squat 286 lb" });
     });
 
     it("has nothing to say about a quiet session", () => {
