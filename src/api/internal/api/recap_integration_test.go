@@ -270,6 +270,74 @@ func TestRecapIsScopedToTheOwner(t *testing.T) {
 	e.GET("/sessions/999999/recap").Expect().Status(http.StatusNotFound)
 }
 
+// Every field the schema documents, spelled the way it documents it.
+//
+// The DTO's json tags are hand-written while the UI's types are generated from
+// openapi.yaml, so the two can disagree without anything failing to compile:
+// the field simply arrives undefined and the page renders a blank where a
+// number should be. The other tests here read the fields they assert on, which
+// covers most of this — but not the ones nothing happens to assert, and those
+// are exactly the ones a typo survives in.
+func TestRecapShapeMatchesTheSchema(t *testing.T) {
+	e := expect(t)
+	_, dayID := firstProgramAndDay(e)
+
+	first := startSession(t, e, dayID)
+	firstID := int(first.Value("id").Number().Raw())
+	setPerformedOn(t, firstID, "2026-07-06")
+	logEverySet(t, e, first)
+	e.POST(fmt.Sprintf("/sessions/%d/finish", firstID)).Expect().Status(http.StatusOK)
+
+	second := startSession(t, e, dayID)
+	secondID := int(second.Value("id").Number().Raw())
+	setPerformedOn(t, secondID, "2026-07-09")
+	logEverySet(t, e, second)
+	e.POST(fmt.Sprintf("/sessions/%d/finish", secondID)).Expect().Status(http.StatusOK)
+
+	r := recap(t, e, secondID)
+	r.Keys().ContainsOnly(
+		"session", "durationSeconds", "pace", "volume", "progress",
+		"lifts", "prs", "milestones", "streak",
+	)
+	r.Value("session").Object().Keys().ContainsOnly(
+		"sessionId", "programId", "programName", "programDayId", "programDayName",
+		"performedOn", "startedAt", "finishedAt", "isOver",
+	)
+	r.Value("pace").Object().Keys().ContainsOnly(
+		"medianSeconds", "deltaPct", "rank", "of", "sampleSize",
+	)
+	r.Value("volume").Object().Keys().ContainsOnly(
+		"totalLb", "previousLb", "deltaPct", "comparison",
+		"setsLogged", "setsPrescribed", "repsLogged", "repsTargeted",
+	)
+	r.Value("volume").Object().Value("comparison").Object().
+		Keys().ContainsOnly("count", "label", "unitLb")
+	r.Value("progress").Object().Keys().ContainsOnly(
+		"previousSessionId", "previousPerformedOn", "weightDeltaPct",
+		"liftsCompared", "liftsNew",
+	)
+	r.Value("streak").Object().Keys().ContainsOnly("sessions", "weeks")
+
+	lift := r.Value("lifts").Array().Value(0).Object()
+	lift.Keys().ContainsOnly(
+		"exerciseId", "exerciseName", "kind", "topWeightLb", "topReps", "topE1rmLb",
+		"setsLogged", "setsPrescribed", "repsLogged", "repsTargeted", "volumeLb",
+		"hitEveryTarget", "previous", "weightDeltaLb", "weightDeltaPct", "e1rmDeltaPct",
+	)
+	lift.Value("previous").Object().
+		Keys().ContainsOnly("performedOn", "topWeightLb", "topReps", "topE1rmLb")
+	// The enum, not a boolean — this is a session surface, and SessionSet
+	// already spells the same distinction this way.
+	lift.Value("kind").String().IsEqual("main")
+	lift.Value("topE1rmLb").Number().Gt(0)
+	lift.Value("hitEveryTarget").Boolean().IsTrue()
+
+	// startedAt is the session's creation, RFC3339 — there is no started_at
+	// column, and this is what stands in for one.
+	r.Value("session").Object().Value("startedAt").String().NotEmpty()
+	r.Value("streak").Object().Value("sessions").Number().Gt(0)
+}
+
 // A session opened and abandoned still produces a whole recap rather than an
 // error — the arrays are empty, not missing.
 func TestRecapOfASessionWithNothingLogged(t *testing.T) {

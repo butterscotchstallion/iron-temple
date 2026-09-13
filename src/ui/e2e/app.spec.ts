@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import type { RackedReport } from "../src/lib/api";
+import type { RackedReport, SessionRecap } from "../src/lib/api";
 
 // The UI is driven entirely by the API, so the e2e suite mocks those responses
 // (via page.route) to stay self-contained — no running backend or seeded DB.
@@ -180,6 +180,78 @@ function sessionDetail(
         restSeconds: 180,
       };
     }),
+  };
+}
+
+/**
+ * The server's recap of session 1 — the answer the recap route prefers over the
+ * reconstruction it can make from the session alone.
+ *
+ * Typed against the generated client, as the Racked fixtures are, so a change
+ * to the contract breaks the fixture at compile time rather than at assert
+ * time.
+ */
+function sessionRecap(overrides: Partial<SessionRecap> = {}): SessionRecap {
+  return {
+    session: {
+      sessionId: 1,
+      programId: 1,
+      programName: "StrongLifts 5x5",
+      programDayId: 10,
+      programDayName: "Workout A",
+      performedOn: "2026-08-01",
+      startedAt: "2026-08-01T18:00:00Z",
+      finishedAt: "2026-08-01T19:30:00Z",
+      isOver: true,
+    },
+    durationSeconds: 5400,
+    pace: { medianSeconds: 6000, deltaPct: -0.1, rank: 2, of: 8, sampleSize: 7 },
+    volume: {
+      totalLb: 800,
+      previousLb: 750,
+      deltaPct: 0.066,
+      comparison: { count: 17, label: "45 lb plates", unitLb: 45 },
+      setsLogged: 2,
+      setsPrescribed: 2,
+      repsLogged: 10,
+      repsTargeted: 10,
+    },
+    progress: {
+      previousSessionId: 9,
+      previousPerformedOn: "2026-07-29",
+      weightDeltaPct: 0.066,
+      liftsCompared: 1,
+      liftsNew: 0,
+    },
+    lifts: [
+      {
+        exerciseId: 1,
+        exerciseName: "Squat",
+        kind: "main",
+        topWeightLb: 80,
+        topReps: 5,
+        topE1rmLb: 93,
+        setsLogged: 2,
+        setsPrescribed: 2,
+        repsLogged: 10,
+        repsTargeted: 10,
+        volumeLb: 800,
+        hitEveryTarget: true,
+        previous: {
+          performedOn: "2026-07-29",
+          topWeightLb: 75,
+          topReps: 5,
+          topE1rmLb: 88,
+        },
+        weightDeltaLb: 5,
+        weightDeltaPct: 0.066,
+        e1rmDeltaPct: 0.057,
+      },
+    ],
+    prs: [],
+    milestones: [],
+    streak: { sessions: 2, weeks: 1 },
+    ...overrides,
   };
 }
 
@@ -694,6 +766,17 @@ test("finishes a part-done session with sets still unlogged, after confirming", 
       json: sessionDetail({ actualReps: 5, completed: true, loggedSets: 1 }),
     }),
   );
+  // Mocked explicitly, and note the glob above does NOT cover it — it stops at
+  // `1`. Left unmocked the request fails, the recap falls back to the session
+  // handed across, and this test would still see its heading: a pass for the
+  // wrong reason, proving nothing about the route it is here to check.
+  await page.route("**/api/v1/sessions/1/recap", (route) =>
+    route.fulfill({
+      json: sessionRecap({
+        volume: { ...sessionRecap().volume, setsLogged: 1, repsLogged: 5 },
+      }),
+    }),
+  );
 
   await page.goto("/#/sessions/1");
   await expect(page.getByText("1 / 2 sets logged")).toBeVisible();
@@ -706,6 +789,10 @@ test("finishes a part-done session with sets still unlogged, after confirming", 
   await expect(page.getByText("1 of 2 sets have no reps logged")).toBeVisible();
 
   await page.getByRole("button", { name: "Finish anyway" }).click();
+
+  // Finishing lands on the recap, which is a route of its own now rather than
+  // a dialog over the session.
+  await expect(page).toHaveURL(/#\/sessions\/1\/recap$/);
   await expect(page.getByRole("heading", { name: /Workout finished/ })).toBeVisible();
   expect(finishCalls).toBe(1);
 
@@ -727,15 +814,67 @@ test("finishes without confirming once every set is logged", async ({ page }) =>
   await page.route("**/api/v1/sessions/1", (route) =>
     route.fulfill({ json: sessionDetail({ actualReps: 5, completed: true }) }),
   );
+  await page.route("**/api/v1/sessions/1/recap", (route) =>
+    route.fulfill({ json: sessionRecap() }),
+  );
 
   await page.goto("/#/sessions/1");
   await page.getByRole("button", { name: "Finish workout" }).click();
 
-  // No confirmation step — straight to the celebration.
+  // No confirmation step — straight to the recap.
+  await expect(page).toHaveURL(/#\/sessions\/1\/recap$/);
   await expect(page.getByRole("heading", { name: /Workout complete/ })).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Finish with sets unlogged?" }),
   ).toHaveCount(0);
+
+  // The server's recap, not the local reconstruction: pace and the weight
+  // progression are only knowable with a history behind them.
+  await expect(page.getByTestId("stat-pace")).toContainText("faster");
+  await expect(page.getByTestId("stat-progress")).toBeVisible();
+  await expect(page.getByTestId("recap-degraded")).toHaveCount(0);
+});
+
+// The basement. A finish made without signal is queued and answered
+// optimistically, so the lifter is standing there with a finished workout —
+// and the recap endpoint is a GET, which cannot be queued and will not land.
+//
+// The recap still has to paint, from the session handed across in memory. What
+// it cannot know it leaves out, and says so, rather than showing an error.
+test("shows a recap from the finished session when the server can't be reached", async ({
+  page,
+}) => {
+  await page.route("**/api/v1/sessions/1/finish", (route) =>
+    route.fulfill({
+      json: sessionDetail({
+        isOver: true,
+        finishedAt: "2026-08-01T19:30:00Z",
+        actualReps: 5,
+        completed: true,
+      }),
+    }),
+  );
+  await page.route("**/api/v1/sessions/1", (route) =>
+    route.fulfill({ json: sessionDetail({ actualReps: 5, completed: true }) }),
+  );
+  await page.route("**/api/v1/sessions/1/recap", (route) => route.abort());
+
+  await page.goto("/#/sessions/1");
+  await page.getByRole("button", { name: "Finish workout" }).click();
+
+  await expect(page).toHaveURL(/#\/sessions\/1\/recap$/);
+  await expect(page.getByRole("heading", { name: /Workout complete/ })).toBeVisible();
+
+  // Two sets of five at 80 lb, finished 90 minutes after it was created.
+  await expect(page.getByTestId("stat-volume")).toContainText("800");
+  await expect(page.getByTestId("stat-sets")).toContainText("2 / 2");
+  await expect(page.getByTestId("stat-duration")).toContainText("1h 30m");
+
+  // Told, not hidden — and not as an error, because nothing the lifter did
+  // failed.
+  await expect(page.getByTestId("recap-degraded")).toBeVisible();
+  await expect(page.getByText("Couldn't load the recap.")).toHaveCount(0);
+  await expect(page.getByTestId("stat-pace")).toHaveCount(0);
 });
 
 test("renders an already-finished session read-only", async ({ page }) => {

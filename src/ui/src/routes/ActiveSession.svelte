@@ -22,10 +22,9 @@
     type PendingWrite,
   } from "../lib/writeQueue.svelte";
   import { celebrate } from "../lib/celebrate";
+  import { handOffSession } from "../lib/recapHandoff";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
-  import Dumbbell from "@lucide/svelte/icons/dumbbell";
   import Flag from "@lucide/svelte/icons/flag";
-  import PartyPopper from "@lucide/svelte/icons/party-popper";
   import Trophy from "@lucide/svelte/icons/trophy";
   import RestTimer from "../lib/RestTimer.svelte";
   import ExerciseCard from "../lib/ExerciseCard.svelte";
@@ -55,7 +54,6 @@
   // tapped, and replaced on every rep from then on.
   let restSeconds = $state(180);
   // Controls the end-of-workout celebration dialog.
-  let showComplete = $state(false);
   // Controls the "some sets aren't logged" confirmation before finishing.
   let confirmFinish = $state(false);
   // A finish request is in flight (guards a double-tap).
@@ -214,14 +212,6 @@
     (session?.sets ?? []).filter((s) => s.actualReps == null).length,
   );
 
-  // Total weight moved this session (weight × reps over all logged sets).
-  const totalVolume = $derived(
-    (session?.sets ?? []).reduce(
-      (sum, s) => sum + s.weightLb * (s.actualReps ?? 0),
-      0,
-    ),
-  );
-
   // Reps count up from 0 on each tap, up to the target, then clear.
   function nextReps(set: SessionSet): number | null {
     if (set.actualReps == null) return 1;
@@ -321,8 +311,13 @@
     }
     actionError = null;
     session = outcome.value;
-    showComplete = true;
-    celebrate({ particleCount: 140, spread: 75, origin: { y: 0.6 } });
+
+    // Hand the finished session across before navigating. The recap asks the
+    // server for the full story, but that is a GET — offline it cannot land,
+    // and neither could a refetch of this session. Passing the object we
+    // already hold is what lets the recap paint at the rack; see recapHandoff.
+    handOffSession(outcome.value);
+    push(`/sessions/${sessionId}/recap`);
   }
 
   // Record (or, with null, erase) what the lifter weighed today. The response is
@@ -595,31 +590,8 @@
       </AlertDialog.Content>
     </AlertDialog.Root>
 
-    <AlertDialog.Root bind:open={showComplete}>
-      <AlertDialog.Content>
-        <AlertDialog.Header>
-          <AlertDialog.Title class="flex items-center gap-2">
-            {#if allComplete}
-              <PartyPopper class="size-5 shrink-0" aria-hidden="true" />
-              Workout complete
-            {:else}
-              <Dumbbell class="size-5 shrink-0" aria-hidden="true" />
-              Workout finished
-            {/if}
-          </AlertDialog.Title>
-          <AlertDialog.Description>
-            {session.programName} · {session.programDayName}
-          </AlertDialog.Description>
-        </AlertDialog.Header>
-        <p class="text-center text-sm text-muted-foreground">
-          {loggedCount} / {session.sets.length} sets · {totalVolume} lb total volume
-        </p>
-        <AlertDialog.Footer>
-          <AlertDialog.Action onclick={() => push("/history")}>
-            See history
-          </AlertDialog.Action>
-        </AlertDialog.Footer>
-      </AlertDialog.Content>
-    </AlertDialog.Root>
+    <!-- Finishing used to open a second dialog here, carrying a sets count and
+         a volume. It is a whole screen now — /sessions/:id/recap, which
+         finish() navigates to. -->
   {/if}
 </div>
