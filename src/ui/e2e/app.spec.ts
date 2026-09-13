@@ -929,7 +929,9 @@ test("adds an assistance lift to the workout in progress", async ({ page }) => {
   await page.getByRole("button", { name: "Add to this workout" }).click();
 
   await expect(page.getByRole("heading", { name: "Barbell Curl" })).toBeVisible();
-  await expect(page.getByText("Assistance")).toBeVisible();
+  // exact, because getByText matches case-insensitively on a substring by
+  // default and the "Add assistance" button below would match too.
+  await expect(page.getByText("Assistance", { exact: true })).toBeVisible();
   expect(added).toEqual({ exerciseId: 4, sets: 3, reps: 10, weightLb: 0 });
 });
 
