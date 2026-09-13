@@ -694,6 +694,7 @@
           onAdd={addAssistanceLift}
           onCancel={() => (pickerOpen = false)}
           confirmLabel="Add to this workout"
+          allowRange={false}
           footnote="It joins {session.programDayName} too, so it's prescribed next time."
         />
       {:else}

@@ -28,6 +28,7 @@
     onCancel,
     confirmLabel = "Add to this day",
     footnote,
+    allowRange = true,
   }: {
     // Exercise ids already on this day — one entry per lift, so offering them
     // again would only earn a 409.
@@ -53,6 +54,17 @@
     confirmLabel?: string;
     /** An extra line under the inputs, for whatever else the caller is doing. */
     footnote?: string;
+    /**
+     * Whether to offer double progression.
+     *
+     * False from the active session, where the endpoint has no rep-range fields
+     * to send them to. Offering the checkbox there would promise a progression
+     * — "hit the top on every set and the weight goes up" — that the request
+     * then silently drops, leaving a flat prescription at the bottom of the
+     * range. A range can still be put on the lift afterwards from the program
+     * page, which is where there is room to explain what it does.
+     */
+    allowRange?: boolean;
   } = $props();
 
   let exercises = $state<Exercise[]>([]);
@@ -238,10 +250,12 @@
         />
       </label>
     </div>
-    <label class="flex items-center gap-2 text-xs text-muted-foreground">
-      <input type="checkbox" bind:checked={ranged} class="size-4 accent-primary" />
-      Use a rep range
-    </label>
+    {#if allowRange}
+      <label class="flex items-center gap-2 text-xs text-muted-foreground">
+        <input type="checkbox" bind:checked={ranged} class="size-4 accent-primary" />
+        Use a rep range
+      </label>
+    {/if}
     {#if selected?.topSet}
       <!-- Named for what it is. topSet is the heaviest set ever, and the
            carry-forward the server applies from the next session on uses the

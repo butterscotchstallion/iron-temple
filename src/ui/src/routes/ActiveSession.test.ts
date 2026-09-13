@@ -211,6 +211,18 @@ describe("ActiveSession: adding assistance", () => {
     expect(panel?.textContent).not.toContain("Squat");
   });
 
+  // The endpoint has no rep-range fields, so offering the checkbox here would
+  // promise a progression the request then silently drops — leaving a flat
+  // prescription at the bottom of the range. The program page still offers it.
+  it("does not offer a rep range, which this endpoint cannot carry", async () => {
+    render(ActiveSession, props);
+    await pickCurl();
+
+    await screen.findByText(/Leave the weight at 0/);
+    expect(screen.queryByLabelText(/Use a rep range/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/never deloads/)).not.toBeInTheDocument();
+  });
+
   // A refusal is real. The panel stays open with the numbers intact rather than
   // making the lifter pick the movement again.
   it("reports a refusal and keeps the picker open", async () => {

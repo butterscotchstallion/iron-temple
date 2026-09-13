@@ -49,7 +49,10 @@ function rowsInOrder(): string[] {
     .filter((name): name is string => name !== undefined);
 }
 
-function open(exercises: Exercise[], props: { exclude?: number[] } = {}) {
+function open(
+  exercises: Exercise[],
+  props: { exclude?: number[]; allowRange?: boolean } = {},
+) {
   listExercises.mockResolvedValue({ status: 200, data: exercises });
   return render(AssistancePicker, {
     props: { ...props, onAdd: vi.fn(async () => true), onCancel: vi.fn() },
@@ -149,5 +152,22 @@ describe("the recent section", () => {
     expect(screen.getAllByRole("button", { name: /^Lift/ })).toHaveLength(
       RECENT_LIMIT * 2 + 2,
     );
+  });
+
+  // Still offered by default: the program page is where double progression is
+  // explained, and where the endpoint can actually carry a range.
+  it("offers a rep range unless told not to", async () => {
+    open(library);
+    await fireEvent.click(await screen.findByRole("button", { name: /Dip/ }));
+    expect(await screen.findByText("Use a rep range")).toBeInTheDocument();
+  });
+
+  // The session endpoint has no rep-range fields, so offering the checkbox
+  // there would promise a progression the request then silently drops.
+  it("hides the rep range when the caller cannot carry one", async () => {
+    open(library, { allowRange: false });
+    await fireEvent.click(await screen.findByRole("button", { name: /Dip/ }));
+    await screen.findByText(/Leave the weight at 0/);
+    expect(screen.queryByText("Use a rep range")).not.toBeInTheDocument();
   });
 });
