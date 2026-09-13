@@ -325,6 +325,7 @@ func TestRecapShapeMatchesTheSchema(t *testing.T) {
 	r := recap(t, e, secondID)
 	r.Keys().ContainsOnly(
 		"session", "durationSeconds", "pace", "volume", "progress",
+		"muscles", "split", "bodyweightLb", "earned",
 		"lifts", "prs", "milestones", "streak",
 	)
 	r.Value("session").Object().Keys().ContainsOnly(
@@ -364,6 +365,101 @@ func TestRecapShapeMatchesTheSchema(t *testing.T) {
 	// column, and this is what stands in for one.
 	r.Value("session").Object().Value("startedAt").String().NotEmpty()
 	r.Value("streak").Object().Value("sessions").Number().Gt(0)
+
+	muscle := r.Value("muscles").Array().Value(0).Object()
+	muscle.Keys().ContainsOnly("group", "volumeLb", "sets", "reps", "lifts", "share", "trained")
+	muscle.Value("trained").Boolean().IsTrue()
+
+	r.Value("split").Object().Keys().ContainsOnly("main", "assistance")
+	r.Value("split").Object().Value("main").Object().
+		Keys().ContainsOnly("volumeLb", "sets", "reps", "lifts", "share")
+
+	// This is the newest session of the day, so it is allowed to say what it
+	// earned — and the prescription carries the engine's reasoning with it.
+	earned := r.Value("earned").Object()
+	earned.Keys().ContainsOnly("programDayId", "programDayName", "exercises")
+	ex := earned.Value("exercises").Array().Value(0).Object()
+	ex.Value("weightLb").Number().Gt(0)
+	ex.Value("progression").Object().Value("status").String().NotEmpty()
+}
+
+// The next-session prescription is computed from history as it stands now, so
+// it is a fact about today rather than about the session on screen. Attached to
+// an older recap it would silently describe a workout that has since been
+// superseded — so the recap withholds it rather than qualifying it.
+func TestRecapOnlyTheNewestSessionOfADaySaysWhatItEarned(t *testing.T) {
+	e := expect(t)
+	_, dayID := firstProgramAndDay(e)
+
+	first := startSession(t, e, dayID)
+	firstID := int(first.Value("id").Number().Raw())
+	setPerformedOn(t, firstID, "2026-08-03")
+	logEverySet(t, e, first)
+	e.POST(fmt.Sprintf("/sessions/%d/finish", firstID)).Expect().Status(http.StatusOK)
+
+	// Alone so far, so it may look forward.
+	recap(t, e, firstID).Value("earned").Object().
+		Value("exercises").Array().NotEmpty()
+
+	second := startSession(t, e, dayID)
+	secondID := int(second.Value("id").Number().Raw())
+	setPerformedOn(t, secondID, "2026-08-06")
+	logEverySet(t, e, second)
+	e.POST(fmt.Sprintf("/sessions/%d/finish", secondID)).Expect().Status(http.StatusOK)
+
+	// Superseded. The older recap stops forecasting; the newer one takes over.
+	recap(t, e, firstID).Value("earned").IsNull()
+	recap(t, e, secondID).Value("earned").Object().
+		Value("exercises").Array().NotEmpty()
+}
+
+// A session records what the lifter weighed that day, when they said.
+func TestRecapCarriesBodyweight(t *testing.T) {
+	e := expect(t)
+	_, dayID := firstProgramAndDay(e)
+
+	session := startSession(t, e, dayID)
+	id := int(session.Value("id").Number().Raw())
+	logEverySet(t, e, session)
+
+	// Unrecorded is null, not zero — the weight-loss series is the days that
+	// were actually measured.
+	recap(t, e, id).Value("bodyweightLb").IsNull()
+
+	e.PATCH(fmt.Sprintf("/sessions/%d", id)).
+		WithJSON(map[string]any{"bodyweightLb": 184.5}).
+		Expect().Status(http.StatusOK)
+	recap(t, e, id).Value("bodyweightLb").Number().IsEqual(184.5)
+}
+
+// The muscle split divides only what the session actually trained. A squat day
+// listing "arms 0%" is noise around one real number, and implies a criticism
+// the session never invited — unlike a month, where the gap is the finding.
+func TestRecapMuscleSplitOmitsWhatWasNotTrained(t *testing.T) {
+	e := expect(t)
+	_, dayID := firstProgramAndDay(e)
+
+	session := startSession(t, e, dayID)
+	id := int(session.Value("id").Number().Raw())
+	logEverySet(t, e, session)
+	e.POST(fmt.Sprintf("/sessions/%d/finish", id)).Expect().Status(http.StatusOK)
+
+	var total float64
+	groups := map[string]bool{}
+	for _, m := range recap(t, e, id).Value("muscles").Array().Iter() {
+		obj := m.Object()
+		obj.Value("trained").Boolean().IsTrue()
+		obj.Value("volumeLb").Number().Gt(0)
+		groups[obj.Value("group").String().Raw()] = true
+		total += obj.Value("share").Number().Raw()
+	}
+	if len(groups) == 0 {
+		t.Fatal("no muscle groups reported for a session that moved weight")
+	}
+	// Shares are of the session's whole volume, so they account for all of it.
+	if total < 0.999 || total > 1.001 {
+		t.Errorf("shares sum to %v, want 1", total)
+	}
 }
 
 // A session opened and abandoned still produces a whole recap rather than an

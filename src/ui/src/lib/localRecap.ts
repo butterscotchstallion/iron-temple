@@ -42,11 +42,12 @@ export type LocalLift = {
   hitEveryTarget: boolean;
 };
 
-/** A weight record, the only kind derivable from previousBests. */
+/** A record, of either kind — previousBests carries both marks to beat. */
 export type LocalPR = {
   exerciseId: number;
   exerciseName: string;
-  weightLb: number;
+  kind: "weight" | "e1rm";
+  valueLb: number;
   previousLb: number;
 };
 
@@ -126,18 +127,34 @@ export function localRecap(session: Session): LocalRecap {
 
   out.lifts = [...byId.values()].filter((l) => l.setsLogged > 0);
 
-  const best = new Map(session.previousBests.map((b) => [b.exerciseId, b.weightLb]));
+  const best = new Map(session.previousBests.map((b) => [b.exerciseId, b]));
   for (const lift of out.lifts) {
-    const previousLb = best.get(lift.exerciseId) ?? 0;
     // A lift with no history is absent from previousBests rather than zero, so
     // `?? 0` reads as "nothing to beat" — the same rule the session screen uses
     // to decide whether a set earns confetti.
-    if (lift.topWeightLb > previousLb) {
+    const prev = best.get(lift.exerciseId);
+    const prevWeight = prev?.weightLb ?? 0;
+    const prevE1rm = prev?.e1rmLb ?? 0;
+
+    // A heavier bar suppresses the estimated-max record it implies: the plate
+    // is the better story, and reporting both is one achievement told twice.
+    // The same rule personalRecords applies server-side, so the list this
+    // produces offline is the list the server will confirm.
+    if (lift.topWeightLb > prevWeight) {
       out.prs.push({
         exerciseId: lift.exerciseId,
         exerciseName: lift.exerciseName,
-        weightLb: lift.topWeightLb,
-        previousLb,
+        kind: "weight",
+        valueLb: lift.topWeightLb,
+        previousLb: prevWeight,
+      });
+    } else if (lift.topE1rmLb > prevE1rm) {
+      out.prs.push({
+        exerciseId: lift.exerciseId,
+        exerciseName: lift.exerciseName,
+        kind: "e1rm",
+        valueLb: lift.topE1rmLb,
+        previousLb: prevE1rm,
       });
     }
   }

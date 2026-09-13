@@ -58,6 +58,9 @@ type SessionMeta struct {
 	// FinishedAt is zero when the lifter never tapped Finish.
 	FinishedAt time.Time
 	IsOver     bool
+	// BodyweightLb is nil when the lifter did not step on a scale, which is a
+	// different answer from any number.
+	BodyweightLb *float64
 }
 
 // Prescribed is one row of the session's prescription, logged or not.
@@ -177,11 +180,14 @@ type SessionStreak struct {
 
 // SessionRecap is one session, in review.
 type SessionRecap struct {
-	Session    SessionMeta
-	Duration   time.Duration
-	Pace       *SessionPace
-	Volume     SessionVolume
-	Progress   SessionProgress
+	Session  SessionMeta
+	Duration time.Duration
+	Pace     *SessionPace
+	Volume   SessionVolume
+	Progress SessionProgress
+	// Muscles is the groups this session actually trained, heaviest first.
+	Muscles    []MuscleSlice
+	Split      Split
 	Lifts      []SessionLift
 	PRs        []PR
 	Milestones []Milestone
@@ -211,6 +217,8 @@ func BuildSession(in SessionInput) SessionRecap {
 		// applies here exactly as it does to the history pace is ranked within.
 		Duration:   SessionDuration(in.Meta.StartedAt, in.Meta.FinishedAt),
 		Volume:     sessionVolume(sess, in),
+		Muscles:    trainedMuscles(in.Sets),
+		Split:      split(in.Sets),
 		Lifts:      sessionLifts(sess, in),
 		PRs:        personalRecords(one, in.Baseline),
 		Milestones: milestones(one, in.Baseline),
@@ -226,6 +234,27 @@ func BuildSession(in SessionInput) SessionRecap {
 		rec.Milestones = []Milestone{}
 	}
 	return rec
+}
+
+// trainedMuscles is muscleSlices narrowed to the groups this session actually
+// worked, heaviest first.
+//
+// The untrained rows are dropped, which is the one place a session's slice and
+// a month's part company. muscleSlices seeds the whole taxonomy on purpose: a
+// month that never trained arms should say so, and the gap is the finding. A
+// single workout is not a report card on the whole body — a squat day listing
+// "arms 0%, chest 0%, core 0%" is four rows of noise around one real number,
+// and it implies a criticism the session never invited.
+func trainedMuscles(sets []Set) []MuscleSlice {
+	all := muscleSlices(sets)
+	out := make([]MuscleSlice, 0, len(all))
+	for _, m := range all {
+		if m.Trained {
+			out = append(out, m)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].VolumeLb > out[j].VolumeLb })
+	return out
 }
 
 // sessionPace ranks this session's length among the same day's other lengths.

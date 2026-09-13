@@ -15,19 +15,28 @@
     prs,
     milestones = [],
     streakSessions = 0,
+    streakWeeks = 0,
   }: {
     prs: RecapPRRow[];
     /** Empty offline: a milestone is a claim about a lifetime, and that needs the server. */
     milestones?: RackedMilestone[];
     streakSessions?: number;
+    streakWeeks?: number;
   } = $props();
 
   // The same threshold Home uses. Below it there is no run to speak of, and a
   // "1 session streak" on somebody's first workout back reads as mockery.
   const showStreak = $derived(streakSessions >= STREAK_DISPLAY_THRESHOLD);
+
+  // The week run is shown only when the session run is NOT, and only once it is
+  // long enough to mean something. The two measure different things — one
+  // precision, the other showing up — but stacked together they read as two
+  // ways of flattering the same fact. This way a lifter who missed a rep last
+  // Thursday still gets credit for the eight weeks they turned up.
+  const showWeeks = $derived(!showStreak && streakWeeks >= STREAK_DISPLAY_THRESHOLD);
 </script>
 
-{#if prs.length > 0 || milestones.length > 0 || showStreak}
+{#if prs.length > 0 || milestones.length > 0 || showStreak || showWeeks}
   <Card class="p-4" data-testid="recap-highlights">
     <h3 class="text-xs uppercase tracking-[0.2em] text-muted-foreground">Worth noting</h3>
     <ul class="mt-2 space-y-2">
@@ -66,6 +75,13 @@
           <span class="text-foreground">
             <span class="font-bold tabular-nums">{streakSessions}</span> sessions in a row, every
             set logged
+          </span>
+        </li>
+      {:else if showWeeks}
+        <li class="flex items-center gap-2 text-sm">
+          <Flame class="size-4 shrink-0 text-primary" aria-hidden="true" />
+          <span class="text-foreground">
+            <span class="font-bold tabular-nums">{streakWeeks}</span> weeks trained in a row
           </span>
         </li>
       {/if}

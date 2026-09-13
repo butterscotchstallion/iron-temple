@@ -663,6 +663,7 @@ func (s *Server) buildSession(ctx context.Context, id, userID int32) (sessionDTO
 		bestDTOs = append(bestDTOs, personalBestDTO{
 			ExerciseID: best.ExerciseID,
 			WeightLb:   numericToFloat(best.BestWeightLb),
+			E1rmLb:     numericToFloat(best.BestE1rmLb),
 		})
 	}
 

@@ -71,6 +71,51 @@ func (q *Queries) RecapExerciseBaseline(ctx context.Context, arg RecapExerciseBa
 	return items, nil
 }
 
+const recapHasLaterDaySession = `-- name: RecapHasLaterDaySession :one
+SELECT EXISTS (
+  SELECT 1
+  FROM sessions s
+  JOIN session_sets ss ON ss.session_id = s.id
+  WHERE s.user_id = $1::int
+    AND s.program_day_id = $2::int
+    AND (s.performed_on > $3::date
+      OR (s.performed_on = $3::date
+          AND s.id > $4::int))
+    AND ss.actual_reps > 0
+)::bool AS exists
+`
+
+type RecapHasLaterDaySessionParams struct {
+	UserID       int32       `json:"user_id"`
+	ProgramDayID int32       `json:"program_day_id"`
+	PerformedOn  pgtype.Date `json:"performed_on"`
+	SessionID    int32       `json:"session_id"`
+}
+
+// RecapHasLaterDaySession asks whether the lifter has performed this program
+// day again since this session — which decides whether the recap may say what
+// the session earned.
+//
+// The next-session prescription is computed from history as it stands now, so
+// it answers a question about today. Attached to the newest session of a day
+// that is the same question the lifter is asking; attached to one from March it
+// silently describes a workout that has since been superseded twice.
+//
+// Note the cut runs the other way from every other query in this file, so the
+// comparison is inverted with it: strictly AFTER this session, by the same
+// (performed_on, id) ordering.
+func (q *Queries) RecapHasLaterDaySession(ctx context.Context, arg RecapHasLaterDaySessionParams) (bool, error) {
+	row := q.db.QueryRow(ctx, recapHasLaterDaySession,
+		arg.UserID,
+		arg.ProgramDayID,
+		arg.PerformedOn,
+		arg.SessionID,
+	)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const recapPreviousDaySessions = `-- name: RecapPreviousDaySessions :many
 SELECT s.id,
        s.performed_on,

@@ -35,6 +35,13 @@ function mkRecap(over: Partial<SessionRecap> = {}): SessionRecap {
       liftsCompared: 0,
       liftsNew: 0,
     },
+    muscles: [],
+    split: {
+      main: { volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0 },
+      assistance: { volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0 },
+    },
+    bodyweightLb: null,
+    earned: null,
     lifts: [],
     prs: [],
     milestones: [],
