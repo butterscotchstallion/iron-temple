@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatOrdinal, formatOutOf, formatPace } from "./recap";
+import { formatOrdinal, formatOutOf, formatPRGain, formatPace } from "./recap";
 
 describe("formatPace", () => {
   // The sign flip is the whole reason this function exists rather than a call
@@ -52,6 +52,37 @@ describe("formatOrdinal", () => {
   it("has nothing to say about a non-placing", () => {
     expect(formatOrdinal(0)).toBe("—");
     expect(formatOrdinal(Number.NaN)).toBe("—");
+  });
+});
+
+describe("formatPRGain", () => {
+  it("measures the record against the mark it replaced", () => {
+    expect(formatPRGain(245, 240)).toBe("+2%");
+    expect(formatPRGain(300, 200)).toBe("+50%");
+  });
+
+  // previousLb is 0 when the lift has no history — the API's spelling of
+  // "nothing to beat", not a mark of zero pounds. A rise from nothing is a
+  // ratio with no meaning.
+  it("says nothing about a first-ever lift", () => {
+    expect(formatPRGain(245, 0)).toBeNull();
+  });
+
+  // "+0%" against a row announcing a personal record reads as a contradiction.
+  // Reachable in practice: one extra rep can move an estimated max by a pound.
+  it("stays quiet about a gain that rounds away", () => {
+    expect(formatPRGain(234, 233)).toBeNull();
+    expect(formatPRGain(240.5, 240)).toBeNull();
+  });
+
+  it("reports the smallest gain that still rounds to a percent", () => {
+    expect(formatPRGain(242, 240)).toBe("+1%");
+  });
+
+  it("has nothing to say about nonsense", () => {
+    expect(formatPRGain(Number.NaN, 240)).toBeNull();
+    expect(formatPRGain(245, Number.NaN)).toBeNull();
+    expect(formatPRGain(245, -10)).toBeNull();
   });
 });
 

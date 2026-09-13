@@ -5,6 +5,8 @@
  * lives here.
  */
 
+import { formatDelta } from "./racked";
+
 /**
  * One lift's row, as the recap draws it.
  *
@@ -81,6 +83,28 @@ export function formatOrdinal(n: number): string {
     default:
       return `${i}th`;
   }
+}
+
+/**
+ * How much a record beat the mark it replaced: 240 -> 245 reads "+2%".
+ *
+ * Null rather than a figure in the two cases where a percentage would be a
+ * lie. A lift with no history has `previousLb: 0` — that is the API's spelling
+ * of "nothing to beat", not a mark of zero pounds, and a rise from nothing is a
+ * ratio with no meaning. And a gain that rounds below one percent is reported
+ * as no gain rather than as "0%", which on a row announcing a personal record
+ * reads as a contradiction. The second case is reachable: an extra rep can move
+ * an estimated max by a single pound.
+ *
+ * Takes the two numbers rather than a record, because the two surfaces that
+ * draw this hold different shapes of one — the wire type on the share card, the
+ * view model on the page — and a record should read the same in both.
+ */
+export function formatPRGain(valueLb: number, previousLb: number): string | null {
+  if (!Number.isFinite(valueLb) || !Number.isFinite(previousLb) || previousLb <= 0) return null;
+  const gain = (valueLb - previousLb) / previousLb;
+  if (Math.round(gain * 100) < 1) return null;
+  return formatDelta(gain);
 }
 
 /**

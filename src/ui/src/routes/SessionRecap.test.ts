@@ -267,6 +267,25 @@ describe("SessionRecap", () => {
     expect(box).toHaveTextContent("Squat");
     expect(box).toHaveTextContent("First 245 lb Squat");
     expect(box).toHaveTextContent("6 sessions in a row");
+    // 240 -> 245. The same figure the share card puts on the same record.
+    expect(box).toHaveTextContent("was 240 · +2%");
+  });
+
+  // previousLb is 0 for a lift with no history, so there is no mark to be a
+  // percentage of — and nothing is claimed.
+  it("says nothing about a first-ever lift's gain", async () => {
+    getSessionRecap.mockResolvedValue({
+      status: 200,
+      data: { ...fullRecap(), prs: [{ ...fullRecap().prs[0], previousLb: 0 }] },
+      headers: new Headers(),
+    });
+    render(SessionRecap, props);
+
+    await waitFor(() => expect(screen.getByTestId("recap-highlights")).toBeInTheDocument());
+    const box = screen.getByTestId("recap-highlights");
+    expect(box).toHaveTextContent("Squat");
+    expect(box).not.toHaveTextContent("was");
+    expect(box).not.toHaveTextContent("%");
   });
 
   // Every nullable field null is a lifter's first workout, and every one of
