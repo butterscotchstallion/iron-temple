@@ -10,6 +10,8 @@
   import { auth } from "../lib/auth.svelte";
   import ErrorCard from "../lib/ErrorCard.svelte";
   import ShareCardDialog from "../lib/ShareCardDialog.svelte";
+  import { shareCardContent } from "../lib/shareCard";
+  import { shareCardFilename } from "../lib/shareImage";
   import CalendarHeatmap from "../lib/CalendarHeatmap.svelte";
   import LiftTrendChart from "../lib/LiftTrendChart.svelte";
   import LiftVolumeBars from "../lib/LiftVolumeBars.svelte";
@@ -224,8 +226,10 @@
   {#if report && hasSessions}
     <ShareCardDialog
       bind:open={sharing}
-      {report}
-      displayName={auth.me?.displayName ?? ""}
+      content={shareCardContent(report, auth.me?.displayName ?? "")}
+      filename={shareCardFilename(report.period)}
+      alt="Racked {report.period.label}: {formatVolume(report.totals.volumeLb)} lb lifted"
+      subtitle="{report.period.label} as an image."
     />
   {/if}
 

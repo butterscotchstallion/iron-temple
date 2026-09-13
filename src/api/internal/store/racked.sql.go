@@ -135,15 +135,18 @@ type RackedPeriodSetsRow struct {
 // a set of charts. Almost none of that is expressed here.
 //
 // The statistics themselves live in internal/racked as pure functions over the
-// rows below, rather than as SQL. Two reasons. The first is testability: a
-// deload, a comeback and an archetype are judgements about a series, and a
-// judgement that can only be exercised against a live Postgres is one that will
-// not be exercised often. The second is that sqlc cannot be run in the
-// development sandbox, so every query here has to be hand-carried into
-// internal/store and kept byte-compatible with the generator — a cost paid per
-// query, and paid again on every edit. A handful of plain queries is a surface
-// worth maintaining; the dozen window functions the full stat list would
-// otherwise need is not.
+// rows below, rather than as SQL. The reason is testability: a deload, a
+// comeback and an archetype are judgements about a series, and a judgement that
+// can only be exercised against a live Postgres is one that will not be
+// exercised often. A handful of plain queries is a surface worth maintaining;
+// the dozen window functions the full stat list would otherwise need is not.
+//
+// This used to give a second reason — that sqlc could not be run in the
+// development sandbox, so every query had to be hand-carried into
+// internal/store and kept byte-compatible with the generator. That is no longer
+// true: sqlc installs from the module proxy, and `make sqlc` generates these.
+// See "Regenerating the data layer" in docs/development.md. The reason above
+// stands on its own.
 //
 // A period's row count is small enough that the trade costs nothing: three
 // sessions a week of five sets across three lifts is roughly 2,300 rows a year,

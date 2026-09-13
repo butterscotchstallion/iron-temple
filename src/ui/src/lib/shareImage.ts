@@ -1,13 +1,14 @@
 /**
- * Turning the Racked share card into a file, and the file into a share.
+ * Turning a share card into a file, and the file into a share.
  *
  * The browser-facing half of shareCard.ts: everything here touches a canvas, a
  * blob, or `navigator`, and is kept out of the painting and layout code so that
  * those stay testable without any of it.
  */
 
-import type { RackedPeriod, RackedReport } from "./api";
-import { SHARE_CARD, font, paintShareCard, shareCardContent } from "./shareCard";
+import type { RackedPeriod } from "./api";
+import type { ShareCardContent } from "./shareCard";
+import { SHARE_CARD, font, paintShareCard } from "./shareCard";
 
 /** What happened when the file was handed off. */
 export type ShareOutcome = "shared" | "cancelled" | "downloaded";
@@ -35,16 +36,18 @@ async function loadFonts(): Promise<void> {
 }
 
 /**
- * Render the recap as a PNG.
+ * Render a prepared card as a PNG.
+ *
+ * Takes the content rather than the report it came from, so that the painting
+ * stack stays indifferent to what is being recapped: a month and a single
+ * workout are different questions with the same answer shape, and only the
+ * selector that fills a ShareCardContent knows which is which.
  *
  * The canvas is never attached to the document: it exists to be painted once
  * and read back as bytes, and appending it would put a 1080×1350 element behind
  * the dialog for no reason.
  */
-export async function renderShareCard(
-  report: RackedReport,
-  displayName: string = "",
-): Promise<Blob> {
+export async function renderShareCard(content: ShareCardContent): Promise<Blob> {
   const canvas = document.createElement("canvas");
   canvas.width = SHARE_CARD.width;
   canvas.height = SHARE_CARD.height;
@@ -53,7 +56,7 @@ export async function renderShareCard(
   if (!ctx) throw new Error("canvas is unavailable");
 
   await loadFonts();
-  paintShareCard(ctx, shareCardContent(report, displayName));
+  paintShareCard(ctx, content);
 
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((blob) => {
@@ -66,11 +69,25 @@ export async function renderShareCard(
 
 /** `racked-march-2026.png`, from the period's own label. */
 export function shareCardFilename(period: RackedPeriod): string {
-  const slug = period.label
+  return `racked-${slug(period.label) || "recap"}.png`;
+}
+
+/**
+ * `recap-workout-a-2026-09-13.png`, from the day and the date it was performed.
+ *
+ * The date is in rather than the day alone because a lifter shares more than
+ * one Workout A, and a downloads folder where the second silently replaces the
+ * first is a folder that has lost something.
+ */
+export function sessionShareCardFilename(dayName: string, performedOn: string): string {
+  return `recap-${slug(`${dayName} ${performedOn}`) || "workout"}.png`;
+}
+
+function slug(label: string): string {
+  return label
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
-  return `racked-${slug || "recap"}.png`;
 }
 
 export function shareCardFile(blob: Blob, filename: string): File {

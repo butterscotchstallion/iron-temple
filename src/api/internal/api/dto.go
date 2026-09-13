@@ -341,6 +341,103 @@ type personalBestDTO struct {
 	WeightLb   float64 `json:"weightLb"`
 }
 
+// ---- Session recap ----
+// One workout in review. Reuses rackedPRDTO, rackedMilestoneDTO and
+// rackedComparisonDTO rather than restating them, which is what keeps a record
+// announced at the rack and the same record listed in March's recap one object.
+
+type sessionRecapDTO struct {
+	Session sessionRecapHeaderDTO `json:"session"`
+	// DurationSeconds is nil when the lifter never tapped Finish, and nil when
+	// the session ran past the 12-hour cap — an overnight tab measures itself,
+	// not the training.
+	DurationSeconds *int                    `json:"durationSeconds"`
+	Pace            *sessionRecapPaceDTO    `json:"pace"`
+	Volume          sessionRecapVolumeDTO   `json:"volume"`
+	Progress        sessionRecapProgressDTO `json:"progress"`
+	// Lifts, PRs and Milestones are never nil: a first workout serializes them
+	// as [], which reads as "nothing yet" rather than "not told".
+	Lifts      []sessionRecapLiftDTO `json:"lifts"`
+	PRs        []rackedPRDTO         `json:"prs"`
+	Milestones []rackedMilestoneDTO  `json:"milestones"`
+	Streak     sessionRecapStreakDTO `json:"streak"`
+}
+
+type sessionRecapHeaderDTO struct {
+	SessionID      int32   `json:"sessionId"`
+	ProgramID      int32   `json:"programId"`
+	ProgramName    string  `json:"programName"`
+	ProgramDayID   int32   `json:"programDayId"`
+	ProgramDayName string  `json:"programDayName"`
+	PerformedOn    string  `json:"performedOn"`
+	StartedAt      string  `json:"startedAt"`
+	FinishedAt     *string `json:"finishedAt"`
+	IsOver         bool    `json:"isOver"`
+}
+
+type sessionRecapPaceDTO struct {
+	MedianSeconds int `json:"medianSeconds"`
+	// DeltaPct is negative when this session was FASTER than usual — the one
+	// signed figure in this API where a drop is the good news.
+	DeltaPct   float64 `json:"deltaPct"`
+	Rank       int     `json:"rank"`
+	Of         int     `json:"of"`
+	SampleSize int     `json:"sampleSize"`
+}
+
+type sessionRecapVolumeDTO struct {
+	TotalLb    float64             `json:"totalLb"`
+	PreviousLb *float64            `json:"previousLb"`
+	DeltaPct   *float64            `json:"deltaPct"`
+	Comparison rackedComparisonDTO `json:"comparison"`
+
+	SetsLogged     int `json:"setsLogged"`
+	SetsPrescribed int `json:"setsPrescribed"`
+	RepsLogged     int `json:"repsLogged"`
+	RepsTargeted   int `json:"repsTargeted"`
+}
+
+type sessionRecapProgressDTO struct {
+	PreviousSessionID   *int32   `json:"previousSessionId"`
+	PreviousPerformedOn *string  `json:"previousPerformedOn"`
+	WeightDeltaPct      *float64 `json:"weightDeltaPct"`
+	LiftsCompared       int      `json:"liftsCompared"`
+	LiftsNew            int      `json:"liftsNew"`
+}
+
+type sessionRecapLiftDTO struct {
+	ExerciseID   int32   `json:"exerciseId"`
+	ExerciseName string  `json:"exerciseName"`
+	Kind         string  `json:"kind"`
+	TopWeightLb  float64 `json:"topWeightLb"`
+	TopReps      int     `json:"topReps"`
+	TopE1rmLb    float64 `json:"topE1rmLb"`
+
+	SetsLogged     int     `json:"setsLogged"`
+	SetsPrescribed int     `json:"setsPrescribed"`
+	RepsLogged     int     `json:"repsLogged"`
+	RepsTargeted   int     `json:"repsTargeted"`
+	VolumeLb       float64 `json:"volumeLb"`
+	HitEveryTarget bool    `json:"hitEveryTarget"`
+
+	Previous       *sessionRecapLiftPreviousDTO `json:"previous"`
+	WeightDeltaLb  *float64                     `json:"weightDeltaLb"`
+	WeightDeltaPct *float64                     `json:"weightDeltaPct"`
+	E1rmDeltaPct   *float64                     `json:"e1rmDeltaPct"`
+}
+
+type sessionRecapLiftPreviousDTO struct {
+	PerformedOn string  `json:"performedOn"`
+	TopWeightLb float64 `json:"topWeightLb"`
+	TopReps     int     `json:"topReps"`
+	TopE1rmLb   float64 `json:"topE1rmLb"`
+}
+
+type sessionRecapStreakDTO struct {
+	Sessions int `json:"sessions"`
+	Weeks    int `json:"weeks"`
+}
+
 // weighInDTO pairs a bodyweight with the day it was recorded, so a client
 // showing "carried from <date>" cannot pair the number with the wrong day.
 type weighInDTO struct {

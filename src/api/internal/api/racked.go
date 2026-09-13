@@ -398,26 +398,10 @@ func rackedReportToDTO(rep racked.Report) rackedReportDTO {
 		})
 	}
 	for _, p := range rep.PRs {
-		out.PRs = append(out.PRs, rackedPRDTO{
-			Kind:         string(p.Kind),
-			PerformedOn:  p.PerformedOn.Format(dateLayout),
-			ExerciseID:   p.ExerciseID,
-			ExerciseName: p.ExerciseName,
-			WeightLb:     p.WeightLb,
-			Reps:         p.Reps,
-			ValueLb:      p.ValueLb,
-			PreviousLb:   p.PreviousLb,
-		})
+		out.PRs = append(out.PRs, rackedPRToDTO(p))
 	}
 	for _, m := range rep.Milestones {
-		out.Milestones = append(out.Milestones, rackedMilestoneDTO{
-			Kind:         string(m.Kind),
-			PerformedOn:  m.PerformedOn.Format(dateLayout),
-			Label:        m.Label,
-			ValueLb:      m.ValueLb,
-			ExerciseID:   m.ExerciseID,
-			ExerciseName: m.ExerciseName,
-		})
+		out.Milestones = append(out.Milestones, rackedMilestoneToDTO(m))
 	}
 	if h := rep.HeaviestSet; h != nil {
 		out.HeaviestSet = &rackedSetHighlightDTO{
@@ -454,4 +438,32 @@ func rackedReportToDTO(rep racked.Report) rackedReportDTO {
 		out.Deloads = append(out.Deloads, dto)
 	}
 	return out
+}
+
+// rackedPRToDTO and rackedMilestoneToDTO are shared with the session recap,
+// which publishes the same two schemas. One mapping rather than two: a record
+// announced at the rack and the same record listed in the month's recap are the
+// same object, and a second copy of this is a second chance to disagree.
+func rackedPRToDTO(p racked.PR) rackedPRDTO {
+	return rackedPRDTO{
+		Kind:         string(p.Kind),
+		PerformedOn:  p.PerformedOn.Format(dateLayout),
+		ExerciseID:   p.ExerciseID,
+		ExerciseName: p.ExerciseName,
+		WeightLb:     p.WeightLb,
+		Reps:         p.Reps,
+		ValueLb:      p.ValueLb,
+		PreviousLb:   p.PreviousLb,
+	}
+}
+
+func rackedMilestoneToDTO(m racked.Milestone) rackedMilestoneDTO {
+	return rackedMilestoneDTO{
+		Kind:         string(m.Kind),
+		PerformedOn:  m.PerformedOn.Format(dateLayout),
+		Label:        m.Label,
+		ValueLb:      m.ValueLb,
+		ExerciseID:   m.ExerciseID,
+		ExerciseName: m.ExerciseName,
+	}
 }

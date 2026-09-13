@@ -2,16 +2,8 @@
   import { onDestroy } from "svelte";
   import * as AlertDialog from "$lib/components/ui/alert-dialog";
   import { Button } from "$lib/components/ui/button";
-  import type { RackedReport } from "./api";
-  import { formatVolume } from "./volume";
-  import { SHARE_CARD } from "./shareCard";
-  import {
-    canShareFile,
-    renderShareCard,
-    shareCardFile,
-    shareCardFilename,
-    shareOrDownload,
-  } from "./shareImage";
+  import { SHARE_CARD, type ShareCardContent } from "./shareCard";
+  import { canShareFile, renderShareCard, shareCardFile, shareOrDownload } from "./shareImage";
 
   // The share preview.
   //
@@ -23,15 +15,28 @@
   // Rendered on open and discarded on close rather than cached, so switching the
   // page between month and year can never leave last period's card behind the
   // button. Painting costs a few milliseconds.
+  //
+  // Takes prepared content rather than a report: the month's recap and a single
+  // workout's both come here, and everything below — the token dance, the object
+  // URL, the share-vs-download fork — is the same for either. What differs is
+  // only which selector filled the content in.
 
   let {
     open = $bindable(false),
-    report,
-    displayName = "",
+    content,
+    filename,
+    alt,
+    title = "Share your recap",
+    subtitle,
   }: {
     open?: boolean;
-    report: RackedReport;
-    displayName?: string;
+    content: ShareCardContent;
+    /** What the file is called once saved. */
+    filename: string;
+    /** Alt text for the preview — what the card says, for a reader who can't see it. */
+    alt: string;
+    title?: string;
+    subtitle: string;
   } = $props();
 
   type Status = "rendering" | "ready" | "failed";
@@ -72,10 +77,10 @@
     // last period's card over this one's — or over a destroyed component.
     const mine = ++token;
     try {
-      const blob = await renderShareCard(report, displayName);
+      const blob = await renderShareCard(content);
       if (mine !== token) return;
 
-      const rendered = shareCardFile(blob, shareCardFilename(report.period));
+      const rendered = shareCardFile(blob, filename);
       objectUrl = URL.createObjectURL(rendered);
       file = rendered;
       previewUrl = objectUrl;
@@ -104,9 +109,6 @@
   // desktop that cannot take a file share gets a Download button that says so
   // rather than a Share button that quietly saves.
   const action = $derived(file && canShareFile(file) ? "Share" : "Download");
-  const alt = $derived(
-    `Racked ${report.period.label}: ${formatVolume(report.totals.volumeLb)} lb lifted`,
-  );
 
   async function send() {
     if (!file) return;
@@ -127,10 +129,8 @@
 <AlertDialog.Root bind:open>
   <AlertDialog.Content class="sm:max-w-md">
     <AlertDialog.Header>
-      <AlertDialog.Title>Share your recap</AlertDialog.Title>
-      <AlertDialog.Description>
-        {report.period.label} as an image.
-      </AlertDialog.Description>
+      <AlertDialog.Title>{title}</AlertDialog.Title>
+      <AlertDialog.Description>{subtitle}</AlertDialog.Description>
     </AlertDialog.Header>
 
     {#if status === "rendering"}
