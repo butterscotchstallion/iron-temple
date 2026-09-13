@@ -149,6 +149,19 @@ describe("localRecap", () => {
     it("is null when a stamp will not parse", () => {
       expect(localRecap(mkSession({ createdAt: "not a date" })).durationSeconds).toBeNull();
     });
+
+    // Matches minReportableDuration in internal/racked: under a second is not a
+    // short workout, it is no measurement — and the two sources of this figure
+    // must not disagree about which sessions have a length.
+    it("is null for a session finished in the same instant it started", () => {
+      const r = localRecap(
+        mkSession({
+          createdAt: "2026-09-13T18:00:00.000Z",
+          finishedAt: "2026-09-13T18:00:00.300Z",
+        }),
+      );
+      expect(r.durationSeconds).toBeNull();
+    });
   });
 
   it("carries the assistance flag through", () => {

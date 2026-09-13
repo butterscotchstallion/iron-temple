@@ -56,6 +56,24 @@ func repeatEverySet(
 	}
 }
 
+// giveDuration backdates a finished session's start so that it has a length.
+//
+// Must be called after the finish, since it measures back from finished_at.
+// Necessary because a test creates and finishes a session in the same instant,
+// which the recap correctly reports as having no duration at all — anything
+// under a second rounds to zero seconds on the wire, and a pace ranked against
+// a median of zero is a division by noise. Without this, a test asserting on
+// pace is asserting on nothing.
+func giveDuration(t *testing.T, sessionID int, minutes int) {
+	t.Helper()
+	_, err := testPool.Exec(context.Background(),
+		"UPDATE sessions SET created_at = finished_at - $1::interval WHERE id = $2",
+		fmt.Sprintf("%d minutes", minutes), sessionID)
+	if err != nil {
+		t.Fatalf("give session %d a duration: %v", sessionID, err)
+	}
+}
+
 // setPerformedOn moves a session's training date, which the API deliberately
 // does not expose — the same reaching past it that backdateSession does. It is
 // how a test gets two sessions onto one calendar day, or onto different ones,
@@ -130,10 +148,11 @@ func TestRecapFirstSessionOfADay(t *testing.T) {
 	setPerformedOn(t, id, "2026-05-04")
 	logEverySet(t, e, session)
 	e.POST(fmt.Sprintf("/sessions/%d/finish", id)).Expect().Status(http.StatusOK)
+	giveDuration(t, id, 48)
 
 	r := recap(t, e, id)
 	r.Value("session").Object().Value("sessionId").Number().IsEqual(id)
-	r.Value("durationSeconds").NotNull()
+	r.Value("durationSeconds").Number().IsEqual(48 * 60)
 
 	// Lifts, PRs and milestones are always arrays — never null — so a client
 	// can range over them without branching.
@@ -221,6 +240,7 @@ func TestRecapComparesAgainstThePreviousSessionOfTheDay(t *testing.T) {
 	setPerformedOn(t, firstID, "2026-06-01")
 	logEverySet(t, e, first)
 	e.POST(fmt.Sprintf("/sessions/%d/finish", firstID)).Expect().Status(http.StatusOK)
+	giveDuration(t, firstID, 60)
 
 	// A second session of the same day. Having hit every set, the engine
 	// prescribes more weight, so this one is genuinely heavier.
@@ -229,6 +249,7 @@ func TestRecapComparesAgainstThePreviousSessionOfTheDay(t *testing.T) {
 	setPerformedOn(t, secondID, "2026-06-04")
 	logEverySet(t, e, second)
 	e.POST(fmt.Sprintf("/sessions/%d/finish", secondID)).Expect().Status(http.StatusOK)
+	giveDuration(t, secondID, 50)
 
 	r := recap(t, e, secondID)
 	prog := r.Value("progress").Object()
@@ -247,11 +268,16 @@ func TestRecapComparesAgainstThePreviousSessionOfTheDay(t *testing.T) {
 	lift.Value("previous").Object().Value("topWeightLb").Number().Gt(0)
 	lift.Value("weightDeltaLb").Number().Gt(0)
 
-	// And the day now has a length to rank the second session against.
+	// And the day now has a length to rank the second session against: 50
+	// minutes measured against a history of one 60-minute session.
+	r.Value("durationSeconds").Number().IsEqual(50 * 60)
 	pace := r.Value("pace").Object()
 	pace.Value("sampleSize").Number().IsEqual(1)
 	pace.Value("of").Number().IsEqual(2)
-	pace.Value("rank").Number().InRange(1, 2)
+	pace.Value("rank").Number().IsEqual(1)
+	pace.Value("medianSeconds").Number().IsEqual(60 * 60)
+	// Negative is faster. The sign is the trap in this field.
+	pace.Value("deltaPct").Number().InRange(-0.17, -0.16)
 }
 
 // A session belonging to somebody else does not resolve, and neither does one
@@ -287,12 +313,14 @@ func TestRecapShapeMatchesTheSchema(t *testing.T) {
 	setPerformedOn(t, firstID, "2026-07-06")
 	logEverySet(t, e, first)
 	e.POST(fmt.Sprintf("/sessions/%d/finish", firstID)).Expect().Status(http.StatusOK)
+	giveDuration(t, firstID, 55)
 
 	second := startSession(t, e, dayID)
 	secondID := int(second.Value("id").Number().Raw())
 	setPerformedOn(t, secondID, "2026-07-09")
 	logEverySet(t, e, second)
 	e.POST(fmt.Sprintf("/sessions/%d/finish", secondID)).Expect().Status(http.StatusOK)
+	giveDuration(t, secondID, 52)
 
 	r := recap(t, e, secondID)
 	r.Keys().ContainsOnly(

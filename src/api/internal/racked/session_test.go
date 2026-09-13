@@ -113,6 +113,63 @@ func TestBuildSessionDurationGuards(t *testing.T) {
 	}
 }
 
+// A session finished in the same instant it started has no length, and must not
+// be given one.
+//
+// Found by running the real endpoint rather than by reasoning about it: the
+// recap reports whole seconds, so a sub-second gap is truthy in Go and zero on
+// the wire — which reads as "never finished" in one field and, far worse, makes
+// pace a division by a median of zero. The API cheerfully called such a session
+// "6% faster than usual".
+func TestBuildSessionIgnoresASubSecondDuration(t *testing.T) {
+	on := day(2026, time.March, 2)
+	rec := BuildSession(SessionInput{
+		Meta:         mkMeta(1, on, 300*time.Millisecond),
+		Sets:         finish(mkSets(1, on, 1, "Squat", 5, 5, 200), 300*time.Millisecond),
+		Prescribed:   mkPrescribed(1, "Squat", 5, 5, 5, false),
+		DayDurations: []time.Duration{45 * time.Minute},
+	})
+
+	if rec.Duration != 0 {
+		t.Fatalf("duration = %s, want 0 — it rounds to no seconds at all", rec.Duration)
+	}
+	if rec.Pace != nil {
+		t.Fatalf("pace = %+v, want nil without a length of our own", rec.Pace)
+	}
+	// The work still counts. Only the clock is in doubt.
+	if rec.Volume.TotalLb != 5000 {
+		t.Fatalf("volume = %v, want 5000", rec.Volume.TotalLb)
+	}
+}
+
+// The same floor applies to the history pace is ranked within, so a median can
+// never be zero.
+func TestSessionDurationFloor(t *testing.T) {
+	start := day(2026, time.March, 2).Add(9 * time.Hour)
+	for _, tc := range []struct {
+		name string
+		gap  time.Duration
+		want time.Duration
+	}{
+		{"same instant", 0, 0},
+		{"sub-second", 999 * time.Millisecond, 0},
+		{"exactly a second", time.Second, time.Second},
+		{"a real workout", 45 * time.Minute, 45 * time.Minute},
+		{"past the 12h cap", 13 * time.Hour, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := SessionDuration(start, start.Add(tc.gap))
+			if got != tc.want {
+				t.Fatalf("SessionDuration(+%s) = %s, want %s", tc.gap, got, tc.want)
+			}
+		})
+	}
+	// A session never finished has no end to measure to.
+	if got := SessionDuration(start, time.Time{}); got != 0 {
+		t.Fatalf("unfinished = %s, want 0", got)
+	}
+}
+
 // Pace against a history: median, rank, and the sign of the delta.
 func TestBuildSessionPace(t *testing.T) {
 	on := day(2026, time.March, 2)

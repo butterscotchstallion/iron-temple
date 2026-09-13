@@ -20,15 +20,30 @@ import (
 // LAST TIME THIS PROGRAM DAY CAME ROUND: pace, and the weight progression. A
 // month has no equivalent question, so there was nothing to reuse.
 
+// minReportableDuration is the shortest gap the recap will call a duration.
+//
+// The recap reports whole seconds, so anything under one rounds to zero on the
+// wire — and a zero is indistinguishable from the "never finished" that the
+// same field uses null for. Worse is what it does to pace: a median of zero
+// makes the percentage a division by noise, and a session created and finished
+// inside the same second was ranked "6% faster" against it. Below a second is
+// not a short workout; it is no measurement at all.
+const minReportableDuration = time.Second
+
 // SessionDuration is how long a session took, or 0 when that cannot be said:
-// the lifter never tapped Finish, or the gap ran past the cap.
+// the lifter never tapped Finish, the gap ran past the cap, or it was too short
+// to survive being expressed in seconds.
 //
 // Exported so a caller holding raw timestamps — the recap handler, ranking a
-// program day's past lengths — can apply exactly the rule session.Duration
-// applies internally, rather than restating a 12-hour constant somewhere it can
-// drift from this one.
+// program day's past lengths — can apply exactly the rule the recap applies
+// internally, rather than restating a 12-hour constant somewhere it can drift
+// from this one.
 func SessionDuration(startedAt, finishedAt time.Time) time.Duration {
-	return session{StartedAt: startedAt, FinishedAt: finishedAt}.Duration()
+	d := session{StartedAt: startedAt, FinishedAt: finishedAt}.Duration()
+	if d < minReportableDuration {
+		return 0
+	}
+	return d
 }
 
 // SessionMeta identifies the session a recap is about.
@@ -191,8 +206,10 @@ func BuildSession(in SessionInput) SessionRecap {
 	one := []session{sess}
 
 	rec := SessionRecap{
-		Session:    in.Meta,
-		Duration:   sess.Duration(),
+		Session: in.Meta,
+		// SessionDuration rather than sess.Duration(), so the one-second floor
+		// applies here exactly as it does to the history pace is ranked within.
+		Duration:   SessionDuration(in.Meta.StartedAt, in.Meta.FinishedAt),
 		Volume:     sessionVolume(sess, in),
 		Lifts:      sessionLifts(sess, in),
 		PRs:        personalRecords(one, in.Baseline),
