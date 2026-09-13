@@ -89,8 +89,11 @@ func validAssistancePrescription(sets, reps int32, weightLb *float64) (float64, 
 	return *weightLb, "", true
 }
 
-// assistanceFitsDay reports whether a lift may be added to a day's assistance,
-// returning the conflict code and message when it may not.
+// assistanceConflict is a reason a lift does not belong on a day.
+type assistanceConflict struct{ Code, Message string }
+
+// assistanceFitsDay reports whether a lift may be added to a day's assistance.
+// A nil conflict and a nil error mean it fits.
 //
 // Two ways it cannot. The lift is already prescribed by the program on this day,
 // which the database cannot express because the prescription lives in another
@@ -101,21 +104,25 @@ func validAssistancePrescription(sets, reps int32, weightLb *float64) (float64, 
 // the UNIQUE does cover, and which is an edit of the existing entry rather than
 // a second one.
 //
-// A read that fails reports "fits": the caller is about to insert, and the
-// database is the backstop for both rules. Better to let the real constraint
-// speak than to refuse a legitimate add because a check query hiccuped.
+// A read that fails is an error, never a "fits". That distinction matters more
+// than it looks: the prescribed rule has NO database backstop, so treating an
+// unreadable answer as permission is how a transient blip writes the row that
+// makes a program day permanently unstartable. Refusing the add is recoverable;
+// the day is not.
 func (s *Server) assistanceFitsDay(
 	ctx context.Context, userID, programDayID, exerciseID int32,
-) (code string, message string, ok bool) {
+) (*assistanceConflict, error) {
 	prescribed, err := s.q.ListPrescriptionsByDay(ctx, programDayID)
 	if err != nil {
-		return "", "", true
+		return nil, err
 	}
 	for _, p := range prescribed {
 		if p.ExerciseID == exerciseID {
-			return "already_prescribed",
-				"this day already prescribes that lift — assistance is for work the program doesn't cover",
-				false
+			return &assistanceConflict{
+				Code: "already_prescribed",
+				Message: "this day already prescribes that lift —" +
+					" assistance is for work the program doesn't cover",
+			}, nil
 		}
 	}
 
@@ -123,14 +130,17 @@ func (s *Server) assistanceFitsDay(
 		UserID: userID, ProgramDayID: programDayID,
 	})
 	if err != nil {
-		return "", "", true
+		return nil, err
 	}
 	for _, a := range existing {
 		if a.ExerciseID == exerciseID {
-			return "duplicate_assistance", "that exercise is already on this day", false
+			return &assistanceConflict{
+				Code:    "duplicate_assistance",
+				Message: "that exercise is already on this day",
+			}, nil
 		}
 	}
-	return "", "", true
+	return nil, nil
 }
 
 func (s *Server) addAssistance(w http.ResponseWriter, r *http.Request) {
@@ -180,8 +190,13 @@ func (s *Server) addAssistance(w http.ResponseWriter, r *http.Request) {
 	// this path and the in-session one cannot disagree. The rationale — including
 	// why the prescribed case is unusable rather than merely mislabelled — is on
 	// assistanceFitsDay.
-	if code, msg, ok := s.assistanceFitsDay(ctx, userID, day.ID, ex.ID); !ok {
-		conflict(w, code, msg)
+	clash, err := s.assistanceFitsDay(ctx, userID, day.ID, ex.ID)
+	if err != nil {
+		internalError(w)
+		return
+	}
+	if clash != nil {
+		conflict(w, clash.Code, clash.Message)
 		return
 	}
 

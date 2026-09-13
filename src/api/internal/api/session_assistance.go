@@ -96,8 +96,13 @@ func (s *Server) addSessionAssistance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if code, msg, ok := s.assistanceFitsDay(ctx, userID, session.ProgramDayID, ex.ID); !ok {
-		conflict(w, code, msg)
+	clash, err := s.assistanceFitsDay(ctx, userID, session.ProgramDayID, ex.ID)
+	if err != nil {
+		internalError(w)
+		return
+	}
+	if clash != nil {
+		conflict(w, clash.Code, clash.Message)
 		return
 	}
 

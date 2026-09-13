@@ -435,6 +435,12 @@ export async function flush(): Promise<void> {
         // whole exercise off the screen, and "1 change couldn't be saved" would
         // undersell that badly.
         rejected += entry.kind === "addAssistance" ? Math.max(1, sending.length) : 1;
+        // The sets were never created, so every write queued against them names
+        // an id the server has never heard of. Left in, each would 404 on its
+        // way past and be counted a second time — a three-set add replayed into
+        // a session that closed overnight would report six failures and spend
+        // six requests learning what this already knows.
+        if (entry.kind === "addAssistance") dropTempSetIds(sending);
       } else if (entry.kind === "addSet") {
         const realId = (result.data as { id?: number } | undefined)?.id;
         if (typeof realId === "number") remapTempSetId(entry.tempSetId, realId);

@@ -473,6 +473,29 @@ describe("addAssistance", () => {
     expect(queuedCount()).toBe(0);
   });
 
+  // The sets were never created, so the reps logged against them name ids the
+  // server has never heard of. Sending them anyway would 404 each one and count
+  // it a second time — the refusal would report six failures for a three-set
+  // add, and spend six requests learning what the first answer already said.
+  it("forgets the reps logged against a refused add", async () => {
+    const [a, b, c] = queueCurls();
+    for (const [id, reps] of [
+      [a, 10],
+      [b, 9],
+      [c, 8],
+    ]) {
+      enqueue({ kind: "updateSet", sessionId: 1, setId: id, body: { actualReps: reps } });
+    }
+
+    addSessionAssistance.mockResolvedValue(refused());
+    markReachable();
+    await flush();
+
+    expect(updateSessionSet).not.toHaveBeenCalled();
+    expect(queuedCount()).toBe(0);
+    expect(rejectedCount()).toBe(3);
+  });
+
   describe("removing a set of a lift that has not been sent yet", () => {
     it("shortens the add instead of queueing a delete", async () => {
       const ids = queueCurls();
