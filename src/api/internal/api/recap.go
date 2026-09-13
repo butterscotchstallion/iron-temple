@@ -27,7 +27,7 @@ func (s *Server) getSessionRecap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	rec, err := s.buildSessionRecap(ctx, id, userFrom(ctx).ID)
+	rec, earned, err := s.buildSessionRecap(ctx, id, userFrom(ctx).ID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		notFound(w, "session not found")
 		return
@@ -36,7 +36,19 @@ func (s *Server) getSessionRecap(w http.ResponseWriter, r *http.Request) {
 		internalError(w)
 		return
 	}
-	writeJSON(w, http.StatusOK, sessionRecapToDTO(rec))
+	writeJSON(w, http.StatusOK, sessionRecapToDTO(rec, earned))
+}
+
+// earnedNext is what the session bought: the next performance of the same
+// program day, as the engine now prescribes it.
+//
+// Kept out of internal/racked, which reduces logged work to statistics and has
+// no business knowing what a prescription is. This is a forecast rather than a
+// finding, so it is assembled here and attached at the DTO boundary.
+type earnedNext struct {
+	ProgramDayID   int32
+	ProgramDayName string
+	Exercises      []prescribedExerciseDTO
 }
 
 // buildSessionRecap gathers a session's rows and reduces them to a recap.
@@ -52,10 +64,10 @@ func (s *Server) getSessionRecap(w http.ResponseWriter, r *http.Request) {
 // Every query below is scoped the same way, but this is the one that decides.
 func (s *Server) buildSessionRecap(
 	ctx context.Context, sessionID, userID int32,
-) (racked.SessionRecap, error) {
+) (racked.SessionRecap, *earnedNext, error) {
 	head, err := s.q.GetSession(ctx, store.GetSessionParams{ID: sessionID, UserID: userID})
 	if err != nil {
-		return racked.SessionRecap{}, err
+		return racked.SessionRecap{}, nil, err
 	}
 	meta := racked.SessionMeta{
 		SessionID:      head.ID,
@@ -67,11 +79,12 @@ func (s *Server) buildSessionRecap(
 		StartedAt:      head.CreatedAt.Time,
 		FinishedAt:     finishedAt(head.FinishedAt),
 		IsOver:         head.IsOver,
+		BodyweightLb:   optionalNumeric(head.BodyweightLb),
 	}
 
 	sets, prescribed, err := s.recapSessionSets(ctx, meta, userID)
 	if err != nil {
-		return racked.SessionRecap{}, err
+		return racked.SessionRecap{}, nil, err
 	}
 
 	// One read of this program day's history, used for two things: the newest
@@ -84,21 +97,25 @@ func (s *Server) buildSessionRecap(
 		SessionID:    meta.SessionID,
 	})
 	if err != nil {
-		return racked.SessionRecap{}, err
+		return racked.SessionRecap{}, nil, err
 	}
 	prevMeta, prevSets, err := s.recapPreviousDay(ctx, meta, userID, history)
 	if err != nil {
-		return racked.SessionRecap{}, err
+		return racked.SessionRecap{}, nil, err
 	}
 	durations := recapDayDurations(history)
 
 	baseline, err := s.recapBaseline(ctx, meta, userID)
 	if err != nil {
-		return racked.SessionRecap{}, err
+		return racked.SessionRecap{}, nil, err
 	}
 	outcomes, err := s.recapOutcomes(ctx, meta, userID)
 	if err != nil {
-		return racked.SessionRecap{}, err
+		return racked.SessionRecap{}, nil, err
+	}
+	earned, err := s.recapEarned(ctx, meta, userID)
+	if err != nil {
+		return racked.SessionRecap{}, nil, err
 	}
 
 	return racked.BuildSession(racked.SessionInput{
@@ -110,7 +127,53 @@ func (s *Server) buildSessionRecap(
 		DayDurations: durations,
 		Baseline:     baseline,
 		Outcomes:     outcomes,
-	}), nil
+	}), earned, nil
+}
+
+// recapEarned computes what this session bought — the next performance of the
+// same program day, at the weights the engine now prescribes.
+//
+// Nil unless this is the lifter's most recent session of the day. The
+// prescription is derived from history as it stands now, so on the newest
+// session it answers exactly the question the lifter is asking, and on an older
+// one it would quietly describe a workout that has since been superseded while
+// appearing to be a fact about the session on screen. A recap is a record of a
+// moment; this is the one field in it that could drift, so it is withheld
+// rather than qualified.
+//
+// The layoff is measured but not applied (apply=false), matching what the
+// preview endpoint does by default: a lifter reading this has just trained, so
+// there is no layoff to speak of, and cutting the weights on the strength of
+// one would answer a question nobody asked.
+func (s *Server) recapEarned(
+	ctx context.Context, meta racked.SessionMeta, userID int32,
+) (*earnedNext, error) {
+	later, err := s.q.RecapHasLaterDaySession(ctx, store.RecapHasLaterDaySessionParams{
+		UserID:       userID,
+		ProgramDayID: meta.ProgramDayID,
+		PerformedOn:  pgtype.Date{Time: meta.PerformedOn, Valid: true},
+		SessionID:    meta.SessionID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if later {
+		return nil, nil
+	}
+
+	lay, err := s.layoffFor(ctx, userID, false)
+	if err != nil {
+		return nil, err
+	}
+	exercises, err := s.prescribe(ctx, meta.ProgramID, meta.ProgramDayID, userID, lay)
+	if err != nil {
+		return nil, err
+	}
+	return &earnedNext{
+		ProgramDayID:   meta.ProgramDayID,
+		ProgramDayName: meta.ProgramDayName,
+		Exercises:      exercises,
+	}, nil
 }
 
 // recapSessionSets reads the session once and returns both views of it: the
@@ -296,7 +359,7 @@ func (s *Server) recapOutcomes(
 	return out, nil
 }
 
-func sessionRecapToDTO(rec racked.SessionRecap) sessionRecapDTO {
+func sessionRecapToDTO(rec racked.SessionRecap, earned *earnedNext) sessionRecapDTO {
 	out := sessionRecapDTO{
 		Session: sessionRecapHeaderDTO{
 			SessionID:      rec.Session.SessionID,
@@ -328,13 +391,38 @@ func sessionRecapToDTO(rec racked.SessionRecap) sessionRecapDTO {
 			LiftsCompared:     rec.Progress.LiftsCompared,
 			LiftsNew:          rec.Progress.LiftsNew,
 		},
-		Lifts:      make([]sessionRecapLiftDTO, 0, len(rec.Lifts)),
-		PRs:        make([]rackedPRDTO, 0, len(rec.PRs)),
-		Milestones: make([]rackedMilestoneDTO, 0, len(rec.Milestones)),
+		Muscles: make([]rackedMuscleSliceDTO, 0, len(rec.Muscles)),
+		Split: rackedSplitDTO{
+			Main:       rackedWorkToDTO(rec.Split.Main),
+			Assistance: rackedWorkToDTO(rec.Split.Assistance),
+		},
+		BodyweightLb: rec.Session.BodyweightLb,
+		Lifts:        make([]sessionRecapLiftDTO, 0, len(rec.Lifts)),
+		PRs:          make([]rackedPRDTO, 0, len(rec.PRs)),
+		Milestones:   make([]rackedMilestoneDTO, 0, len(rec.Milestones)),
 		Streak: sessionRecapStreakDTO{
 			Sessions: rec.Streak.Sessions,
 			Weeks:    rec.Streak.Weeks,
 		},
+	}
+
+	for _, m := range rec.Muscles {
+		out.Muscles = append(out.Muscles, rackedMuscleSliceDTO{
+			Group:    m.Group,
+			VolumeLb: m.VolumeLb,
+			Sets:     m.Sets,
+			Reps:     m.Reps,
+			Lifts:    m.Lifts,
+			Share:    m.Share,
+			Trained:  m.Trained,
+		})
+	}
+	if earned != nil {
+		out.Earned = &sessionRecapEarnedDTO{
+			ProgramDayID:   earned.ProgramDayID,
+			ProgramDayName: earned.ProgramDayName,
+			Exercises:      earned.Exercises,
+		}
 	}
 
 	if !rec.Session.FinishedAt.IsZero() {

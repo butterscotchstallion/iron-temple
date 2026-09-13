@@ -5,6 +5,7 @@
   import type { Session, SessionRecap } from "../lib/api";
   import { cachedValue, fetchThrough, sessionRecapKey } from "../lib/cache.svelte";
   import { observe } from "../lib/connectivity.svelte";
+  import { onDrained } from "../lib/writeQueue.svelte";
   import { auth } from "../lib/auth.svelte";
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
@@ -18,6 +19,9 @@
   import RecapComparisons from "../lib/RecapComparisons.svelte";
   import RecapHighlights from "../lib/RecapHighlights.svelte";
   import RecapLiftTable from "../lib/RecapLiftTable.svelte";
+  import RecapEarned from "../lib/RecapEarned.svelte";
+  import MuscleVolumeBars from "../lib/MuscleVolumeBars.svelte";
+  import { formatPercent, formatWeighIn } from "../lib/racked";
   import { takeHandedSession } from "../lib/recapHandoff";
   import { localRecap } from "../lib/localRecap";
   import type { RecapLiftRow, RecapPRRow } from "../lib/recap";
@@ -93,6 +97,19 @@
   }
 
   onMount(load);
+
+  // When the queue drains, ask again.
+  //
+  // Without this the degraded state is a dead end: it promises the rest will
+  // "fill in next time you're on signal" and then never looks. The recap is
+  // reached by finishing, which is also the write most likely to have been
+  // queued — so walking out of the gym and back onto signal is the single most
+  // likely thing to happen while this page is open. ActiveSession does the same
+  // on the same signal.
+  $effect(() => {
+    onDrained(() => void load());
+    return () => onDrained(null);
+  });
 
   // ---- one view model, from whichever source answered ----
 
@@ -170,10 +187,8 @@
         }))
       : (local?.prs ?? []).map((p) => ({
           exerciseName: p.exerciseName,
-          // previousBests carries weights only, so an estimated-max record
-          // cannot be recognised without the server.
-          kind: "weight" as const,
-          valueLb: p.weightLb,
+          kind: p.kind,
+          valueLb: p.valueLb,
           previousLb: p.previousLb,
         })),
   );
@@ -235,6 +250,7 @@
       {prs}
       milestones={recap?.milestones ?? []}
       streakSessions={recap?.streak.sessions ?? 0}
+      streakWeeks={recap?.streak.weeks ?? 0}
     />
 
     {#if recap && recap.volume.comparison.count > 0}
@@ -246,6 +262,34 @@
     {/if}
 
     <RecapLiftTable {lifts} />
+
+    {#if recap && recap.muscles.length > 0}
+      <Card class="p-4" data-testid="recap-muscles">
+        <h3 class="text-xs uppercase tracking-[0.2em] text-muted-foreground">Where it went</h3>
+        <div class="mt-2">
+          <MuscleVolumeBars rows={recap.muscles} />
+        </div>
+        <!-- Only worth saying when the lifter actually bolted something on: on
+             a session that was purely the program, "100% prescribed" is a
+             sentence that tells them what they already know. -->
+        {#if recap.split.assistance.volumeLb > 0}
+          <p class="mt-2 text-xs tabular-nums text-muted-foreground">
+            {formatPercent(recap.split.main.share)} prescribed ·
+            {formatPercent(recap.split.assistance.share)} assistance
+          </p>
+        {/if}
+      </Card>
+    {/if}
+
+    {#if recap?.earned}
+      <RecapEarned earned={recap.earned} />
+    {/if}
+
+    {#if recap?.bodyweightLb}
+      <p class="text-center text-xs tabular-nums text-muted-foreground">
+        You weighed {formatWeighIn(recap.bodyweightLb)} lb
+      </p>
+    {/if}
 
     <div class="flex flex-wrap gap-2">
       {#if shareContent}

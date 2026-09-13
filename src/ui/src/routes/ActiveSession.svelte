@@ -516,6 +516,19 @@
           <Flag />
           {finishing ? "Finishing…" : "Finish workout"}
         </Button>
+      {:else}
+        <!-- An over session is a record to read, and this screen is the set-by-
+             set version of it. The recap is the same workout told as a story,
+             so it sits where Finish used to — the one action a closed session
+             still has. -->
+        <Button
+          size="sm"
+          variant="outline"
+          onclick={() => push(`/sessions/${sessionId}/recap`)}
+        >
+          <Trophy />
+          Recap
+        </Button>
       {/if}
     </div>
 

@@ -130,6 +130,31 @@ WHERE ss.actual_reps > 0
   )
 ORDER BY ss.exercise_id, ss.set_number;
 
+-- RecapHasLaterDaySession asks whether the lifter has performed this program
+-- day again since this session — which decides whether the recap may say what
+-- the session earned.
+--
+-- The next-session prescription is computed from history as it stands now, so
+-- it answers a question about today. Attached to the newest session of a day
+-- that is the same question the lifter is asking; attached to one from March it
+-- silently describes a workout that has since been superseded twice.
+--
+-- Note the cut runs the other way from every other query in this file, so the
+-- comparison is inverted with it: strictly AFTER this session, by the same
+-- (performed_on, id) ordering.
+-- name: RecapHasLaterDaySession :one
+SELECT EXISTS (
+  SELECT 1
+  FROM sessions s
+  JOIN session_sets ss ON ss.session_id = s.id
+  WHERE s.user_id = sqlc.arg('user_id')::int
+    AND s.program_day_id = sqlc.arg('program_day_id')::int
+    AND (s.performed_on > sqlc.arg('performed_on')::date
+      OR (s.performed_on = sqlc.arg('performed_on')::date
+          AND s.id > sqlc.arg('session_id')::int))
+    AND ss.actual_reps > 0
+)::bool AS exists;
+
 -- RecapExerciseBaseline is each lift's all-time best BEFORE this session, which
 -- is what lets a set inside it be recognised as a record rather than merely as
 -- the heaviest thing in one workout.

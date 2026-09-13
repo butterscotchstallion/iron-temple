@@ -28,6 +28,22 @@ vi.mock("../lib/api", async (importOriginal) => ({
 const celebrate = vi.hoisted(() => vi.fn());
 vi.mock("../lib/celebrate", () => ({ celebrate }));
 
+// The recap re-fetches when the write queue drains. Captured rather than
+// stubbed away, so the test can fire the same signal the queue does.
+const { onDrained, drain } = vi.hoisted(() => {
+  let handler: (() => void) | null = null;
+  return {
+    onDrained: vi.fn((h: (() => void) | null) => {
+      handler = h;
+    }),
+    drain: () => handler?.(),
+  };
+});
+vi.mock("../lib/writeQueue.svelte", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/writeQueue.svelte")>()),
+  onDrained,
+}));
+
 const props = { params: { id: "42" } };
 
 /** A recap with every optional field absent — a lifter's first workout. */
@@ -63,6 +79,13 @@ function emptyRecap(): Recap {
       liftsCompared: 0,
       liftsNew: 0,
     },
+    muscles: [],
+    split: {
+      main: { volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0 },
+      assistance: { volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0 },
+    },
+    bodyweightLb: null,
+    earned: null,
     lifts: [],
     prs: [],
     milestones: [],
@@ -171,7 +194,7 @@ function mkSession(): Session {
     createdAt: "2026-09-13T18:00:00Z",
     finishedAt: "2026-09-13T18:45:00Z",
     isOver: true,
-    previousBests: [{ exerciseId: 1, weightLb: 195 }],
+    previousBests: [{ exerciseId: 1, weightLb: 195, e1rmLb: 228 }],
     sets: [1, 2, 3, 4, 5].map((n) => mkSet({ id: n, setNumber: n })),
   };
 }
@@ -328,6 +351,26 @@ describe("SessionRecap", () => {
     });
   });
 
+  // The degraded state promises the rest will fill in on signal. Without this
+  // it never looks again — and the recap is reached by finishing, which is the
+  // write most likely to have been queued in the first place.
+  it("asks again once the write queue drains", async () => {
+    getSessionRecap.mockResolvedValue(unreachable);
+    handOffSession(mkSession());
+    render(SessionRecap, props);
+
+    await waitFor(() => expect(screen.getByTestId("recap-degraded")).toBeInTheDocument());
+
+    // Back on signal: the queue drains, and the server's answer replaces the
+    // reconstruction without the lifter touching anything.
+    getSessionRecap.mockResolvedValue({ status: 200, data: fullRecap(), headers: new Headers() });
+    drain();
+
+    await waitFor(() => expect(screen.getByTestId("stat-volume")).toHaveTextContent("18,240"));
+    expect(screen.queryByTestId("recap-degraded")).not.toBeInTheDocument();
+    expect(screen.getByTestId("stat-pace")).toBeInTheDocument();
+  });
+
   // A handed-off session is taken once, so it cannot decorate a recap it does
   // not belong to.
   it("ignores a handed-off session for a different workout", async () => {
@@ -350,6 +393,167 @@ describe("SessionRecap", () => {
     await waitFor(() => expect(screen.getByTestId("stat-volume")).toHaveTextContent("18,240"));
     expect(screen.queryByTestId("recap-degraded")).not.toBeInTheDocument();
     expect(screen.getByTestId("stat-pace")).toBeInTheDocument();
+  });
+
+  it("divides the session by muscle group, and names the split when there is one", async () => {
+    getSessionRecap.mockResolvedValue({
+      status: 200,
+      data: {
+        ...fullRecap(),
+        muscles: [
+          { group: "legs", volumeLb: 6125, sets: 5, reps: 25, lifts: 1, share: 0.7, trained: true },
+          { group: "back", volumeLb: 2625, sets: 5, reps: 25, lifts: 1, share: 0.3, trained: true },
+        ],
+        split: {
+          main: { volumeLb: 7000, sets: 8, reps: 40, lifts: 2, share: 0.8 },
+          assistance: { volumeLb: 1750, sets: 2, reps: 10, lifts: 1, share: 0.2 },
+        },
+      },
+      headers: new Headers(),
+    });
+    render(SessionRecap, props);
+
+    await waitFor(() => expect(screen.getByTestId("recap-muscles")).toBeInTheDocument());
+    expect(screen.getByTestId("recap-muscles")).toHaveTextContent("80% prescribed");
+    expect(screen.getByTestId("recap-muscles")).toHaveTextContent("20% assistance");
+  });
+
+  // On a session that was purely the program, "100% prescribed" tells the
+  // lifter what they already know.
+  it("stays quiet about the split when nothing was bolted on", async () => {
+    getSessionRecap.mockResolvedValue({
+      status: 200,
+      data: {
+        ...fullRecap(),
+        muscles: [
+          { group: "legs", volumeLb: 6125, sets: 5, reps: 25, lifts: 1, share: 1, trained: true },
+        ],
+      },
+      headers: new Headers(),
+    });
+    render(SessionRecap, props);
+
+    await waitFor(() => expect(screen.getByTestId("recap-muscles")).toBeInTheDocument());
+    expect(screen.getByTestId("recap-muscles")).not.toHaveTextContent("prescribed");
+  });
+
+  describe("what it earned", () => {
+    const earned = {
+      programDayId: 7,
+      programDayName: "Workout A",
+      exercises: [
+        {
+          exerciseId: 1,
+          exerciseName: "Squat",
+          kind: "main" as const,
+          sets: 5,
+          reps: 5,
+          weightLb: 250,
+          restSeconds: 180,
+          setPlan: [],
+          progression: {
+            status: "advance",
+            failureCount: 0,
+            failuresBeforeDeload: 3,
+            incrementLb: 5,
+          },
+        },
+      ],
+    };
+
+    it("shows the next prescription and the engine's verdict", async () => {
+      getSessionRecap.mockResolvedValue({
+        status: 200,
+        data: { ...fullRecap(), earned },
+        headers: new Headers(),
+      });
+      render(SessionRecap, props);
+
+      await waitFor(() => expect(screen.getByTestId("recap-earned")).toBeInTheDocument());
+      const card = screen.getByTestId("recap-earned");
+      expect(card).toHaveTextContent("Next Workout A");
+      expect(card).toHaveTextContent("250 lb");
+      expect(card).toHaveTextContent("up");
+    });
+
+    // A stall is worth seeing coming, so the count comes with it.
+    it("counts a hold towards the deload it is heading for", async () => {
+      const holding = {
+        ...earned,
+        exercises: [
+          {
+            ...earned.exercises[0],
+            weightLb: 245,
+            progression: {
+              status: "hold",
+              failureCount: 2,
+              failuresBeforeDeload: 3,
+              incrementLb: 5,
+            },
+          },
+        ],
+      };
+      getSessionRecap.mockResolvedValue({
+        status: 200,
+        data: { ...fullRecap(), earned: holding },
+        headers: new Headers(),
+      });
+      render(SessionRecap, props);
+
+      await waitFor(() =>
+        expect(screen.getByTestId("recap-earned")).toHaveTextContent("held · 2/3 to deload"),
+      );
+    });
+
+    // Withheld on an older session, since the prescription describes today.
+    it("is absent when the server withholds it", async () => {
+      getSessionRecap.mockResolvedValue({
+        status: 200,
+        data: fullRecap(),
+        headers: new Headers(),
+      });
+      render(SessionRecap, props);
+
+      await waitFor(() => expect(screen.getByTestId("recap-lifts")).toBeInTheDocument());
+      expect(screen.queryByTestId("recap-earned")).not.toBeInTheDocument();
+    });
+  });
+
+  // The two streaks measure different things, but stacked they read as two ways
+  // of flattering one fact — so the weeks only speak when the sessions cannot.
+  it("falls back to the week streak when the session run is broken", async () => {
+    getSessionRecap.mockResolvedValue({
+      status: 200,
+      data: { ...fullRecap(), streak: { sessions: 1, weeks: 8 } },
+      headers: new Headers(),
+    });
+    render(SessionRecap, props);
+
+    await waitFor(() => expect(screen.getByTestId("recap-highlights")).toBeInTheDocument());
+    const box = screen.getByTestId("recap-highlights");
+    expect(box).toHaveTextContent("8 weeks trained in a row");
+    expect(box).not.toHaveTextContent("sessions in a row");
+  });
+
+  it("prefers the session streak when there is one", async () => {
+    getSessionRecap.mockResolvedValue({ status: 200, data: fullRecap(), headers: new Headers() });
+    render(SessionRecap, props);
+
+    await waitFor(() => expect(screen.getByTestId("recap-highlights")).toBeInTheDocument());
+    const box = screen.getByTestId("recap-highlights");
+    expect(box).toHaveTextContent("6 sessions in a row");
+    expect(box).not.toHaveTextContent("weeks trained in a row");
+  });
+
+  it("reports what the lifter weighed, when they said", async () => {
+    getSessionRecap.mockResolvedValue({
+      status: 200,
+      data: { ...fullRecap(), bodyweightLb: 184.5 },
+      headers: new Headers(),
+    });
+    render(SessionRecap, props);
+
+    await waitFor(() => expect(screen.getByText(/You weighed 184.5 lb/)).toBeInTheDocument());
   });
 
   it("lists every lift with its own movement", async () => {

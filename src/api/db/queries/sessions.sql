@@ -365,9 +365,26 @@ ORDER BY ss.session_id, MIN(COALESCE(pde.position, 1000 + pda.position, 2000));
 --
 -- actual_reps > 0 is the same definition of real work as ListExerciseHistory,
 -- so a weight only defends a record once it has actually been performed.
+--
+-- Both bests are carried, because a heavier bar is not the only way to set a
+-- record: the same weight for more reps is a higher estimated max, and on a 5x5
+-- that is exactly what the session before a jump looks like. The weight alone
+-- was all the live screen needed to fire confetti, but the recap reports both
+-- kinds — and when it falls back to reconstructing itself from this response
+-- offline, a weight-only answer made it quietly report fewer records than the
+-- server would.
+--
+-- ROUND and the single-rep CASE are copied verbatim from RecapExerciseBaseline,
+-- and must stay that way: Set.E1RM in Go rounds to the pound and compares
+-- straight against these numbers, so if only one side rounded the two would
+-- disagree inside a sub-pound band — which is exactly where a record is decided.
 -- name: ListSessionPersonalBests :many
 SELECT ss.exercise_id,
-       MAX(ss.weight_lb)::numeric AS best_weight_lb
+       MAX(ss.weight_lb)::numeric AS best_weight_lb,
+       MAX(ROUND(CASE WHEN ss.actual_reps = 1
+                      THEN ss.weight_lb
+                      ELSE ss.weight_lb * (1 + ss.actual_reps / 30.0)
+                 END))::numeric AS best_e1rm_lb
 FROM session_sets ss
 JOIN sessions s ON s.id = ss.session_id
 WHERE s.user_id = sqlc.arg('user_id')::int

@@ -248,6 +248,15 @@ function sessionRecap(overrides: Partial<SessionRecap> = {}): SessionRecap {
         e1rmDeltaPct: 0.057,
       },
     ],
+    muscles: [
+      { group: "legs", volumeLb: 800, sets: 2, reps: 10, lifts: 1, share: 1, trained: true },
+    ],
+    split: {
+      main: { volumeLb: 800, sets: 2, reps: 10, lifts: 1, share: 1 },
+      assistance: { volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0 },
+    },
+    bodyweightLb: null,
+    earned: null,
     prs: [],
     milestones: [],
     streak: { sessions: 2, weeks: 1 },

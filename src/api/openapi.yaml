@@ -2334,10 +2334,10 @@ components:
 
     PersonalBest:
       description: >-
-        One lift's heaviest working set before the session carrying it —
-        the weight a set has to beat to count as a personal record.
+        One lift's best showing before the session carrying it — the marks a set
+        has to beat to count as a personal record.
       type: object
-      required: [exerciseId, weightLb]
+      required: [exerciseId, weightLb, e1rmLb]
       properties:
         exerciseId:
           type: integer
@@ -2345,6 +2345,19 @@ components:
         weightLb:
           type: number
           minimum: 0
+        e1rmLb:
+          type: number
+          minimum: 0
+          description: >
+            The best estimated max — Epley, rounded to the pound, with a single
+            worth exactly what was on the bar.
+
+            Carried alongside the weight because a heavier bar is not the only
+            way to set a record: the same weight for more reps raises the
+            estimate, which on a 5x5 is what the session before a jump looks
+            like. The live session screen only flags the weight; the recap
+            reports both, and needs this to say the same thing about a finished
+            workout whether or not it could reach the server.
 
     SessionSet:
       type: object
@@ -2478,7 +2491,8 @@ components:
     SessionRecap:
       type: object
       required:
-        [session, durationSeconds, pace, volume, progress, lifts, prs, milestones, streak]
+        [session, durationSeconds, pace, volume, progress, muscles, split, bodyweightLb,
+         earned, lifts, prs, milestones, streak]
       properties:
         session:
           $ref: "#/components/schemas/SessionRecapHeader"
@@ -2502,6 +2516,36 @@ components:
           $ref: "#/components/schemas/SessionRecapVolume"
         progress:
           $ref: "#/components/schemas/SessionRecapProgress"
+        muscles:
+          type: array
+          description: >
+            How the session's volume divided across muscle groups, heaviest
+            first. Groups the session did not touch are absent — a recap of one
+            workout is not a report card on the whole body.
+          items:
+            $ref: "#/components/schemas/RackedMuscleSlice"
+        split:
+          $ref: "#/components/schemas/RackedSplit"
+        bodyweightLb:
+          type: number
+          nullable: true
+          description: >
+            What the lifter weighed on the day, when they recorded it. Null is a
+            real answer and not a gap to fill: a weight-loss series is the days
+            that were actually measured.
+        earned:
+          allOf:
+            - $ref: "#/components/schemas/SessionRecapEarned"
+          nullable: true
+          description: >
+            What this session bought: the weights the next performance of this
+            program day will prescribe, and the engine's reasoning for each.
+
+            Null unless this is the lifter's MOST RECENT session of the day.
+            The prescription is computed from history as it stands now, so
+            attaching it to an older recap would answer a question about today
+            while appearing to describe a workout from March — and a recap is a
+            record of a moment, not a live view.
         lifts:
           type: array
           description: >
@@ -2753,6 +2797,28 @@ components:
           type: integer
         topE1rmLb:
           type: number
+
+    SessionRecapEarned:
+      description: >
+        The next performance of this program day, as the progression engine
+        prescribes it off the back of this session.
+
+        Reuses PrescribedExercise, so this is byte for byte what
+        /programs/{programId}/days/{dayId}/next-session returns — including the
+        `progression` block, which is what lets a deload or an approaching stall
+        read as a decision rather than as an unexplained number next week.
+      type: object
+      required: [programDayId, programDayName, exercises]
+      properties:
+        programDayId:
+          type: integer
+          format: int64
+        programDayName:
+          type: string
+        exercises:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrescribedExercise"
 
     SessionRecapStreak:
       description: >

@@ -106,16 +106,16 @@ describe("localRecap", () => {
   describe("records", () => {
     it("flags a set above the lift's standing best", () => {
       const r = localRecap(
-        mkSession({ previousBests: [{ exerciseId: 1, weightLb: 195 }] }),
+        mkSession({ previousBests: [{ exerciseId: 1, weightLb: 195, e1rmLb: 228 }] }),
       );
       expect(r.prs).toEqual([
-        { exerciseId: 1, exerciseName: "Squat", weightLb: 200, previousLb: 195 },
+        { exerciseId: 1, exerciseName: "Squat", kind: "weight", valueLb: 200, previousLb: 195 },
       ]);
     });
 
     it("does not flag a set that only matched the best", () => {
       const r = localRecap(
-        mkSession({ previousBests: [{ exerciseId: 1, weightLb: 200 }] }),
+        mkSession({ previousBests: [{ exerciseId: 1, weightLb: 200, e1rmLb: 233 }] }),
       );
       expect(r.prs).toEqual([]);
     });
@@ -126,6 +126,32 @@ describe("localRecap", () => {
       const r = localRecap(mkSession({ previousBests: [] }));
       expect(r.prs).toHaveLength(1);
       expect(r.prs[0].previousLb).toBe(0);
+    });
+
+    // The bar did not move, but it went further — which on a 5x5 is exactly
+    // what the session before a jump looks like. Before previousBests carried
+    // an estimated max, this was invisible offline and the recap silently
+    // reported fewer records than the server would once it reconnected.
+    it("flags the same weight carried for more reps", () => {
+      const r = localRecap(
+        mkSession({
+          // 5×200 estimates 233, against a standing estimate of 220.
+          previousBests: [{ exerciseId: 1, weightLb: 200, e1rmLb: 220 }],
+        }),
+      );
+      expect(r.prs).toEqual([
+        { exerciseId: 1, exerciseName: "Squat", kind: "e1rm", valueLb: 233, previousLb: 220 },
+      ]);
+    });
+
+    // One achievement, told once: the heavier plate is the better story, and it
+    // implies the estimate anyway. Same rule as personalRecords server-side.
+    it("lets a heavier bar suppress the estimated max it implies", () => {
+      const r = localRecap(
+        mkSession({ previousBests: [{ exerciseId: 1, weightLb: 195, e1rmLb: 200 }] }),
+      );
+      expect(r.prs).toHaveLength(1);
+      expect(r.prs[0].kind).toBe("weight");
     });
   });
 

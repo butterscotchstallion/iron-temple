@@ -339,6 +339,10 @@ type sessionDTO struct {
 type personalBestDTO struct {
 	ExerciseID int32   `json:"exerciseId"`
 	WeightLb   float64 `json:"weightLb"`
+	// E1rmLb is the estimated-max mark to beat. The live screen flags only the
+	// weight; the recap reports both kinds of record, and reconstructs itself
+	// from this response when it cannot reach the server.
+	E1rmLb float64 `json:"e1rmLb"`
 }
 
 // ---- Session recap ----
@@ -355,6 +359,16 @@ type sessionRecapDTO struct {
 	Pace            *sessionRecapPaceDTO    `json:"pace"`
 	Volume          sessionRecapVolumeDTO   `json:"volume"`
 	Progress        sessionRecapProgressDTO `json:"progress"`
+	// Muscles carries only the groups this session trained — unlike the monthly
+	// recap, where an untrained group is the finding and gets a row of its own.
+	Muscles []rackedMuscleSliceDTO `json:"muscles"`
+	Split   rackedSplitDTO         `json:"split"`
+	// BodyweightLb is nil when the lifter did not step on a scale, which is a
+	// different answer from any number.
+	BodyweightLb *float64 `json:"bodyweightLb"`
+	// Earned is nil on any but the lifter's most recent session of the day —
+	// see recapEarned for why it is withheld rather than qualified.
+	Earned *sessionRecapEarnedDTO `json:"earned"`
 	// Lifts, PRs and Milestones are never nil: a first workout serializes them
 	// as [], which reads as "nothing yet" rather than "not told".
 	Lifts      []sessionRecapLiftDTO `json:"lifts"`
@@ -436,6 +450,16 @@ type sessionRecapLiftPreviousDTO struct {
 type sessionRecapStreakDTO struct {
 	Sessions int `json:"sessions"`
 	Weeks    int `json:"weeks"`
+}
+
+// sessionRecapEarnedDTO reuses prescribedExerciseDTO, so what the recap
+// promises for next time is the same object the next-session preview returns —
+// including its progression block, which is what makes a deload read as a
+// decision rather than as an unexplained number a week later.
+type sessionRecapEarnedDTO struct {
+	ProgramDayID   int32                   `json:"programDayId"`
+	ProgramDayName string                  `json:"programDayName"`
+	Exercises      []prescribedExerciseDTO `json:"exercises"`
 }
 
 // weighInDTO pairs a bodyweight with the day it was recorded, so a client
