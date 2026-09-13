@@ -11,6 +11,7 @@
     recentExercises,
   } from "./library";
   import { exerciseEmoji } from "./exerciseIcon";
+  import { formatVolume } from "./volume";
   import { Button } from "$lib/components/ui/button";
   import ErrorBanner from "./ErrorBanner.svelte";
   import Plus from "@lucide/svelte/icons/plus";
@@ -25,19 +26,33 @@
     exclude = [],
     onAdd,
     onCancel,
+    confirmLabel = "Add to this day",
+    footnote,
   }: {
     // Exercise ids already on this day — one entry per lift, so offering them
     // again would only earn a 409.
     exclude?: number[];
-    onAdd: (choice: {
-      exerciseId: number;
-      sets: number;
-      reps: number;
-      weightLb: number;
-      repMin?: number;
-      repMax?: number;
-    }) => Promise<boolean>;
+    onAdd: (
+      choice: {
+        exerciseId: number;
+        sets: number;
+        reps: number;
+        weightLb: number;
+        repMin?: number;
+        repMax?: number;
+      },
+      exercise: Exercise,
+    ) => Promise<boolean>;
     onCancel: () => void;
+    /**
+     * What the confirm button says. Defaults to the program page's wording; the
+     * session screen adds the lift to the workout in front of the lifter as
+     * well as to the day, and a button naming only the day would be describing
+     * the half they cannot see.
+     */
+    confirmLabel?: string;
+    /** An extra line under the inputs, for whatever else the caller is doing. */
+    footnote?: string;
   } = $props();
 
   let exercises = $state<Exercise[]>([]);
@@ -103,18 +118,44 @@
     loading = false;
   }
 
+  /**
+   * Pick a movement, and start its weight where the lifter left it.
+   *
+   * Zero is the right default for a first-ever accessory and the wrong one for
+   * a lift already trained — nobody adds dips meaning to do them at bodyweight
+   * when they have been adding 25 lb for a month, and retyping it at the rack
+   * is the kind of small friction that stops the lift being logged at all.
+   *
+   * topSet is the HEAVIEST set ever, not the last one. It is what the library
+   * carries, and the caption below says so rather than calling it "last time" —
+   * the server's own carry-forward uses the last performance, and the two are
+   * different numbers after a deload. A starting point to adjust, labelled
+   * honestly, beats an empty box.
+   */
+  function choose(exercise: Exercise) {
+    selected = exercise;
+    weightLb = exercise.topSet?.weightLb ?? 0;
+  }
+
   async function confirm() {
     if (!selected || saving) return;
     saving = true;
-    const ok = await onAdd({
-      exerciseId: selected.id,
-      sets,
-      // With a range the bottom is the rep target: a set is complete at the
-      // bottom and the weight moves at the top.
-      reps: ranged ? repMin : reps,
-      weightLb,
-      ...(ranged ? { repMin, repMax } : {}),
-    });
+    const ok = await onAdd(
+      {
+        exerciseId: selected.id,
+        sets,
+        // With a range the bottom is the rep target: a set is complete at the
+        // bottom and the weight moves at the top.
+        reps: ranged ? repMin : reps,
+        weightLb,
+        ...(ranged ? { repMin, repMax } : {}),
+      },
+      // The movement itself, beside the numbers rather than folded into them:
+      // the first argument is a request body, and a caller that adds this lift
+      // to a live workout needs the name and the rest length to draw its sets
+      // before the server has answered.
+      selected,
+    );
     saving = false;
     // On failure the parent shows the banner and the panel stays open with the
     // selection intact, so the numbers needn't be typed twice.
@@ -201,6 +242,15 @@
       <input type="checkbox" bind:checked={ranged} class="size-4 accent-primary" />
       Use a rep range
     </label>
+    {#if selected?.topSet}
+      <!-- Named for what it is. topSet is the heaviest set ever, and the
+           carry-forward the server applies from the next session on uses the
+           LAST one — after a deload those disagree, and calling this "last
+           time" would quietly be a lie. -->
+      <p class="text-xs tabular-nums text-muted-foreground">
+        Your heaviest so far: {formatVolume(selected.topSet.weightLb)} lb
+      </p>
+    {/if}
     <p class="text-xs text-muted-foreground">
       Leave the weight at 0 for bodyweight work.
       {#if ranged}
@@ -211,10 +261,13 @@
         session — nothing moves it but you.
       {/if}
     </p>
+    {#if footnote}
+      <p class="text-xs text-muted-foreground">{footnote}</p>
+    {/if}
     <div class="flex gap-2">
       <Button size="sm" onclick={confirm} disabled={saving}>
         <Plus />
-        {saving ? "Adding…" : "Add to this day"}
+        {saving ? "Adding…" : confirmLabel}
       </Button>
       <Button size="sm" variant="ghost" onclick={onCancel}>Cancel</Button>
     </div>
@@ -294,7 +347,7 @@
   <button
     type="button"
     class="flex w-full items-center gap-2 px-3 py-2 text-left transition hover:bg-foreground/5"
-    onclick={() => (selected = exercise)}
+    onclick={() => choose(exercise)}
   >
     <span class="text-base" aria-hidden="true">
       {exerciseEmoji(exercise.name)}

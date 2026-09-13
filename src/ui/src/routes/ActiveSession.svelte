@@ -7,7 +7,9 @@
     updateSessionSet,
     addSessionSet,
     removeSessionSet,
+    addSessionAssistance,
     finishSession,
+    type Exercise,
     type Session,
     type SessionSet,
   } from "../lib/api";
@@ -28,6 +30,8 @@
   import Trophy from "@lucide/svelte/icons/trophy";
   import RestTimer from "../lib/RestTimer.svelte";
   import ExerciseCard from "../lib/ExerciseCard.svelte";
+  import AssistancePicker from "../lib/AssistancePicker.svelte";
+  import Plus from "@lucide/svelte/icons/plus";
   import BodyweightCard from "../lib/BodyweightCard.svelte";
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
@@ -58,6 +62,9 @@
   let confirmFinish = $state(false);
   // A finish request is in flight (guards a double-tap).
   let finishing = $state(false);
+  // Whether the assistance picker is expanded. One at a time, and only while
+  // the session is open.
+  let pickerOpen = $state(false);
 
   // Personal-record tracking: the record to beat per lift, which the session
   // response now carries. It used to be one history request per distinct lift
@@ -206,6 +213,13 @@
   // is a record to read rather than a workout to pace — so the timer only
   // exists between those two points.
   const showRestTimer = $derived(loggedCount > 0 && !isOver);
+
+  // Movements already in this workout, so the picker cannot offer one that would
+  // only come back as a 409. The optimistic rows count, which is what stops a
+  // second offline add of the same lift being queued behind the first.
+  const alreadyHere = $derived([
+    ...new Set((session?.sets ?? []).map((s) => s.exerciseId)),
+  ]);
 
   // Sets with no rep count at all — what the confirm prompt warns about.
   const unloggedCount = $derived(
@@ -428,6 +442,69 @@
     session.sets = [...session.sets, outcome.value];
   }
 
+  // A whole lift, decided on at the rack.
+  //
+  // This is the only write on this screen that reaches past the session: the
+  // server puts the movement on the program day too, so it is prescribed every
+  // time that day comes round, with carry-forward and rep progression behind it
+  // rather than being a one-off with no future. Both halves are one transaction
+  // server-side — see POST /sessions/{id}/assistance.
+  //
+  // Returns whether it landed, because that is what AssistancePicker wants: on a
+  // refusal it keeps the numbers the lifter typed rather than making them pick
+  // the movement again.
+  async function addAssistanceLift(
+    choice: { exerciseId: number; sets: number; reps: number; weightLb: number },
+    exercise: Exercise,
+  ): Promise<boolean> {
+    if (isOver || !session) return false;
+
+    // One id per set, allocated here so the queued entry and the rows on screen
+    // name the same placeholders — the replay repoints these exact ids.
+    const tempSetIds = Array.from({ length: choice.sets }, () => nextTempSetId());
+
+    const outcome = await write<SessionSet[]>(
+      {
+        kind: "addAssistance",
+        sessionId,
+        exerciseId: choice.exerciseId,
+        reps: choice.reps,
+        weightLb: choice.weightLb,
+        tempSetIds,
+      },
+      () => addSessionAssistance(sessionId, { ...choice }),
+      // Buildable in full, which is why this can be queued at all: the picker
+      // handed over the movement, the lifter typed the numbers, the server uses
+      // them verbatim, and kind is assistance by construction. restSeconds is
+      // the one field that had to be put on the library for this — without it
+      // the countdown would start three minutes on a set of curls.
+      () =>
+        tempSetIds.map((id, i) => ({
+          id,
+          exerciseId: exercise.id,
+          exerciseName: exercise.name,
+          kind: "assistance" as const,
+          setNumber: i + 1,
+          targetReps: choice.reps,
+          actualReps: null,
+          weightLb: choice.weightLb,
+          completed: false,
+          restSeconds: exercise.restSeconds,
+        })),
+    );
+    if (!outcome.ok) {
+      actionError = "Couldn't add that lift.";
+      return false;
+    }
+    actionError = null;
+    if (!session) return false;
+    // Appended: assistance goes after the program's own work, and the server
+    // orders it that way on the next read.
+    session.sets = [...session.sets, ...outcome.value];
+    pickerOpen = false;
+    return true;
+  }
+
   // Drop a set that wasn't performed. Removing a lift's last set takes the lift
   // out of the session, which is what skipping it looks like.
   async function removeSet(set: SessionSet) {
@@ -602,6 +679,30 @@
         </AlertDialog.Footer>
       </AlertDialog.Content>
     </AlertDialog.Root>
+
+    <!-- Extra work, decided on at the rack. Below the cards because that is
+         where it goes in the workout, and out of the way of the sets being
+         tapped through.
+
+         Unlike everything above it, this reaches past the session: the lift is
+         added to the program day too, so it comes round again with a
+         progression behind it. -->
+    {#if !isOver}
+      {#if pickerOpen}
+        <AssistancePicker
+          exclude={alreadyHere}
+          onAdd={addAssistanceLift}
+          onCancel={() => (pickerOpen = false)}
+          confirmLabel="Add to this workout"
+          footnote="It joins {session.programDayName} too, so it's prescribed next time."
+        />
+      {:else}
+        <Button variant="outline" size="sm" onclick={() => (pickerOpen = true)}>
+          <Plus />
+          Add assistance
+        </Button>
+      {/if}
+    {/if}
 
     <!-- Finishing used to open a second dialog here, carrying a sets count and
          a volume. It is a whole screen now — /sessions/:id/recap, which
