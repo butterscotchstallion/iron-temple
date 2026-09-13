@@ -60,7 +60,18 @@ prescribed lifts, sets and reps.
   fourth pair of 45s you don't own. A weight the rack can't build rounds down to
   one it can, and says so.
 - **Bodyweight weigh-ins** recorded against the session.
-- **Finish the session** to close it out — with confetti when it went well.
+- **Finish the session** to close it out — with confetti when it went well — and
+  land on a **recap** of what it was worth: how long it took and where that
+  ranks among your other goes at the same workout, the tonnage restated as
+  something you can picture, the **percentage the weights moved** since that day
+  last came round, any **records and milestones** you hit, your streak, and every
+  lift with its own before-and-after. It's a page of its own, so you can come
+  back to it, and there's a **share card** to export. The statistics are the ones
+  Racked computes over a month, pointed at a single session — a record announced
+  at the rack and the same record listed in March are decided by the same code.
+  It's also the one screen built to survive a dead network: what can be worked
+  out from the workout you just did is drawn from memory, and the rest fills in
+  when you're next on signal.
 
 ### Progression
 
@@ -128,7 +139,7 @@ an uploaded avatar or a colour, and a password change.
 
 | | |
 |--|--|
-| [`docs/development.md`](docs/development.md) | Git hooks, preflight gates, integration tests |
+| [`docs/development.md`](docs/development.md) | Git hooks, preflight gates, sqlc, integration tests |
 | [`docs/design.md`](docs/design.md) | Original design brief |
 | [`docs/implementation-plan.md`](docs/implementation-plan.md) | What's built, phase by phase |
 | [`docs/api-integration-tests.md`](docs/api-integration-tests.md) | The DB-backed API suite |

@@ -69,6 +69,41 @@ can't run becomes a failure instead of a skip. The pre-commit hook always passes
 `--strict`; interactive runs stay lenient, so a box missing one tool can still check
 the rest. ("Nothing to check here" — no `src/ui`, no `go.mod` — stays a skip either way.)
 
+## Regenerating the data layer (sqlc)
+
+`src/api/internal/store/*.sql.go` is generated from `src/api/db/queries/*.sql`.
+Edit the SQL, then regenerate — never hand-edit the Go:
+
+```sh
+cd src/api && make sqlc && git diff --stat -- internal/store/
+```
+
+`make sqlc` needs `sqlc` on `PATH`, and the sandbox image does not bake it. It
+does install, because the Go module proxy is reachable — only `/opt/go/pkg/mod`
+and `/usr/local/gobin` are read-only, so redirect all three paths (takes about
+two minutes, once):
+
+```sh
+cd /tmp && GOFLAGS="" GOTOOLCHAIN=local GOMODCACHE=/tmp/gomodcache \
+  GOPATH=/tmp/gopath GOBIN=/tmp/gopath/bin \
+  go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+```
+
+`GOFLAGS=""` is load-bearing: the repo default is `-mod=vendor`, which a
+module-aware install outside this module must not inherit. Keep the version in
+step with `SQLC_VERSION` in `.gitea/workflows/go.yml` — the `sqlc` CI job
+regenerates and diffs `internal/store`, so a different generator shows up as
+drift.
+
+Two things that bite when writing a query. **Cast every bare aggregate**
+(`MAX(ss.weight_lb)::numeric`, `MAX(s.performed_on)::date`): sqlc cannot infer an
+aggregate's type and emits `interface{}`, which scans into anything and asserts
+nothing. And **never put a comment inside a generated struct** — sqlc does not
+emit them, so the diff job fails, and a comment also splits gofmt's alignment
+groups so `gofmt -l` reports the file clean while the fields no longer match.
+Explain nullability in the `.sql` comment instead; that becomes the Go doc
+comment and survives regeneration.
+
 ## Integration tests
 
 The backend's DB-backed suite runs against a **real Postgres**, so it needs one — which
