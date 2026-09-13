@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SessionRecap } from "./api";
 import { sessionShareCardContent } from "./sessionShareCard";
-import { LIFT_ROWS } from "./shareCard";
+import { LIFT_ROWS, shareCardLayout } from "./shareCard";
 
 function mkRecap(over: Partial<SessionRecap> = {}): SessionRecap {
   return {
@@ -182,32 +182,37 @@ describe("sessionShareCardContent", () => {
       expect(c.moments[0]).toEqual({ label: "Pace", value: "12% slower · 4th of 12" });
     });
 
-    it("gives a lone record its weight", () => {
-      const one = sessionShareCardContent(mkRecap({ prs: [mkPR("Squat", 245)] }));
-      expect(one.moments[0]).toEqual({ label: "Personal record", value: "Squat 245 lb" });
-    });
-
-    // The row used to read "Personal records (3)" beside a single lift's name,
-    // which looks like a card that failed to render the other two. It never
-    // states a count it does not then show.
-    it("names every record rather than counting them", () => {
+    // A row each, with what was lifted. The block used to be one row reading
+    // "Personal records (3)" beside a single lift's name, which looked like a
+    // card that had failed to render the other two — and naming them without
+    // their weights still says a good day happened without saying what it was.
+    it("gives every record a row of its own, with the weight on it", () => {
       const c = sessionShareCardContent(
         mkRecap({
           prs: [mkPR("Bench Press", 160), mkPR("Squat", 245), mkPR("Barbell Row", 135)],
         }),
       );
-      expect(c.moments[0]).toEqual({
-        label: "Personal records",
-        // Heaviest first: the server returns them alphabetically, which is fine
-        // for a list and arbitrary for a headline.
-        value: "Squat, Bench Press and Barbell Row",
-      });
+      // Heaviest first: the server returns them alphabetically, which is right
+      // for a list and arbitrary for a headline.
+      expect(c.moments).toEqual([
+        { label: "PR · Squat", value: "245 lb × 5" },
+        { label: "PR · Bench Press", value: "160 lb × 5" },
+        { label: "PR · Barbell Row", value: "135 lb × 5" },
+      ]);
     });
 
-    // Past three the line runs out of room, so the overflow is named as an
-    // overflow — a promise the row keeps — and the lifts dropped are the
-    // lightest. Two names rather than three: the count has to fit beside them.
-    it("counts the overflow past three", () => {
+    // The bar did not move, so quoting it would make the row look like a record
+    // that isn't one. The estimate is what was beaten, and it says so.
+    it("marks an estimated-max record apart from a heavier bar", () => {
+      const c = sessionShareCardContent(
+        mkRecap({ prs: [{ ...mkPR("Squat", 286), kind: "e1rm", weightLb: 245, reps: 8 }] }),
+      );
+      expect(c.moments[0]).toEqual({ label: "Est. max · Squat", value: "286 lb" });
+    });
+
+    // Rows are finite, so the overflow is counted rather than silently dropped —
+    // and what overflows is the lightest.
+    it("counts the records past the rows it has", () => {
       const c = sessionShareCardContent(
         mkRecap({
           prs: [
@@ -219,28 +224,86 @@ describe("sessionShareCardContent", () => {
           ],
         }),
       );
-      expect(c.moments[0].value).toBe("Squat, Bench Press and 3 more");
+      expect(c.moments).toEqual([
+        { label: "PR · Squat", value: "245 lb × 5" },
+        { label: "PR · Bench Press", value: "160 lb × 5" },
+        { label: "PR · Barbell Row", value: "135 lb × 5" },
+        { label: "More records", value: "+2" },
+      ]);
     });
 
-    // Whatever the count, the row is three comma-separated parts at most — it
-    // is painted into a fixed width and clipped past it.
-    it("never runs to more than three parts", () => {
-      for (const n of [2, 3, 4, 8, 20]) {
-        const prs = Array.from({ length: n }, (_, i) => mkPR(`Lift ${i}`, 300 - i));
-        const value = sessionShareCardContent(mkRecap({ prs })).moments[0].value;
-        expect(value.split(/, | and /)).toHaveLength(Math.min(n, 3));
-      }
-    });
-
-    it("treats an estimated-max record the same as a heavier bar", () => {
-      const c = sessionShareCardContent(
-        mkRecap({ prs: [{ ...mkPR("Squat", 286), kind: "e1rm" }] }),
-      );
-      expect(c.moments[0]).toEqual({ label: "Personal record", value: "Squat 286 lb" });
+    // Exactly four fit, so nothing is given up to a count of nothing.
+    it("spends no row counting when they all fit", () => {
+      const prs = Array.from({ length: 4 }, (_, i) => mkPR(`Lift ${i}`, 300 - i));
+      const c = sessionShareCardContent(mkRecap({ prs }));
+      expect(c.moments).toHaveLength(4);
+      expect(c.moments.every((m) => m.label.startsWith("PR · "))).toBe(true);
     });
 
     it("has nothing to say about a quiet session", () => {
       expect(sessionShareCardContent(mkRecap()).moments).toEqual([]);
+    });
+  });
+
+  // The records got their own rows by spending vertical space the card has a
+  // fixed amount of. shareCardLayout packs blocks into the region above the
+  // footer, and a card that outgrows it runs long rather than cropping — so the
+  // bound is asserted rather than reasoned about.
+  //
+  // Pure arithmetic over the metrics, which is why this can run in jsdom at all:
+  // no canvas is touched.
+  describe("the layout it produces", () => {
+    /** The fullest a session card gets: every optional line, every row taken. */
+    function fullestRecap() {
+      return mkRecap({
+        // Both optional header lines present.
+        volume: { ...mkRecap().volume, comparison: { count: 3, label: "pickup trucks", unitLb: 5000 } },
+        progress: {
+          previousSessionId: 40,
+          previousPerformedOn: "2026-09-06",
+          weightDeltaPct: 0.021,
+          liftsCompared: 5,
+          liftsNew: 0,
+        },
+        pace: { medianSeconds: 3600, deltaPct: 0.12, rank: 4, of: 12, sampleSize: 11 },
+        lifts: Array.from({ length: 8 }, (_, i) => mkLift(`Exercise Number ${i}`, 900 - i, 200)),
+        prs: Array.from({ length: 9 }, (_, i) => mkPR(`Exercise Number ${i}`, 300 - i)),
+        milestones: [
+          {
+            kind: "plate" as const,
+            performedOn: "2026-09-13",
+            label: "First 245 lb Squat",
+            valueLb: 245,
+            exerciseId: 1,
+            exerciseName: "Squat",
+          },
+        ],
+      });
+    }
+
+    it("fits above the footer at its fullest", () => {
+      const content = sessionShareCardContent(fullestRecap(), "Ada");
+      const { blocks, contentBottom } = shareCardLayout(content);
+
+      const last = blocks[blocks.length - 1];
+      expect(last.y + last.height).toBeLessThanOrEqual(contentBottom);
+      // And it starts on the card rather than above it.
+      expect(blocks[0].y).toBeGreaterThanOrEqual(0);
+    });
+
+    it("still fits when every moment row is a record", () => {
+      // No pace and no milestone, so the records take the whole budget.
+      const content = sessionShareCardContent(
+        mkRecap({
+          ...fullestRecap(),
+          pace: null,
+          milestones: [],
+        }),
+        "Ada",
+      );
+      const { blocks, contentBottom } = shareCardLayout(content);
+      const last = blocks[blocks.length - 1];
+      expect(last.y + last.height).toBeLessThanOrEqual(contentBottom);
     });
   });
 

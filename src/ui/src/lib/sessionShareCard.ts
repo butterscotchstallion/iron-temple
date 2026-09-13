@@ -8,51 +8,65 @@
  */
 
 import type { SessionRecap } from "./api";
-import { barFraction, formatDelta, formatSessionLength, joinNames } from "./racked";
+import { barFraction, formatDelta, formatSessionLength } from "./racked";
 import { formatVolume } from "./volume";
 import { formatOrdinal, formatPace } from "./recap";
-import { LIFT_ROWS, MOMENT_ROWS, type MomentRow, type ShareCardContent } from "./shareCard";
+import { LIFT_ROWS, type MomentRow, type ShareCardContent } from "./shareCard";
+
+/** Rows the records may take, each carrying one lift and what it lifted. */
+const PR_ROWS = 4;
 
 /**
- * The most comma-separated parts the records row will carry.
+ * Moment rows the session card allows, against MOMENT_ROWS' three on the
+ * monthly one.
  *
- * Three either way: three names when that is all there are, or two names and a
- * count when there are more. The row is painted right-aligned into 560px at
- * 26px semibold, and fitText clips what does not fit — "Squat, Bench Press,
- * Barbell Row and 2 more" already sits on that limit, and lifts are not always
- * called "Squat". Two names plus a count leaves room for the ones that aren't.
+ * A month's card summarises the records as a count and spends its rows on
+ * variety — most improved, heaviest set, a milestone. A session has room to be
+ * specific, and the records ARE the session: giving each one its own row is the
+ * difference between "you set three records" and being shown what they were.
+ *
+ * Six is not a free choice. The layout packs blocks into the space above the
+ * footer, and a card that outgrows it runs long rather than cropping — so this
+ * is bounded by what the fullest realistic session card can hold: a header with
+ * both optional lines, four stat tiles, five lift bars, and this. See the
+ * layout test, which asserts the last block still clears contentBottom.
  */
-const PR_PARTS = 3;
+const SESSION_MOMENT_ROWS = 6;
 
 /**
- * The records, as one line: "Squat 245 lb", or "Squat, Bench Press and Row".
+ * The records, one row each: "PR · Squat" against "245 lb × 5".
  *
- * A single record has room for its weight, which is the interesting part when
- * there is only one. Beyond that the names are what the lifter wants to see, so
- * they are joined the way a person says them — the same joinNames the recap
- * email and the Racked page use, rather than a third spelling of the same list.
+ * A row apiece rather than one row listing names, because the weight is the
+ * thing — "Squat, Bench Press and Barbell Row" says a good day happened without
+ * saying what it was. This block used to be a single row reading "Personal
+ * records (3)" beside one lift's name, which looked like a card that had failed
+ * to render the other two.
  *
- * The row never states a count it does not then show. It used to read
- * "Personal records (3)" against a single lift's name, which looks like a card
- * that failed to render the other two. Where there are more records than the
- * line can carry, the overflow is named as an overflow ("and 2 more") — which
- * is a promise the line keeps.
+ * The two kinds are labelled apart, as they are on the page. A weight record
+ * shows the bar and the reps that carried it. An estimated-max record shows the
+ * estimate, because the bar did not move and quoting it would make the row look
+ * like a record that isn't one.
  *
- * Sorted heaviest first, so the lift that leads is the one worth leading with
- * and the ones dropped are the least impressive. The server returns records in
- * alphabetical order — fine for a list, arbitrary for a headline, and the
- * reason this used to put whichever lift sorted first beside a count of three.
+ * Sorted heaviest first, so the lift that leads is worth leading with and the
+ * ones that overflow are the least impressive — the server returns records
+ * alphabetically, which is right for a list and arbitrary for a headline.
  */
-function prsValue(prs: SessionRecap["prs"]): string {
+function prMoments(prs: SessionRecap["prs"]): MomentRow[] {
   const ranked = [...prs].sort((a, b) => b.valueLb - a.valueLb);
-  if (ranked.length === 1) {
-    return `${ranked[0].exerciseName} ${formatVolume(ranked[0].valueLb)} lb`;
-  }
-  if (ranked.length <= PR_PARTS) {
-    return joinNames(ranked.map((p) => p.exerciseName));
-  }
-  const named = ranked.slice(0, PR_PARTS - 1).map((p) => p.exerciseName);
-  return joinNames([...named, `${ranked.length - named.length} more`]);
+  // Only give up a row to the overflow count when there is something to count.
+  const shown = ranked.length > PR_ROWS ? ranked.slice(0, PR_ROWS - 1) : ranked;
+
+  const rows: MomentRow[] = shown.map((pr) => ({
+    label: `${pr.kind === "weight" ? "PR" : "Est. max"} · ${pr.exerciseName}`,
+    value:
+      pr.kind === "weight"
+        ? `${formatVolume(pr.weightLb)} lb × ${pr.reps}`
+        : `${formatVolume(pr.valueLb)} lb`,
+  }));
+
+  const rest = ranked.length - shown.length;
+  if (rest > 0) rows.push({ label: "More records", value: `+${rest}` });
+  return rows;
 }
 
 export function sessionShareCardContent(
@@ -97,12 +111,7 @@ export function sessionShareCardContent(
           : `${formatPace(recap.pace.deltaPct)} · ${formatOrdinal(recap.pace.rank)} of ${recap.pace.of}`,
     });
   }
-  if (recap.prs.length > 0) {
-    moments.push({
-      label: recap.prs.length === 1 ? "Personal record" : "Personal records",
-      value: prsValue(recap.prs),
-    });
-  }
+  moments.push(...prMoments(recap.prs));
   if (recap.milestones.length > 0) {
     moments.push({ label: "Milestone", value: recap.milestones[0].label });
   }
@@ -126,7 +135,7 @@ export function sessionShareCardContent(
       { value: `${recap.streak.sessions}`, label: "session streak" },
     ],
     lifts,
-    moments: moments.slice(0, MOMENT_ROWS),
+    moments: moments.slice(0, SESSION_MOMENT_ROWS),
     footnote: `${recap.session.programName} · ${recap.session.programDayName}`,
   };
 }
