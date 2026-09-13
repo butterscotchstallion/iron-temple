@@ -35,6 +35,7 @@
  */
 
 import {
+  addSessionAssistance,
   addSessionSet,
   finishSession,
   removeSessionSet,
@@ -63,6 +64,24 @@ export type SetPatch = {
 export type PendingWrite =
   | { kind: "updateSet"; sessionId: number; setId: number; body: SetPatch }
   | { kind: "addSet"; sessionId: number; exerciseId: number; tempSetId: number }
+  /**
+   * A whole lift added mid-workout — the overlay row on the program day and
+   * every set of it at once. The only entry that stands for more than one row,
+   * which is why tempSetIds is a list and why flush has to remap all of them.
+   *
+   * The set count is NOT stored alongside: it is `tempSetIds.length`. Two
+   * fields that must agree eventually will not, and the way this one fails is
+   * a mismatched zip on replay — the lifter's reps written onto the wrong set,
+   * which is the one outcome this module's header says to avoid above all.
+   */
+  | {
+      kind: "addAssistance";
+      sessionId: number;
+      exerciseId: number;
+      reps: number;
+      weightLb: number;
+      tempSetIds: number[];
+    }
   | { kind: "removeSet"; sessionId: number; setId: number }
   | { kind: "updateSession"; sessionId: number; bodyweightLb: number | null }
   | { kind: "finishSession"; sessionId: number };
@@ -74,8 +93,19 @@ export type QueuedWrite = PendingWrite & { id: number };
  * replayed under. A stored queue at a version this build does not know is
  * dropped rather than guessed at: replaying a misread write is worse than
  * losing it, because the lifter can see a lost rep and cannot see a wrong one.
+ *
+ * Bumped to 2 for `addAssistance`, and note which direction forced it. Forward
+ * is harmless — a v1 queue holds only kinds this build still understands. The
+ * hazard is backward: this app ships a service worker and an update prompt, so
+ * a lifter can write an addAssistance entry on a new build and then load an old
+ * one. That build's `send` has no arm for the kind, and an entry it cannot send
+ * sits at the head forever while the retry timer wakes every fifteen seconds —
+ * and because a non-empty queue makes mustQueue() true, every later write joins
+ * it and nothing reaches the server again. The workout silently stops saving.
+ * Under a bumped version the old build drops the queue instead, which loses
+ * what was in it and keeps the session working.
  */
-const STORAGE_VERSION = 1;
+const STORAGE_VERSION = 2;
 const STORAGE_KEY = "iron-temple:writes:v1";
 
 let queue = $state<QueuedWrite[]>([]);
@@ -226,12 +256,52 @@ export function clearQueue(): void {
  *   server has never heard of, and would 404 the moment the add gave it a real
  *   one. Both come out, along with anything queued against that temp id.
  */
+/**
+ * Whether this entry is the one that will bring `id` into existence.
+ *
+ * Two shapes answer to it — a single-set add and a whole lift — and asking in
+ * one place is what keeps the cancellation rule below from learning about only
+ * one of them, which is how a removed set comes back from the dead on replay.
+ */
+function ownsTempSetId(entry: QueuedWrite, id: number): boolean {
+  if (entry.kind === "addSet") return entry.tempSetId === id;
+  if (entry.kind === "addAssistance") return entry.tempSetIds.includes(id);
+  return false;
+}
+
 export function enqueue(write: PendingWrite): void {
   if (write.kind === "removeSet" && isTempSetId(write.setId)) {
-    const pending = queue.some(
-      (entry) => entry.kind === "addSet" && entry.tempSetId === write.setId,
-    );
-    if (pending) {
+    const owner = queue.find((entry) => ownsTempSetId(entry, write.setId));
+
+    // A whole lift added offline, now losing one of its sets. The set does not
+    // exist anywhere yet, so the fix is to create one fewer rather than to
+    // create it and then delete it — and the count the request carries is
+    // tempSetIds.length, so shortening the list IS shortening the request.
+    //
+    // Removal is tail-only (ExerciseCard only ever offers the last set), so the
+    // remaining ids stay contiguous and stay aligned with the set numbers the
+    // server will hand back. If "remove any set" ever ships, that assumption is
+    // what breaks first.
+    if (owner?.kind === "addAssistance") {
+      owner.tempSetIds = owner.tempSetIds.filter((id) => id !== write.setId);
+      queue = queue.filter((entry) => {
+        // The lift's last set has gone, so there is no lift left to add.
+        //
+        // This is the one place the offline answer differs from the online one.
+        // Online, adding a lift and then removing every set leaves the overlay
+        // row behind, so it is prescribed again next week; here the whole write
+        // is cancelled and the row is never created. That is deliberate: the
+        // lifter plainly undid what they just did, and a plan row for a lift
+        // with no sets today is a state no online path produces either.
+        if (entry.id === owner.id) return owner.tempSetIds.length > 0;
+        if (entry.kind === "updateSet") return entry.setId !== write.setId;
+        return true;
+      });
+      persist();
+      return;
+    }
+
+    if (owner) {
       queue = queue.filter((entry) => {
         if (entry.kind === "addSet") return entry.tempSetId !== write.setId;
         if (entry.kind === "updateSet") return entry.setId !== write.setId;
@@ -274,6 +344,21 @@ function send(entry: QueuedWrite) {
       return updateSession(entry.sessionId, { bodyweightLb: entry.bodyweightLb });
     case "finishSession":
       return finishSession(entry.sessionId);
+    case "addAssistance":
+      return addSessionAssistance(entry.sessionId, {
+        exerciseId: entry.exerciseId,
+        // Derived, never stored — see the union member.
+        sets: entry.tempSetIds.length,
+        reps: entry.reps,
+        weightLb: entry.weightLb,
+      });
+    default:
+      // An entry this build does not understand, which a version bump is
+      // supposed to have made impossible. Reported as a refusal so the lifter
+      // is told something was lost, rather than returning undefined and
+      // wedging the queue on an entry that can never be sent — see
+      // STORAGE_VERSION for what that failure looks like.
+      return Promise.resolve({ status: 422, data: undefined, headers: new Headers() });
   }
 }
 
@@ -284,6 +369,24 @@ function send(entry: QueuedWrite) {
  * placeholder, so the moment the add lands they all have to be repointed or
  * they will PATCH an id that does not exist.
  */
+/**
+ * Forget every queued write against these placeholders.
+ *
+ * Used when an add came back with fewer sets than it asked for, so some temp
+ * ids will never have a real counterpart. Sending those writes would 404 and be
+ * counted against the lifter; dropping them loses the same reps quietly, which
+ * is the honest half of a bad situation.
+ */
+function dropTempSetIds(ids: number[]): void {
+  queue = queue.filter(
+    (entry) =>
+      !(
+        (entry.kind === "updateSet" || entry.kind === "removeSet") &&
+        ids.includes(entry.setId)
+      ),
+  );
+}
+
 function remapTempSetId(tempId: number, realId: number): void {
   queue = queue.map((entry) =>
     (entry.kind === "updateSet" || entry.kind === "removeSet") && entry.setId === tempId
@@ -318,18 +421,44 @@ export async function flush(): Promise<void> {
   try {
     while (queue.length > 0) {
       const entry = queue[0];
+      // Snapshotted before the await, because enqueue can run during it — a rep
+      // tap or a removed set — and shorten this very list. Zipping a list that
+      // changed under us against a response sized to the old one is how a
+      // logged rep ends up on the wrong set.
+      const sending = entry.kind === "addAssistance" ? [...entry.tempSetIds] : [];
       const result = await send(entry);
 
       if (observe(result)) return; // transport failure: still offline
 
       if (!isOk(result.status)) {
-        rejected += 1;
+        // Counted per row, not per entry. One refused addAssistance takes a
+        // whole exercise off the screen, and "1 change couldn't be saved" would
+        // undersell that badly.
+        rejected += entry.kind === "addAssistance" ? Math.max(1, sending.length) : 1;
       } else if (entry.kind === "addSet") {
         const realId = (result.data as { id?: number } | undefined)?.id;
         if (typeof realId === "number") remapTempSetId(entry.tempSetId, realId);
+      } else if (entry.kind === "addAssistance") {
+        const created = (result.data as { id?: number }[] | undefined) ?? [];
+        // Zipped by position, which the endpoint guarantees by returning the
+        // sets in set order — the same order the temp ids were handed out in.
+        const paired = Math.min(created.length, sending.length);
+        for (let i = 0; i < paired; i += 1) {
+          const realId = created[i]?.id;
+          if (typeof realId === "number") remapTempSetId(sending[i], realId);
+        }
+        // Anything left unpaired names a set the server did not create. Drop
+        // the writes queued against it rather than letting them go out and 404:
+        // the reps are lost either way, and a bookkeeping gap of ours should
+        // not be reported to the lifter as the server refusing their work.
+        if (paired < sending.length) dropTempSetIds(sending.slice(paired));
       }
 
-      queue = queue.slice(1);
+      // Removed by identity, not position. enqueue's cancellation can take this
+      // entry out of the queue while the request is in flight, and slicing the
+      // head off would then drop whatever moved into its place — an entry that
+      // was never sent.
+      queue = queue.filter((q) => q.id !== entry.id);
       persist();
     }
 

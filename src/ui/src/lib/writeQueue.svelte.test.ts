@@ -15,6 +15,7 @@ import {
 } from "./writeQueue.svelte";
 import { markReachable, markUnreachable, resetConnectivity } from "./connectivity.svelte";
 
+const addSessionAssistance = vi.hoisted(() => vi.fn());
 const addSessionSet = vi.hoisted(() => vi.fn());
 const finishSession = vi.hoisted(() => vi.fn());
 const removeSessionSet = vi.hoisted(() => vi.fn());
@@ -23,6 +24,7 @@ const updateSessionSet = vi.hoisted(() => vi.fn());
 
 vi.mock("./api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./api")>()),
+  addSessionAssistance,
   addSessionSet,
   finishSession,
   removeSessionSet,
@@ -388,3 +390,153 @@ function clearQueueInMemoryOnly(): void {
   clearQueue();
   if (stored !== null) localStorage.setItem("iron-temple:writes:v1", stored);
 }
+
+// ---- a whole lift, added mid-workout ----
+//
+// The only queue entry that stands for more than one row. Everything here is
+// about the places where "one entry, one set" stops being true.
+describe("addAssistance", () => {
+  /** Three sets of curls, queued. Returns the temp ids in set order. */
+  function queueCurls(): number[] {
+    const tempSetIds = [nextTempSetId(), nextTempSetId(), nextTempSetId()];
+    enqueue({
+      kind: "addAssistance",
+      sessionId: 1,
+      exerciseId: 9,
+      reps: 10,
+      weightLb: 30,
+      tempSetIds,
+    });
+    return tempSetIds;
+  }
+
+  it("sends the set count from the ids it holds", async () => {
+    queueCurls();
+    addSessionAssistance.mockResolvedValue(ok([{ id: 71 }, { id: 72 }, { id: 73 }]));
+    markReachable();
+    await flush();
+
+    expect(addSessionAssistance).toHaveBeenCalledWith(1, {
+      exerciseId: 9,
+      sets: 3,
+      reps: 10,
+      weightLb: 30,
+    });
+  });
+
+  // The heart of it: every placeholder has to be repointed, not just the first.
+  it("remaps every temp id onto the set the server made", async () => {
+    const [a, b, c] = queueCurls();
+    enqueue({ kind: "updateSet", sessionId: 1, setId: a, body: { actualReps: 10 } });
+    enqueue({ kind: "updateSet", sessionId: 1, setId: b, body: { actualReps: 9 } });
+    enqueue({ kind: "updateSet", sessionId: 1, setId: c, body: { actualReps: 8 } });
+
+    addSessionAssistance.mockResolvedValue(ok([{ id: 71 }, { id: 72 }, { id: 73 }]));
+    updateSessionSet.mockResolvedValue(ok({ id: 0 }));
+    markReachable();
+    await flush();
+
+    expect(updateSessionSet).toHaveBeenNthCalledWith(1, 1, 71, { actualReps: 10 });
+    expect(updateSessionSet).toHaveBeenNthCalledWith(2, 1, 72, { actualReps: 9 });
+    expect(updateSessionSet).toHaveBeenNthCalledWith(3, 1, 73, { actualReps: 8 });
+    expect(rejectedCount()).toBe(0);
+  });
+
+  // A gap in our own bookkeeping must not be reported to the lifter as the
+  // server refusing their reps.
+  it("drops writes against sets the server did not create", async () => {
+    const [a, , c] = queueCurls();
+    enqueue({ kind: "updateSet", sessionId: 1, setId: a, body: { actualReps: 10 } });
+    enqueue({ kind: "updateSet", sessionId: 1, setId: c, body: { actualReps: 8 } });
+
+    // Only two came back for three ids.
+    addSessionAssistance.mockResolvedValue(ok([{ id: 71 }, { id: 72 }]));
+    updateSessionSet.mockResolvedValue(ok({ id: 0 }));
+    markReachable();
+    await flush();
+
+    expect(updateSessionSet).toHaveBeenCalledTimes(1);
+    expect(updateSessionSet).toHaveBeenCalledWith(1, 71, { actualReps: 10 });
+    expect(queuedCount()).toBe(0);
+    expect(rejectedCount()).toBe(0);
+  });
+
+  // A refusal takes a whole exercise off the screen. "1 change couldn't be
+  // saved" would undersell that.
+  it("counts a refusal per set, not per entry", async () => {
+    queueCurls();
+    addSessionAssistance.mockResolvedValue(refused());
+    markReachable();
+    await flush();
+
+    expect(rejectedCount()).toBe(3);
+    expect(queuedCount()).toBe(0);
+  });
+
+  describe("removing a set of a lift that has not been sent yet", () => {
+    it("shortens the add instead of queueing a delete", async () => {
+      const ids = queueCurls();
+      enqueue({ kind: "removeSet", sessionId: 1, setId: ids[2] });
+
+      // Still one entry — no delete was queued for a set the server has never
+      // heard of.
+      expect(queuedCount()).toBe(1);
+
+      addSessionAssistance.mockResolvedValue(ok([{ id: 71 }, { id: 72 }]));
+      markReachable();
+      await flush();
+
+      expect(addSessionAssistance).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ sets: 2 }),
+      );
+    });
+
+    it("forgets edits made to the set it removed", async () => {
+      const ids = queueCurls();
+      enqueue({ kind: "updateSet", sessionId: 1, setId: ids[2], body: { actualReps: 8 } });
+      enqueue({ kind: "removeSet", sessionId: 1, setId: ids[2] });
+
+      addSessionAssistance.mockResolvedValue(ok([{ id: 71 }, { id: 72 }]));
+      markReachable();
+      await flush();
+
+      expect(updateSessionSet).not.toHaveBeenCalled();
+    });
+
+    // Removing every set is an undo, so the lift is never added at all — not to
+    // the session and not to the program day. This is the one place the offline
+    // answer differs from the online one, where the overlay row would survive.
+    it("cancels the whole add when the last set goes", () => {
+      const ids = queueCurls();
+      for (const id of ids) enqueue({ kind: "removeSet", sessionId: 1, setId: id });
+      expect(queuedCount()).toBe(0);
+    });
+  });
+
+  // A set the server already knows about is not this entry's to cancel.
+  it("leaves a remove of a real set alone", () => {
+    queueCurls();
+    enqueue({ kind: "removeSet", sessionId: 1, setId: 42 });
+    expect(queuedCount()).toBe(2);
+  });
+
+  // The reason this entry is worth persisting at all: a phone that kills the
+  // tab between sets still owes the lifter the lift they added.
+  it("survives a reload with its ids intact", async () => {
+    const ids = queueCurls();
+
+    clearQueueInMemoryOnly();
+    hydrateQueue();
+    expect(queuedCount()).toBe(1);
+
+    enqueue({ kind: "updateSet", sessionId: 1, setId: ids[1], body: { actualReps: 10 } });
+    addSessionAssistance.mockResolvedValue(ok([{ id: 71 }, { id: 72 }, { id: 73 }]));
+    updateSessionSet.mockResolvedValue(ok({ id: 0 }));
+    markReachable();
+    await flush();
+
+    // The restored list still knows which placeholder was the second set.
+    expect(updateSessionSet).toHaveBeenCalledWith(1, 72, { actualReps: 10 });
+  });
+});
