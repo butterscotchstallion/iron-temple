@@ -193,12 +193,22 @@ describe("sessionShareCardContent", () => {
         }),
       );
       // Heaviest first: the server returns them alphabetically, which is right
-      // for a list and arbitrary for a headline.
+      // for a list and arbitrary for a headline. mkPR beats the old mark by 5,
+      // so each row also says how far it moved it.
       expect(c.moments).toEqual([
-        { label: "PR · Squat", value: "245 lb × 5" },
-        { label: "PR · Bench Press", value: "160 lb × 5" },
-        { label: "PR · Barbell Row", value: "135 lb × 5" },
+        { label: "PR · Squat", value: "245 lb × 5 · +2%" },
+        { label: "PR · Bench Press", value: "160 lb × 5 · +3%" },
+        { label: "PR · Barbell Row", value: "135 lb × 5 · +4%" },
       ]);
+    });
+
+    // previousLb is 0 for a lift with no history — "nothing to beat" rather
+    // than a mark of zero pounds — so there is no percentage to report.
+    it("omits the gain on a lift with no history", () => {
+      const c = sessionShareCardContent(
+        mkRecap({ prs: [{ ...mkPR("Squat", 245), previousLb: 0 }] }),
+      );
+      expect(c.moments[0]).toEqual({ label: "PR · Squat", value: "245 lb × 5" });
     });
 
     // The bar did not move, so quoting it would make the row look like a record
@@ -207,7 +217,7 @@ describe("sessionShareCardContent", () => {
       const c = sessionShareCardContent(
         mkRecap({ prs: [{ ...mkPR("Squat", 286), kind: "e1rm", weightLb: 245, reps: 8 }] }),
       );
-      expect(c.moments[0]).toEqual({ label: "Est. max · Squat", value: "286 lb" });
+      expect(c.moments[0]).toEqual({ label: "Est. max · Squat", value: "286 lb · +2%" });
     });
 
     // Rows are finite, so the overflow is counted rather than silently dropped —
@@ -225,9 +235,9 @@ describe("sessionShareCardContent", () => {
         }),
       );
       expect(c.moments).toEqual([
-        { label: "PR · Squat", value: "245 lb × 5" },
-        { label: "PR · Bench Press", value: "160 lb × 5" },
-        { label: "PR · Barbell Row", value: "135 lb × 5" },
+        { label: "PR · Squat", value: "245 lb × 5 · +2%" },
+        { label: "PR · Bench Press", value: "160 lb × 5 · +3%" },
+        { label: "PR · Barbell Row", value: "135 lb × 5 · +4%" },
         { label: "More records", value: "+2" },
       ]);
     });

@@ -10,7 +10,7 @@
 import type { SessionRecap } from "./api";
 import { barFraction, formatDelta, formatSessionLength } from "./racked";
 import { formatVolume } from "./volume";
-import { formatOrdinal, formatPace } from "./recap";
+import { formatOrdinal, formatPRGain, formatPace } from "./recap";
 import { LIFT_ROWS, type MomentRow, type ShareCardContent } from "./shareCard";
 
 /** Rows the records may take, each carrying one lift and what it lifted. */
@@ -34,7 +34,7 @@ const PR_ROWS = 4;
 const SESSION_MOMENT_ROWS = 6;
 
 /**
- * The records, one row each: "PR · Squat" against "245 lb × 5".
+ * The records, one row each: "PR · Squat" against "245 lb × 5 · +2%".
  *
  * A row apiece rather than one row listing names, because the weight is the
  * thing — "Squat, Bench Press and Barbell Row" says a good day happened without
@@ -56,13 +56,19 @@ function prMoments(prs: SessionRecap["prs"]): MomentRow[] {
   // Only give up a row to the overflow count when there is something to count.
   const shown = ranked.length > PR_ROWS ? ranked.slice(0, PR_ROWS - 1) : ranked;
 
-  const rows: MomentRow[] = shown.map((pr) => ({
-    label: `${pr.kind === "weight" ? "PR" : "Est. max"} · ${pr.exerciseName}`,
-    value:
+  const rows: MomentRow[] = shown.map((pr) => {
+    const lifted =
       pr.kind === "weight"
         ? `${formatVolume(pr.weightLb)} lb × ${pr.reps}`
-        : `${formatVolume(pr.valueLb)} lb`,
-  }));
+        : `${formatVolume(pr.valueLb)} lb`;
+    // How far it moved the mark, when that can be said at all — a lift with no
+    // history has nothing to be a percentage of. See formatPRGain.
+    const gain = formatPRGain(pr.valueLb, pr.previousLb);
+    return {
+      label: `${pr.kind === "weight" ? "PR" : "Est. max"} · ${pr.exerciseName}`,
+      value: gain ? `${lifted} · ${gain}` : lifted,
+    };
+  });
 
   const rest = ranked.length - shown.length;
   if (rest > 0) rows.push({ label: "More records", value: `+${rest}` });

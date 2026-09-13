@@ -5,7 +5,7 @@
   import Trophy from "@lucide/svelte/icons/trophy";
   import Flame from "@lucide/svelte/icons/flame";
   import { formatVolume } from "./volume";
-  import type { RecapPRRow } from "./recap";
+  import { formatPRGain, type RecapPRRow } from "./recap";
   import { STREAK_DISPLAY_THRESHOLD } from "./streak";
 
   // Records, milestones and streaks — the part worth reading first, so it sits
@@ -55,6 +55,13 @@
           {#if pr.previousLb > 0}
             <span class="ml-auto text-xs tabular-nums text-muted-foreground">
               was {formatVolume(pr.previousLb)}
+              <!-- The same figure the share card puts on the same record, so a
+                   lifter reading both is told one thing twice rather than two
+                   things once. Absent below a percent, where it would round to
+                   "0%" against a row announcing a record. -->
+              {#if formatPRGain(pr.valueLb, pr.previousLb)}
+                · <span class="text-primary">{formatPRGain(pr.valueLb, pr.previousLb)}</span>
+              {/if}
             </span>
           {/if}
         </li>
