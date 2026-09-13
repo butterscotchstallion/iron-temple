@@ -43,6 +43,11 @@ prescribed lifts, sets and reps.
 - **Set-by-set logging** — tick sets off as you complete them, or edit reps and
   weight when the day doesn't go to plan. **Add a set** for the extra one you had
   in you, or **drop one** you skipped.
+- **Add a lift you decided on at the rack.** Assistance can be added from the
+  workout you're in, not just from the program page — it drops into today's
+  session straight away *and* joins the day it came from, so it comes round again
+  with weight carry-forward behind it rather than being a one-off. The weight
+  starts where you left it, and like everything else here it works with no signal.
 - **Training without a signal.** A gym in a basement is where this app is used and
   where the network isn't. A tap that can't reach the server is written to disk,
   applied to the screen as though it had landed, and replayed in order when the
