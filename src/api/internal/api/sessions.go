@@ -669,18 +669,7 @@ func (s *Server) buildSession(ctx context.Context, id, userID int32) (sessionDTO
 
 	setDTOs := make([]sessionSetDTO, 0, len(sets))
 	for _, set := range sets {
-		setDTOs = append(setDTOs, sessionSetDTO{
-			ID:           set.ID,
-			ExerciseID:   set.ExerciseID,
-			ExerciseName: set.ExerciseName,
-			Kind:         setKind(set.IsAssistance),
-			SetNumber:    set.SetNumber,
-			TargetReps:   set.TargetReps,
-			ActualReps:   set.ActualReps,
-			WeightLb:     numericToFloat(set.WeightLb),
-			Completed:    set.Completed,
-			RestSeconds:  set.RestSeconds,
-		})
+		setDTOs = append(setDTOs, sessionSetToDTO(set))
 	}
 
 	return sessionDTO{
@@ -699,4 +688,23 @@ func (s *Server) buildSession(ctx context.Context, id, userID int32) (sessionDTO
 		PreviousBests:  bestDTOs,
 		Sets:           setDTOs,
 	}, nil
+}
+
+// sessionSetToDTO maps a row from ListSessionSets onto the wire. Shared by the
+// session read and by adding assistance mid-workout, so the two cannot differ
+// about a set — every field but the first four is derived at read time, which is
+// exactly the sort of thing a second copy gets subtly wrong.
+func sessionSetToDTO(set store.ListSessionSetsRow) sessionSetDTO {
+	return sessionSetDTO{
+		ID:           set.ID,
+		ExerciseID:   set.ExerciseID,
+		ExerciseName: set.ExerciseName,
+		Kind:         setKind(set.IsAssistance),
+		SetNumber:    set.SetNumber,
+		TargetReps:   set.TargetReps,
+		ActualReps:   set.ActualReps,
+		WeightLb:     numericToFloat(set.WeightLb),
+		Completed:    set.Completed,
+		RestSeconds:  set.RestSeconds,
+	}
 }

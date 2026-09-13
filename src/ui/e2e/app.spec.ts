@@ -58,11 +58,11 @@ const program1 = {
 // test below clicks getByRole("button", { name: /Dip/ }), which would then be a
 // strict-mode violation. The recents section has its own test.
 const libraryExercises = [
-  { id: 1, name: "Squat", muscleGroup: "legs", equipment: "barbell", isAccessory: false, isCustom: false, lastPerformedOn: null, performedSessions: 0 },
-  { id: 2, name: "Bench Press", muscleGroup: "chest", equipment: "barbell", isAccessory: false, isCustom: false, lastPerformedOn: null, performedSessions: 0 },
-  { id: 3, name: "Dip", muscleGroup: "chest", equipment: "bodyweight", isAccessory: true, isCustom: false, lastPerformedOn: null, performedSessions: 0 },
-  { id: 4, name: "Barbell Curl", muscleGroup: "arms", equipment: "barbell", isAccessory: true, isCustom: false, lastPerformedOn: null, performedSessions: 0 },
-  { id: 5, name: "Plank", muscleGroup: "core", equipment: "bodyweight", isAccessory: true, isCustom: false, lastPerformedOn: null, performedSessions: 0 },
+  { id: 1, name: "Squat", muscleGroup: "legs", equipment: "barbell", isAccessory: false, isCustom: false, restSeconds: 90, lastPerformedOn: null, performedSessions: 0 },
+  { id: 2, name: "Bench Press", muscleGroup: "chest", equipment: "barbell", isAccessory: false, isCustom: false, restSeconds: 90, lastPerformedOn: null, performedSessions: 0 },
+  { id: 3, name: "Dip", muscleGroup: "chest", equipment: "bodyweight", isAccessory: true, isCustom: false, restSeconds: 90, lastPerformedOn: null, performedSessions: 0 },
+  { id: 4, name: "Barbell Curl", muscleGroup: "arms", equipment: "barbell", isAccessory: true, isCustom: false, restSeconds: 90, lastPerformedOn: null, performedSessions: 0 },
+  { id: 5, name: "Plank", muscleGroup: "core", equipment: "bodyweight", isAccessory: true, isCustom: false, restSeconds: 90, lastPerformedOn: null, performedSessions: 0 },
 ];
 
 const nextSession = {
@@ -884,6 +884,55 @@ test("shows a recap from the finished session when the server can't be reached",
   await expect(page.getByTestId("recap-degraded")).toBeVisible();
   await expect(page.getByText("Couldn't load the recap.")).toHaveCount(0);
   await expect(page.getByTestId("stat-pace")).toHaveCount(0);
+});
+
+// Extra work, decided on at the rack. The one action on this screen that also
+// changes the program: the lift joins the day it was added from, which is what
+// the footnote under the inputs says.
+test("adds an assistance lift to the workout in progress", async ({ page }) => {
+  await page.route("**/api/v1/sessions/1", (route) =>
+    route.fulfill({ json: sessionDetail() }),
+  );
+  await page.route("**/api/v1/exercises**", (route) =>
+    route.fulfill({ json: libraryExercises }),
+  );
+
+  let added: unknown = null;
+  await page.route("**/api/v1/sessions/1/assistance", async (route) => {
+    added = route.request().postDataJSON();
+    await route.fulfill({
+      status: 201,
+      json: [1, 2, 3].map((n) => ({
+        id: 100 + n,
+        exerciseId: 4,
+        exerciseName: "Barbell Curl",
+        kind: "assistance",
+        setNumber: n,
+        targetReps: 10,
+        actualReps: null,
+        weightLb: 30,
+        completed: false,
+        restSeconds: 90,
+      })),
+    });
+  });
+
+  await page.goto("/#/sessions/1");
+  await page.getByRole("button", { name: "Add assistance" }).click();
+
+  // A movement already in the workout is not offered — it could only 409.
+  await expect(page.getByRole("button", { name: /Barbell Curl/ }).first()).toBeVisible();
+  await page.getByRole("button", { name: /Barbell Curl/ }).first().click();
+
+  // And it says what it is about to do to the program, not just to today.
+  await expect(page.getByText(/joins Workout A too/)).toBeVisible();
+  await page.getByRole("button", { name: "Add to this workout" }).click();
+
+  await expect(page.getByRole("heading", { name: "Barbell Curl" })).toBeVisible();
+  // exact, because getByText matches case-insensitively on a substring by
+  // default and the "Add assistance" button below would match too.
+  await expect(page.getByText("Assistance", { exact: true })).toBeVisible();
+  expect(added).toEqual({ exerciseId: 4, sets: 3, reps: 10, weightLb: 0 });
 });
 
 test("renders an already-finished session read-only", async ({ page }) => {

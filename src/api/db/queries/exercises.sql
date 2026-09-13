@@ -55,6 +55,7 @@ SELECT e.id,
        e.muscle_group,
        e.equipment,
        e.is_accessory,
+       e.rest_seconds,
        (e.created_by_user_id IS NOT NULL)::bool AS is_custom,
        top.weight_lb                            AS top_weight_lb,
        top.performed_on                         AS top_performed_on,
@@ -118,7 +119,7 @@ WHERE lower(name) = lower(sqlc.arg('name'))
 -- name: CreateExercise :one
 INSERT INTO exercises (name, muscle_group, equipment, created_by_user_id)
 VALUES (sqlc.arg('name'), sqlc.arg('muscle_group'), sqlc.arg('equipment'), sqlc.arg('user_id')::int)
-RETURNING id, name, muscle_group, equipment, is_accessory,
+RETURNING id, name, muscle_group, equipment, is_accessory, rest_seconds,
           (created_by_user_id IS NOT NULL)::bool AS is_custom;
 
 -- CountExerciseUses reports what would break if an exercise were deleted.

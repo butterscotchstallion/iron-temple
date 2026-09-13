@@ -88,6 +88,7 @@ func (s *Server) listExercises(w http.ResponseWriter, r *http.Request) {
 			Equipment:         e.Equipment,
 			IsAccessory:       e.IsAccessory,
 			IsCustom:          e.IsCustom,
+			RestSeconds:       e.RestSeconds,
 			TopSet:            top,
 			LastPerformedOn:   lastPerformedOn,
 			PerformedSessions: e.PerformedSessions,
@@ -166,6 +167,7 @@ func (s *Server) createExercise(w http.ResponseWriter, r *http.Request) {
 		Equipment:   created.Equipment,
 		IsAccessory: created.IsAccessory,
 		IsCustom:    created.IsCustom,
+		RestSeconds: created.RestSeconds,
 		// A movement that did not exist a moment ago has nothing logged against
 		// it, so its top set and its history are null by construction rather
 		// than by lookup — spelled out because all three are `required` in the
