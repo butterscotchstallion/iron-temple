@@ -1,8 +1,15 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "security:minimumReleaseAgeNpm holds npm updates back until the release is 3 days old. It is here to agree with a gate that already exists downstream: pnpm 12 enforces a 24h minimumReleaseAge at install time (see src/ui/pnpm-workspace.yaml), and a committed lockfile naming a version younger than that fails `pnpm install --frozen-lockfile` outright with ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION. With no window configured here, Renovate resolved same-day releases and opened PRs that were red the moment they arrived — #180 landed 15 such entries and needed a re-run hours later rather than any fix. Three days clears the 24h gate with margin, so a PR is installable when it opens.",
+    "Renovate's window must stay at or above pnpm's. The package-manager gate is the backstop that also protects developer machines, so the two are layered deliberately and the fix for a red PR is never to lower pnpm's side. internalChecksFilter already defaults to 'strict', so no branch is created while the check is pending — this suppresses the PR, it does not merely annotate it.",
+    "Extended as the preset rather than set as a bare minimumReleaseAge because the preset also carves the setting back out (to null) for lockFileMaintenance, bump, lockfileUpdate and rollback — update types Renovate cannot age-check because it is the package manager, not Renovate, that writes those versions. A hand-rolled rule silently skips those carve-outs.",
+    "Known gap, so it is not mistaken for a regression: once a PR is already open, a newer release updates that PR immediately and bypasses the window. The cooling-off applies to raising the branch, not to every subsequent push onto it."
+  ],
   "extends": [
     "config:recommended",
-    ":semanticCommits"
+    ":semanticCommits",
+    "security:minimumReleaseAgeNpm"
   ],
   "postUpdateOptions": [
     "gomodTidy",

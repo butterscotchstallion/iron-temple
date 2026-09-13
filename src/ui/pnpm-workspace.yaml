@@ -47,8 +47,17 @@ allowBuilds:
 # committed lockfile naming a too-new version fails hard with
 # ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION.
 #
-# Consequence worth knowing before it surprises someone: a Renovate PR that
-# bumps to a same-day release will go red until the version ages out, and needs
-# a re-run rather than a fix. That cooling-off is the point — compromised
-# packages are typically caught within hours — so raise the frequency question
-# with renovate.json's schedule, not by lowering this.
+# This is the BACKSTOP, not the only gate. It protects developer machines and
+# any lockfile however it was produced, so it stays at 24h regardless of what
+# the bot does. Renovate is configured to wait longer than this before it even
+# raises a branch (security:minimumReleaseAgeNpm, 3 days — see renovate.json),
+# which is what keeps a dependency PR from arriving already red. Those two
+# windows are layered on purpose: Renovate's must stay at or above this one, so
+# a red dependency PR is answered by raising Renovate's side, never by lowering
+# this. That cooling-off is the point — compromised packages are typically
+# caught within hours.
+#
+# Still expect to see this fire. A PR that was already open when a new version
+# shipped gets updated past Renovate's window, and a hand-edited lockfile never
+# passed through Renovate at all; both land here and fail hard. That is the
+# backstop working, and it clears by letting the version age out.
