@@ -57,7 +57,14 @@ function bareReport(): RackedReport {
     peakHour: -1,
     hourLabel: "",
     streak: { longestWeeks: 0, currentWeeks: 0 },
-    attendance: { basis: "none", expected: 0, actual: 0, rate: 0, sessionsPerWeek: 0 },
+    attendance: {
+      basis: "none",
+      expected: 0,
+      actual: 0,
+      rate: 0,
+      sessionsPerWeek: 0,
+      weekdays: [],
+    },
     prs: [],
     milestones: [],
     heaviestSet: null,
@@ -103,7 +110,14 @@ function fullReport(): RackedReport {
       gainPct: 0.0987,
     },
     streak: { longestWeeks: 5, currentWeeks: 3 },
-    attendance: { basis: "none", expected: 0, actual: 12, rate: 0, sessionsPerWeek: 2.75 },
+    attendance: {
+      basis: "none",
+      expected: 0,
+      actual: 12,
+      rate: 0,
+      sessionsPerWeek: 2.75,
+      weekdays: [],
+    },
     prs: [
       {
         kind: "weight",
@@ -273,6 +287,7 @@ describe("shareCardContent", () => {
       actual: 12,
       rate: 0.857,
       sessionsPerWeek: 2.75,
+      weekdays: [1, 3, 5],
     };
     expect(shareCardContent(scheduled).footnote).toBe("86% of scheduled sessions");
   });

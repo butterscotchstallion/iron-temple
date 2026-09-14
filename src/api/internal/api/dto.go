@@ -694,6 +694,10 @@ type rackedAttendanceDTO struct {
 	// of the time: it is a measurement rather than a score against a target
 	// nobody entered.
 	SessionsPerWeek float64 `json:"sessionsPerWeek"`
+	// Weekdays are the days the schedule runs on, for surfaces that draw it
+	// rather than grade against it. Empty whenever Basis is "none", so it needs
+	// no second check.
+	Weekdays []int `json:"weekdays"`
 }
 
 type rackedPRDTO struct {
