@@ -21,6 +21,12 @@
   let currentProgramId = $derived(auth.me?.currentProgramId ?? lastSessionProgramId);
   let streak = $state(0);
   let sessions = $state<{ performedOn: string; day: string }[]>([]);
+  // Reported up by the program below as it loads, so the heatmap can draw a row
+  // for a day that is scheduled but hasn't been trained — the miss that the
+  // session list, by definition, has no record of. Empty until it arrives, and
+  // for a lifter with no program at all, which just leaves the grid to collapse
+  // on the days they actually trained.
+  let scheduledWeekdays = $state<number[]>([]);
   let loading = $state(true);
   let failed = $state(false);
 
@@ -93,7 +99,7 @@
         >
           Training days
         </h3>
-        <CalendarHeatmap {sessions} />
+        <CalendarHeatmap {sessions} {scheduledWeekdays} />
       </Card>
     </div>
   {/if}
@@ -103,7 +109,10 @@
   {:else if failed}
     <ErrorCard message="Couldn't load your workout." onRetry={load} />
   {:else if currentProgramId != null}
-    <ProgramDetail params={{ id: String(currentProgramId) }} />
+    <ProgramDetail
+      params={{ id: String(currentProgramId) }}
+      onSchedule={(weekdays) => (scheduledWeekdays = weekdays)}
+    />
   {:else}
     <Programs />
   {/if}

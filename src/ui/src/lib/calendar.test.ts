@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { addDaysIso, buildCalendar, volumeLevel } from "./calendar";
+import { activeWeekdays, addDaysIso, buildCalendar, volumeLevel } from "./calendar";
 
 describe("buildCalendar", () => {
   // 2026-08-06 is a Thursday.
@@ -23,6 +23,51 @@ describe("buildCalendar", () => {
     expect(flat.find((d) => d.date === "2026-08-06")?.count).toBe(2);
     expect(flat.find((d) => d.date === "2026-08-04")?.count).toBe(1);
     expect(flat.find((d) => d.date === "2026-08-05")?.count).toBe(0);
+  });
+});
+
+describe("activeWeekdays", () => {
+  // 2026-08-03 is a Monday, so that week runs Mon 3rd … Sat 8th.
+  const MON = "2026-08-03";
+  const WED = "2026-08-05";
+  const THU = "2026-08-06";
+  const FRI = "2026-08-07";
+  const SAT = "2026-08-08";
+  const ALL = [0, 1, 2, 3, 4, 5, 6];
+
+  it("collapses a two-day program to its two rows", () => {
+    expect(activeWeekdays([MON, THU, "2026-08-10"], [1, 4])).toEqual([1, 4]);
+  });
+
+  it("keeps a scheduled day that was never trained, which is the miss", () => {
+    expect(activeWeekdays([MON], [1, 4])).toEqual([1, 4]);
+  });
+
+  // The row set is what decides which cells exist, so dropping a weekday would
+  // drop the sessions on it off the grid entirely.
+  it("keeps a weekday trained off schedule", () => {
+    expect(activeWeekdays([SAT], [1, 4])).toEqual([1, 4, 6]);
+  });
+
+  it("falls back to all seven rather than trimming a scattered history", () => {
+    expect(activeWeekdays(["2026-08-02", MON, WED, THU, FRI])).toEqual(ALL);
+  });
+
+  it("draws all seven when there is nothing to collapse on", () => {
+    expect(activeWeekdays([])).toEqual(ALL);
+    expect(activeWeekdays([], [])).toEqual(ALL);
+  });
+
+  it("works from sessions alone, with no schedule to go on", () => {
+    expect(activeWeekdays([MON, THU])).toEqual([1, 4]);
+  });
+
+  it("ignores a weekday outside 0–6 and a date it cannot parse", () => {
+    expect(activeWeekdays(["not-a-date", MON], [9, -1, 4])).toEqual([1, 4]);
+  });
+
+  it("counts a weekday once however many sessions land on it", () => {
+    expect(activeWeekdays([MON, MON, MON, THU], [1])).toEqual([1, 4]);
   });
 });
 

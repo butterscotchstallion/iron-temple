@@ -48,7 +48,20 @@
   import TrendingDown from "@lucide/svelte/icons/trending-down";
   import X from "@lucide/svelte/icons/x";
 
-  let { params }: { params?: { id?: string } } = $props();
+  let {
+    params,
+    // Told to whoever is hosting this screen whenever the program's schedule
+    // changes shape — which is Home, whose heatmap draws a row per scheduled
+    // weekday and needs to know which. Reported from here rather than fetched
+    // there because this screen has already paid for the program, and because
+    // the weekday picker below is what edits it: assigning a day to Monday
+    // grows the Monday row without a reload. Absent on the standalone route,
+    // where nobody is listening.
+    onSchedule,
+  }: {
+    params?: { id?: string };
+    onSchedule?: (weekdays: number[]) => void;
+  } = $props();
   let programId = $derived(Number(params?.id));
 
   // A day plus its progression-computed next-session prescription.
@@ -105,6 +118,13 @@
         return a.dueOn < b.dueOn ? -1 : 1;
       }),
   );
+  // The weekdays this program is scheduled on, deduplicated and ascending —
+  // two days can share one, and an unscheduled day contributes nothing.
+  let scheduledWeekdays = $derived([
+    ...new Set(days.map((d) => d.weekday).filter((w) => w !== null)),
+  ].sort((a, b) => a - b));
+  $effect(() => onSchedule?.(scheduledWeekdays));
+
   let loading = $state(true);
   let failed = $state(false);
   let startingDayId = $state<number | null>(null);
