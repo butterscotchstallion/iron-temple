@@ -11,6 +11,12 @@ export const WEEKDAYS = [
   "Saturday",
 ];
 
+/**
+ * The same seven, abbreviated, for places too narrow to spell them out — the
+ * heatmap's row labels are three characters wide at most.
+ */
+export const SHORT_WEEKDAYS = WEEKDAYS.map((name) => name.slice(0, 3));
+
 /** Full weekday name for 0 = Sunday … 6 = Saturday; "Unscheduled" for null. */
 export function weekdayLabel(n: number | null | undefined): string {
   return n == null ? "Unscheduled" : (WEEKDAYS[n] ?? "");

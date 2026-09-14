@@ -52,6 +52,47 @@ export function volumeLevel(volume: number, max: number): number {
 }
 
 /**
+ * Above this many rows, collapsing has stopped paying for itself: the grid is
+ * nearly full height anyway, and a five-row week reads as a broken seven-row
+ * one rather than as a schedule.
+ */
+const MAX_COLLAPSED_ROWS = 4;
+
+/**
+ * Which weekday rows the heatmap should draw, Sunday = 0, ascending.
+ *
+ * A GitHub-style seven-row grid assumes any day can carry work. A lifter on a
+ * two-day program can never light more than two of the rows, so five sevenths
+ * of the card is blank however well they train — and a blank cell means both
+ * "rest day" and "missed session", which are not the same news. Drawing only
+ * the weekdays that mean something — the ones the program is scheduled on,
+ * plus any the lifter actually trained — turns every remaining blank on a
+ * scheduled row into a missed session.
+ *
+ * Trained weekdays are included unconditionally, because a row that isn't
+ * drawn takes its sessions off the grid with it and the grid may not hide
+ * work. That is also why a scattered history falls back to all seven rows
+ * instead of being trimmed to the usual days: there is no honest way to drop a
+ * row that someone trained on.
+ */
+export function activeWeekdays(
+  sessionDates: string[],
+  scheduled: number[] = [],
+): number[] {
+  const rows = new Set<number>();
+  for (const weekday of scheduled) {
+    if (Number.isInteger(weekday) && weekday >= 0 && weekday <= 6) rows.add(weekday);
+  }
+  for (const iso of sessionDates) {
+    // NaN for anything unparseable, which Number.isInteger drops.
+    const weekday = parseIso(iso).getDay();
+    if (Number.isInteger(weekday)) rows.add(weekday);
+  }
+  if (rows.size === 0 || rows.size > MAX_COLLAPSED_ROWS) return [0, 1, 2, 3, 4, 5, 6];
+  return [...rows].sort((a, b) => a - b);
+}
+
+/**
  * Build a `weeks` × 7 grid (GitHub-style) of per-day session counts, ending at
  * the week containing `endIso`. Columns are weeks (oldest → newest); rows are
  * Sunday → Saturday. Dates are compared as YYYY-MM-DD strings, computed in local

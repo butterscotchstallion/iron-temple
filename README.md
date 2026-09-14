@@ -120,6 +120,10 @@ A recap of **this week, this month or this year**, computed from performed sets:
   the days that have actually elapsed, so a month two days in isn't graded as a
   whole one.
 - Per-lift trend charts, a calendar heatmap, best weekday and peak training hour.
+  The heatmap draws a row per weekday that means something — the ones your program
+  is scheduled on, plus any you actually trained — rather than a fixed seven. On a
+  two-day program that is two rows instead of five-sevenths empty space, and a blank
+  cell on a scheduled row is a session missed rather than a Tuesday.
 - Bodyweight trend, when there are weigh-ins to draw.
 - An **archetype** naming how you trained, and a **share card** you can export.
 
@@ -136,7 +140,8 @@ waking on the 1st, so downtime delays a recap instead of dropping it.
 - **Per-lift history** with a progress chart and your top set to date.
 - **Session history**, paged, with lifetime volume across everything you've logged.
 - **Home** opens on the program you last used, with your streak and a heatmap of
-  recent training.
+  recent training — collapsed to the weekdays your program runs on, so the days you
+  were meant to train and didn't are visible rather than lost among the rest days.
 
 ### Accounts
 
