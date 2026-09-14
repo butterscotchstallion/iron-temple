@@ -2,6 +2,7 @@ package racked
 
 import (
 	"math"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -270,6 +271,67 @@ func TestAttendanceBasis(t *testing.T) {
 		got := attendance(nil, time.Time{}, nil, start, start)
 		if got.SessionsPerWeek != 0 {
 			t.Fatalf("sessionsPerWeek = %v, want 0", got.SessionsPerWeek)
+		}
+	})
+}
+
+// Weekdays is what the heatmap draws its rows from, and its contract is that it
+// is non-empty exactly when Basis is AttendanceWeekday — so a surface can read
+// it without repeating the basis check.
+func TestAttendanceWeekdays(t *testing.T) {
+	monday, wednesday := 1, 3
+	start, end := day(2026, time.March, 1), day(2026, time.March, 31)
+
+	t.Run("the scheduled days, ascending", func(t *testing.T) {
+		days := []ProgramDay{{Name: "A", Weekday: &wednesday}, {Name: "B", Weekday: &monday}}
+		got := attendance(days, time.Time{}, performedFrom(start, 8), start, end)
+		if !reflect.DeepEqual(got.Weekdays, []int{1, 3}) {
+			t.Fatalf("weekdays = %v, want [1 3]", got.Weekdays)
+		}
+	})
+
+	// Expected counts both Mondays, because two days scheduled on one weekday
+	// really are two sessions to turn up for. A calendar still has one Monday.
+	t.Run("one entry per weekday, however many days share it", func(t *testing.T) {
+		days := []ProgramDay{{Name: "A", Weekday: &monday}, {Name: "B", Weekday: &monday}}
+		got := attendance(days, time.Time{}, performedFrom(start, 4), start, end)
+		if !reflect.DeepEqual(got.Weekdays, []int{1}) {
+			t.Fatalf("weekdays = %v, want [1]", got.Weekdays)
+		}
+		if got.Expected != 10 { // five Mondays, two days wanted on each
+			t.Fatalf("expected = %d, want 10", got.Expected)
+		}
+	})
+
+	// Empty, never nil: it ships as a JSON array and a surface iterates it
+	// without a null check.
+	t.Run("empty whenever the basis is none", func(t *testing.T) {
+		for name, days := range map[string][]ProgramDay{
+			"no program":  nil,
+			"no weekdays": {{Name: "A"}, {Name: "B"}},
+		} {
+			got := attendance(days, time.Time{}, performedFrom(start, 4), start, end)
+			if got.Basis != AttendanceNone {
+				t.Fatalf("%s: basis = %q, want none", name, got.Basis)
+			}
+			if got.Weekdays == nil || len(got.Weekdays) != 0 {
+				t.Fatalf("%s: weekdays = %v, want empty and non-nil", name, got.Weekdays)
+			}
+		}
+	})
+
+	// The program is younger than the period, so there is no scheduled day in
+	// it to have missed. Grading stands down, and so must the rows drawn from
+	// the same judgement.
+	t.Run("empty when the program post-dates the period", func(t *testing.T) {
+		days := []ProgramDay{{Name: "A", Weekday: &monday}}
+		started := day(2026, time.April, 15)
+		got := attendance(days, started, performedFrom(start, 4), start, end)
+		if got.Basis != AttendanceNone {
+			t.Fatalf("basis = %q, want none", got.Basis)
+		}
+		if len(got.Weekdays) != 0 {
+			t.Fatalf("weekdays = %v, want empty", got.Weekdays)
 		}
 	})
 }

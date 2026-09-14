@@ -3385,7 +3385,7 @@ components:
 
     RackedAttendance:
       type: object
-      required: [basis, expected, actual, rate, sessionsPerWeek]
+      required: [basis, expected, actual, rate, sessionsPerWeek, weekdays]
       properties:
         basis:
           type: string
@@ -3417,6 +3417,27 @@ components:
             How often the lifter actually trained, over the period's whole length
             rather than only the weeks they showed up. Always populated, needs no
             configuration, and is what to show when there is no target.
+        weekdays:
+          type: array
+          maxItems: 7
+          items:
+            type: integer
+            minimum: 0
+            maximum: 6
+          example: [1, 4]
+          description: >
+            The distinct days the schedule runs on, ascending, 0 = Sunday to match
+            programDay.weekday — for surfaces that DRAW the schedule rather than
+            grade against it, such as the calendar heatmap, which uses it to keep
+            a row for a day that was scheduled and not trained.
+
+            Distinct, where `expected` counts: two program days sharing a Monday
+            ask for two Monday sessions, but they are one row on a calendar.
+
+            Non-empty exactly when `basis` is `weekday`, so it can be read without
+            checking the basis first. Every reason the schedule cannot be trusted
+            for this period — no current program, no weekday set on any day, or a
+            program younger than the period — empties this too.
 
     RackedPR:
       type: object

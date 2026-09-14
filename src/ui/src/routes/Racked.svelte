@@ -496,6 +496,7 @@
           volumes={volumesByDate}
           endDate={report.period.end}
           weeks={heatmapWeeks}
+          scheduledWeekdays={report.attendance.weekdays}
         />
         <ChartTable label="Training days" columns={["Date", "Volume"]} rows={dayRows} />
       </Card>

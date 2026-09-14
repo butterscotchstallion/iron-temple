@@ -1259,7 +1259,14 @@ const rackedMarch: RackedReport = {
   peakHour: 6,
   hourLabel: "Early bird",
   streak: { longestWeeks: 5, currentWeeks: 3 },
-  attendance: { basis: "none", expected: 0, actual: 12, rate: 0, sessionsPerWeek: 2.75 },
+  attendance: {
+    basis: "none",
+    expected: 0,
+    actual: 12,
+    rate: 0,
+    sessionsPerWeek: 2.75,
+    weekdays: [],
+  },
   prs: [
     {
       kind: "weight",

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/svelte";
+import { render, screen, waitFor, within } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Racked from "./Racked.svelte";
 import type { RackedReport } from "../lib/api";
@@ -56,7 +56,14 @@ function emptyReport(): RackedReport {
     peakHour: -1,
     hourLabel: "",
     streak: { longestWeeks: 0, currentWeeks: 0 },
-    attendance: { basis: "none", expected: 0, actual: 0, rate: 0, sessionsPerWeek: 0 },
+    attendance: {
+      basis: "none",
+      expected: 0,
+      actual: 0,
+      rate: 0,
+      sessionsPerWeek: 0,
+      weekdays: [],
+    },
     prs: [],
     milestones: [],
     heaviestSet: null,
@@ -157,7 +164,14 @@ function fullReport(): RackedReport {
     peakHour: 6,
     hourLabel: "Early bird",
     streak: { longestWeeks: 5, currentWeeks: 3 },
-    attendance: { basis: "none", expected: 0, actual: 12, rate: 0, sessionsPerWeek: 2.75 },
+    attendance: {
+      basis: "none",
+      expected: 0,
+      actual: 12,
+      rate: 0,
+      sessionsPerWeek: 2.75,
+      weekdays: [],
+    },
     prs: [
       {
         kind: "weight",
@@ -424,6 +438,7 @@ describe("Racked", () => {
       actual: 12,
       rate: 0.923,
       sessionsPerWeek: 2.75,
+      weekdays: [1, 3, 5],
     };
     getRacked.mockResolvedValue({ status: 200, data: report, headers: new Headers() });
     render(Racked);
@@ -526,6 +541,44 @@ describe("Racked", () => {
 
     await screen.findByTestId("stat-training-days");
     expect(screen.getByText("Week streak")).toBeInTheDocument();
+  });
+
+  // The report carries the weekdays attendance was graded against, so the recap
+  // heatmap can keep a row for a scheduled day that holds no session. Without
+  // it the grid collapses on training alone and a missed Thursday leaves no
+  // trace — the row it would have been missing from is not drawn.
+  it("keeps a row for a scheduled day the period holds no session on", async () => {
+    const report = fullReport();
+    // Both fixture sessions are Mondays; Thursday is scheduled and untrained.
+    report.attendance = {
+      basis: "weekday",
+      expected: 9,
+      actual: 2,
+      rate: 0.222,
+      sessionsPerWeek: 0.5,
+      weekdays: [1, 4],
+    };
+    getRacked.mockResolvedValue({ status: 200, data: report, headers: new Headers() });
+    render(Racked);
+
+    const card = within(await screen.findByTestId("stat-training-days"));
+    expect(card.getByText("Mon")).toBeInTheDocument();
+    expect(card.getByText("Thu")).toBeInTheDocument();
+    // Nothing else: the rows are the schedule, not the week.
+    expect(card.queryByText("Tue")).not.toBeInTheDocument();
+  });
+
+  // basis "none" means the server declined to grade against the schedule — no
+  // program, none of its days scheduled, or a program younger than the period.
+  // weekdays is empty in step with it, so the grid falls back to the days that
+  // were actually trained and claims nothing about what was missed.
+  it("draws no scheduled rows when there is no schedule to trust", async () => {
+    getRacked.mockResolvedValue({ status: 200, data: fullReport(), headers: new Headers() });
+    render(Racked);
+
+    const card = within(await screen.findByTestId("stat-training-days"));
+    expect(card.getByText("Mon")).toBeInTheDocument();
+    expect(card.queryByText("Thu")).not.toBeInTheDocument();
   });
 
   // Accuracy fixes from the recap audit — each pins a figure the page used to

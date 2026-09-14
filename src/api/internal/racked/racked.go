@@ -336,6 +336,16 @@ type Attendance struct {
 	// SessionsPerWeek is how often the lifter actually trained, measured over
 	// the period's length rather than over the weeks they happened to show up.
 	SessionsPerWeek float64
+	// Weekdays are the distinct days Expected was counted from, ascending,
+	// 0 = Sunday. Non-empty exactly when Basis is AttendanceWeekday, which is
+	// what makes it safe to read on its own: every reason the schedule cannot
+	// be trusted for this period — no program, no weekday set, a program
+	// younger than the period — already empties it by leaving Basis alone.
+	//
+	// Distinct, where Expected counts: two program days sharing a Monday ask
+	// for two Monday sessions, but they are one row on a calendar. This is for
+	// the surfaces that draw the schedule rather than grade against it.
+	Weekdays []int
 }
 
 // PRKind distinguishes the two ways a set can be a record.
@@ -961,6 +971,9 @@ func attendance(
 		// Measured over the whole elapsed period, whatever the program was doing
 		// in it — this is a fact about the lifter, not about a schedule.
 		SessionsPerWeek: float64(len(performed)) / weeksBetween(start, end),
+		// Empty rather than nil: it ships as a JSON array, and every early
+		// return below leaves it exactly as it is.
+		Weekdays: []int{},
 	}
 
 	// Counted, not collected: a program running two different days on a Monday
@@ -1012,6 +1025,12 @@ func attendance(
 	a.Basis = AttendanceWeekday
 	a.Actual = attended
 	a.Rate = float64(attended) / float64(a.Expected)
+	// Published only here, at the point the schedule has been found good enough
+	// to grade against. See Attendance.Weekdays.
+	for weekday := range scheduled {
+		a.Weekdays = append(a.Weekdays, weekday)
+	}
+	sort.Ints(a.Weekdays)
 	return a
 }
 

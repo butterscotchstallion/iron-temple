@@ -306,6 +306,7 @@ func rackedReportToDTO(rep racked.Report) rackedReportDTO {
 			Actual:          rep.Attendance.Actual,
 			Rate:            rep.Attendance.Rate,
 			SessionsPerWeek: rep.Attendance.SessionsPerWeek,
+			Weekdays:        rep.Attendance.Weekdays,
 		},
 		PRs:        make([]rackedPRDTO, 0, len(rep.PRs)),
 		Milestones: make([]rackedMilestoneDTO, 0, len(rep.Milestones)),
