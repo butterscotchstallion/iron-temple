@@ -33,7 +33,7 @@
   import ErrorCard from "../lib/ErrorCard.svelte";
   import ErrorBanner from "../lib/ErrorBanner.svelte";
   import AssistancePicker from "../lib/AssistancePicker.svelte";
-  import { weekdayOptions, dueLabel } from "../lib/weekday";
+  import { weekdayOptions } from "../lib/weekday";
   import { todayIso } from "../lib/calendar";
   import {
     deloadLabel,
@@ -536,29 +536,14 @@
     {#each orderedDays as day (day.id)}
       {@const trained = todayStatus(recent, day.id)}
       {@const dueToday = day.dueOn === todayIso()}
+      <!-- The ring is what marks today's workout. It used to be a dated chip
+           beside the title, but the weekday picker below already labels every
+           choice with the date it lands on, so the chip spent most of its life
+           restating the selected option word for word. -->
       <Card class="p-5 {dueToday ? 'ring-2 ring-primary' : ''}">
         <div class="flex items-center justify-between gap-3">
           <div class="flex flex-wrap items-center gap-2">
             <h3 class="text-lg font-bold text-card-foreground">{day.name}</h3>
-            <!-- When this day next comes round. Keyed off the due date rather
-                 than the weekday, so a day finished this morning reads as next
-                 week's rather than still claiming to be today's workout. The
-                 date is what tells two cards for the SAME day a week apart
-                 apart, which is the whole reason it is spelled out. -->
-            {#if day.dueOn}
-              <span
-                class="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide {dueToday
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-muted text-muted-foreground'}"
-              >
-                {dueLabel(day.dueOn)}
-              </span>
-            {/if}
-            <!-- Kept alongside the due chip rather than folded into it: the two
-                 answer different questions, and together they explain each
-                 other. "Done today" next to next week's date is the card saying
-                 why it moved — without it, a day that was due today and is
-                 suddenly dated a week out looks like a scheduling bug. -->
             {#if trained?.done}
               <Badge variant="secondary">
                 <Check aria-hidden="true" />
@@ -571,6 +556,11 @@
               class="flex items-center gap-1 rounded-md border border-input px-2 py-1 text-xs text-muted-foreground"
             >
               <Calendar class="size-3.5" />
+              <!-- Which weekday this day is scheduled on, and — through the
+                   dated option labels — when that next comes round. Those dates
+                   are the next upcoming occurrence of each weekday, so a day
+                   finished this morning still reads as today's; "Done today"
+                   beside it is what says the work is behind you. -->
               <select
                 class="bg-transparent outline-none"
                 value={day.weekday === null ? "" : String(day.weekday)}
