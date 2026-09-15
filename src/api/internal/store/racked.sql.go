@@ -14,10 +14,7 @@ import (
 const rackedExerciseBaseline = `-- name: RackedExerciseBaseline :many
 SELECT ss.exercise_id,
        MAX(ss.weight_lb)::numeric AS best_weight_lb,
-       MAX(ROUND(CASE WHEN ss.actual_reps = 1
-                      THEN ss.weight_lb
-                      ELSE ss.weight_lb * (1 + ss.actual_reps / 30.0)
-                 END))::numeric AS best_e1rm_lb
+       MAX(e1rm_lb(ss.weight_lb, ss.actual_reps))::numeric AS best_e1rm_lb
 FROM session_sets ss
 JOIN sessions s ON s.id = ss.session_id
 WHERE s.user_id = $1::int
@@ -48,17 +45,13 @@ type RackedExerciseBaselineRow struct {
 // side keeps the same two, and estimateOneRepMax in the UI uses the same
 // formula — weight x (1 + reps/30).
 //
-// ROUND is load-bearing, not cosmetic. Set.E1RM in Go rounds to the pound, and
-// personalRecords compares an in-period estimate straight against this baseline;
-// if only one side rounded, the two would disagree inside a sub-pound band and
-// that band is exactly where a record is decided. Unrounded here, repeating an
-// identical set in a later period reads as a new record — 185 x 3 is 203.5, the
-// Go side calls it 204, and 204 > 203.5. Rounding per row rather than around the
-// MAX mirrors what Go does, and is equivalent anyway since ROUND is monotonic.
-//
-// The single is spelled out for the same reason the CASE exists in Go: Epley
-// extrapolates from a set carried past one rep, and at exactly one rep it
-// inflates a known number by a thirtieth. A 225 single is a 225 estimated max.
+// The estimate comes from e1rm_lb() (migration 0019), which is where the ROUND
+// and the single-rep exception now live. They are load-bearing, not cosmetic:
+// Set.E1RM in Go rounds to the pound and personalRecords compares an in-period
+// estimate straight against this baseline, so if only one side rounded the two
+// would disagree inside a sub-pound band — and that band is exactly where a
+// record is decided. This query and the two others that need the estimate used to
+// spell it out separately; one body is what keeps them from drifting.
 func (q *Queries) RackedExerciseBaseline(ctx context.Context, arg RackedExerciseBaselineParams) ([]RackedExerciseBaselineRow, error) {
 	rows, err := q.db.Query(ctx, rackedExerciseBaseline, arg.UserID, arg.StartOn)
 	if err != nil {
