@@ -2,6 +2,7 @@
   import { barFraction, formatPercent } from "./racked";
   import { muscleGroupLabel } from "./library";
   import { formatVolume } from "./volume";
+  import VolumeBar from "./VolumeBar.svelte";
 
   // What the period trained, by muscle group.
   //
@@ -36,29 +37,21 @@
 
 <ul class="flex flex-col gap-2" data-testid="muscle-bars">
   {#each rows as row (row.group)}
-    <li>
-      <div class="flex items-baseline justify-between gap-2 text-xs">
-        <span
-          class="truncate font-semibold {row.trained
-            ? 'text-foreground'
-            : 'text-muted-foreground'}"
-        >
-          {muscleGroupLabel(row.group)}
-        </span>
-        <span class="shrink-0 tabular-nums text-muted-foreground">
-          {#if row.trained}
-            {formatVolume(row.volumeLb)} lb · {formatPercent(row.share)}
-          {:else}
-            not trained
-          {/if}
-        </span>
-      </div>
-      <div class="mt-1 h-2 w-full overflow-hidden rounded-full bg-muted/40">
-        <div
-          class="h-full rounded-full bg-cyan"
-          style="width: {barFraction(row.volumeLb, max) * 100}%"
-        ></div>
-      </div>
-    </li>
+    <VolumeBar
+      fraction={barFraction(row.volumeLb, max)}
+      nameClass={row.trained ? "text-foreground" : "text-muted-foreground"}
+      fillClass="bg-cyan"
+    >
+      {#snippet name()}
+        {muscleGroupLabel(row.group)}
+      {/snippet}
+      {#snippet value()}
+        {#if row.trained}
+          {formatVolume(row.volumeLb)} lb · {formatPercent(row.share)}
+        {:else}
+          not trained
+        {/if}
+      {/snippet}
+    </VolumeBar>
   {/each}
 </ul>

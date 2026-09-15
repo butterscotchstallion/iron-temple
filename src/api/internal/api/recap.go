@@ -324,16 +324,11 @@ func (s *Server) recapBaseline(
 		return racked.Baseline{}, err
 	}
 
-	base := racked.Baseline{
-		VolumeLb:   numericToFloat(volume),
-		BestWeight: make(map[int32]float64, len(rows)),
-		BestE1RM:   make(map[int32]float64, len(rows)),
-	}
-	for _, row := range rows {
-		base.BestWeight[row.ExerciseID] = numericToFloat(row.BestWeightLb)
-		base.BestE1RM[row.ExerciseID] = numericToFloat(row.BestE1rmLb)
-	}
-	return base, nil
+	return baselineFrom(volume, rows, func(
+		r store.RecapExerciseBaselineRow,
+	) (int32, pgtype.Numeric, pgtype.Numeric) {
+		return r.ExerciseID, r.BestWeightLb, r.BestE1rmLb
+	}), nil
 }
 
 // recapOutcomes reads the recent sessions both streaks are counted over.

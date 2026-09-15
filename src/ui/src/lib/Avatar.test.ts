@@ -1,19 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/svelte";
 import Avatar from "./Avatar.svelte";
-import type { User } from "./api";
-
-function user(overrides: Partial<User> = {}): User {
-  return {
-    id: 1,
-    username: "ada",
-    displayName: "Ada Lovelace",
-    avatarColor: "",
-    isAdmin: true,
-    hasAvatar: false,
-    ...overrides,
-  };
-}
+import { testUser as user } from "./testFixtures";
 
 describe("Avatar", () => {
   it("renders the initials chip when there is no uploaded image", () => {

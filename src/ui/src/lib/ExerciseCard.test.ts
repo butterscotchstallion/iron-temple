@@ -2,19 +2,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/svelte";
 import ExerciseCard from "./ExerciseCard.svelte";
 import { auth } from "./auth.svelte";
-import type { SessionSet, User } from "./api";
+import type { SessionSet } from "./api";
+import { testUser } from "./testFixtures";
 
 // The bar and the rack come off the profile, so these sign in as somebody with
 // a gym: an 80 lb bar and the standard rack, which is what this file's
 // arithmetic assumes. A work weight of 80 is therefore just the bar, and
 // produces no warm-ups.
-const lifter = {
-  id: 1,
-  username: "ada",
-  displayName: "Ada",
-  avatarColor: "",
-  isAdmin: true,
-  hasAvatar: false,
+const lifter = testUser({
   barWeightLb: 80,
   plates: [
     { plateLb: 45, pairs: 2 },
@@ -24,7 +19,7 @@ const lifter = {
     { plateLb: 5, pairs: 2 },
     { plateLb: 2.5, pairs: 2 },
   ],
-} satisfies User;
+});
 
 beforeEach(() => {
   auth.me = { ...lifter };

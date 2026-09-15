@@ -26,6 +26,9 @@ sql:
       # the Madcow reseed below them is DML.
       - "db/migrations/0015_madcow.up.sql"
       # 0018 is seed DML only, so it has no schema to declare here.
+      # 0019 declares e1rm_lb(), which three queries call — sqlc needs the
+      # signature to type its result rather than guess at it.
+      - "db/migrations/0019_e1rm_function.up.sql"
     queries: "db/queries"
     gen:
       go:

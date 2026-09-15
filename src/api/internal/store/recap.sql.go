@@ -14,10 +14,7 @@ import (
 const recapExerciseBaseline = `-- name: RecapExerciseBaseline :many
 SELECT ss.exercise_id,
        MAX(ss.weight_lb)::numeric AS best_weight_lb,
-       MAX(ROUND(CASE WHEN ss.actual_reps = 1
-                      THEN ss.weight_lb
-                      ELSE ss.weight_lb * (1 + ss.actual_reps / 30.0)
-                 END))::numeric AS best_e1rm_lb
+       MAX(e1rm_lb(ss.weight_lb, ss.actual_reps))::numeric AS best_e1rm_lb
 FROM session_sets ss
 JOIN sessions s ON s.id = ss.session_id
 WHERE s.user_id = $1::int
@@ -45,12 +42,10 @@ type RecapExerciseBaselineRow struct {
 // the heaviest thing in one workout.
 //
 // It is RackedExerciseBaseline with the period cut replaced by the session cut
-// described at the top of this file. The ROUND and the single-rep CASE are
-// copied verbatim and must stay that way: Set.E1RM in Go rounds to the pound and
-// compares straight against this number, so if only one side rounded, the two
-// would disagree inside a sub-pound band — and that band is exactly where a
-// record is decided. Unrounded here, repeating an identical set reads as a new
-// record, because 185 x 3 is 203.5 and Go calls it 204.
+// described at the top of this file, and it shares that query's estimate by
+// calling the same e1rm_lb() (migration 0019). The two used to carry a copy of
+// the formula each, with a comment on both asking that they be kept identical;
+// they cannot drift now.
 func (q *Queries) RecapExerciseBaseline(ctx context.Context, arg RecapExerciseBaselineParams) ([]RecapExerciseBaselineRow, error) {
 	rows, err := q.db.Query(ctx, recapExerciseBaseline, arg.UserID, arg.PerformedOn, arg.SessionID)
 	if err != nil {

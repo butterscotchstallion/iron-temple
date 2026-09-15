@@ -484,10 +484,7 @@ func (q *Queries) ListSessionExerciseWeights(ctx context.Context, arg ListSessio
 const listSessionPersonalBests = `-- name: ListSessionPersonalBests :many
 SELECT ss.exercise_id,
        MAX(ss.weight_lb)::numeric AS best_weight_lb,
-       MAX(ROUND(CASE WHEN ss.actual_reps = 1
-                      THEN ss.weight_lb
-                      ELSE ss.weight_lb * (1 + ss.actual_reps / 30.0)
-                 END))::numeric AS best_e1rm_lb
+       MAX(e1rm_lb(ss.weight_lb, ss.actual_reps))::numeric AS best_e1rm_lb
 FROM session_sets ss
 JOIN sessions s ON s.id = ss.session_id
 WHERE s.user_id = $1::int
@@ -535,10 +532,11 @@ type ListSessionPersonalBestsRow struct {
 // offline, a weight-only answer made it quietly report fewer records than the
 // server would.
 //
-// ROUND and the single-rep CASE are copied verbatim from RecapExerciseBaseline,
-// and must stay that way: Set.E1RM in Go rounds to the pound and compares
-// straight against these numbers, so if only one side rounded the two would
-// disagree inside a sub-pound band — which is exactly where a record is decided.
+// The estimate comes from e1rm_lb() (migration 0019), shared with
+// RecapExerciseBaseline and RackedExerciseBaseline. Set.E1RM in Go rounds to the
+// pound and compares straight against these numbers, so a formula that differed
+// between the three would put the two sides at odds inside a sub-pound band —
+// which is exactly where a record is decided.
 func (q *Queries) ListSessionPersonalBests(ctx context.Context, arg ListSessionPersonalBestsParams) ([]ListSessionPersonalBestsRow, error) {
 	rows, err := q.db.Query(ctx, listSessionPersonalBests, arg.UserID, arg.SessionID)
 	if err != nil {

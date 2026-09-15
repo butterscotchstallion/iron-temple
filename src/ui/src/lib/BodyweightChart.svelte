@@ -1,5 +1,7 @@
 <script lang="ts">
   import { formatWeighIn } from "./racked";
+  import { dateTicks, isoDayNumber, scale, shortDate } from "./chartScale";
+  import ChartGridlines from "./ChartGridlines.svelte";
   import type { RackedWeighIn } from "./api";
 
   // The lifter's weigh-ins across the period.
@@ -27,13 +29,7 @@
   const padT = 14;
   const padB = 28;
 
-  /** Days since epoch for a YYYY-MM-DD string — the chart's x quantity. */
-  function dayNumber(iso: string): number {
-    const [y, m, d] = iso.split("-").map(Number);
-    return Math.floor(Date.UTC(y, m - 1, d) / 86_400_000);
-  }
-
-  const days = $derived(points.map((p) => dayNumber(p.performedOn)));
+  const days = $derived(points.map((p) => isoDayNumber(p.performedOn)));
   const xMin = $derived(days.length ? Math.min(...days) : 0);
   const xMax = $derived(days.length ? Math.max(...days) : 1);
 
@@ -50,13 +46,10 @@
   const yHi = $derived(mid + span * 0.65);
 
   function xAt(iso: string): number {
-    if (xMax === xMin) return (padL + (W - padR)) / 2;
-    const t = (dayNumber(iso) - xMin) / (xMax - xMin);
-    return padL + t * (W - padL - padR);
+    return scale(isoDayNumber(iso), xMin, xMax, padL, W - padR);
   }
   function yAt(lb: number): number {
-    const t = (lb - yLo) / (yHi - yLo || 1);
-    return H - padB - t * (H - padT - padB);
+    return scale(lb, yLo, yHi, H - padB, padT);
   }
 
   const path = $derived(
@@ -67,17 +60,7 @@
 
   const yTicks = $derived([yHi, mid, yLo]);
 
-  function shortDate(iso: string): string {
-    const parts = iso.split("-");
-    return `${Number(parts[1])}/${Number(parts[2])}`;
-  }
-
-  // Up to three date ticks: the ends, and the middle when there is room.
-  const xTicks = $derived.by(() => {
-    const all = [...new Set(points.map((p) => p.performedOn))].sort();
-    if (all.length <= 2) return all;
-    return [all[0], all[Math.floor((all.length - 1) / 2)], all[all.length - 1]];
-  });
+  const xTicks = $derived(dateTicks(points.map((p) => p.performedOn)));
 
   const label = $derived(
     `Bodyweight across ${points.length} weigh-in${points.length === 1 ? "" : "s"}, ` +
@@ -86,24 +69,12 @@
 </script>
 
 <svg viewBox="0 0 {W} {H}" class="w-full select-none" role="img" aria-label={label}>
-  {#each yTicks as t (t)}
-    <line
-      x1={padL}
-      x2={W - padR}
-      y1={yAt(t)}
-      y2={yAt(t)}
-      class="stroke-border"
-      stroke-width="1"
-    />
-    <text
-      x={padL - 5}
-      y={yAt(t) + 3}
-      text-anchor="end"
-      class="fill-muted-foreground text-[9px] tabular-nums"
-    >
-      {formatWeighIn(t)}
-    </text>
-  {/each}
+  <ChartGridlines
+    rows={yTicks.map((t) => ({ y: yAt(t), label: formatWeighIn(t) }))}
+    x1={padL}
+    x2={W - padR}
+    labelX={padL - 5}
+  />
 
   {#each xTicks as iso (iso)}
     <text

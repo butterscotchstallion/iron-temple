@@ -9,7 +9,7 @@ Derived from [`design.md`](./design.md), with decisions locked in below.
 |---|---|
 | Folder layout | `src/api` (Go) and `src/ui` (Svelte). The design doc's "api folder / ui folder" wording refers to these. |
 | Weight units | **Pounds only.** No unit column, no conversion. |
-| Program scope | StrongLifts 5×5 + variants: Advanced 3×5, and StrongLifts 5×5 Lite. All linear. |
+| Program scope | **Seven seeded programs.** ~~StrongLifts 5×5 + variants: Advanced 3×5, and StrongLifts 5×5 Lite. All linear.~~ The StrongLifts family — 5×5, Lite, Mini, Intermediate, and Lite (Dumbbell Press) — plus Advanced 3×5 and **Madcow 5×5**. Madcow is the exception to "all linear": it ramps within a session and progresses weekly, which is why it has its own engine (`internal/progression/madcow.go`). |
 | Users | **Per-user sessions.** ~~Single implicit user.~~ A `users` table, with `sessions.user_id` scoping every performance. Programs, days and exercises stay shared — the prescription is the same for everyone; only what you lifted is yours. |
 | Auth | **Session cookie.** ~~None, per design doc.~~ Password login (PBKDF2-SHA256, PHC-encoded so the algorithm can be upgraded per-user on login), an opaque `it_session` cookie stored as a SHA-256 digest, and an optional 60-day "remember me" whose expiry slides forward as it is used. Registration is first-user-only: the install is reachable from the internet, so an open signup form is an open door. |
 | Database | **Runtime:** existing PostgreSQL in the cluster (via `DATABASE_URL`). **Tests:** ephemeral Postgres via Testcontainers. No local docker-compose. |
@@ -77,7 +77,7 @@ Tables:
 - `session_sets` — actual reps, weight, completed flag per set.
 
 Constraints: FKs, `NOT NULL`, check constraints (weight ≥ 0, reps > 0), timestamps.
-Seed data (all linear, A/B split unless noted):
+Seed data (linear and A/B split unless noted):
 - **StrongLifts 5×5** — A: Squat 5×5 / Bench 5×5 / Row 5×5 · B: Squat 5×5 / OHP 5×5 / Deadlift 1×5.
 - **Advanced 3×5** — the graduation fork when 5×5 stalls (same lifts, 3×5).
 - **StrongLifts 5×5 Lite** — A: Squat 2×5 / Bench 2×5 / Row 2×5 · B: Squat 2×5 / OHP 2×5 / Deadlift 2×5.
@@ -86,6 +86,11 @@ Seed data (all linear, A/B split unless noted):
   Pause Bench 5×3 / Pause Deadlift 2×3. Each day also calls for assistance work, which is
   the lifter's choice and so is not seeded.
 - **StrongLifts 5×5 Mini** — A: Squat 2×5 / Bench 2×5 · B: Deadlift 2×5 / OHP 2×5.
+- **StrongLifts 5×5 Lite (Dumbbell Press)** — Lite with the overhead press taken to
+  dumbbells, for a rack without the ceiling height for a barbell (migration 0018).
+- **Madcow 5×5** — **not linear.** A ramping 5×5 on an A/B/C split that progresses week to
+  week rather than session to session, so it runs on its own engine rather than the shared
+  linear one (migrations 0012 and 0015).
 Progression is **computed** from `session_sets` history, not stored.
 
 ### Phase 2 — OpenAPI v3 spec + red integration tests
