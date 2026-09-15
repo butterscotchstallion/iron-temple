@@ -1,5 +1,6 @@
 <script lang="ts">
   import { activeWeekdays, buildCalendar, todayIso, volumeLevel } from "./calendar";
+  import { isoParts } from "./date";
   import { SHORT_WEEKDAYS } from "./weekday";
   import type { CalendarDay } from "./calendar";
 
@@ -60,7 +61,7 @@
     const out: { name: string; pct: number }[] = [];
     let last = -1;
     grid.forEach((week, i) => {
-      const month = Number(week[0].date.split("-")[1]) - 1;
+      const month = isoParts(week[0].date)[1] - 1;
       if (month !== last) {
         out.push({ name: MONTHS[month], pct: (i / WEEKS) * 100 });
         last = month;

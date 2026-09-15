@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { scale, shortDate } from "./chartScale";
+  import ChartGridlines from "./ChartGridlines.svelte";
+
   type Point = {
     performedOn: string;
     weightLb: number;
@@ -24,13 +27,14 @@
   const yLo = $derived(yMin === yMax ? yMin - 5 : yMin - (yMax - yMin) * 0.15);
   const yHi = $derived(yMin === yMax ? yMax + 5 : yMax + (yMax - yMin) * 0.15);
 
+  // Plotted against session index rather than date: this chart is "the last N
+  // times you did this lift", where the gap between them is not the subject.
+  // A single session gives a zero-width domain, which scale() centres.
   function xAt(i: number): number {
-    if (n <= 1) return (padL + (W - padR)) / 2;
-    return padL + (i / (n - 1)) * (W - padL - padR);
+    return scale(i, 0, n - 1, padL, W - padR);
   }
   function yAt(w: number): number {
-    const t = (w - yLo) / (yHi - yLo || 1);
-    return H - padB - t * (H - padT - padB);
+    return scale(w, yLo, yHi, H - padB, padT);
   }
 
   const linePath = $derived(
@@ -52,11 +56,6 @@
     return [...set];
   });
 
-  function shortDate(iso: string): string {
-    const parts = iso.split("-");
-    return `${Number(parts[1])}/${Number(parts[2])}`;
-  }
-
   let hover = $state<number | null>(null);
   function onMove(e: PointerEvent) {
     const rect = (e.currentTarget as SVGRectElement).getBoundingClientRect();
@@ -74,24 +73,12 @@
   aria-label={`Weight over ${n} session${n === 1 ? "" : "s"}`}
 >
   <!-- y gridlines + weight labels -->
-  {#each yTicks as t (t)}
-    <line
-      x1={padL}
-      x2={W - padR}
-      y1={yAt(t)}
-      y2={yAt(t)}
-      class="stroke-border"
-      stroke-width="1"
-    />
-    <text
-      x={padL - 6}
-      y={yAt(t) + 3}
-      text-anchor="end"
-      class="fill-muted-foreground text-[9px] tabular-nums"
-    >
-      {t}
-    </text>
-  {/each}
+  <ChartGridlines
+    rows={yTicks.map((t) => ({ y: yAt(t), label: `${t}` }))}
+    x1={padL}
+    x2={W - padR}
+    labelX={padL - 6}
+  />
   <text
     x={padL - 6}
     y={padT - 6}

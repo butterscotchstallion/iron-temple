@@ -1,5 +1,7 @@
 <script lang="ts">
   import { formatDelta } from "./racked";
+  import { dateTicks, isoDayNumber, scale, shortDate } from "./chartScale";
+  import ChartGridlines from "./ChartGridlines.svelte";
   import type { IndexedSeries } from "./racked";
 
   // Improvement across every lift, as percentage change from each lift's first
@@ -21,14 +23,8 @@
   const padT = 14;
   const padB = 28;
 
-  /** Days since epoch for a YYYY-MM-DD string — the chart's x quantity. */
-  function dayNumber(iso: string): number {
-    const [y, m, d] = iso.split("-").map(Number);
-    return Math.floor(Date.UTC(y, m - 1, d) / 86_400_000);
-  }
-
   const points = $derived(series.flatMap((s) => s.points));
-  const days = $derived(points.map((p) => dayNumber(p.performedOn)));
+  const days = $derived(points.map((p) => isoDayNumber(p.performedOn)));
   const xMin = $derived(days.length ? Math.min(...days) : 0);
   const xMax = $derived(days.length ? Math.max(...days) : 1);
 
@@ -42,13 +38,10 @@
   const yHi = $derived(yHiRaw + pad);
 
   function xAt(iso: string): number {
-    if (xMax === xMin) return (padL + (W - padR)) / 2;
-    const t = (dayNumber(iso) - xMin) / (xMax - xMin);
-    return padL + t * (W - padL - padR);
+    return scale(isoDayNumber(iso), xMin, xMax, padL, W - padR);
   }
   function yAt(pct: number): number {
-    const t = (pct - yLo) / (yHi - yLo || 1);
-    return H - padB - t * (H - padT - padB);
+    return scale(pct, yLo, yHi, H - padB, padT);
   }
 
   function path(s: IndexedSeries): string {
@@ -59,17 +52,7 @@
 
   const yTicks = $derived([yHi, (yLo + yHi) / 2, yLo]);
 
-  function shortDate(iso: string): string {
-    const parts = iso.split("-");
-    return `${Number(parts[1])}/${Number(parts[2])}`;
-  }
-
-  // Up to three date ticks: the ends, and the middle when there is room.
-  const xTicks = $derived.by(() => {
-    const all = [...new Set(points.map((p) => p.performedOn))].sort();
-    if (all.length <= 2) return all;
-    return [all[0], all[Math.floor((all.length - 1) / 2)], all[all.length - 1]];
-  });
+  const xTicks = $derived(dateTicks(points.map((p) => p.performedOn)));
 
   // Hover reads out the nearest dated column rather than the nearest point of
   // one line, because the question is "how did the lifts compare that day".
@@ -113,24 +96,12 @@
   role="img"
   aria-label={label}
 >
-  {#each yTicks as t (t)}
-    <line
-      x1={padL}
-      x2={W - padR}
-      y1={yAt(t)}
-      y2={yAt(t)}
-      class="stroke-border"
-      stroke-width="1"
-    />
-    <text
-      x={padL - 5}
-      y={yAt(t) + 3}
-      text-anchor="end"
-      class="fill-muted-foreground text-[9px] tabular-nums"
-    >
-      {formatDelta(t)}
-    </text>
-  {/each}
+  <ChartGridlines
+    rows={yTicks.map((t) => ({ y: yAt(t), label: formatDelta(t) }))}
+    x1={padL}
+    x2={W - padR}
+    labelX={padL - 5}
+  />
 
   <!-- The zero baseline is the reference every line is measured against, so it
        reads stronger than the other gridlines. -->

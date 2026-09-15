@@ -1,10 +1,7 @@
+import { parseIso } from "./date";
+
 export type CalendarDay = { date: string; count: number };
 export type CalendarWeek = CalendarDay[]; // 7 days, Sunday → Saturday
-
-function parseIso(iso: string): Date {
-  const [y, m, d] = iso.split("-").map(Number);
-  return new Date(y, m - 1, d);
-}
 
 function toIso(dt: Date): string {
   const y = dt.getFullYear();
