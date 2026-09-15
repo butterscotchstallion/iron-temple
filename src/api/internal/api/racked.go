@@ -173,6 +173,33 @@ func finishedAt(t pgtype.Timestamptz) time.Time {
 	return t.Time
 }
 
+// baselineFrom assembles what a lifter had done before some cut-off: the tonnage
+// they had moved, and their best weight and estimated max per lift.
+//
+// Generic over the row type because the two cuts are two queries — a period
+// boundary for Racked, a session boundary for the workout recap — and sqlc emits
+// a distinct row struct for each even though the columns are identical. The
+// accessor is the price of that; what it buys is one definition of how a
+// Baseline is built, so a field added to it cannot be filled on one path and
+// left zero on the other.
+func baselineFrom[R any](
+	volume pgtype.Numeric,
+	rows []R,
+	at func(R) (exerciseID int32, bestWeight, bestE1RM pgtype.Numeric),
+) racked.Baseline {
+	base := racked.Baseline{
+		VolumeLb:   numericToFloat(volume),
+		BestWeight: make(map[int32]float64, len(rows)),
+		BestE1RM:   make(map[int32]float64, len(rows)),
+	}
+	for _, row := range rows {
+		id, weight, e1rm := at(row)
+		base.BestWeight[id] = numericToFloat(weight)
+		base.BestE1RM[id] = numericToFloat(e1rm)
+	}
+	return base
+}
+
 func (s *Server) rackedBaseline(
 	ctx context.Context, userID int32, start time.Time,
 ) (racked.Baseline, error) {
@@ -191,16 +218,11 @@ func (s *Server) rackedBaseline(
 		return racked.Baseline{}, err
 	}
 
-	base := racked.Baseline{
-		VolumeLb:   numericToFloat(volume),
-		BestWeight: make(map[int32]float64, len(rows)),
-		BestE1RM:   make(map[int32]float64, len(rows)),
-	}
-	for _, row := range rows {
-		base.BestWeight[row.ExerciseID] = numericToFloat(row.BestWeightLb)
-		base.BestE1RM[row.ExerciseID] = numericToFloat(row.BestE1rmLb)
-	}
-	return base, nil
+	return baselineFrom(volume, rows, func(
+		r store.RackedExerciseBaselineRow,
+	) (int32, pgtype.Numeric, pgtype.Numeric) {
+		return r.ExerciseID, r.BestWeightLb, r.BestE1rmLb
+	}), nil
 }
 
 // rackedProgramDays returns the days of the lifter's current program and when

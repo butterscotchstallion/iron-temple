@@ -383,29 +383,56 @@ func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) updateSessionSet(w http.ResponseWriter, r *http.Request) {
+// sessionSet resolves the {sessionId}/{setId} pair both set-mutating routes are
+// mounted under, confirming the set belongs to the session named in the path and
+// to the caller. The sibling of programDay, and it writes the 404 itself and
+// reports false, so callers can `if !ok { return }`.
+//
+// The session check is not redundant with the ownership one. GetSessionSet
+// already scopes to the caller through session_sets -> sessions, so an unchecked
+// handler would still refuse another lifter's set — but it would happily edit
+// the caller's OWN set through any of their session URLs, and the 404 the
+// callers write says "set not found" in a session it would then have mutated.
+//
+// Every failure is the same 404, deliberately: a malformed id, a set that does
+// not exist, one belonging to someone else, and one reached through the wrong
+// session are indistinguishable from outside, so none of them confirms an id.
+func (s *Server) sessionSet(
+	w http.ResponseWriter, r *http.Request,
+) (store.GetSessionSetRow, bool) {
 	sessionID, ok := idParam(r, "sessionId")
 	if !ok {
 		notFound(w, "set not found")
-		return
+		return store.GetSessionSetRow{}, false
 	}
 	setID, ok := idParam(r, "setId")
 	if !ok {
 		notFound(w, "set not found")
-		return
+		return store.GetSessionSetRow{}, false
 	}
-	ctx := r.Context()
 
+	ctx := r.Context()
 	userID := userFrom(ctx).ID
 	current, err := s.q.GetSessionSet(ctx, store.GetSessionSetParams{ID: setID, UserID: userID})
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && current.SessionID != sessionID) {
 		notFound(w, "set not found")
-		return
+		return store.GetSessionSetRow{}, false
 	}
 	if err != nil {
 		internalError(w)
+		return store.GetSessionSetRow{}, false
+	}
+	return current, true
+}
+
+func (s *Server) updateSessionSet(w http.ResponseWriter, r *http.Request) {
+	current, ok := s.sessionSet(w, r)
+	if !ok {
 		return
 	}
+	ctx := r.Context()
+	userID := userFrom(ctx).ID
+	setID := current.ID
 
 	// Decode into raw fields so we can tell "absent" from "explicit null" — the
 	// spec lets any subset be sent, and actualReps: null clears a prior entry.
@@ -565,31 +592,13 @@ func (s *Server) addSessionSet(w http.ResponseWriter, r *http.Request) {
 // why nothing renumbers afterwards, and addSessionSet for why a finished session
 // refuses this.
 func (s *Server) removeSessionSet(w http.ResponseWriter, r *http.Request) {
-	sessionID, ok := idParam(r, "sessionId")
+	current, ok := s.sessionSet(w, r)
 	if !ok {
-		notFound(w, "set not found")
-		return
-	}
-	setID, ok := idParam(r, "setId")
-	if !ok {
-		notFound(w, "set not found")
 		return
 	}
 	ctx := r.Context()
 	userID := userFrom(ctx).ID
-
-	// The set has to belong to the session named in the path, not merely to the
-	// caller — otherwise a set could be deleted through any session's URL, and
-	// the 404 below would be reporting on the wrong thing.
-	current, err := s.q.GetSessionSet(ctx, store.GetSessionSetParams{ID: setID, UserID: userID})
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && current.SessionID != sessionID) {
-		notFound(w, "set not found")
-		return
-	}
-	if err != nil {
-		internalError(w)
-		return
-	}
+	sessionID, setID := current.SessionID, current.ID
 
 	session, err := s.q.GetSession(ctx, store.GetSessionParams{ID: sessionID, UserID: userID})
 	if err != nil {
