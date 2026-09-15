@@ -2,18 +2,12 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { render, screen } from "@testing-library/svelte";
 import PlateBar from "./PlateBar.svelte";
 import { auth } from "./auth.svelte";
-import type { User } from "./api";
+import { testUser } from "./testFixtures";
 
 // The bar and the rack come off the profile now, so these have to sign in as
 // somebody with a gym. An 80 lb bar and the standard rack, which is what this
 // file's arithmetic has always assumed — it just used to be a constant.
-const lifter = {
-  id: 1,
-  username: "ada",
-  displayName: "Ada",
-  avatarColor: "",
-  isAdmin: true,
-  hasAvatar: false,
+const lifter = testUser({
   barWeightLb: 80,
   plates: [
     { plateLb: 45, pairs: 2 },
@@ -23,7 +17,7 @@ const lifter = {
     { plateLb: 5, pairs: 2 },
     { plateLb: 2.5, pairs: 2 },
   ],
-} satisfies User;
+});
 
 beforeEach(() => {
   auth.me = { ...lifter };

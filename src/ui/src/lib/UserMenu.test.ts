@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/svelte";
 import UserMenu from "./UserMenu.svelte";
 import { auth } from "./auth.svelte";
 import type { User } from "./api";
+import { testUser } from "./testFixtures";
 
 const logout = vi.hoisted(() => vi.fn());
 const getMe = vi.hoisted(() => vi.fn());
@@ -20,14 +21,7 @@ vi.mock("svelte-spa-router", async (importOriginal) => ({
   push,
 }));
 
-const ada: User = {
-  id: 1,
-  username: "ada",
-  displayName: "Ada Lovelace",
-  avatarColor: "",
-  isAdmin: true,
-  hasAvatar: false,
-};
+const ada: User = testUser();
 
 beforeEach(() => {
   logout.mockResolvedValue({ data: undefined, error: undefined });

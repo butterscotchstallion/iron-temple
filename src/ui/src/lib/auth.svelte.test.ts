@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { auth, loadMe, signIn, signOut, signUp } from "./auth.svelte";
 import type { User } from "./api";
+import { testUser } from "./testFixtures";
 
 const getMe = vi.hoisted(() => vi.fn());
 const getRegistrationStatus = vi.hoisted(() => vi.fn());
@@ -24,14 +25,7 @@ const answer = (status: number, data: unknown = undefined) => ({
   headers: new Headers(),
 });
 
-const ada: User = {
-  id: 1,
-  username: "ada",
-  displayName: "Ada Lovelace",
-  avatarColor: "",
-  isAdmin: true,
-  hasAvatar: false,
-};
+const ada: User = testUser();
 
 beforeEach(() => {
   auth.me = null;

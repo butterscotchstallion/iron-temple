@@ -3,19 +3,10 @@ import { barWeightLb, plateInventory } from "./gym.svelte";
 import { auth } from "./auth.svelte";
 import { DEFAULT_BAR_LB, DEFAULT_PLATES } from "./plates";
 import type { User } from "./api";
+import { testUser } from "./testFixtures";
 
 function signIn(gym: Partial<User>) {
-  auth.me = {
-    id: 1,
-    username: "ada",
-    displayName: "Ada",
-    avatarColor: "",
-    isAdmin: true,
-    hasAvatar: false,
-    barWeightLb: 45,
-    plates: [],
-    ...gym,
-  } as User;
+  auth.me = testUser({ barWeightLb: 45, plates: [], ...gym });
   auth.loaded = true;
 }
 

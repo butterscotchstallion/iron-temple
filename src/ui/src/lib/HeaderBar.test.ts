@@ -4,19 +4,13 @@ import HeaderBar from "./HeaderBar.svelte";
 import { auth } from "./auth.svelte";
 import { version } from "./version.svelte";
 import type { User } from "./api";
+import { testUser } from "./testFixtures";
 
 // The bar only renders the version store now — App.svelte owns the polling that
 // fills it, and version.svelte.test.ts covers the fetching. So drive the store
 // directly rather than stubbing /health at one remove.
 
-const ada: User = {
-  id: 1,
-  username: "ada",
-  displayName: "Ada Lovelace",
-  avatarColor: "",
-  isAdmin: true,
-  hasAvatar: false,
-};
+const ada: User = testUser();
 
 beforeEach(() => {
   version.running = "v1.2.3";
