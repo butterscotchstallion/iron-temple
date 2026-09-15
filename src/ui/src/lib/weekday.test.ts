@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { weekdayLabel, weekdayOptions } from "./weekday";
+import { nextWeekLabel, weekdayLabel, weekdayOptions } from "./weekday";
 
 describe("weekdayLabel", () => {
   it("names weekdays 0..6", () => {
@@ -39,5 +39,34 @@ describe("weekdayOptions", () => {
     expect(byValue[0]).toBe("Sunday, August 30");
     expect(byValue[1]).toBe("Monday, August 31");
     expect(byValue[2]).toBe("Tuesday, September 1");
+  });
+});
+
+describe("nextWeekLabel", () => {
+  it("names the weekday and date, marked as next week's", () => {
+    expect(nextWeekLabel("2026-09-25")).toBe("Next Friday, September 25");
+    expect(nextWeekLabel("2026-09-22")).toBe("Next Tuesday, September 22");
+  });
+
+  // The case the label exists for. A day scheduled for Tuesday and trained on
+  // Tuesday the 15th has its picker reading "Tuesday, September 15" while it is
+  // really due the 22nd. The two have to be tellable apart, and on a program
+  // with one workout a week the weekday alone is no help at all.
+  it("reads differently from the picker option it sits beside", () => {
+    const picker = weekdayOptions(new Date(2026, 8, 15))[2].label;
+    expect(picker).toBe("Tuesday, September 15");
+    expect(nextWeekLabel("2026-09-22")).not.toBe(picker);
+  });
+
+  it("crosses a month boundary", () => {
+    expect(nextWeekLabel("2026-10-02")).toBe("Next Friday, October 2");
+  });
+
+  it("crosses a year boundary", () => {
+    expect(nextWeekLabel("2027-01-01")).toBe("Next Friday, January 1");
+  });
+
+  it("returns a malformed date unchanged rather than Invalid Date", () => {
+    expect(nextWeekLabel("not-a-date")).toBe("not-a-date");
   });
 });

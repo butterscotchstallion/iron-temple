@@ -33,7 +33,7 @@
   import ErrorCard from "../lib/ErrorCard.svelte";
   import ErrorBanner from "../lib/ErrorBanner.svelte";
   import AssistancePicker from "../lib/AssistancePicker.svelte";
-  import { weekdayOptions } from "../lib/weekday";
+  import { weekdayOptions, nextWeekLabel } from "../lib/weekday";
   import { todayIso } from "../lib/calendar";
   import {
     deloadLabel,
@@ -107,7 +107,17 @@
   // showing the rest of this week and the start of the next. See nextDueOn.
   let orderedDays = $derived(
     days
-      .map((d) => ({ ...d, dueOn: nextDueOn(recent, d) }))
+      .map((d) => ({
+        ...d,
+        dueOn: nextDueOn(recent, d),
+        // What the weekday picker's selected option claims, which is this same
+        // function with today's training taken out of it: the next upcoming
+        // occurrence of the day's weekday. Derived from nextDueOn rather than
+        // rebuilt from weekdayOptions so the two cannot drift — a card decides
+        // whether to spell its due date out by comparing these, and the whole
+        // point is that it stays silent whenever they agree.
+        scheduledOn: nextDueOn([], d),
+      }))
       .sort((a, b) => {
         // Unscheduled days last: they are not due anything, so they cannot take
         // a place in the order, and the one control that fixes that — the
@@ -536,10 +546,18 @@
     {#each orderedDays as day (day.id)}
       {@const trained = todayStatus(recent, day.id)}
       {@const dueToday = day.dueOn === todayIso()}
-      <!-- The ring is what marks today's workout. It used to be a dated chip
-           beside the title, but the weekday picker below already labels every
-           choice with the date it lands on, so the chip spent most of its life
-           restating the selected option word for word. -->
+      <!-- The date this day is next due, but ONLY when the weekday picker below
+           is not already saying it. The picker labels every choice with the date
+           it lands on, so for all but one card a chip here would restate the
+           selected option word for word — which is why the old unconditional
+           one was dropped. The exception is a day scheduled for today and
+           trained: it is due again next week, while the picker's labels run to
+           each weekday's next upcoming occurrence and so still read today. -->
+      {@const movedOn =
+        day.dueOn !== null && day.dueOn !== day.scheduledOn ? day.dueOn : null}
+      <!-- The ring marks today's workout, and goes once the day is done: dueOn
+           has moved to next week by then, so dueToday is false on exactly the
+           card movedOn is set on. The two never show together. -->
       <Card class="p-5 {dueToday ? 'ring-2 ring-primary' : ''}">
         <div class="flex items-center justify-between gap-3">
           <div class="flex flex-wrap items-center gap-2">
@@ -552,15 +570,29 @@
             {:else if trained}
               <Badge variant="outline">In progress</Badge>
             {/if}
+            <!-- Beside "Done today" rather than folded into it: the two answer
+                 different questions, and together they explain each other. The
+                 badge says the work is behind you, the date says when it comes
+                 round again — without the badge, a day that was due today and
+                 is suddenly dated a week out looks like a scheduling bug. -->
+            {#if movedOn}
+              <span
+                class="rounded-full bg-muted px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground"
+              >
+                {nextWeekLabel(movedOn)}
+              </span>
+            {/if}
             <label
               class="flex items-center gap-1 rounded-md border border-input px-2 py-1 text-xs text-muted-foreground"
             >
               <Calendar class="size-3.5" />
               <!-- Which weekday this day is scheduled on, and — through the
                    dated option labels — when that next comes round. Those dates
-                   are the next upcoming occurrence of each weekday, so a day
-                   finished this morning still reads as today's; "Done today"
-                   beside it is what says the work is behind you. -->
+                   are the next upcoming occurrence of each weekday, which is
+                   the right answer on every card but the one already trained
+                   today; there the chip above carries the real due date, since
+                   this control cannot say "next week" without lying about which
+                   weekday the day is assigned to. -->
               <select
                 class="bg-transparent outline-none"
                 value={day.weekday === null ? "" : String(day.weekday)}

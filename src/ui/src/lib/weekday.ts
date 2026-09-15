@@ -1,4 +1,4 @@
-import { formatMonthDay } from "./date";
+import { formatMonthDay, parseIso } from "./date";
 
 export const WEEKDAYS = [
   "Sunday",
@@ -44,4 +44,29 @@ export function weekdayOptions(today: Date = new Date()): WeekdayOption[] {
     );
     return { value: i, label: `${name}, ${formatMonthDay(date)}` };
   });
+}
+
+/**
+ * How a due date reads on the one card whose weekday picker names a nearer
+ * date: "Next Friday, September 25".
+ *
+ * That card is the day scheduled for today and already trained. The picker's
+ * options are labeled with each weekday's next UPCOMING occurrence and today
+ * counts as zero days away, so its selected option reads today's date — while
+ * the day itself is not due again until the same weekday next week. Every other
+ * card has the two agreeing, and says the date once through the picker; see
+ * ProgramDetail for the comparison that decides which is which.
+ *
+ * The weekday alone would not do, because it names both dates. "Next" is what
+ * separates them, and it is only correct because the gap is always exactly a
+ * week — nextDueOn adds seven days, and only to a day due today. Don't reach
+ * for this to label an arbitrary date.
+ *
+ * Returns the input unchanged if it can't be parsed, matching formatLongDate: a
+ * malformed date should show as itself, not as "Invalid Date".
+ */
+export function nextWeekLabel(iso: string): string {
+  const date = parseIso(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return `Next ${WEEKDAYS[date.getDay()]}, ${formatMonthDay(date)}`;
 }
