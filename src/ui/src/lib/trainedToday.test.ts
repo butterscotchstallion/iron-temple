@@ -152,6 +152,34 @@ describe("nextDueOn", () => {
     expect(nextDueOn([], { id: 7, weekday: now.getDay() })).toBe(iso);
   });
 
+  // The card spells its due date out only when this function disagrees with
+  // itself run over no sessions — the second being what the weekday picker's
+  // selected option claims, since its labels are each weekday's next upcoming
+  // occurrence. Any card where the two agree would be restating the picker.
+  describe("against the schedule alone, which is what the picker says", () => {
+    it("disagrees by exactly a week for the day trained today", () => {
+      expect(due(FRIDAY, [session()])).toBe("2026-09-18");
+      expect(due(FRIDAY)).toBe("2026-09-11");
+    });
+
+    it("agrees when nothing has been logged", () => {
+      expect(due(FRIDAY, [])).toBe(due(FRIDAY));
+    });
+
+    it("agrees while today's session is still open", () => {
+      const open = [session({ completedSetCount: 3, isOver: false })];
+      expect(due(FRIDAY, open)).toBe(due(FRIDAY));
+    });
+
+    it("agrees for a day trained off its own weekday", () => {
+      expect(due(3, [session()])).toBe(due(3));
+    });
+
+    it("agrees for an unscheduled day, both having no date at all", () => {
+      expect(due(null, [session()])).toBe(due(null));
+    });
+  });
+
   // The behaviour the screen is actually built on: a two-day program keeps
   // showing two upcoming workouts after one of them is done today.
   it("orders a finished day behind the rest of the week", () => {
