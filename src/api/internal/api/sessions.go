@@ -496,6 +496,7 @@ func (s *Server) updateSessionSet(w http.ResponseWriter, r *http.Request) {
 		WeightLb:     numericToFloat(updated.WeightLb),
 		Completed:    updated.Completed,
 		RestSeconds:  current.RestSeconds,
+		Equipment:    current.Equipment,
 	})
 }
 
@@ -585,6 +586,7 @@ func (s *Server) addSessionSet(w http.ResponseWriter, r *http.Request) {
 		WeightLb:     numericToFloat(full.WeightLb),
 		Completed:    full.Completed,
 		RestSeconds:  full.RestSeconds,
+		Equipment:    full.Equipment,
 	})
 }
 
@@ -715,5 +717,6 @@ func sessionSetToDTO(set store.ListSessionSetsRow) sessionSetDTO {
 		WeightLb:     numericToFloat(set.WeightLb),
 		Completed:    set.Completed,
 		RestSeconds:  set.RestSeconds,
+		Equipment:    set.Equipment,
 	}
 }

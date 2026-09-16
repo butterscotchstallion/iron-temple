@@ -39,6 +39,7 @@ function mkSet(over: Partial<SessionSet> & Pick<SessionSet, "id">): SessionSet {
     weightLb: 200,
     completed: false,
     restSeconds: 180,
+    equipment: "barbell",
     ...over,
   };
 }

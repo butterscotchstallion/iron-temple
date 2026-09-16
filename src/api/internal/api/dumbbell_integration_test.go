@@ -66,6 +66,79 @@ func TestBarbellLiftOnADumbbellDayStillMovesFive(t *testing.T) {
 	}
 }
 
+// The same fact the engine reads has to reach the client, because the session
+// screen makes the same mistake the engine used to: it opens every warm-up with
+// two sets of an empty bar, draws the plates to hang off it, and steps the
+// weight by a bar's 5 lb. On a pair of dumbbells all three describe equipment
+// that is not in the lifter's hands, and nothing on the wire said so — a session
+// set carried its lift's name and its rest and stopped there.
+//
+// Read off Workout B for the reason the test above uses it: the squat sits
+// beside the press, so a response that labels both the same is one answering
+// from the program rather than from the movement.
+func TestSessionSetsCarryTheirLiftsEquipment(t *testing.T) {
+	e := expect(t)
+
+	const program = "StrongLifts 5x5 Lite (Dumbbell Press)"
+	_, dayID := programDayByName(e, program, "Workout B")
+	session := startSession(t, e, dayID)
+	sessionID := int(session.Value("id").Number().Raw())
+
+	want := map[string]string{
+		"Dumbbell Shoulder Press": "dumbbell",
+		"Squat":                   "barbell",
+		"Deadlift":                "barbell",
+	}
+	seen := map[string]bool{}
+
+	sets := session.Value("sets").Array()
+	for i := 0; i < int(sets.Length().Raw()); i++ {
+		set := sets.Value(i).Object()
+		name := set.Value("exerciseName").String().Raw()
+		equipment, ok := want[name]
+		if !ok {
+			t.Fatalf("unexpected lift %q on %s Workout B", name, program)
+		}
+		set.Value("equipment").String().IsEqual(equipment)
+		seen[name] = true
+	}
+	for name := range want {
+		if !seen[name] {
+			t.Errorf("%s never materialized into the session", name)
+		}
+	}
+
+	// A logged set echoes the same answer back, so a card re-rendered off the
+	// PATCH response cannot lose the bar it was drawn without.
+	pressSets := setsNamed(session, "Dumbbell Shoulder Press")
+	setID := int(pressSets[0].Value("id").Number().Raw())
+	e.PATCH(fmt.Sprintf("/sessions/%d/sets/%d", sessionID, setID)).
+		WithJSON(map[string]any{"actualReps": 5, "completed": true}).
+		Expect().Status(http.StatusOK).JSON().Object().
+		Value("equipment").String().IsEqual("dumbbell")
+
+	// And so does an extra set added at the rack, which comes back from a third
+	// query again rather than from the one the session was read with.
+	e.POST(fmt.Sprintf("/sessions/%d/sets", sessionID)).
+		WithJSON(map[string]any{"exerciseId": int(pressSets[0].Value("exerciseId").Number().Raw())}).
+		Expect().Status(http.StatusCreated).JSON().Object().
+		Value("equipment").String().IsEqual("dumbbell")
+}
+
+// setsNamed picks a session's sets for one lift by name. sessionSetsFor does the
+// same by exercise id, which a test holding only a name would have to look up.
+func setsNamed(session *httpexpect.Object, name string) []*httpexpect.Object {
+	var out []*httpexpect.Object
+	sets := session.Value("sets").Array()
+	for i := 0; i < int(sets.Length().Raw()); i++ {
+		set := sets.Value(i).Object()
+		if set.Value("exerciseName").String().Raw() == name {
+			out = append(out, set)
+		}
+	}
+	return out
+}
+
 // programDayByName resolves a program and one of its days, both by name.
 // programAndFirstDay cannot serve here: the dumbbell press is on Workout B, and
 // the first day of that program is Workout A.
