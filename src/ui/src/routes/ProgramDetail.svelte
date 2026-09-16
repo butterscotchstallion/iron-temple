@@ -555,6 +555,17 @@
            each weekday's next upcoming occurrence and so still read today. -->
       {@const movedOn =
         day.dueOn !== null && day.dueOn !== day.scheduledOn ? day.dueOn : null}
+      <!-- Today's session, but only for as long as this card still stands for
+           today. Once dueOn has moved to next week the card IS the next
+           occurrence, and everything on it has to be about that one: a "Done
+           today" badge and a View link dated a week earlier than the card they
+           sit on read as claims about the session the card is showing, which is
+           the one workout they are not about. Nothing is lost by dropping them
+           — the finished session is on the home screen and in History.
+           A day trained OFF its weekday keeps them, because its date never
+           moved: that card still says the day's own weekday, and the badge is
+           the only thing explaining why a day due Friday was worked today. -->
+      {@const todaySession = movedOn === null ? trained : null}
       <!-- The ring marks today's workout, and goes once the day is done: dueOn
            has moved to next week by then, so dueToday is false on exactly the
            card movedOn is set on. The two never show together. -->
@@ -562,19 +573,20 @@
         <div class="flex items-center justify-between gap-3">
           <div class="flex flex-wrap items-center gap-2">
             <h3 class="text-lg font-bold text-card-foreground">{day.name}</h3>
-            {#if trained?.done}
+            {#if todaySession?.done}
               <Badge variant="secondary">
                 <Check aria-hidden="true" />
                 Done today
               </Badge>
-            {:else if trained}
+            {:else if todaySession}
               <Badge variant="outline">In progress</Badge>
             {/if}
-            <!-- Beside "Done today" rather than folded into it: the two answer
-                 different questions, and together they explain each other. The
-                 badge says the work is behind you, the date says when it comes
-                 round again — without the badge, a day that was due today and
-                 is suddenly dated a week out looks like a scheduling bug. -->
+            <!-- The one card with no badge beside it, and the only thing on it
+                 that accounts for the jump: a day booked for today and trained
+                 is dated a week out, while the picker below still reads today.
+                 "Next" against the picker's own label is the whole explanation
+                 — the day is this weekday, and the one coming round is the one
+                 after the session just finished. -->
             {#if movedOn}
               <span
                 class="rounded-full bg-muted px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground"
@@ -605,29 +617,33 @@
               </select>
             </label>
           </div>
-          <!-- Three states, one slot. A day already trained demotes Start to
-               "Start again" — the second session of the day is a real thing a
-               lifter does, but it is not what the button should invite — and an
-               open one replaces it outright, because resuming and starting over
-               are not the same act and only one of them keeps the sets already
-               logged. -->
+          <!-- Three states, one slot. An open session replaces Start outright,
+               because resuming and starting over are not the same act and only
+               one of them keeps the sets already logged. A day trained to
+               completion demotes Start to "Start again" — the second session of
+               the day is a real thing a lifter does, but it is not what the
+               button should invite. On the card that has moved to next week it
+               is back to plain "Start", since what that card offers is its own
+               next session begun early rather than a repeat of one it no longer
+               mentions; it stays demoted all the same, because the lifter has
+               in fact already trained this day today — see the variant. -->
           <div class="flex shrink-0 items-center gap-1">
-            {#if trained}
+            {#if todaySession}
               <a
                 use:link
-                href="/sessions/{trained.sessionId}"
+                href="/sessions/{todaySession.sessionId}"
                 class={buttonVariants({
-                  variant: trained.done ? "ghost" : "default",
+                  variant: todaySession.done ? "ghost" : "default",
                   size: "sm",
                 })}
               >
-                {#if !trained.done}
+                {#if !todaySession.done}
                   <Play aria-hidden="true" />
                 {/if}
-                {trained.done ? "View" : "Resume"}
+                {todaySession.done ? "View" : "Resume"}
               </a>
             {/if}
-            {#if !trained || trained.done}
+            {#if !todaySession || todaySession.done}
               <Button
                 size="sm"
                 variant={trained ? "outline" : "default"}
@@ -638,7 +654,7 @@
                 {#if startingDayId === day.id}
                   Starting…
                 {:else}
-                  {trained ? "Start again" : "Start"}
+                  {todaySession ? "Start again" : "Start"}
                 {/if}
               </Button>
             {/if}
