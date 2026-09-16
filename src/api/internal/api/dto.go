@@ -309,6 +309,13 @@ type sessionSetDTO struct {
 	WeightLb     float64 `json:"weightLb"`
 	Completed    bool    `json:"completed"`
 	RestSeconds  int32   `json:"restSeconds"`
+	// Equipment is the movement's, carried on every set because the session
+	// screen is the one screen that never loads the exercise library. Two things
+	// there are wrong without it: the warm-up ramp opens with two sets of an
+	// empty bar and rounds its rungs onto plates, and the weight stepper moves by
+	// a bar's 5 lb. On a pair of dumbbells the first describes equipment nobody
+	// is holding and the second builds a 35 lb pair out of 5 lb bells.
+	Equipment string `json:"equipment"`
 }
 
 type sessionDTO struct {

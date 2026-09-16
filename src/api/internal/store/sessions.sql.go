@@ -312,7 +312,8 @@ SELECT ss.id,
        ss.weight_lb,
        ss.completed,
        (pde.id IS NULL)::bool AS is_assistance,
-       e.rest_seconds
+       e.rest_seconds,
+       e.equipment
 FROM session_sets ss
 JOIN exercises e ON e.id = ss.exercise_id
 JOIN sessions s ON s.id = ss.session_id
@@ -339,6 +340,7 @@ type GetSessionSetRow struct {
 	Completed    bool           `json:"completed"`
 	IsAssistance bool           `json:"is_assistance"`
 	RestSeconds  int32          `json:"rest_seconds"`
+	Equipment    string         `json:"equipment"`
 }
 
 // GetSessionSet reaches the owner through session_sets -> sessions, so a set id
@@ -363,6 +365,7 @@ func (q *Queries) GetSessionSet(ctx context.Context, arg GetSessionSetParams) (G
 		&i.Completed,
 		&i.IsAssistance,
 		&i.RestSeconds,
+		&i.Equipment,
 	)
 	return i, err
 }
@@ -568,7 +571,8 @@ SELECT ss.id,
        ss.weight_lb,
        ss.completed,
        (pde.id IS NULL)::bool AS is_assistance,
-       e.rest_seconds
+       e.rest_seconds,
+       e.equipment
 FROM session_sets ss
 JOIN exercises e ON e.id = ss.exercise_id
 JOIN sessions s ON s.id = ss.session_id
@@ -600,6 +604,7 @@ type ListSessionSetsRow struct {
 	Completed    bool           `json:"completed"`
 	IsAssistance bool           `json:"is_assistance"`
 	RestSeconds  int32          `json:"rest_seconds"`
+	Equipment    string         `json:"equipment"`
 }
 
 // ListSessionSets returns a session's logged sets in prescription order (the
@@ -626,6 +631,12 @@ type ListSessionSetsRow struct {
 // session materializes whatever prescribe() returned, and asking "was this on
 // the program's own list?" at read time cannot drift from the answer the
 // ordering above already depends on.
+//
+// equipment rides along from the exercise for the same reason ListAssistanceByDay
+// takes it: the smallest jump a lift can make, and whether it has a bar to warm
+// up with at all, are properties of the movement and nothing else knows them. The
+// session screen draws a plate diagram and an empty-bar opener off this, which on
+// a pair of dumbbells describes equipment that is not in the lifter's hands.
 func (q *Queries) ListSessionSets(ctx context.Context, arg ListSessionSetsParams) ([]ListSessionSetsRow, error) {
 	rows, err := q.db.Query(ctx, listSessionSets, arg.SessionID, arg.UserID)
 	if err != nil {
@@ -647,6 +658,7 @@ func (q *Queries) ListSessionSets(ctx context.Context, arg ListSessionSetsParams
 			&i.Completed,
 			&i.IsAssistance,
 			&i.RestSeconds,
+			&i.Equipment,
 		); err != nil {
 			return nil, err
 		}

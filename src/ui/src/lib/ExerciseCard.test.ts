@@ -162,6 +162,89 @@ describe("ExerciseCard", () => {
     expect(warmups[1]).toHaveAttribute("aria-label", expect.stringContaining("Warm-up 180 lb"));
   });
 
+  // Everything this card said about loading a weight used to assume a barbell.
+  // On a pair of dumbbells all of it was fiction: a lifter curling 30 lb was
+  // told to open with two sets of an 80 lb bar, shown a diagram of the plates to
+  // hang off it, and given a stepper that built a 35 lb pair out of 5 lb bells.
+  describe("on a lift with no bar", () => {
+    it("omits the barbell diagram and the per-side plate line", () => {
+      render(ExerciseCard, {
+        name: "Dumbbell Curl",
+        sets: workSets(30, 3),
+        equipment: "dumbbell",
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+      });
+      expect(screen.queryByLabelText(/^Barbell loaded to/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/\/ side/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/bar only/)).not.toBeInTheDocument();
+    });
+
+    it("says what one bell weighs, since the prescription is the pair", () => {
+      render(ExerciseCard, {
+        name: "Dumbbell Curl",
+        sets: workSets(30, 3),
+        equipment: "dumbbell",
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+      });
+      // The ramp opens at 10, so that is the active step: 5 lb in each hand.
+      expect(screen.getByText("10 lb × 5 · 5 lb per hand")).toBeInTheDocument();
+    });
+
+    it("warms up without the empty bar", () => {
+      const { container } = render(ExerciseCard, {
+        name: "Dumbbell Curl",
+        sets: workSets(30, 3),
+        equipment: "dumbbell",
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+      });
+
+      const warmups = container.querySelectorAll<HTMLButtonElement>(
+        'button[aria-label^="Warm-up"]',
+      );
+      expect(warmups).toHaveLength(2);
+      expect(warmups[0]).toHaveAttribute("aria-label", expect.stringContaining("Warm-up 10 lb"));
+      expect(warmups[1]).toHaveAttribute("aria-label", expect.stringContaining("Warm-up 20 lb"));
+    });
+
+    it("steps the weight by 10, which is what a pair of bells can do", async () => {
+      const onChangeWeight = vi.fn();
+      render(ExerciseCard, {
+        name: "Dumbbell Curl",
+        sets: workSets(30, 3),
+        equipment: "dumbbell",
+        onCycle: vi.fn(),
+        onChangeWeight,
+      });
+
+      await fireEvent.click(
+        screen.getByRole("button", { name: "Increase weight by 10 lb" }),
+      );
+      expect(onChangeWeight).toHaveBeenCalledWith(10);
+
+      await fireEvent.click(
+        screen.getByRole("button", { name: "Decrease weight by 10 lb" }),
+      );
+      expect(onChangeWeight).toHaveBeenCalledWith(-10);
+    });
+
+    it("leaves a machine's weight to speak for itself", () => {
+      // No plates to list and no bell to halve — the stack is its own label, and
+      // a second line restating the weight above it is noise.
+      render(ExerciseCard, {
+        name: "Leg Press",
+        sets: workSets(90, 3),
+        equipment: "machine",
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+      });
+      expect(screen.queryByLabelText(/^Barbell loaded to/)).not.toBeInTheDocument();
+      expect(screen.getByText("45 lb × 5")).toBeInTheDocument();
+    });
+  });
+
   describe("when readonly (the session is over)", () => {
     it("ignores taps on work sets and the weight steppers", async () => {
       const onCycle = vi.fn();

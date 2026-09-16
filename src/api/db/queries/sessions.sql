@@ -198,6 +198,12 @@ WHERE id = sqlc.arg('id')
 -- session materializes whatever prescribe() returned, and asking "was this on
 -- the program's own list?" at read time cannot drift from the answer the
 -- ordering above already depends on.
+--
+-- equipment rides along from the exercise for the same reason ListAssistanceByDay
+-- takes it: the smallest jump a lift can make, and whether it has a bar to warm
+-- up with at all, are properties of the movement and nothing else knows them. The
+-- session screen draws a plate diagram and an empty-bar opener off this, which on
+-- a pair of dumbbells describes equipment that is not in the lifter's hands.
 -- name: ListSessionSets :many
 SELECT ss.id,
        ss.session_id,
@@ -209,7 +215,8 @@ SELECT ss.id,
        ss.weight_lb,
        ss.completed,
        (pde.id IS NULL)::bool AS is_assistance,
-       e.rest_seconds
+       e.rest_seconds,
+       e.equipment
 FROM session_sets ss
 JOIN exercises e ON e.id = ss.exercise_id
 JOIN sessions s ON s.id = ss.session_id
@@ -241,7 +248,8 @@ SELECT ss.id,
        ss.weight_lb,
        ss.completed,
        (pde.id IS NULL)::bool AS is_assistance,
-       e.rest_seconds
+       e.rest_seconds,
+       e.equipment
 FROM session_sets ss
 JOIN exercises e ON e.id = ss.exercise_id
 JOIN sessions s ON s.id = ss.session_id

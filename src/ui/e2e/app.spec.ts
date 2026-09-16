@@ -178,6 +178,7 @@ function sessionDetail(
         weightLb: 80,
         completed: logged ? completed : false,
         restSeconds: 180,
+        equipment: "barbell",
       };
     }),
   };

@@ -475,9 +475,11 @@
       () => addSessionAssistance(sessionId, { ...choice }),
       // Buildable in full, which is why this can be queued at all: the picker
       // handed over the movement, the lifter typed the numbers, the server uses
-      // them verbatim, and kind is assistance by construction. restSeconds is
-      // the one field that had to be put on the library for this — without it
-      // the countdown would start three minutes on a set of curls.
+      // them verbatim, and kind is assistance by construction. restSeconds and
+      // equipment are the two fields that had to be put on the library for this
+      // — without the first the countdown would start three minutes on a set of
+      // curls, and without the second the card would put an empty bar and a
+      // plate diagram in front of a pair of dumbbells until the server replied.
       () =>
         tempSetIds.map((id, i) => ({
           id,
@@ -490,6 +492,7 @@
           weightLb: choice.weightLb,
           completed: false,
           restSeconds: exercise.restSeconds,
+          equipment: exercise.equipment,
         })),
     );
     if (!outcome.ok) {
@@ -655,6 +658,7 @@
       <ExerciseCard
         name={group.name}
         sets={group.sets}
+        equipment={group.sets[0].equipment}
         onCycle={cycle}
         onChangeWeight={(delta) => changeWeight(group.sets, delta)}
         onAddSet={() => addSet(group.sets[0].exerciseId)}

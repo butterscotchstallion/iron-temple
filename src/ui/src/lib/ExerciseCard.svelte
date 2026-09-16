@@ -6,6 +6,7 @@
   import Plus from "@lucide/svelte/icons/plus";
   import PlateBar from "./PlateBar.svelte";
   import { plateLabel } from "./plates";
+  import { equipmentStepLb } from "./library";
   import { barWeightLb, plateInventory } from "./gym.svelte";
   import { warmupSets } from "./warmup";
   import { formatTime } from "./time";
@@ -14,6 +15,7 @@
   let {
     name,
     sets,
+    equipment = "barbell",
     onCycle,
     onChangeWeight,
     onAddSet,
@@ -22,6 +24,14 @@
   }: {
     name: string;
     sets: SessionSet[];
+    /**
+     * The movement's equipment. Everything this card says about loading a
+     * weight depends on it: a barbell gets an empty-bar opener, a plate diagram
+     * and 5 lb steps, and a pair of dumbbells gets none of those, because none
+     * of them exist for a pair of dumbbells. Defaulted rather than required so a
+     * card still renders without one, the way `readonly` is.
+     */
+    equipment?: string;
     onCycle: (set: SessionSet) => void;
     onChangeWeight: (delta: number) => void;
     /** Append one more set of this lift. Omitted where sets are fixed. */
@@ -52,6 +62,16 @@
     pendingRemoval = null;
   }
 
+  // Only a barbell has a bar to load, so only a barbell gets the diagram, the
+  // per-side plate line and the empty-bar opener in front of its work sets.
+  const barbell = $derived(equipment === "barbell");
+  // The smallest change this equipment admits, which is what the stepper should
+  // move by: 10 on dumbbells, because a rack steps 5 lb a bell and a pair steps
+  // twice that. Shared with the API's progression.Ladder through
+  // `equipmentStepLb`, so the button and the engine agree about what the next
+  // weight up even is — ±5 on a dumbbell lift asks for a 35 lb pair nobody owns.
+  const stepLb = $derived(equipmentStepLb(equipment));
+
   // The last set is the one a "remove a set" control should target: sets are
   // numbered in order and the tail is what an extra one was appended to.
   const lastSet = $derived(sets[sets.length - 1]);
@@ -79,10 +99,12 @@
   // corner of the screen with no name on it.
   const restSeconds = $derived(sets[0]?.restSeconds ?? 0);
 
-  // Warm-up ramp expanded to one entry per set (the empty bar is done twice).
-  // Built against this lifter's bar and rack: the ramp starts at whatever their
-  // bar weighs and each rung rounds to a weight that rack can build, so a
-  // prescription below the bar yields no warm-ups rather than impossible ones.
+  // Warm-up ramp expanded to one entry per set (on a barbell the empty bar is
+  // done twice). Built against this lifter's bar and rack and this lift's
+  // equipment: a barbell ramp starts at whatever their bar weighs and each rung
+  // rounds to a weight that rack can build, so a prescription below the bar
+  // yields no warm-ups rather than impossible ones — and a lift with no bar
+  // ramps from nothing in the steps its own equipment admits.
   // A ramp is its own warm-up — that is what the first three rungs of a Madcow
   // day are — so bolting a second one in front of it would have the lifter warm
   // up to warm up.
@@ -94,12 +116,12 @@
   const warmups = $derived.by(() => {
     const out: { weightLb: number; reps: number }[] = [];
     if (ramping) return out;
-    for (const w of warmupSets(
-      workWeight,
-      barWeightLb(),
-      plateInventory(),
-      sets.length,
-    )) {
+    for (const w of warmupSets(workWeight, {
+      equipment,
+      bar: barWeightLb(),
+      plates: plateInventory(),
+      maxSets: sets.length,
+    })) {
       for (let k = 0; k < w.sets; k++) {
         out.push({ weightLb: w.weightLb, reps: w.reps });
       }
@@ -150,6 +172,18 @@
       ? warmups[active].reps
       : (sets[active - warmups.length]?.targetReps ?? targetReps),
   );
+
+  // How the active weight is actually carried, said in the terms the equipment
+  // uses. A barbell gets the plates for one side. A dumbbell gets the weight of
+  // one bell, because every weight in this app is the whole load and the number
+  // stamped on the thing in the lifter's hand is half of it. A machine's stack
+  // and a cable's pin are their own label already, so they get nothing rather
+  // than a sentence restating the weight above them.
+  const loadNote = $derived.by(() => {
+    if (barbell) return plateLabel(activeWeight, barWeightLb(), plateInventory());
+    if (equipment === "dumbbell") return `${activeWeight / 2} lb per hand`;
+    return "";
+  });
 
   function warmClass(i: number): string {
     const ring =
@@ -211,9 +245,9 @@
         <Button
           variant="outline"
           size="icon-sm"
-          onclick={() => stepWeight(-5)}
+          onclick={() => stepWeight(-stepLb)}
           disabled={readonly}
-          aria-label="Decrease weight by 5 lb"
+          aria-label="Decrease weight by {stepLb} lb"
         >
           <Minus />
         </Button>
@@ -225,9 +259,9 @@
         <Button
           variant="outline"
           size="icon-sm"
-          onclick={() => stepWeight(5)}
+          onclick={() => stepWeight(stepLb)}
           disabled={readonly}
-          aria-label="Increase weight by 5 lb"
+          aria-label="Increase weight by {stepLb} lb"
         >
           <Plus />
         </Button>
@@ -235,15 +269,15 @@
     </div>
   </div>
 
-  <!-- Plate guide for the active step (warm-up rung or work weight). -->
+  <!-- Loading guide for the active step (warm-up rung or work weight). The bar
+       diagram is drawn only where there is a bar; off the barbell the weight and
+       reps carry the step on their own, plus whatever `loadNote` has to add. -->
   <div class="mt-4 flex flex-col items-center gap-2">
-    <PlateBar weightLb={activeWeight} />
+    {#if barbell}
+      <PlateBar weightLb={activeWeight} />
+    {/if}
     <p class="text-xs tabular-nums text-muted-foreground">
-      {activeWeight} lb × {activeReps} · {plateLabel(
-        activeWeight,
-        barWeightLb(),
-        plateInventory(),
-      )}
+      {activeWeight} lb × {activeReps}{loadNote ? ` · ${loadNote}` : ""}
     </p>
   </div>
 

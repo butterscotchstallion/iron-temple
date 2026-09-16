@@ -2471,7 +2471,7 @@ components:
     SessionSet:
       type: object
       required:
-        [id, exerciseId, exerciseName, kind, setNumber, targetReps, weightLb, completed, restSeconds]
+        [id, exerciseId, exerciseName, kind, setNumber, targetReps, weightLb, completed, restSeconds, equipment]
       properties:
         id:
           type: integer
@@ -2508,6 +2508,13 @@ components:
             The session screen's countdown starts from it, so a set of squats and
             a set of curls no longer ask for the same length.
           example: 180
+        # No description: this is 3.0.3, where siblings of $ref are ignored, and
+        # every other $ref'd field here goes bare for the same reason. What the
+        # client does with it is on sessionSetDTO.Equipment — it decides whether
+        # the warm-up opens with an empty bar and rounds onto plates, and whether
+        # the weight steps by a bar's 5 lb or a pair of bells' 10.
+        equipment:
+          $ref: "#/components/schemas/Equipment"
 
     SessionExerciseWeight:
       description: An exercise's set/rep prescription and top weight for a session.
