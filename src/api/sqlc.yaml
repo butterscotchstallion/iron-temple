@@ -29,6 +29,7 @@ sql:
       # 0019 declares e1rm_lb(), which three queries call — sqlc needs the
       # signature to type its result rather than guess at it.
       - "db/migrations/0019_e1rm_function.up.sql"
+      - "db/migrations/0020_dumbbell_step.up.sql"
     queries: "db/queries"
     gen:
       go:

@@ -7,7 +7,7 @@
   import PlateBar from "./PlateBar.svelte";
   import { plateLabel } from "./plates";
   import { equipmentStepLb } from "./library";
-  import { barWeightLb, plateInventory } from "./gym.svelte";
+  import { barWeightLb, gymSteps, plateInventory } from "./gym.svelte";
   import { warmupSets } from "./warmup";
   import { formatTime } from "./time";
   import type { SessionSet } from "./api";
@@ -65,12 +65,13 @@
   // Only a barbell has a bar to load, so only a barbell gets the diagram, the
   // per-side plate line and the empty-bar opener in front of its work sets.
   const barbell = $derived(equipment === "barbell");
-  // The smallest change this equipment admits, which is what the stepper should
-  // move by: 10 on dumbbells, because a rack steps 5 lb a bell and a pair steps
-  // twice that. Shared with the API's progression.Ladder through
-  // `equipmentStepLb`, so the button and the engine agree about what the next
-  // weight up even is — ±5 on a dumbbell lift asks for a 35 lb pair nobody owns.
-  const stepLb = $derived(equipmentStepLb(equipment));
+  // The smallest change this equipment admits IN THIS GYM, which is what the
+  // stepper should move by: twice the lightest plate owned on a bar, twice the
+  // rack's step on a pair of dumbbells. Shared with the API's progression.Ladder
+  // through `equipmentStepLb`, so the button and the engine agree about what the
+  // next weight up even is — ±5 on a lift whose rack steps 5 lb a bell asks for
+  // a 35 lb pair nobody owns.
+  const stepLb = $derived(equipmentStepLb(equipment, gymSteps()));
 
   // The last set is the one a "remove a set" control should target: sets are
   // numbered in order and the tail is what an extra one was appended to.
@@ -120,6 +121,7 @@
       equipment,
       bar: barWeightLb(),
       plates: plateInventory(),
+      steps: gymSteps(),
       maxSets: sets.length,
     })) {
       for (let k = 0; k < w.sets; k++) {

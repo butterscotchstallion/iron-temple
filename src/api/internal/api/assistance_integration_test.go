@@ -672,3 +672,146 @@ func assistancePreview(
 	}
 	panic("assistance lift not in the prescription")
 }
+
+// The bug report, end to end: "I've done the DB curl twice and the weight isn't
+// increasing."
+//
+// Two separate faults met here. The weight did not move because the lift had no
+// rep range and nothing else moves an assistance weight — that half is covered
+// above. This is the other half: when it DOES move, by how much.
+//
+// A dumbbell curl topping out went up 10 lb on the pair, a third heavier in one
+// session, because the engine believed every rack steps 5 lb a bell. Told
+// otherwise, it prescribes what this lifter's rack can actually build.
+func TestAssistanceAdvancesByWhatTheRackCanBuild(t *testing.T) {
+	e := expect(t)
+	programID, dayID := firstProgramAndDay(e)
+	curlID := exerciseIDByName(t, e, "Dumbbell Curl")
+
+	// Bells in 2.5s, so the pair moves in 5s.
+	e.PATCH("/me").WithJSON(map[string]any{"dumbbellStepLb": 2.5}).
+		Expect().Status(http.StatusOK)
+	t.Cleanup(func() {
+		e.PATCH("/me").WithJSON(map[string]any{"dumbbellStepLb": 5}).Expect()
+	})
+
+	created := e.POST(fmt.Sprintf("/programs/%d/days/%d/assistance", programID, dayID)).
+		WithJSON(map[string]any{
+			"exerciseId": curlID, "sets": 3, "reps": 8, "weightLb": 30,
+			"repMin": 8, "repMax": 12,
+		}).
+		Expect().Status(http.StatusCreated).JSON().Object()
+	assistanceID := int(created.Value("id").Number().Raw())
+	t.Cleanup(func() {
+		e.DELETE(fmt.Sprintf("/programs/%d/days/%d/assistance/%d",
+			programID, dayID, assistanceID)).Expect()
+	})
+	// Carried to the client so its stepper and its copy can promise the jump the
+	// engine will actually make.
+	created.Value("equipment").String().IsEqual("dumbbell")
+
+	session := startSession(t, e, dayID)
+	sessionID := int(session.Value("id").Number().Raw())
+	for _, set := range sessionSetsFor(session, curlID) {
+		logSetAt(e, sessionID, int(set.Value("id").Number().Raw()), 12, 30, true)
+	}
+
+	// 35, not 40. Five is half a bell on the rack this app used to assume and a
+	// whole bell on the one this lifter actually owns.
+	advanced := assistancePreview(e, programID, dayID, curlID)
+	advanced.Value("weightLb").Number().IsEqual(35)
+	advanced.Value("progression").Object().Value("status").String().IsEqual("progressing")
+}
+
+// The same lift on an account that has never opened the setup screen, which is
+// every account until it does. Nothing about the prescription may change for
+// them, and this is what says so.
+func TestAssistanceOnAnUndescribedRackIsUnchanged(t *testing.T) {
+	e := expect(t)
+	programID, dayID := firstProgramAndDay(e)
+	curlID := exerciseIDByName(t, e, "Hammer Curl")
+
+	created := e.POST(fmt.Sprintf("/programs/%d/days/%d/assistance", programID, dayID)).
+		WithJSON(map[string]any{
+			"exerciseId": curlID, "sets": 3, "reps": 8, "weightLb": 30,
+			"repMin": 8, "repMax": 12,
+		}).
+		Expect().Status(http.StatusCreated).JSON().Object()
+	assistanceID := int(created.Value("id").Number().Raw())
+	t.Cleanup(func() {
+		e.DELETE(fmt.Sprintf("/programs/%d/days/%d/assistance/%d",
+			programID, dayID, assistanceID)).Expect()
+	})
+
+	session := startSession(t, e, dayID)
+	sessionID := int(session.Value("id").Number().Raw())
+	for _, set := range sessionSetsFor(session, curlID) {
+		logSetAt(e, sessionID, int(set.Value("id").Number().Raw()), 12, 30, true)
+	}
+
+	assistancePreview(e, programID, dayID, curlID).
+		Value("weightLb").Number().IsEqual(40)
+}
+
+// A lift added from inside a workout joins the program day, so it has to be
+// able to carry a rep range — without one the row is created with NULLs and
+// nothing will ever move its weight. That was true of every accessory a lifter
+// decided on at the rack.
+func TestSessionAssistanceCarriesARepRange(t *testing.T) {
+	e := expect(t)
+	programID, dayID := firstProgramAndDay(e)
+	flyID := exerciseIDByName(t, e, "Dumbbell Fly")
+
+	session := startSession(t, e, dayID)
+	sessionID := int(session.Value("id").Number().Raw())
+	t.Cleanup(func() {
+		e.DELETE(fmt.Sprintf("/programs/%d/days/%d/assistance", programID, dayID)).Expect()
+	})
+
+	e.POST(fmt.Sprintf("/sessions/%d/assistance", sessionID)).
+		WithJSON(map[string]any{
+			"exerciseId": flyID, "sets": 3, "reps": 8, "weightLb": 20,
+			"repMin": 8, "repMax": 12,
+		}).
+		Expect().Status(http.StatusCreated)
+
+	// The day now carries it, range and all — which is what makes the lift come
+	// round again with a progression behind it rather than frozen.
+	day := e.GET(fmt.Sprintf("/programs/%d", programID)).
+		Expect().Status(http.StatusOK).JSON().Object().
+		Value("days").Array()
+	var found bool
+	for i := 0; i < int(day.Length().Raw()); i++ {
+		d := day.Value(i).Object()
+		if int(d.Value("id").Number().Raw()) != dayID {
+			continue
+		}
+		assist := d.Value("assistance").Array()
+		for j := 0; j < int(assist.Length().Raw()); j++ {
+			a := assist.Value(j).Object()
+			if int(a.Value("exerciseId").Number().Raw()) != flyID {
+				continue
+			}
+			a.Value("repMin").Number().IsEqual(8)
+			a.Value("repMax").Number().IsEqual(12)
+			a.Value("equipment").String().IsEqual("dumbbell")
+			found = true
+			// Clean up by id now that we have it.
+			id := int(a.Value("id").Number().Raw())
+			t.Cleanup(func() {
+				e.DELETE(fmt.Sprintf("/programs/%d/days/%d/assistance/%d",
+					programID, dayID, id)).Expect()
+			})
+		}
+	}
+	if !found {
+		t.Fatal("the lift added at the rack is not on the program day")
+	}
+
+	// And the same both-or-neither rule the program page enforces.
+	e.POST(fmt.Sprintf("/sessions/%d/assistance", sessionID)).
+		WithJSON(map[string]any{
+			"exerciseId": flyID, "sets": 3, "reps": 8, "weightLb": 20, "repMin": 8,
+		}).
+		Expect().Status(http.StatusBadRequest)
+}

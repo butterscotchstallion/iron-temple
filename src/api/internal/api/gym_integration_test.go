@@ -21,6 +21,9 @@ func TestNewAccountStartsWithABarAndAStandardRack(t *testing.T) {
 
 	me := e.GET("/me").Expect().Status(http.StatusOK).JSON().Object()
 	me.Value("barWeightLb").Number().Gt(0)
+	// Per bell, and 5 is the rack the engine assumed before it was told about
+	// any: 5 a bell is the 10 lb pair progression.DumbbellIncrementLb names.
+	me.Value("dumbbellStepLb").Number().IsEqual(5)
 
 	plates := me.Value("plates").Array()
 	plates.NotEmpty()
@@ -122,6 +125,12 @@ func TestGymSetupValidation(t *testing.T) {
 		{"repeated denomination", map[string]any{"plates": []map[string]any{
 			{"plateLb": 45, "pairs": 1}, {"plateLb": 45, "pairs": 2},
 		}}},
+		// Below a pound is not a rack, it is a mistyped digit — and the pair
+		// moves twice whatever is stored, so a quarter-pound bell would have the
+		// engine prescribing half-pound jumps on a pair of dumbbells.
+		{"zero dumbbell step", map[string]any{"dumbbellStepLb": 0}},
+		{"sub-pound dumbbell step", map[string]any{"dumbbellStepLb": 0.25}},
+		{"absurd dumbbell step", map[string]any{"dumbbellStepLb": 100}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

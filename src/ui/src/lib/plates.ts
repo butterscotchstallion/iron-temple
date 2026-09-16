@@ -30,6 +30,31 @@ export const DEFAULT_PLATES: PlateInventory = [
  */
 export type PlateInventory = { plateLb: number; pairs: number }[];
 
+/** The smallest change a bar admits when the rack is unknown. */
+export const DEFAULT_BAR_STEP_LB = 5;
+
+/**
+ * The smallest weight change a loaded barbell admits: twice the lightest plate
+ * owned, because plates load symmetrically and the pair is the change.
+ *
+ * "A barbell moves in 5s" is really "a barbell moves in twice your lightest
+ * plate", and it only looks like a constant because 2.5s are what most racks
+ * bottom out at. A lifter who owns 1.25s moves in 2.5s, and the progression
+ * engine is now told so — this is the client-side mirror of the bar_step_lb
+ * half of GetGymSteps, kept here beside the inventory it is derived from.
+ *
+ * An empty inventory falls back to 5 rather than 0: owning no plates means
+ * bar-only, which admits no change at all, and a step of zero is not a number
+ * anything downstream can divide by.
+ */
+export function barStepLb(plates: PlateInventory = DEFAULT_PLATES): number {
+  const lightest = plates.reduce(
+    (min, p) => (p.plateLb > 0 && p.plateLb < min ? p.plateLb : min),
+    Infinity,
+  );
+  return Number.isFinite(lightest) ? lightest * 2 : DEFAULT_BAR_STEP_LB;
+}
+
 /** A loaded bar: the plates on ONE side, and the weight that actually lands. */
 export type Loadout = {
   /** Plates for one side, heaviest first (heaviest sits nearest the collar). */

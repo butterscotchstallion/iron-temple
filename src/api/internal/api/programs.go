@@ -98,6 +98,7 @@ func (s *Server) getProgram(w http.ResponseWriter, r *http.Request) {
 			WeightLb:     numericToFloat(a.WeightLb),
 			RepMin:       a.RepMin,
 			RepMax:       a.RepMax,
+			Equipment:    a.Equipment,
 		})
 	}
 
@@ -315,6 +316,30 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32, 
 		baseline[b.ExerciseID] = numericToFloat(b.WeightLb)
 	}
 
+	// What this lifter's equipment can actually build, read once for the day for
+	// the same reason the baselines are: every lift below needs it, and it is
+	// one small read either way.
+	//
+	// Unlike a baseline this is consulted on EVERY session rather than only the
+	// first. It decides the size of a jump, not where a lift begins — how far a
+	// successful session advances, where a deload lands, and how much assistance
+	// work goes up when it tops its rep range.
+	//
+	// A failure here is not allowed to fail the prescription. The zero GymSteps
+	// means "not configured" and falls back to the constants the engine used
+	// before it was shown a gym, so an unreadable rack prescribes the standard
+	// one rather than 500ing a lifter out of their workout — the same rule
+	// userDTO applies to the same tables.
+	var gym progression.GymSteps
+	if steps, err := s.q.GetGymSteps(ctx, userID); err == nil {
+		gym = progression.GymSteps{
+			BarLb: numericToFloat(steps.BarStepLb),
+			// Stored per bell, prescribed per pair: every weight in this app is
+			// the whole load, and a dumbbell lift is two bells. See 0020.
+			DumbbellLb: numericToFloat(steps.DumbbellStepLb) * 2,
+		}
+	}
+
 	// The program's per-set prescriptions, if it has any. Only Madcow does; for
 	// every other program this comes back empty and each lift is a uniform block
 	// of sets x reps at one weight, exactly as before.
@@ -373,7 +398,7 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32, 
 		// What this lift can jump by, from the movement and the equipment it
 		// uses. A dumbbell press moves 10 lb because that is 5 lb a bell and a
 		// rack has nothing between; a barbell lift still moves 5.
-		ladder := progression.LadderFor(p.ExerciseName, p.Equipment)
+		ladder := progression.LadderFor(p.ExerciseName, p.Equipment, gym)
 		plan := progression.NextPlan(start, ladder, history)
 		if lay.active() {
 			plan = progression.ApplyLayoff(plan, lay.weeks, ladder)
@@ -467,7 +492,7 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32, 
 		// the smallest move the equipment allows, so a dumbbell curl goes up 10
 		// on the pair and a barbell curl 5 — before this, both went up 5 and the
 		// dumbbell one asked for half a bell.
-		ladder := progression.LadderFor(a.ExerciseName, a.Equipment)
+		ladder := progression.LadderFor(a.ExerciseName, a.Equipment, gym)
 		plan := progression.NextAssistance(
 			numericToFloat(a.WeightLb), derefInt32(a.RepMin), derefInt32(a.RepMax), last, ladder,
 		)

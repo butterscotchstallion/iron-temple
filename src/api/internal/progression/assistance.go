@@ -20,16 +20,17 @@ package progression
 //
 // Like the linear engine this is pure — history in, a number out, no I/O.
 
-// AssistanceIncrement is how much a BARBELL lift goes up when every set tops the
-// range: the same 5 lb the main lifts use, and the smallest change a standard
-// barbell admits.
+// AssistanceIncrement is how much a lift goes up when every set tops the range
+// in a gym nobody has described: the same 5 lb the main lifts use, and the
+// smallest change a standard barbell admits.
 //
-// It is no longer the answer for every accessory, which is what it used to
-// claim. The old note here read "the dumbbell rack it usually means is no
-// finer", and that is only true of ONE bell — every weight in this app is the
-// whole load, so a dumbbell accessory is two bells and the smallest move the
-// rack allows is 10 lb. A curl that topped its range was being sent up 5, to a
-// pair of bells that does not exist. See Ladder, and use LadderFor.
+// It is a fallback and not the rule, which is what it used to claim twice over.
+// The first note here read "the dumbbell rack it usually means is no finer",
+// and that is only true of ONE bell — every weight in this app is the whole
+// load, so a dumbbell accessory is two bells. The second read "the smallest
+// change a standard barbell admits", which assumed the lightest plate anyone
+// owns is a 2.5. Both are now questions the lifter's gym answers; see GymSteps
+// and use LadderFor.
 const AssistanceIncrement = 5.0
 
 // AssistancePerformance is what a lift did the last time it was performed: the
@@ -144,10 +145,13 @@ func toppedOut(reps []int32, repMax int32) bool {
 }
 
 // assistanceStep is how much a ranged lift goes up when every set tops out: the
-// smallest change its equipment admits. A zero ladder — one a caller built
-// itself rather than taking from LadderFor — falls back to the barbell 5 this
-// function replaced, so a missed call site keeps the old behaviour rather than
-// prescribing a weight of zero.
+// smallest change its equipment admits in this lifter's gym, which is the whole
+// reason Ladder carries a Step distinct from its Increment. A curl does not
+// advance at the pace of a squat; it advances by the least the rack allows.
+//
+// A zero ladder — one a caller built itself rather than taking from LadderFor —
+// falls back to the 5 this function replaced, so a missed call site keeps the
+// old behaviour rather than prescribing a weight of zero.
 func assistanceStep(l Ladder) float64 {
 	if l.Step <= 0 {
 		return AssistanceIncrement

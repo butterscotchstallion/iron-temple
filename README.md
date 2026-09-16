@@ -22,12 +22,13 @@ prescribed lifts, sets and reps.
 
 - **Put the days on a calendar.** Assign a weekday to each program day, and the app
   knows what you're scheduled to do and when you missed it.
-- **Add your own assistance work.** Accessories attach to a program day as a
-  per-account overlay: the seeded programs stay untouched, so your curls never move
-  anyone else's Workout A. Give one a **rep range** and it runs on double
-  progression — add reps inside the range, and when every set reaches the top the
-  weight goes up and the reps reset to the bottom. Without a range it simply
-  carries forward whatever you last lifted.
+- **Add your own assistance work, and have it progress.** Accessories attach to a
+  program day as a per-account overlay: the seeded programs stay untouched, so your
+  curls never move anyone else's Workout A. Each one runs on **double progression**
+  by default — add reps inside a rep range, and when every set reaches the top the
+  weight goes up and the reps reset to the bottom. Edit a lift on the program page
+  to change the range, or turn it off and simply carry forward whatever you last
+  lifted. Assistance never deloads: a stalled lateral raise is not a signal.
 - **See the next session before you start it.** Every day previews its target
   weights, so you know what's coming without opening a session.
 - **Always know what's next.** The program page is a queue: every day carries the
@@ -45,9 +46,10 @@ prescribed lifts, sets and reps.
   in you, or **drop one** you skipped.
 - **Add a lift you decided on at the rack.** Assistance can be added from the
   workout you're in, not just from the program page — it drops into today's
-  session straight away *and* joins the day it came from, so it comes round again
-  with weight carry-forward behind it rather than being a one-off. The weight
-  starts where you left it, and like everything else here it works with no signal.
+  session straight away *and* joins the day it came from, rep range and all, so it
+  comes round again with a progression behind it rather than being a one-off. The
+  weight starts where you left it, and like everything else here it works with no
+  signal.
 - **Training without a signal.** A gym in a basement is where this app is used and
   where the network isn't. A tap that can't reach the server is written to disk,
   applied to the screen as though it had landed, and replayed in order when the
@@ -91,10 +93,18 @@ again after a failure, and a **deload to 90%** after three consecutive failures 
 one weight. It also says *why* it picked a number, so a deload or an approaching
 stall reads as a decision rather than a mystery.
 
-Every jump is one the equipment can make. A **dumbbell** lift moves **+10 lb** and
-deloads onto the same grid, because a weight here is the whole load and a rack
-steps 5 lb a *bell* — so the pair steps 10, and there is nothing in between. The
-same rule sets the increase when assistance work tops out its rep range.
+Every jump is one **your** equipment can make. The smallest change a barbell admits
+is twice your lightest plate, and the smallest a pair of dumbbells admits is twice
+your rack's step — a weight here is the whole load, so a rack of 5 lb bells moves
+the pair 10 at a time and has nothing in between. Both come off your gym setup
+rather than a constant, so owning 1.25s means a deload can land on 121.5, and a
+rack of 2.5s means a dumbbell press climbs 5 lb a session instead of 10.
+
+The programme's pace is separate from that grid and is rounded **up** to it: the
+squat still wants +5 and the deadlift +10, and a gym too coarse to build them gets
+the next weight that exists rather than an advance of nothing. The grid alone sets
+the increase when assistance work tops out its rep range — a curl is not a squat,
+and it goes up by the least the rack allows.
 
 History follows the **lift**, not the program — so taking Advanced 3x5 when your
 5x5 stalls picks the bar up where you left it instead of sending you back to an
@@ -135,8 +145,9 @@ waking on the 1st, so downtime delays a recap instead of dropping it.
 
 - **Exercise library** — everything seeded plus your own movements, each with a
   muscle group and its equipment, grouped so a long list stays navigable.
-- **Your gym** — the bar's weight and the plates you own, on the profile. Every
-  weight the app draws is loaded onto them.
+- **Your gym** — the bar's weight, the plates you own, and what your dumbbell rack
+  steps by, on the profile. Every weight the app draws is loaded onto them, and
+  every jump it prescribes is one they can build.
 - **Per-lift history** with a progress chart and your top set to date.
 - **Session history**, paged, with lifetime volume across everything you've logged.
 - **Home** opens on the program you last used, with your streak and a heatmap of

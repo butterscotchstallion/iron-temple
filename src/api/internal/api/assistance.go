@@ -232,6 +232,7 @@ func (s *Server) addAssistance(w http.ResponseWriter, r *http.Request) {
 		WeightLb:     numericToFloat(created.WeightLb),
 		RepMin:       created.RepMin,
 		RepMax:       created.RepMax,
+		Equipment:    ex.Equipment,
 	})
 }
 
@@ -373,6 +374,7 @@ func (s *Server) updateAssistance(w http.ResponseWriter, r *http.Request) {
 		WeightLb:     numericToFloat(updated.WeightLb),
 		RepMin:       updated.RepMin,
 		RepMax:       updated.RepMax,
+		Equipment:    current.Equipment,
 	})
 }
 

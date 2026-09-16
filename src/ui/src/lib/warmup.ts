@@ -4,7 +4,7 @@ import {
   loadBar,
   type PlateInventory,
 } from "./plates";
-import { equipmentStepLb } from "./library";
+import { equipmentStepLb, type GymSteps } from "./library";
 
 /** One warm-up entry: a weight for `reps` reps, performed `sets` times. */
 export type WarmupSet = {
@@ -29,6 +29,13 @@ export type WarmupGym = {
   equipment?: string;
   bar?: number;
   plates?: PlateInventory;
+  /**
+   * The jumps this lifter's equipment admits, for the rungs that are not loaded
+   * on a bar. A barbell ramp rounds against `plates` and never consults this;
+   * a pair of dumbbells has no plates to add up, so it rounds to the rack's own
+   * step — which is a fact about their rack and not a constant.
+   */
+  steps?: GymSteps;
   /** See `trimToCap`. Uncapped by default, for callers asking what the full ramp would be. */
   maxSets?: number;
 };
@@ -63,6 +70,7 @@ export function warmupSets(workLb: number, gym: WarmupGym = {}): WarmupSet[] {
     equipment = "barbell",
     bar = DEFAULT_BAR_LB,
     plates = DEFAULT_PLATES,
+    steps = {},
     maxSets = Infinity,
   } = gym;
 
@@ -70,7 +78,7 @@ export function warmupSets(workLb: number, gym: WarmupGym = {}): WarmupSet[] {
   const floor = barbell ? bar : 0;
   if (workLb <= floor) return [];
 
-  const step = equipmentStepLb(equipment);
+  const step = equipmentStepLb(equipment, steps);
   const round = barbell
     ? (w: number) => loadBar(w, bar, plates).weightLb
     : (w: number) => Math.floor(w / step) * step;

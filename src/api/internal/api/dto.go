@@ -45,6 +45,16 @@ type userDTO struct {
 	// nil — an account with no plates serializes as [], which the loader reads
 	// as bar-only rather than as "unset".
 	Plates []plateDTO `json:"plates"`
+	// DumbbellStepLb is what this lifter's rack steps by, PER BELL. The pair
+	// steps twice it, because every weight this app shows is the whole load —
+	// so a rack of 5s moves 10 at a time and has nothing in between.
+	//
+	// Sent for the same reason the bar is: the client promises a lifter a
+	// number before they lift ("the weight goes up 5 lb next time", the weight
+	// input's arrows), and it can only promise the one they will actually get
+	// if it knows the same grid the engine used. Always present: GetGymSteps
+	// falls back to 5.
+	DumbbellStepLb float64 `json:"dumbbellStepLb"`
 }
 
 // plateDTO is a denomination and how many PAIRS of it are owned. Pairs rather
@@ -173,9 +183,15 @@ type programDayAssistanceDTO struct {
 	// RepMin and RepMax turn this lift onto double progression: add reps inside
 	// the range week to week, and when every set reaches the top the weight goes
 	// up and the reps reset to the bottom. Both absent means the lift carries its
-	// weight forward and nothing moves it, which is the default.
+	// weight forward and nothing moves it.
 	RepMin *int32 `json:"repMin,omitempty"`
 	RepMax *int32 `json:"repMax,omitempty"`
+	// Equipment is the movement's, copied from the exercise rather than stored
+	// on the overlay. The client needs it for the same reason the engine does:
+	// the smallest jump this lift can make is a fact about the bar or the bells
+	// it uses, and the program page both offers that jump on a stepper and
+	// promises it in words.
+	Equipment string `json:"equipment"`
 }
 
 type programDayExerciseDTO struct {

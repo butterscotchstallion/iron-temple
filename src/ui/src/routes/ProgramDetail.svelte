@@ -11,6 +11,7 @@
     updateProgramDayWeekday,
     addAssistance,
     removeAssistance,
+    updateAssistance,
     updateMe,
     setBaseline,
     type Layoff,
@@ -33,6 +34,8 @@
   import ErrorCard from "../lib/ErrorCard.svelte";
   import ErrorBanner from "../lib/ErrorBanner.svelte";
   import AssistancePicker from "../lib/AssistancePicker.svelte";
+  import { equipmentStepLb } from "../lib/library";
+  import { gymSteps } from "../lib/gym.svelte";
   import { weekdayOptions, nextWeekLabel } from "../lib/weekday";
   import { todayIso } from "../lib/calendar";
   import {
@@ -44,6 +47,7 @@
   import Calendar from "@lucide/svelte/icons/calendar";
   import Check from "@lucide/svelte/icons/check";
   import Play from "@lucide/svelte/icons/play";
+  import Pencil from "@lucide/svelte/icons/pencil";
   import Plus from "@lucide/svelte/icons/plus";
   import TrendingDown from "@lucide/svelte/icons/trending-down";
   import X from "@lucide/svelte/icons/x";
@@ -261,6 +265,14 @@
   // carried forward from the last time it was logged, which is what the preview
   // computed. Falls back to the stored weight for a lift never performed, which
   // is also what the server would send.
+  // The jump this accessory's equipment admits in this lifter's gym — what the
+  // weight stepper should move by, and the number the copy below promises when
+  // a rep range tops out. The same answer progression.LadderFor gives on the
+  // server, off the same two facts: the movement's equipment and the gym.
+  function assistanceStepLb(entry: ProgramDayAssistance): number {
+    return equipmentStepLb(entry.equipment, gymSteps());
+  }
+
   function assistanceWeight(day: DayView, entry: ProgramDayAssistance): number {
     const prescribed = day.exercises.find(
       (e) => e.kind === "assistance" && e.exerciseId === entry.exerciseId,
@@ -313,6 +325,69 @@
       d.id === dayId ? { ...d, assistance, exercises: exercises ?? d.exercises } : d,
     );
     if (preview.status !== 200) previewFailed = true;
+  }
+
+  // Editing a lift already on the day.
+  //
+  // This was the missing half of double progression, and its absence is why no
+  // accessory in the app had ever progressed. The rep range decides whether
+  // anything moves an assistance weight at all, the picker is the only place it
+  // could be set, and the picker only ever runs when a lift is being ADDED. So
+  // a curl added without a range was frozen at its first weight for good, and
+  // the only way out was to delete it and add it back — which is also how the
+  // lifter would have found out. The endpoint has accepted this patch since the
+  // range shipped; nothing called it.
+  let editingId = $state<number | null>(null);
+  let editSets = $state(3);
+  let editReps = $state(10);
+  let editWeight = $state(0);
+  let editRanged = $state(false);
+  let editRepMin = $state(8);
+  let editRepMax = $state(12);
+  let editSaving = $state(false);
+
+  function startEdit(entry: ProgramDayAssistance) {
+    assistanceError = null;
+    editingId = entry.id;
+    editSets = entry.sets;
+    editReps = entry.reps;
+    editWeight = entry.weightLb;
+    // A range is on when the row has one. The defaults behind the checkbox
+    // match the picker's, so ticking it on a lift that never had one offers
+    // 8–12 rather than whatever the reps happened to be.
+    editRanged = entry.repMin != null && entry.repMax != null;
+    editRepMin = entry.repMin ?? 8;
+    editRepMax = entry.repMax ?? 12;
+  }
+
+  async function saveEdit(day: DayView, entry: ProgramDayAssistance) {
+    if (editSaving) return;
+    editSaving = true;
+    assistanceError = null;
+    const saved = await updateAssistance(programId, day.id, entry.id, {
+      sets: editSets,
+      // With a range the bottom is the rep target, the same rule the picker
+      // applies: a set is complete at the bottom and the weight moves at the top.
+      reps: editRanged ? editRepMin : editReps,
+      weightLb: editWeight,
+      // null, not omitted. Absent means "leave it alone" on this endpoint, so
+      // clearing the range has to be said out loud — that is what puts a lift
+      // back on carrying its weight forward.
+      repMin: editRanged ? editRepMin : null,
+      repMax: editRanged ? editRepMax : null,
+    });
+    editSaving = false;
+    if (saved.status !== 200) {
+      assistanceError = saved.data?.message ?? `Couldn't save ${entry.exerciseName}.`;
+      return;
+    }
+    editingId = null;
+    // Re-preview the day: a rep range changes what the next session prescribes,
+    // which is the whole point of having set one.
+    await refreshDay(
+      day.id,
+      day.assistance.map((a) => (a.id === entry.id ? saved.data : a)),
+    );
   }
 
   async function remove(day: DayView, entry: ProgramDayAssistance) {
@@ -759,34 +834,154 @@
           {#if day.assistance.length > 0}
             <ul class="mt-2 flex flex-col gap-1.5">
               {#each day.assistance as entry (entry.id)}
-                <li class="flex items-baseline justify-between gap-2 text-sm">
-                  <a
-                    use:link
-                    href="/exercises/{entry.exerciseId}"
-                    class="text-card-foreground underline-offset-2 transition hover:text-primary hover:underline"
-                  >
-                    {entry.exerciseName}
-                  </a>
-                  <span class="flex items-center gap-2">
-                    <span class="tabular-nums text-muted-foreground">
-                      {entry.sets}×{entry.repMax
-                        ? `${entry.repMin}–${entry.repMax}`
-                        : entry.reps}
-                      {#if assistanceWeight(day, entry) > 0}
-                        · {assistanceWeight(day, entry)} lb
-                      {:else}
-                        · bodyweight
-                      {/if}
-                    </span>
-                    <button
-                      type="button"
-                      class="rounded-md p-1 text-muted-foreground transition hover:text-destructive"
-                      aria-label="Remove {entry.exerciseName} from {day.name}"
-                      onclick={() => remove(day, entry)}
+                <li class="flex flex-col gap-2 text-sm">
+                  <div class="flex items-baseline justify-between gap-2">
+                    <a
+                      use:link
+                      href="/exercises/{entry.exerciseId}"
+                      class="text-card-foreground underline-offset-2 transition hover:text-primary hover:underline"
                     >
-                      <X class="size-4" aria-hidden="true" />
-                    </button>
-                  </span>
+                      {entry.exerciseName}
+                    </a>
+                    <span class="flex items-center gap-2">
+                      <span class="tabular-nums text-muted-foreground">
+                        {entry.sets}×{entry.repMax
+                          ? `${entry.repMin}–${entry.repMax}`
+                          : entry.reps}
+                        {#if assistanceWeight(day, entry) > 0}
+                          · {assistanceWeight(day, entry)} lb
+                        {:else}
+                          · bodyweight
+                        {/if}
+                      </span>
+                      <button
+                        type="button"
+                        class="rounded-md p-1 text-muted-foreground transition hover:text-primary"
+                        aria-label="Edit {entry.exerciseName} on {day.name}"
+                        onclick={() =>
+                          editingId === entry.id
+                            ? (editingId = null)
+                            : startEdit(entry)}
+                      >
+                        <Pencil class="size-4" aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        class="rounded-md p-1 text-muted-foreground transition hover:text-destructive"
+                        aria-label="Remove {entry.exerciseName} from {day.name}"
+                        onclick={() => remove(day, entry)}
+                      >
+                        <X class="size-4" aria-hidden="true" />
+                      </button>
+                    </span>
+                  </div>
+
+                  <!-- The prescription, editable in place. Same three numbers
+                       and the same rep-range checkbox the picker offers, because
+                       it is the same prescription — a lifter who can set a range
+                       when adding a lift should not have to delete it to change
+                       their mind. -->
+                  {#if editingId === entry.id}
+                    <div
+                      class="flex flex-col gap-2 rounded-md border border-border/60 p-2"
+                    >
+                      <div class="flex flex-wrap items-end gap-2">
+                        <label class="flex flex-col gap-1">
+                          <span class="text-xs text-muted-foreground">Sets</span>
+                          <input
+                            type="number"
+                            min="1"
+                            max="20"
+                            bind:value={editSets}
+                            class="w-16 rounded-md border border-input bg-transparent px-2 py-1.5 text-sm tabular-nums text-foreground outline-none transition focus:border-primary"
+                          />
+                        </label>
+                        {#if editRanged}
+                          <label class="flex flex-col gap-1">
+                            <span class="text-xs text-muted-foreground">Rep min</span>
+                            <input
+                              type="number"
+                              min="1"
+                              max="100"
+                              bind:value={editRepMin}
+                              class="w-16 rounded-md border border-input bg-transparent px-2 py-1.5 text-sm tabular-nums text-foreground outline-none transition focus:border-primary"
+                            />
+                          </label>
+                          <label class="flex flex-col gap-1">
+                            <span class="text-xs text-muted-foreground">Rep max</span>
+                            <input
+                              type="number"
+                              min="1"
+                              max="100"
+                              bind:value={editRepMax}
+                              class="w-16 rounded-md border border-input bg-transparent px-2 py-1.5 text-sm tabular-nums text-foreground outline-none transition focus:border-primary"
+                            />
+                          </label>
+                        {:else}
+                          <label class="flex flex-col gap-1">
+                            <span class="text-xs text-muted-foreground">Reps</span>
+                            <input
+                              type="number"
+                              min="1"
+                              max="100"
+                              bind:value={editReps}
+                              class="w-16 rounded-md border border-input bg-transparent px-2 py-1.5 text-sm tabular-nums text-foreground outline-none transition focus:border-primary"
+                            />
+                          </label>
+                        {/if}
+                        <label class="flex flex-col gap-1">
+                          <span class="text-xs text-muted-foreground">Weight (lb)</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step={assistanceStepLb(entry)}
+                            bind:value={editWeight}
+                            class="w-20 rounded-md border border-input bg-transparent px-2 py-1.5 text-sm tabular-nums text-foreground outline-none transition focus:border-primary"
+                          />
+                        </label>
+                      </div>
+
+                      <label
+                        class="flex items-center gap-2 text-xs text-muted-foreground"
+                      >
+                        <input
+                          type="checkbox"
+                          bind:checked={editRanged}
+                          class="size-4 accent-primary"
+                        />
+                        Use a rep range
+                      </label>
+
+                      <p class="text-xs text-muted-foreground">
+                        {#if editRanged}
+                          Hit the top on every set and the weight goes up
+                          {assistanceStepLb(entry)} lb next time, with the reps
+                          back at the bottom. It never deloads.
+                        {:else}
+                          Without a range the weight carries over from your last
+                          session — nothing moves it but you.
+                        {/if}
+                      </p>
+
+                      <div class="flex gap-2">
+                        <Button
+                          size="sm"
+                          onclick={() => saveEdit(day, entry)}
+                          disabled={editSaving}
+                        >
+                          {editSaving ? "Saving…" : "Save"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onclick={() => (editingId = null)}
+                          disabled={editSaving}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  {/if}
                 </li>
               {/each}
             </ul>

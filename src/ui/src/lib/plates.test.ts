@@ -3,6 +3,7 @@ import {
   platesPerSide,
   plateLabel,
   loadBar,
+  barStepLb,
   type PlateInventory,
 } from "./plates";
 
@@ -141,5 +142,30 @@ describe("plateLabel", () => {
     expect(plateLabel(200, BAR, [{ plateLb: 45, pairs: 2 }])).toBe(
       "45 / side · 170 lb",
     );
+  });
+});
+
+describe("barStepLb", () => {
+  // Twice the lightest plate, because plates load symmetrically and the pair is
+  // the change. "A barbell moves in 5s" is only true of a rack that bottoms out
+  // at 2.5 — it just happens to be most of them.
+  it("is twice the lightest plate owned", () => {
+    expect(barStepLb([{ plateLb: 45, pairs: 2 }, { plateLb: 2.5, pairs: 2 }])).toBe(5);
+    expect(barStepLb([{ plateLb: 45, pairs: 2 }, { plateLb: 1.25, pairs: 1 }])).toBe(2.5);
+  });
+
+  it("does not assume the inventory is sorted", () => {
+    expect(barStepLb([{ plateLb: 5, pairs: 2 }, { plateLb: 45, pairs: 2 }])).toBe(10);
+  });
+
+  // Owning no plates means bar-only, which admits no change at all. Zero is not
+  // a usable answer downstream — it is a stepper that cannot step — so the
+  // standard bar's stands in, matching what GetGymSteps does server-side.
+  it("falls back to the standard bar when nothing is owned", () => {
+    expect(barStepLb([])).toBe(5);
+  });
+
+  it("uses the standard rack when the profile has not loaded", () => {
+    expect(barStepLb()).toBe(5);
   });
 });
