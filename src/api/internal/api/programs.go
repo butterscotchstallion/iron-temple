@@ -539,9 +539,13 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32, 
 		// outright and the shallower is a no-op. Overwriting would let a week off
 		// after a stall quietly UNDO the deload by putting the weight back up.
 		//
-		// The StatusStart guard inside it is also the one that used to be spelled
-		// `previous > 0` here: a stored fallback weight is what to use the first
-		// time, not something to detrain off.
+		// The `previous > 0` guard this used to apply here now lives inside
+		// ApplyLayoff, as PreviousLb <= 0 — a stored fallback weight is what to
+		// use the first time, not something to detrain off. It is checked there
+		// rather than here because it is a fact about the plan, not about this
+		// call site, and because the status it used to be inferred from
+		// (StatusStart) is not the only way to have no history: a ranged
+		// accessory never performed reports StatusFixed with PreviousLb 0.
 		layoffState := progression.Plan{
 			WeightLb:   weight,
 			Status:     plan.Status,

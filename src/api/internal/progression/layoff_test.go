@@ -131,6 +131,20 @@ func TestApplyLayoff(t *testing.T) {
 			wantStatus: StatusStart,
 		},
 		{
+			// The same condition wearing a different status, which is why the
+			// guard tests PreviousLb and not StatusStart. A ranged accessory
+			// never performed is prescribed its stored fallback and reports
+			// StatusFixed with nothing worked behind it; cutting 30% off "no
+			// weight" made the layoff weight 0, which is below the fallback and
+			// so won the comparison — prescribing a lift the lifter has never
+			// done at 0 lb.
+			name:       "a never-performed lift is never cut, whatever its status",
+			plan:       Plan{WeightLb: 25, Status: StatusFixed},
+			weeks:      12,
+			wantWeight: 25,
+			wantStatus: StatusFixed,
+		},
+		{
 			// 90% of 225 is 205; a week off would also be 205. The two must not
 			// compound into 180.
 			name:       "a stall deload as deep as the layoff wins",
