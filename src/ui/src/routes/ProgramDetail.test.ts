@@ -1,7 +1,11 @@
-import { render, screen } from "@testing-library/svelte";
+import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ProgramDetail from "./ProgramDetail.svelte";
-import type { Program, SessionSummary } from "../lib/api";
+import type {
+  Program,
+  ProgramDayAssistance,
+  SessionSummary,
+} from "../lib/api";
 import { clearCache } from "../lib/cache.svelte";
 import { todayIso } from "../lib/calendar";
 import { todayWeekday } from "../lib/weekday";
@@ -24,10 +28,14 @@ import { todayWeekday } from "../lib/weekday";
 
 const getProgram = vi.hoisted(() => vi.fn());
 const previewNextSessions = vi.hoisted(() => vi.fn());
+const previewNextSession = vi.hoisted(() => vi.fn());
+const updateAssistance = vi.hoisted(() => vi.fn());
 vi.mock("../lib/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/api")>()),
   getProgram,
   previewNextSessions,
+  previewNextSession,
+  updateAssistance,
 }));
 
 const loadHomeSessions = vi.hoisted(() => vi.fn());
@@ -37,7 +45,10 @@ vi.mock("../lib/homeData", async (importOriginal) => ({
 }));
 
 /** A one-day program, since every case here turns on a single card. */
-function program(weekday: number | null): Program {
+function program(
+  weekday: number | null,
+  assistance: ProgramDayAssistance[] = [],
+): Program {
   return {
     id: 1,
     name: "StrongLifts 5x5",
@@ -50,9 +61,24 @@ function program(weekday: number | null): Program {
         position: 1,
         weekday,
         exercises: [],
-        assistance: [],
+        assistance,
       },
     ],
+  };
+}
+
+/** One accessory on the day, carrying no rep range unless given one. */
+function curl(over: Partial<ProgramDayAssistance> = {}): ProgramDayAssistance {
+  return {
+    id: 3,
+    exerciseId: 9,
+    exerciseName: "Dumbbell Curl",
+    equipment: "dumbbell",
+    position: 1,
+    sets: 3,
+    reps: 10,
+    weightLb: 30,
+    ...over,
   };
 }
 
@@ -75,8 +101,15 @@ function today(over: Partial<SessionSummary> = {}): SessionSummary {
 }
 
 /** Render the screen for `weekday` with `sessions` behind it, once loaded. */
-async function show(weekday: number | null, sessions: SessionSummary[]) {
-  getProgram.mockResolvedValue({ status: 200, data: program(weekday) });
+async function show(
+  weekday: number | null,
+  sessions: SessionSummary[],
+  assistance: ProgramDayAssistance[] = [],
+) {
+  getProgram.mockResolvedValue({
+    status: 200,
+    data: program(weekday, assistance),
+  });
   loadHomeSessions.mockResolvedValue({ status: 200, data: { items: sessions } });
   render(ProgramDetail, { params: { id: "1" } });
   await screen.findByRole("heading", { name: "Workout A" });
@@ -98,6 +131,18 @@ beforeEach(() => {
     status: 200,
     data: { programId: 1, layoff: null, days: [] },
   });
+  previewNextSession.mockReset();
+  previewNextSession.mockResolvedValue({
+    status: 200,
+    data: {
+      programId: 1,
+      programDayId: 7,
+      programDayName: "Workout A",
+      exercises: [],
+      layoff: null,
+    },
+  });
+  updateAssistance.mockReset();
 });
 
 describe("ProgramDetail day card", () => {
@@ -151,5 +196,82 @@ describe("ProgramDetail day card", () => {
     expect(action("Start").className).toContain("bg-primary");
     expect(screen.queryByText("Done today")).not.toBeInTheDocument();
     expect(screen.queryByText(/^Next /)).not.toBeInTheDocument();
+  });
+});
+
+// The control that unsticks a lift already on a day.
+//
+// Its absence is why double progression shipped switched off in practice: the
+// rep range is what decides whether an assistance weight ever moves, the picker
+// was the only place it could be set, and the picker only runs while a lift is
+// being ADDED. So a curl added without one was frozen at its first weight, and
+// the only way out was to delete it and add it back. The endpoint accepted this
+// patch the whole time; nothing called it.
+describe("ProgramDetail assistance editing", () => {
+  const day = 7;
+
+  it("puts a rep range on a lift that has none", async () => {
+    await show(todayWeekday(), [], [curl()]);
+    updateAssistance.mockResolvedValue({
+      status: 200,
+      data: curl({ reps: 8, repMin: 8, repMax: 12 }),
+    });
+
+    await fireEvent.click(
+      screen.getByRole("button", { name: "Edit Dumbbell Curl on Workout A" }),
+    );
+    await fireEvent.click(await screen.findByLabelText("Use a rep range"));
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    // reps is the BOTTOM of the range: a set is complete at the bottom and the
+    // weight moves at the top, which is what lets a lifter finish at 8s without
+    // the app scoring it a failure.
+    await waitFor(() =>
+      expect(updateAssistance).toHaveBeenCalledWith(1, day, 3, {
+        sets: 3,
+        reps: 8,
+        weightLb: 30,
+        repMin: 8,
+        repMax: 12,
+      }),
+    );
+  });
+
+  // null, not omitted. Absent means "leave it alone" on this endpoint, so
+  // turning the range off has to be said out loud.
+  it("clears the range with an explicit null", async () => {
+    await show(todayWeekday(), [], [curl({ reps: 8, repMin: 8, repMax: 12 })]);
+    updateAssistance.mockResolvedValue({ status: 200, data: curl() });
+
+    await fireEvent.click(
+      screen.getByRole("button", { name: "Edit Dumbbell Curl on Workout A" }),
+    );
+    await fireEvent.click(await screen.findByLabelText("Use a rep range"));
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(updateAssistance).toHaveBeenCalledWith(1, day, 3, {
+        sets: 3,
+        // The reps the row already carried, which while ranged was the BOTTOM
+        // of the range. Turning the range off keeps the number that was on
+        // screen rather than inventing a fresh default.
+        reps: 8,
+        weightLb: 30,
+        repMin: null,
+        repMax: null,
+      }),
+    );
+  });
+
+  // The stepper offers the jump this lifter's rack can actually make. A pair of
+  // bells moves 10 with no profile loaded, not the bar's 5 — asking for 5 is
+  // asking for a bell that is not on the rack.
+  it("steps the weight by what the movement's equipment builds", async () => {
+    await show(todayWeekday(), [], [curl()]);
+
+    await fireEvent.click(
+      screen.getByRole("button", { name: "Edit Dumbbell Curl on Workout A" }),
+    );
+    expect(await screen.findByLabelText("Weight (lb)")).toHaveAttribute("step", "10");
   });
 });

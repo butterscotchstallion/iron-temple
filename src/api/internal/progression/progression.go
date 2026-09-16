@@ -4,9 +4,9 @@
 // weight advances, so a single engine serves all of them.
 //
 // Rules (pounds):
-//   - Advance by a per-lift increment after a successful session:
-//     +10 lb on the deadlift, +10 lb on a dumbbell lift, +5 lb on every other
-//     lift. See Ladder for why the dumbbell number is what it is.
+//   - Advance by a per-lift increment after a successful session: +10 lb on the
+//     deadlift and +5 lb on every other lift, each rounded up to something the
+//     lifter's own equipment can build. See Ladder and GymSteps.
 //   - Repeat the same weight after a failed session.
 //   - After 3 consecutive failed sessions at the same weight, deload to 90%
 //     of that weight, snapped to what the equipment can build, giving a fresh
@@ -16,11 +16,13 @@
 //
 // Both the advance and the snap come off the lift's Ladder, because neither is
 // a property of the program: a pair of dumbbells has nothing between 10 lb
-// however the sets and reps are arranged.
+// however the sets and reps are arranged — and nothing between 5 lb if the rack
+// steps 2.5 a bell, which is why the grid is read from the lifter's gym rather
+// than assumed.
 //
 // The engine is pure: it takes a history and returns a number, with no I/O.
-// The data layer supplies the history; the API layer maps exercises to
-// ladders and rounds for display.
+// The data layer supplies the history and the gym; the API layer maps exercises
+// to ladders and rounds for display.
 package progression
 
 import "math"
@@ -39,13 +41,18 @@ const (
 	FailuresBeforeDeload = 3
 	// BarIncrementLb is the smallest change a standard barbell admits
 	// (2.5 lb per side); computed weights snap to this.
+	//
+	// The standard bar, not every bar. A lifter who owns 1.25s moves in 2.5s,
+	// which GymSteps carries and this constant is the fallback for.
 	BarIncrementLb = 5.0
-	// DumbbellIncrementLb is the smallest change a pair of dumbbells admits.
+	// DumbbellIncrementLb is the smallest change a pair of dumbbells admits on
+	// the rack this app assumes when told about no other.
 	//
 	// Ten, not five, because every weight in this app is the WHOLE load and a
 	// dumbbell lift is two bells. A rack steps 5 lb a bell, so the smallest
 	// move a lifter can actually make is 10 lb on the pair. Asking for 5 is
-	// asking for a bell that is not on the rack.
+	// asking for a bell that is not on the rack — unless the rack goes in 2.5s,
+	// in which case 5 is exactly right and GymSteps is what says so.
 	DumbbellIncrementLb = 10.0
 )
 
@@ -75,28 +82,109 @@ type Ladder struct {
 	Step float64
 }
 
-// BarLadder is the ladder for anything loaded on a barbell, which is every
-// lift the app knew about before dumbbells were prescribed.
+// BarLadder is the ladder for anything loaded on a barbell in a gym that has
+// not been described — the standard rack, whose lightest plate is a 2.5 and
+// which therefore moves in 5s. It is what LadderFor returns for a barbell lift
+// under a zero GymSteps.
 var BarLadder = Ladder{Increment: IncrementDefault, Step: BarIncrementLb}
 
-// LadderFor returns the jumps a lift can make, from its (seeded) exercise name
-// and its equipment. Unknown names and unknown equipment take the bar's.
+// GymSteps is the smallest weight change each kind of equipment admits in ONE
+// lifter's gym, as WHOLE load — the pair, not the bell; the bar and both sides
+// of it, not one plate.
 //
-// Equipment is checked first and wins outright, because it answers a stricter
+// It exists because Step was written as a constant and is not one. "A barbell
+// moves in 5s" is really "a barbell moves in twice the lightest plate you own",
+// and "a pair of dumbbells moves in 10s" is really "twice whatever your rack
+// steps by". Both facts are recorded per lifter (user_plates since 0013,
+// user_gym.dumbbell_step_lb since 0020) and neither was reaching the engine, so
+// a lifter with finer equipment was prescribed jumps coarser than their gym
+// actually makes — most visibly on assistance work, which advances by exactly
+// this number.
+//
+// A zero field means "not configured" and falls back to the constant that was
+// hardcoded before this type existed. That is deliberate and load-bearing: the
+// engine is pure and does not get to assume its caller looked the gym up, and a
+// missed call site should prescribe what it always did rather than divide by
+// zero. Same defensive shape as roundToStep and assistanceStep.
+type GymSteps struct {
+	// BarLb is the smallest change a loaded barbell admits: twice the lightest
+	// plate owned. Zero when unknown.
+	BarLb float64
+	// DumbbellLb is the smallest change a PAIR of dumbbells admits: twice the
+	// rack's per-bell step. Zero when unknown.
+	DumbbellLb float64
+}
+
+// stepFor picks the grid a lift is loaded on, falling back to the constants.
+func (g GymSteps) stepFor(equipment string) float64 {
+	if equipment == equipmentDumbbell {
+		if g.DumbbellLb > 0 {
+			return g.DumbbellLb
+		}
+		return DumbbellIncrementLb
+	}
+	if g.BarLb > 0 {
+		return g.BarLb
+	}
+	return BarIncrementLb
+}
+
+// LadderFor returns the jumps a lift can make, from its (seeded) exercise name,
+// its equipment, and the gym it is being lifted in. Unknown names and unknown
+// equipment take the bar's.
+//
+// Equipment decides the grid and wins outright, because it answers a stricter
 // question. The deadlift's +10 is a claim about how fast the movement should be
 // pushed; a pair of dumbbells stepping 10 is a claim about which weights exist
 // at all. A preference can be overruled by a constraint, never the other way
 // round — so a dumbbell deadlift, if a program ever prescribes one, takes the
 // pair's grid rather than the bar's.
-func LadderFor(exerciseName, equipment string) Ladder {
-	if equipment == equipmentDumbbell {
-		return Ladder{Increment: DumbbellIncrementLb, Step: DumbbellIncrementLb}
-	}
+//
+// What used to be three branches is now one, because the branches were all
+// saying the same thing in different arithmetic: take the programme's pace and
+// round it up to something the equipment can build. That reproduces every
+// number this function used to return — a bar stepping 5 gives +5 and the
+// deadlift's +10; a pair stepping 10 gives +10, which is the whole reason
+// DumbbellIncrementLb was introduced — and it keeps producing the right one
+// when the grid is finer. A rack that steps 2.5 a bell moves the pair in 5s, so
+// the seeded dumbbell press advances 5 lb a session rather than 10.
+func LadderFor(exerciseName, equipment string, g GymSteps) Ladder {
+	step := g.stepFor(equipment)
+
+	// Pace is a preference, so it is chosen by the movement...
+	inc := IncrementDefault
 	if exerciseName == deadliftName {
-		return Ladder{Increment: IncrementDeadlift, Step: BarIncrementLb}
+		inc = IncrementDeadlift
 	}
-	return BarLadder
+	// ...and then made reachable, because a preference no rack can build is not
+	// a prescription.
+	return Ladder{Increment: advanceAtLeast(inc, step), Step: step}
 }
+
+// advanceAtLeast rounds a desired advance UP to a multiple of the smallest
+// change the equipment admits.
+//
+// Up rather than to-nearest: rounding down can reach zero, and an advance of
+// zero is a lift that never progresses dressed up as one that does. A gym so
+// coarse that +5 is unbuildable gets the next weight that exists, which is the
+// honest answer — it is what the dumbbell pair has always done.
+//
+// The epsilon absorbs float noise in the division so a quotient that is exact
+// in decimal does not ceil to one step too many. Both inputs arrive from
+// NUMERIC(5,2) by way of float64, so 5/2.5 can land a hair either side of 2,
+// and on the high side that would advance 7.5 instead of 5. Same tolerance the
+// plate loader applies for the same reason.
+func advanceAtLeast(want, step float64) float64 {
+	if step <= 0 {
+		return want
+	}
+	return math.Ceil(want/step-stepEpsilon) * step
+}
+
+// stepEpsilon is the float-noise tolerance in advanceAtLeast. Far below any
+// real weight — the finest plate anyone racks is a quarter pound — and far
+// above the error in dividing two two-decimal numbers.
+const stepEpsilon = 1e-9
 
 // SessionResult is the outcome of one past performance of a single lift,
 // oldest-to-newest when collected into a history.

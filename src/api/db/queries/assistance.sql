@@ -46,6 +46,11 @@ ORDER BY pda.position, pda.id;
 -- ListAssistanceByProgram returns every day's assistance across one program, so
 -- the program detail response can be assembled in one round trip. Ordered by day
 -- then position, mirroring ListPrescriptionsByProgram.
+--
+-- equipment rides along for the same reason it does on the by-day query, but for
+-- the client rather than the engine: the program page lets a lifter edit a
+-- prescription, and the number input's step and the copy promising "+N lb next
+-- time" both have to name the jump this movement can actually make.
 -- name: ListAssistanceByProgram :many
 SELECT pda.id,
        pda.program_day_id,
@@ -56,7 +61,8 @@ SELECT pda.id,
        pda.reps,
        pda.weight_lb,
        pda.rep_min,
-       pda.rep_max
+       pda.rep_max,
+       e.equipment
 FROM program_day_assistance pda
 JOIN exercises e ON e.id = pda.exercise_id
 JOIN program_days pd ON pd.id = pda.program_day_id
@@ -107,7 +113,8 @@ SELECT pda.id,
        pda.reps,
        pda.weight_lb,
        pda.rep_min,
-       pda.rep_max
+       pda.rep_max,
+       e.equipment
 FROM program_day_assistance pda
 JOIN exercises e ON e.id = pda.exercise_id
 WHERE pda.id = sqlc.arg('id')

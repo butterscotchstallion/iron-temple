@@ -1262,6 +1262,18 @@ components:
             nearest weight this rack can actually build.
           items:
             $ref: "#/components/schemas/Plate"
+        dumbbellStepLb:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          description: >
+            What this lifter's dumbbell rack steps by, PER BELL. Every weight the
+            app shows is the whole load, so a pair steps twice this — a rack of
+            5s moves 10 at a time and has nothing in between. It sets how much a
+            dumbbell lift advances and, for assistance work on a rep range, how
+            much the weight goes up when every set tops out. 5 until the setup
+            screen says otherwise.
+          example: 5
 
     Plate:
       type: object
@@ -1377,12 +1389,17 @@ components:
 
     ExportGym:
       type: object
-      required: [barWeightLb, plates]
+      required: [barWeightLb, dumbbellStepLb, plates]
       properties:
         barWeightLb:
           type: number
           minimum: 0
           exclusiveMinimum: true
+        dumbbellStepLb:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          description: Per bell; the pair steps twice this.
         plates:
           type: array
           items:
@@ -1574,6 +1591,16 @@ components:
           minimum: 0
           exclusiveMinimum: true
           maximum: 200
+        dumbbellStepLb:
+          type: number
+          minimum: 1
+          maximum: 25
+          description: >
+            What the rack steps by, per bell — so the pair moves twice this. The
+            floor is 1 rather than 0: below a pound is not a dumbbell rack, it is
+            a mistyped digit, and half-pound jumps on a pair of bells are the
+            thing this field exists to stop the engine inventing.
+          example: 2.5
         plates:
           type: array
           maxItems: 20
@@ -1853,7 +1880,8 @@ components:
         prescribed weight is whatever they last logged for the lift, falling back
         to weightLb here.
       type: object
-      required: [id, exerciseId, exerciseName, position, sets, reps, weightLb]
+      required:
+        [id, exerciseId, exerciseName, equipment, position, sets, reps, weightLb]
       properties:
         id:
           type: integer
@@ -1864,6 +1892,8 @@ components:
         exerciseName:
           type: string
           example: Dip
+        equipment:
+          $ref: "#/components/schemas/Equipment"
         position:
           type: integer
           example: 1
@@ -1891,8 +1921,10 @@ components:
           maximum: 100
           description: >
             Top of the rep range. When every set reaches it, the weight goes up
-            by 5 lb and the reps reset to repMin. There is no deload — a stalled
-            accessory is not a signal.
+            by the smallest change this lifter's equipment admits — twice the
+            lightest plate they own on a bar, twice their rack's step on a pair
+            of dumbbells — and the reps reset to repMin. There is no deload; a
+            stalled accessory is not a signal.
           example: 12
 
     CreateAssistanceRequest:
@@ -1930,8 +1962,10 @@ components:
           maximum: 100
           description: >
             Top of the rep range. When every set reaches it, the weight goes up
-            by 5 lb and the reps reset to repMin. There is no deload — a stalled
-            accessory is not a signal.
+            by the smallest change this lifter's equipment admits — twice the
+            lightest plate they own on a bar, twice their rack's step on a pair
+            of dumbbells — and the reps reset to repMin. There is no deload; a
+            stalled accessory is not a signal.
           example: 12
 
     UpdateAssistanceRequest:
@@ -2307,10 +2341,11 @@ components:
       type: object
       required: [exerciseId, sets, reps]
       description: >
-        The same shape as CreateAssistanceRequest minus the rep range, which
-        stays on the program page — double progression needs explaining, and the
-        rack is not where to do it. A lift added here can be given a range later
-        by editing the day.
+        The same shape as CreateAssistanceRequest. This adds the lift to the
+        session in front of the lifter AND to the program day behind it, so it
+        carries a rep range for the same reason the program page does: the day
+        gains the lift permanently, and a row created without a range is a lift
+        nothing will ever progress.
       properties:
         exerciseId:
           type: integer
@@ -2335,6 +2370,22 @@ components:
           minimum: 0
           default: 0
           description: Omit or send 0 for bodyweight work.
+        repMin:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: >
+            Bottom of the rep range. Given with repMax or not at all.
+          example: 8
+        repMax:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: >
+            Top of the rep range. Same double progression the program page
+            describes; it applies from the NEXT session, since the sets created
+            here use the reps that were typed.
+          example: 12
 
     UpdateSessionSetRequest:
       type: object

@@ -50,6 +50,11 @@
   let plates = $state<{ plateLb: number; pairs: number }[]>(
     (auth.me?.plates ?? []).map((p) => ({ ...p })),
   );
+  // What the dumbbell rack steps by, per bell — the third thing the gym is made
+  // of, and the one that was still a constant in the engine until 0020. A pair
+  // moves twice this, so a rack of 5s has nothing between 10 lb and a rack of
+  // 2.5s has nothing between 5.
+  let dumbbellStep = $state(auth.me?.dumbbellStepLb ?? 5);
   let gymSaving = $state(false);
   let gymError = $state<string | null>(null);
   let gymSaved = $state(false);
@@ -99,7 +104,11 @@
     gymError = null;
     gymSaved = false;
 
-    const saved = await updateMe({ barWeightLb: barWeight, plates });
+    const saved = await updateMe({
+      barWeightLb: barWeight,
+      dumbbellStepLb: dumbbellStep,
+      plates,
+    });
     if (saved.status !== 200) {
       gymError = "Couldn't save your gym setup.";
     } else {
@@ -315,6 +324,28 @@
           />
           <span class="text-xs text-muted-foreground">
             A standard Olympic bar is 45 lb. Weigh yours if you're not sure.
+          </span>
+        </label>
+
+        <label class="flex flex-col gap-1.5">
+          <span class={labelClass}>Dumbbell step (lb per bell)</span>
+          <input
+            bind:value={dumbbellStep}
+            type="number"
+            min="1"
+            max="25"
+            step="0.25"
+            required
+            class="{fieldClass} w-32"
+          />
+          <!-- Spelled out in both units on purpose. The number asked for is the
+               one written on the rack, but every weight the app shows is the
+               pair, so a lifter typing 5 should see the 10 it becomes rather
+               than discover it when a curl jumps further than they expected. -->
+          <span class="text-xs text-muted-foreground">
+            The gap between one bell and the next. Most racks step 5 lb;
+            adjustable dumbbells often do 2.5. A pair moves twice this, so yours
+            go up {dumbbellStep * 2} lb at a time.
           </span>
         </label>
 

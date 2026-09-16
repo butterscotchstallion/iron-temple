@@ -45,8 +45,13 @@ type exportProfileDTO struct {
 }
 
 type exportGymDTO struct {
-	BarWeightLb float64    `json:"barWeightLb"`
-	Plates      []plateDTO `json:"plates"`
+	BarWeightLb float64 `json:"barWeightLb"`
+	// Per bell, as it is stored and as a rack is labelled; the pair steps twice
+	// it. Carried because it is part of what the lifter configured, and an
+	// export that omitted it would restore a gym that prescribes different
+	// weights from the one it came from.
+	DumbbellStepLb float64    `json:"dumbbellStepLb"`
+	Plates         []plateDTO `json:"plates"`
 }
 
 type exportBaselineDTO struct {
@@ -239,7 +244,14 @@ func (s *Server) exportGym(ctx context.Context, userID int32) (exportGymDTO, err
 		return exportGymDTO{}, err
 	}
 
-	gym := exportGymDTO{BarWeightLb: numericToFloat(bar), Plates: []plateDTO{}}
+	gym := exportGymDTO{
+		BarWeightLb:    numericToFloat(bar),
+		DumbbellStepLb: defaultDumbbellStepLb,
+		Plates:         []plateDTO{},
+	}
+	if steps, err := s.q.GetGymSteps(ctx, userID); err == nil {
+		gym.DumbbellStepLb = numericToFloat(steps.DumbbellStepLb)
+	}
 	for _, p := range plates {
 		gym.Plates = append(gym.Plates, plateDTO{
 			PlateLb: numericToFloat(p.PlateLb),

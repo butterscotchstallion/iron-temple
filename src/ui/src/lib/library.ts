@@ -1,4 +1,5 @@
 import type { Exercise, MuscleGroup, Equipment } from "./api";
+import { DEFAULT_BAR_STEP_LB } from "./plates";
 
 /**
  * Pure helpers behind the exercise library: how the catalogue is labelled,
@@ -56,19 +57,48 @@ export function muscleGroupLabel(group: string): string {
 }
 
 /**
+ * The smallest weight change each kind of equipment admits in ONE lifter's gym,
+ * as WHOLE load — the pair, not the bell; the bar and both sides of it, not one
+ * plate.
+ *
+ * Mirrors `progression.GymSteps` on the API side, field for field, including
+ * the rule that a missing or zero value means "not configured" and falls back
+ * to the constant rather than to nothing.
+ */
+export type GymSteps = {
+  /** Twice the lightest plate owned. See `barStepLb`. */
+  barLb?: number;
+  /** Twice the rack's per-bell step. */
+  dumbbellLb?: number;
+};
+
+/** The smallest change a pair of dumbbells admits when the rack is unknown. */
+export const DEFAULT_DUMBBELL_STEP_LB = 10;
+
+/**
  * The smallest weight change a kind of equipment admits, in lb.
  *
- * Five for a barbell — 2.5 a side — and ten for dumbbells, because every weight
- * in this app is the whole load and a dumbbell lift is two bells: a rack steps
- * 5 lb a bell, so the pair steps 10. Anything else is loaded in units this app
- * does not model, and the bar's is the only guess available.
+ * Both numbers used to be constants here — five for a barbell, ten for a pair
+ * of dumbbells — and neither is one. Five is twice a 2.5 lb plate, which is
+ * only the lightest plate if that is what you happen to own; ten is twice a
+ * 5 lb bell, which is only the rack's step if that is the rack you have. A
+ * lifter with finer equipment was being promised, and prescribed, jumps coarser
+ * than their gym actually makes. Both now come off the profile — see
+ * `gymSteps` — and the constants are the fallback for a client that has not
+ * loaded one yet.
  *
- * This mirrors progression.Ladder on the API side, which is what actually moves
- * the weight. It exists here so the copy that promises a lifter a number can
- * promise the one they will get.
+ * Anything the catalogue calls machine, cable, bodyweight or other is loaded in
+ * units this app does not model, and the bar's is the only guess available.
+ *
+ * This mirrors progression.LadderFor on the API side, which is what actually
+ * moves the weight. It exists here so the copy that promises a lifter a number
+ * can promise the one they will get.
  */
-export function equipmentStepLb(equipment: string): number {
-  return equipment === "dumbbell" ? 10 : 5;
+export function equipmentStepLb(equipment: string, steps: GymSteps = {}): number {
+  if (equipment === "dumbbell") {
+    return steps.dumbbellLb || DEFAULT_DUMBBELL_STEP_LB;
+  }
+  return steps.barLb || DEFAULT_BAR_STEP_LB;
 }
 
 /** Display name for an equipment kind; unknown values pass through unchanged. */

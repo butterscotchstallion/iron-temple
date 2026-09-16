@@ -80,6 +80,12 @@ export type PendingWrite =
       exerciseId: number;
       reps: number;
       weightLb: number;
+      /**
+       * The rep range, when the lifter asked for one. Optional, and
+       * deliberately NOT a STORAGE_VERSION bump — see below.
+       */
+      repMin?: number;
+      repMax?: number;
       tempSetIds: number[];
     }
   | { kind: "removeSet"; sessionId: number; setId: number }
@@ -104,6 +110,14 @@ export type QueuedWrite = PendingWrite & { id: number };
  * it and nothing reaches the server again. The workout silently stops saving.
  * Under a bumped version the old build drops the queue instead, which loses
  * what was in it and keeps the session working.
+ *
+ * NOT bumped to 3 when `addAssistance` gained repMin/repMax, and the reasoning
+ * is the same rule read the other way. The hazard the bump exists for is an
+ * entry an old build cannot replay; two optional fields replay fine — an old
+ * `send` drops them and adds the lift without a range, which the program page's
+ * editor can put back. Weigh that against what bumping costs: every queued
+ * entry discarded, including logged sets from a workout that has not reached
+ * the server yet. Losing a rep range is recoverable and losing reps is not.
  */
 const STORAGE_VERSION = 2;
 const STORAGE_KEY = "iron-temple:writes:v1";
@@ -351,6 +365,8 @@ function send(entry: QueuedWrite) {
         sets: entry.tempSetIds.length,
         reps: entry.reps,
         weightLb: entry.weightLb,
+        repMin: entry.repMin,
+        repMax: entry.repMax,
       });
     default:
       // An entry this build does not understand, which a version bump is

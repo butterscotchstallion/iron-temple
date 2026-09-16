@@ -62,6 +62,9 @@ type updateProfileRequest struct {
 	AvatarColor      *string  `json:"avatarColor"`
 	CurrentProgramID *int32   `json:"currentProgramId"`
 	BarWeightLb      *float64 `json:"barWeightLb"`
+	// DumbbellStepLb is per bell, as user_gym stores it and as a rack is
+	// labelled. The pair the app prescribes steps twice it.
+	DumbbellStepLb *float64 `json:"dumbbellStepLb"`
 	// Plates replaces the inventory whole. A pointer to a slice so that an
 	// omitted field ("leave my rack alone") stays distinguishable from an empty
 	// array ("I own no plates"), which is a thing a lifter is allowed to say.
@@ -77,6 +80,14 @@ const (
 	maxPlateLb     = 200
 	maxPlatePairs  = 20
 	maxBaselineLb  = 2000
+	// The rack's step, per bell. A pound is the floor because below it is not a
+	// rack, it is a mistyped digit — and the pair moves twice whatever is
+	// stored here, so a bell step of a quarter would have the engine prescribing
+	// half-pound jumps on a pair of dumbbells, which is precisely the weight
+	// nobody can make. 25 is the ceiling for the same reason 200 is the bar's:
+	// no rack steps further than that between bells.
+	minDumbbellStepLb = 1
+	maxDumbbellStepLb = 25
 )
 
 func (s *Server) updateMe(w http.ResponseWriter, r *http.Request) {
@@ -128,6 +139,12 @@ func (s *Server) updateMe(w http.ResponseWriter, r *http.Request) {
 	if req.BarWeightLb != nil {
 		if *req.BarWeightLb <= 0 || *req.BarWeightLb > maxBarWeightLb {
 			badRequest(w, "barWeightLb must be between 0 and 200")
+			return
+		}
+	}
+	if req.DumbbellStepLb != nil {
+		if *req.DumbbellStepLb < minDumbbellStepLb || *req.DumbbellStepLb > maxDumbbellStepLb {
+			badRequest(w, "dumbbellStepLb must be between 1 and 25")
 			return
 		}
 	}
@@ -190,7 +207,7 @@ func (s *Server) updateMe(w http.ResponseWriter, r *http.Request) {
 // delete and the last insert would leave the lifter owning some of their plates,
 // and the next prescription would round to a weight they cannot build.
 func (s *Server) writeGymSetup(ctx context.Context, userID int32, req updateProfileRequest) error {
-	if req.BarWeightLb == nil && req.Plates == nil {
+	if req.BarWeightLb == nil && req.Plates == nil && req.DumbbellStepLb == nil {
 		return nil
 	}
 
@@ -204,6 +221,13 @@ func (s *Server) writeGymSetup(ctx context.Context, userID int32, req updateProf
 	if req.BarWeightLb != nil {
 		if err := qtx.SetBarWeight(ctx, store.SetBarWeightParams{
 			UserID: userID, BarWeightLb: floatToNumeric(*req.BarWeightLb),
+		}); err != nil {
+			return err
+		}
+	}
+	if req.DumbbellStepLb != nil {
+		if err := qtx.SetDumbbellStep(ctx, store.SetDumbbellStepParams{
+			UserID: userID, DumbbellStepLb: floatToNumeric(*req.DumbbellStepLb),
 		}); err != nil {
 			return err
 		}
@@ -535,6 +559,10 @@ func (s *Server) userDTO(ctx context.Context, u store.GetUserRow) userDTO {
 	} else {
 		dto.BarWeightLb = defaultBarWeightLb
 	}
+	dto.DumbbellStepLb = defaultDumbbellStepLb
+	if steps, err := s.q.GetGymSteps(ctx, u.ID); err == nil {
+		dto.DumbbellStepLb = numericToFloat(steps.DumbbellStepLb)
+	}
 	dto.Plates = []plateDTO{}
 	if plates, err := s.q.ListPlates(ctx, u.ID); err == nil {
 		for _, p := range plates {
@@ -550,6 +578,11 @@ func (s *Server) userDTO(ctx context.Context, u store.GetUserRow) userDTO {
 // defaultBarWeightLb mirrors the column default in 0013_gym_setup. Only reached
 // when the bar cannot be read at all; the query itself already COALESCEs.
 const defaultBarWeightLb = 45
+
+// defaultDumbbellStepLb mirrors the column default in 0020_dumbbell_step, and
+// so is half of progression.DumbbellIncrementLb — this one is per bell, that
+// one is the pair. Only reached when the rack cannot be read at all.
+const defaultDumbbellStepLb = 5
 
 // compile-time guard: auth.Hasher must keep satisfying what the handlers use.
 var _ interface {

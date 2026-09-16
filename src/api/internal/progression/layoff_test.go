@@ -74,7 +74,7 @@ func TestLayoffWeightSnapsToTheBar(t *testing.T) {
 // for a 80 lb bell in each hand when the rack has 75s and 80s but nothing that
 // makes 160... it does, so the case that bites is any odd multiple of 5.
 func TestLayoffWeightSnapsToTheBells(t *testing.T) {
-	db := LadderFor("Dumbbell Shoulder Press", "dumbbell")
+	db := LadderFor("Dumbbell Shoulder Press", "dumbbell", GymSteps{})
 	for previous := 20.0; previous <= 300; previous += 10 {
 		for weeks := 1; weeks <= 8; weeks++ {
 			got := LayoffWeight(previous, weeks, db)

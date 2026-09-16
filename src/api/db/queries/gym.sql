@@ -26,6 +26,42 @@ ON CONFLICT (user_id) DO UPDATE
 SET bar_weight_lb = EXCLUDED.bar_weight_lb,
     updated_at    = now();
 
+-- SetDumbbellStep records what this lifter's rack steps by, per bell. Upsert
+-- for the same reason SetBarWeight is one; a row created here takes the column
+-- default for the bar, which is the number GetBarWeight would have answered
+-- anyway while the row was missing.
+-- name: SetDumbbellStep :exec
+INSERT INTO user_gym (user_id, dumbbell_step_lb)
+VALUES (sqlc.arg('user_id')::int, sqlc.arg('dumbbell_step_lb'))
+ON CONFLICT (user_id) DO UPDATE
+SET dumbbell_step_lb = EXCLUDED.dumbbell_step_lb,
+    updated_at       = now();
+
+-- GetGymSteps answers the one question the progression engine asks of the gym:
+-- what is the smallest weight change this lifter can actually make? One read
+-- rather than two because both halves are wanted together, by prescribe(), for
+-- every lift on the day.
+--
+-- The bar's step is derived, not configured. Two of the lightest plate owned is
+-- the finest change a barbell admits, and the inventory is already recorded —
+-- asking the lifter to also state the consequence of their own rack would be a
+-- second fact that can disagree with the first. Owning no plates falls back to
+-- 5 rather than 0: an empty inventory means bar-only, which admits no change at
+-- all, and a step of zero is not a number the engine can divide by.
+--
+-- The rack's step is per BELL, as 0020 stores it. Doubling it is left to Go,
+-- beside the comment explaining why the pair is what gets prescribed.
+-- name: GetGymSteps :one
+SELECT
+    COALESCE(
+        (SELECT MIN(p.plate_lb) * 2 FROM user_plates p WHERE p.user_id = u.id),
+        5.0
+    )::numeric AS bar_step_lb,
+    COALESCE(g.dumbbell_step_lb, 5.0)::numeric AS dumbbell_step_lb
+FROM users u
+LEFT JOIN user_gym g ON g.user_id = u.id
+WHERE u.id = sqlc.arg('user_id')::int;
+
 -- ListPlates returns the lifter's inventory, heaviest first — the order the
 -- greedy loader wants and the order a rack is read in.
 -- name: ListPlates :many

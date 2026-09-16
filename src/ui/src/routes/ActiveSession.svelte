@@ -454,7 +454,14 @@
   // refusal it keeps the numbers the lifter typed rather than making them pick
   // the movement again.
   async function addAssistanceLift(
-    choice: { exerciseId: number; sets: number; reps: number; weightLb: number },
+    choice: {
+      exerciseId: number;
+      sets: number;
+      reps: number;
+      weightLb: number;
+      repMin?: number;
+      repMax?: number;
+    },
     exercise: Exercise,
   ): Promise<boolean> {
     if (isOver || !session) return false;
@@ -470,6 +477,8 @@
         exerciseId: choice.exerciseId,
         reps: choice.reps,
         weightLb: choice.weightLb,
+        repMin: choice.repMin,
+        repMax: choice.repMax,
         tempSetIds,
       },
       () => addSessionAssistance(sessionId, { ...choice }),
@@ -698,7 +707,6 @@
           onAdd={addAssistanceLift}
           onCancel={() => (pickerOpen = false)}
           confirmLabel="Add to this workout"
-          allowRange={false}
           footnote="It joins {session.programDayName} too, so it's prescribed next time."
         />
       {:else}

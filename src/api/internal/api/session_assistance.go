@@ -32,6 +32,19 @@ type addSessionAssistanceRequest struct {
 	Sets       int32    `json:"sets"`
 	Reps       int32    `json:"reps"`
 	WeightLb   *float64 `json:"weightLb"`
+	// RepMin and RepMax put the lift on double progression, exactly as they do
+	// on the program page. Both or neither.
+	//
+	// They belong here because of what the half of this handler that touches the
+	// program day means. A lift added at the rack is not a one-off: it joins the
+	// day so it comes round again. Landing it with no range made "comes round
+	// again" true and "with a progression behind it" false — the row was created
+	// carrying NULLs, NextAssistance carries the weight forward forever, and the
+	// only screen that could have fixed it afterwards had no control for it.
+	// Every accessory a lifter decided on mid-workout was frozen at the weight
+	// they first tried.
+	RepMin *int32 `json:"repMin"`
+	RepMax *int32 `json:"repMax"`
 }
 
 func (s *Server) addSessionAssistance(w http.ResponseWriter, r *http.Request) {
@@ -54,6 +67,13 @@ func (s *Server) addSessionAssistance(w http.ResponseWriter, r *http.Request) {
 	// cannot drift about what a usable prescription is.
 	weight, msg, ok := validAssistancePrescription(req.Sets, req.Reps, req.WeightLb)
 	if !ok {
+		badRequest(w, msg)
+		return
+	}
+	// Shared with addAssistance for the same reason, and it is the same rule:
+	// both-or-neither, the right way round, and within the bounds the database
+	// would reject anyway.
+	if msg, ok := validRepRange(req.RepMin, req.RepMax); !ok {
 		badRequest(w, msg)
 		return
 	}
@@ -140,6 +160,8 @@ func (s *Server) addSessionAssistance(w http.ResponseWriter, r *http.Request) {
 		Sets:         req.Sets,
 		Reps:         req.Reps,
 		WeightLb:     floatToNumeric(weight),
+		RepMin:       req.RepMin,
+		RepMax:       req.RepMax,
 	}); err != nil {
 		// The checks above raced another writer. Report it as the conflict it
 		// is rather than as a 500.

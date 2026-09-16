@@ -10,6 +10,8 @@
     muscleGroupLabel,
     recentExercises,
   } from "./library";
+  import { DEFAULT_BAR_STEP_LB } from "./plates";
+  import { gymSteps } from "./gym.svelte";
   import { exerciseEmoji } from "./exerciseIcon";
   import { formatVolume } from "./volume";
   import { Button } from "$lib/components/ui/button";
@@ -28,7 +30,6 @@
     onCancel,
     confirmLabel = "Add to this day",
     footnote,
-    allowRange = true,
   }: {
     // Exercise ids already on this day — one entry per lift, so offering them
     // again would only earn a 409.
@@ -54,17 +55,6 @@
     confirmLabel?: string;
     /** An extra line under the inputs, for whatever else the caller is doing. */
     footnote?: string;
-    /**
-     * Whether to offer double progression.
-     *
-     * False from the active session, where the endpoint has no rep-range fields
-     * to send them to. Offering the checkbox there would promise a progression
-     * — "hit the top on every set and the weight goes up" — that the request
-     * then silently drops, leaving a flat prescription at the bottom of the
-     * range. A range can still be put on the lift afterwards from the program
-     * page, which is where there is room to explain what it does.
-     */
-    allowRange?: boolean;
   } = $props();
 
   let exercises = $state<Exercise[]>([]);
@@ -82,20 +72,30 @@
   let weightLb = $state(0);
   let saving = $state(false);
 
-  // Off by default. A rep range turns the lift onto double progression — add
+  // On by default. A rep range turns the lift onto double progression — add
   // reps inside the range week to week, and when every set reaches the top the
   // weight goes up by one step of the equipment and the reps reset to the
-  // bottom. Without it the lift carries its weight forward and nothing moves it,
-  // which is what accessories have always done here and is still the right
-  // default for most of them.
-  let ranged = $state(false);
+  // bottom. Without it the lift carries its weight forward and NOTHING moves
+  // it, ever.
+  //
+  // This used to default off, on the argument that carry-forward "is still the
+  // right default for most of them". That argument was wrong in the way silent
+  // defaults usually are: it was also the only way to get a range at all, so in
+  // practice no accessory in this app ever progressed. A lifter who adds a curl
+  // and comes back to it six weeks later should find it heavier, not find a
+  // checkbox they never saw. Turning it off is still one click, and the lift
+  // then behaves exactly as everything did before.
+  let ranged = $state(true);
   let repMin = $state(8);
   let repMax = $state(12);
 
-  // What the chosen movement's weight moves in: 5 lb on a bar, 10 on a pair of
+  // What the chosen movement's weight moves in, in THIS lifter's gym: twice
+  // their lightest plate on a bar, twice their rack's step on a pair of
   // dumbbells. Drives both the copy below and the number input's step, so the
   // arrows offer weights the rack can actually make.
-  const stepLb = $derived(selected ? equipmentStepLb(selected.equipment) : 5);
+  const stepLb = $derived(
+    selected ? equipmentStepLb(selected.equipment, gymSteps()) : DEFAULT_BAR_STEP_LB,
+  );
 
   const available = $derived(exercises.filter((e) => !exclude.includes(e.id)));
   const counts = $derived(countByGroup(available));
@@ -250,12 +250,10 @@
         />
       </label>
     </div>
-    {#if allowRange}
-      <label class="flex items-center gap-2 text-xs text-muted-foreground">
-        <input type="checkbox" bind:checked={ranged} class="size-4 accent-primary" />
-        Use a rep range
-      </label>
-    {/if}
+    <label class="flex items-center gap-2 text-xs text-muted-foreground">
+      <input type="checkbox" bind:checked={ranged} class="size-4 accent-primary" />
+      Use a rep range
+    </label>
     {#if selected?.topSet}
       <!-- Named for what it is. topSet is the heaviest set ever, and the
            carry-forward the server applies from the next session on uses the

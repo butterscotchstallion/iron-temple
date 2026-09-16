@@ -158,11 +158,17 @@ describe("ActiveSession: adding assistance", () => {
       expect(screen.getByRole("heading", { name: "Barbell Curl" })).toBeInTheDocument(),
     );
     expect(screen.getByText("Assistance")).toBeInTheDocument();
+    // The rep range rides along, and the reps sent are the BOTTOM of it: a set
+    // is complete at the bottom and the weight moves at the top. That is the
+    // picker's rule, and this endpoint now carries it — a lift added at the
+    // rack joins the day with a progression behind it rather than frozen.
     expect(addSessionAssistance).toHaveBeenCalledWith(1, {
       exerciseId: 9,
       sets: 3,
-      reps: 10,
+      reps: 8,
       weightLb: 30,
+      repMin: 8,
+      repMax: 12,
     });
   });
 
@@ -212,16 +218,53 @@ describe("ActiveSession: adding assistance", () => {
     expect(panel?.textContent).not.toContain("Squat");
   });
 
-  // The endpoint has no rep-range fields, so offering the checkbox here would
-  // promise a progression the request then silently drops — leaving a flat
-  // prescription at the bottom of the range. The program page still offers it.
-  it("does not offer a rep range, which this endpoint cannot carry", async () => {
+  // The endpoint carries a rep range now, and the checkbox is on by default.
+  // This is the whole point of adding assistance here: the lift joins the
+  // program day, so a row created without a range is one nothing will ever
+  // progress — which is exactly what used to happen to every lift added at the
+  // rack.
+  it("offers a rep range, on by default", async () => {
     render(ActiveSession, props);
     await pickCurl();
 
     await screen.findByText(/Leave the weight at 0/);
-    expect(screen.queryByLabelText(/Use a rep range/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/never deloads/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/Use a rep range/)).toBeChecked();
+    expect(screen.getByText(/never deloads/)).toBeInTheDocument();
+  });
+
+  // Turning it off is one click, and then the lift behaves the way every
+  // accessory did before double progression was switched on by default.
+  it("sends no range when the lifter turns it off", async () => {
+    addSessionAssistance.mockResolvedValue(
+      ok(
+        [1, 2, 3].map((n) =>
+          mkSet({
+            id: 100 + n,
+            exerciseId: 9,
+            exerciseName: "Barbell Curl",
+            kind: "assistance",
+            setNumber: n,
+            targetReps: 10,
+            weightLb: 30,
+            restSeconds: 90,
+          }),
+        ),
+        201,
+      ),
+    );
+
+    render(ActiveSession, props);
+    await pickCurl();
+    await fireEvent.click(await screen.findByLabelText(/Use a rep range/));
+    await confirmAdd();
+
+    await waitFor(() => expect(addSessionAssistance).toHaveBeenCalled());
+    expect(addSessionAssistance).toHaveBeenCalledWith(1, {
+      exerciseId: 9,
+      sets: 3,
+      reps: 10,
+      weightLb: 30,
+    });
   });
 
   // A refusal is real. The panel stays open with the numbers intact rather than

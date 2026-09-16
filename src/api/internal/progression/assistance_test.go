@@ -184,7 +184,7 @@ func TestNextAssistanceStepsByEquipment(t *testing.T) {
 		t.Errorf("barbell accessory = %v, want 45", bar.WeightLb)
 	}
 
-	db := progression.LadderFor("Hammer Curl", "dumbbell")
+	db := progression.LadderFor("Hammer Curl", "dumbbell", progression.GymSteps{})
 	got := progression.NextAssistance(25, 8, 12, toppedOut, db)
 	if got.WeightLb != 50 {
 		t.Errorf("dumbbell accessory = %v, want 50 (a pair that exists)", got.WeightLb)

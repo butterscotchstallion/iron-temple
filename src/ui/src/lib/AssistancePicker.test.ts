@@ -49,10 +49,7 @@ function rowsInOrder(): string[] {
     .filter((name): name is string => name !== undefined);
 }
 
-function open(
-  exercises: Exercise[],
-  props: { exclude?: number[]; allowRange?: boolean } = {},
-) {
+function open(exercises: Exercise[], props: { exclude?: number[] } = {}) {
   listExercises.mockResolvedValue({ status: 200, data: exercises });
   return render(AssistancePicker, {
     props: { ...props, onAdd: vi.fn(async () => true), onCancel: vi.fn() },
@@ -154,20 +151,43 @@ describe("the recent section", () => {
     );
   });
 
-  // Still offered by default: the program page is where double progression is
-  // explained, and where the endpoint can actually carry a range.
-  it("offers a rep range unless told not to", async () => {
+  // Offered everywhere now. Both entry points carry a rep range — the program
+  // page and the active session — so the `allowRange` prop that used to hide it
+  // is gone rather than set.
+  it("offers a rep range", async () => {
     open(library);
     await fireEvent.click(await screen.findByRole("button", { name: /Dip/ }));
     expect(await screen.findByText("Use a rep range")).toBeInTheDocument();
   });
 
-  // The session endpoint has no rep-range fields, so offering the checkbox
-  // there would promise a progression the request then silently drops.
-  it("hides the rep range when the caller cannot carry one", async () => {
-    open(library, { allowRange: false });
+  // The default that decides whether anything ever progresses. It used to be
+  // off, which made carry-forward the silent norm and meant no accessory in the
+  // app had ever gained weight; a lifter who wants that can still untick it.
+  it("turns the rep range on by default", async () => {
+    open(library);
     await fireEvent.click(await screen.findByRole("button", { name: /Dip/ }));
-    await screen.findByText(/Leave the weight at 0/);
-    expect(screen.queryByText("Use a rep range")).not.toBeInTheDocument();
+    expect(await screen.findByLabelText("Use a rep range")).toBeChecked();
+    expect(screen.getByText(/never deloads/)).toBeInTheDocument();
+  });
+
+  // The stepper offers the jump the lifter's own equipment makes, not a
+  // constant. With no profile loaded the fallbacks stand in: a bar moves 5, and
+  // a pair of bells 10, because a weight here is the whole load and a rack
+  // steps 5 lb a bell. Asserted on the input's step rather than on the copy,
+  // which interpolates the same number into a split text node.
+  it("steps the weight by what the chosen equipment can build", async () => {
+    open([
+      exercise({ id: 9, name: "Hammer", muscleGroup: "arms", equipment: "dumbbell" }),
+    ]);
+    await fireEvent.click(await screen.findByRole("button", { name: /Hammer/ }));
+    expect(await screen.findByLabelText("Weight (lb)")).toHaveAttribute("step", "10");
+  });
+
+  it("steps a barbell lift by five", async () => {
+    open([
+      exercise({ id: 9, name: "Hammer", muscleGroup: "arms", equipment: "barbell" }),
+    ]);
+    await fireEvent.click(await screen.findByRole("button", { name: /Hammer/ }));
+    expect(await screen.findByLabelText("Weight (lb)")).toHaveAttribute("step", "5");
   });
 });

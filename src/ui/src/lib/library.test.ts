@@ -222,6 +222,10 @@ describe("recentExercises", () => {
 });
 
 describe("equipmentStepLb", () => {
+  // An undescribed gym answers exactly what this function used to return as a
+  // constant, which is what makes these the regression guard for teaching it
+  // about gyms at all.
+  //
   // Ten, not five: every weight in this app is the whole load, so a dumbbell
   // lift is two bells and a rack that steps 5 lb a bell steps 10 on the pair.
   // Promising a lifter 5 promised them half a bell.
@@ -237,5 +241,26 @@ describe("equipmentStepLb", () => {
     for (const kind of ["machine", "cable", "bodyweight", "other", "kettlebell", ""]) {
       expect(equipmentStepLb(kind)).toBe(5);
     }
+  });
+
+  // A described gym overrides both. This is the case the whole change exists
+  // for: a rack of 2.5 lb bells moves the pair in 5s, so a curl that tops its
+  // rep range goes up 5 rather than 10.
+  it("takes the lifter's own rack over the default", () => {
+    expect(equipmentStepLb("dumbbell", { dumbbellLb: 5 })).toBe(5);
+    expect(equipmentStepLb("barbell", { barLb: 2.5 })).toBe(2.5);
+  });
+
+  // Each half falls back on its own, so knowing one does not imply the other.
+  it("falls back per kind, not all or nothing", () => {
+    expect(equipmentStepLb("dumbbell", { barLb: 2.5 })).toBe(10);
+    expect(equipmentStepLb("barbell", { dumbbellLb: 5 })).toBe(5);
+  });
+
+  // Zero is "not configured", not "moves by nothing" — a step of 0 downstream
+  // is a stepper that cannot step and a division by zero in the engine.
+  it("treats a zero step as unconfigured", () => {
+    expect(equipmentStepLb("dumbbell", { dumbbellLb: 0 })).toBe(10);
+    expect(equipmentStepLb("barbell", { barLb: 0 })).toBe(5);
   });
 });

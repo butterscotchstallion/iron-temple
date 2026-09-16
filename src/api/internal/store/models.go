@@ -121,9 +121,10 @@ type UserAvatar struct {
 }
 
 type UserGym struct {
-	UserID      int32              `json:"user_id"`
-	BarWeightLb pgtype.Numeric     `json:"bar_weight_lb"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	UserID         int32              `json:"user_id"`
+	BarWeightLb    pgtype.Numeric     `json:"bar_weight_lb"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	DumbbellStepLb pgtype.Numeric     `json:"dumbbell_step_lb"`
 }
 
 type UserLiftBaseline struct {
