@@ -956,10 +956,14 @@
                         {#if editRanged}
                           Hit the top on every set and the weight goes up
                           {assistanceStepLb(entry)} lb next time, with the reps
-                          back at the bottom. It never deloads.
+                          back at the bottom. It never deloads — good for light
+                          work where {assistanceStepLb(entry)} lb a session is too
+                          big a jump.
                         {:else}
-                          Without a range the weight carries over from your last
-                          session — nothing moves it but you.
+                          Hit your reps on every set and it goes up
+                          {assistanceStepLb(entry)} lb next time, the same as the
+                          program's own lifts. Miss and it stays; miss three times
+                          and it drops back.
                         {/if}
                       </p>
 

@@ -158,17 +158,13 @@ describe("ActiveSession: adding assistance", () => {
       expect(screen.getByRole("heading", { name: "Barbell Curl" })).toBeInTheDocument(),
     );
     expect(screen.getByText("Assistance")).toBeInTheDocument();
-    // The rep range rides along, and the reps sent are the BOTTOM of it: a set
-    // is complete at the bottom and the weight moves at the top. That is the
-    // picker's rule, and this endpoint now carries it — a lift added at the
-    // rack joins the day with a progression behind it rather than frozen.
+    // No range, because a lift without one now runs the linear engine — it
+    // joins the day with a progression behind it either way.
     expect(addSessionAssistance).toHaveBeenCalledWith(1, {
       exerciseId: 9,
       sets: 3,
-      reps: 8,
+      reps: 10,
       weightLb: 30,
-      repMin: 8,
-      repMax: 12,
     });
   });
 
@@ -218,23 +214,21 @@ describe("ActiveSession: adding assistance", () => {
     expect(panel?.textContent).not.toContain("Squat");
   });
 
-  // The endpoint carries a rep range now, and the checkbox is on by default.
-  // This is the whole point of adding assistance here: the lift joins the
-  // program day, so a row created without a range is one nothing will ever
-  // progress — which is exactly what used to happen to every lift added at the
-  // rack.
-  it("offers a rep range, on by default", async () => {
+  // The endpoint carries a rep range now — it could not before, which left
+  // every lift added at the rack with no way to progress at all. Offered here
+  // rather than only on the program page, and off by default like everywhere
+  // else, because a lift without one runs the linear engine.
+  it("offers a rep range, off by default", async () => {
     render(ActiveSession, props);
     await pickCurl();
 
     await screen.findByText(/Leave the weight at 0/);
-    expect(screen.getByLabelText(/Use a rep range/)).toBeChecked();
-    expect(screen.getByText(/never deloads/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Use a rep range/)).not.toBeChecked();
   });
 
-  // Turning it off is one click, and then the lift behaves the way every
-  // accessory did before double progression was switched on by default.
-  it("sends no range when the lifter turns it off", async () => {
+  // Turning it on is one click, and the range then reaches the program day the
+  // lift joins — the thing this endpoint could not express at all before.
+  it("sends the range when the lifter turns it on", async () => {
     addSessionAssistance.mockResolvedValue(
       ok(
         [1, 2, 3].map((n) =>
@@ -259,11 +253,15 @@ describe("ActiveSession: adding assistance", () => {
     await confirmAdd();
 
     await waitFor(() => expect(addSessionAssistance).toHaveBeenCalled());
+    // reps is the BOTTOM of the range: a set is complete at the bottom and the
+    // weight moves at the top.
     expect(addSessionAssistance).toHaveBeenCalledWith(1, {
       exerciseId: 9,
       sets: 3,
-      reps: 10,
+      reps: 8,
       weightLb: 30,
+      repMin: 8,
+      repMax: 12,
     });
   });
 

@@ -72,20 +72,19 @@
   let weightLb = $state(0);
   let saving = $state(false);
 
-  // On by default. A rep range turns the lift onto double progression — add
-  // reps inside the range week to week, and when every set reaches the top the
-  // weight goes up by one step of the equipment and the reps reset to the
-  // bottom. Without it the lift carries its weight forward and NOTHING moves
-  // it, ever.
+  // Off by default, because the default now progresses on its own.
   //
-  // This used to default off, on the argument that carry-forward "is still the
-  // right default for most of them". That argument was wrong in the way silent
-  // defaults usually are: it was also the only way to get a range at all, so in
-  // practice no accessory in this app ever progressed. A lifter who adds a curl
-  // and comes back to it six weeks later should find it heavier, not find a
-  // checkbox they never saw. Turning it off is still one click, and the lift
-  // then behaves exactly as everything did before.
-  let ranged = $state(true);
+  // Without a range an accessory runs the prescribed lifts' engine: hit your
+  // reps on every set and the weight goes up next time, miss and it repeats,
+  // miss three times and it deloads. That is what most lifters mean by "make it
+  // increase", and it is why this no longer has to default on to be useful.
+  //
+  // With a range it is double progression, and on a coarse grid that is the
+  // GENTLER option rather than the only working one — a pair of dumbbells steps
+  // 10 lb, so climbing reps inside 8-12 first is a far smaller weekly increase
+  // than the rack's own jump. Worth reaching for on light isolation work; not
+  // worth making everyone opt out of.
+  let ranged = $state(false);
   let repMin = $state(8);
   let repMax = $state(12);
 
@@ -267,10 +266,12 @@
       Leave the weight at 0 for bodyweight work.
       {#if ranged}
         With a range, hit the top on every set and the weight goes up {stepLb} lb
-        next time, with the reps back at the bottom. It never deloads.
+        next time, with the reps back at the bottom. It never deloads — good for
+        light work where {stepLb} lb a session is too big a jump.
       {:else}
-        After the first time you log it, the weight carries over from your last
-        session — nothing moves it but you.
+        Hit your reps on every set and it goes up {stepLb} lb next time, the same
+        as the program's own lifts. Miss and it stays; miss three times and it
+        drops back. Bodyweight work stays bodyweight.
       {/if}
     </p>
     {#if footnote}

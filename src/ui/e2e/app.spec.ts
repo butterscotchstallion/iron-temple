@@ -580,16 +580,14 @@ test("adds assistance to a program day", async ({ page }) => {
 
   await page.getByRole("button", { name: "Add assistance" }).click();
   await page.getByRole("button", { name: /Dip/ }).click();
-  // The rep range is on by default, so the rep input is the bottom of it. Named
-  // in full because "Reps from" would also match a bare "Reps".
-  await expect(page.getByLabel("Use a rep range")).toBeChecked();
-  await page.getByLabel("Reps from").fill("8");
+  // Off by default: a lift without a range runs the prescribed lifts' engine,
+  // so the plain rep input is the one on screen.
+  await expect(page.getByLabel("Use a rep range")).not.toBeChecked();
+  await page.getByLabel("Reps", { exact: true }).fill("8");
   await page.getByRole("button", { name: "Add to this day" }).click();
 
-  // reps is the BOTTOM of the range: a set is complete at the bottom and the
-  // weight moves at the top. Without the range nothing would ever move it.
   await expect.poll(() => posted).toEqual([
-    { exerciseId: 3, sets: 3, reps: 8, weightLb: 0, repMin: 8, repMax: 12 },
+    { exerciseId: 3, sets: 3, reps: 8, weightLb: 0 },
   ]);
 
   // It shows up under the day, below the program's own lifts, and reads as
@@ -938,17 +936,7 @@ test("adds an assistance lift to the workout in progress", async ({ page }) => {
   // exact, because getByText matches case-insensitively on a substring by
   // default and the "Add assistance" button below would match too.
   await expect(page.getByText("Assistance", { exact: true })).toBeVisible();
-  // The range rides along here too. This endpoint adds the lift to the program
-  // day as well as to today, so a row created without one is a lift nothing
-  // would ever progress.
-  expect(added).toEqual({
-    exerciseId: 4,
-    sets: 3,
-    reps: 8,
-    weightLb: 0,
-    repMin: 8,
-    repMax: 12,
-  });
+  expect(added).toEqual({ exerciseId: 4, sets: 3, reps: 10, weightLb: 0 });
 });
 
 test("renders an already-finished session read-only", async ({ page }) => {

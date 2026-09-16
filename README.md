@@ -22,13 +22,17 @@ prescribed lifts, sets and reps.
 
 - **Put the days on a calendar.** Assign a weekday to each program day, and the app
   knows what you're scheduled to do and when you missed it.
-- **Add your own assistance work, and have it progress.** Accessories attach to a
-  program day as a per-account overlay: the seeded programs stay untouched, so your
-  curls never move anyone else's Workout A. Each one runs on **double progression**
-  by default — add reps inside a rep range, and when every set reaches the top the
-  weight goes up and the reps reset to the bottom. Edit a lift on the program page
-  to change the range, or turn it off and simply carry forward whatever you last
-  lifted. Assistance never deloads: a stalled lateral raise is not a signal.
+- **Add your own assistance work, and have it progress like everything else.**
+  Accessories attach to a program day as a per-account overlay: the seeded programs
+  stay untouched, so your curls never move anyone else's Workout A. They run the
+  **same linear engine** as the prescribed lifts — hit your reps on every set and
+  the weight goes up next time, miss and it repeats, miss three times and it
+  deloads. The jump is the smallest one your equipment admits, never a programme
+  pace. Bodyweight work stays bodyweight: a lift logged at 0 has nothing to add to.
+  Prefer something gentler on light isolation work? Give a lift a **rep range** on
+  the program page and it switches to double progression — climb reps inside the
+  range, and only when every set reaches the top does the weight move, with no
+  deload ever.
 - **See the next session before you start it.** Every day previews its target
   weights, so you know what's coming without opening a session.
 - **Always know what's next.** The program page is a queue: every day carries the
@@ -87,11 +91,14 @@ prescribed lifts, sets and reps.
 
 ### Progression
 
-The linear engine sets the next weight for every lift from its own history:
-**+5 lb** after a successful session (**+10 lb** on the deadlift), the same weight
-again after a failure, and a **deload to 90%** after three consecutive failures at
-one weight. It also says *why* it picked a number, so a deload or an approaching
-stall reads as a decision rather than a mystery.
+The linear engine sets the next weight for every lift from its own history —
+prescribed and assistance alike: **+5 lb** after a successful session (**+10 lb**
+on the deadlift), the same weight again after a failure, and a **deload to 90%**
+after three consecutive failures at one weight. A deload always lands *below* the
+weight that stalled: where 10% is finer than the grid, it takes one step off
+instead, because a "deload" that rounds back to the weight you just failed three
+times is no deload at all. It also says *why* it picked a number, so a deload or
+an approaching stall reads as a decision rather than a mystery.
 
 Every jump is one **your** equipment can make. The smallest change a barbell admits
 is twice your lightest plate, and the smallest a pair of dumbbells admits is twice
@@ -102,9 +109,9 @@ rack of 2.5s means a dumbbell press climbs 5 lb a session instead of 10.
 
 The programme's pace is separate from that grid and is rounded **up** to it: the
 squat still wants +5 and the deadlift +10, and a gym too coarse to build them gets
-the next weight that exists rather than an advance of nothing. The grid alone sets
-the increase when assistance work tops out its rep range — a curl is not a squat,
-and it goes up by the least the rack allows.
+the next weight that exists rather than an advance of nothing. The grid alone
+sets the increase on assistance work, on either rule — a curl is not a squat, so
+it goes up by the least the rack allows rather than at a programme's pace.
 
 History follows the **lift**, not the program — so taking Advanced 3x5 when your
 5x5 stalls picks the bar up where you left it instead of sending you back to an
