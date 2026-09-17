@@ -10,43 +10,67 @@ func perf(weight float64, reps ...int32) *progression.AssistancePerformance {
 	return &progression.AssistancePerformance{WeightLb: weight, Reps: reps}
 }
 
+func ok(w float64) progression.SessionResult {
+	return progression.SessionResult{WeightLb: w, Success: true}
+}
+
+func miss(w float64) progression.SessionResult {
+	return progression.SessionResult{WeightLb: w, Success: false}
+}
+
+// Without a range an accessory runs the prescribed lifts' own engine. This is
+// the reversal of the behaviour this file used to defend — carry the weight
+// forward and let nothing move it — which read as a considered default but was
+// the only reachable one, and left every accessory frozen at its first weight.
 func TestNextAssistanceWithoutARange(t *testing.T) {
-	// The behaviour that predates this engine, and still the default: do what
-	// you did last time, and change it when you feel like it.
 	tests := []struct {
 		name       string
 		fallback   float64
-		last       *progression.AssistancePerformance
+		history    []progression.SessionResult
 		wantWeight float64
 		wantStatus progression.Status
 	}{
 		{
 			name:       "never performed uses the stored fallback",
 			fallback:   25,
-			last:       nil,
+			history:    nil,
 			wantWeight: 25,
-			wantStatus: progression.StatusFixed,
+			wantStatus: progression.StatusStart,
 		},
 		{
-			name:       "carries the last weight forward",
+			// The whole point: hit your reps and it goes up next time, by the
+			// least the equipment admits.
+			name:       "a session where every set landed advances the weight",
 			fallback:   25,
-			last:       perf(40, 8, 8, 8),
-			wantWeight: 40,
-			wantStatus: progression.StatusFixed,
+			history:    []progression.SessionResult{ok(40)},
+			wantWeight: 45,
+			wantStatus: progression.StatusAdvance,
 		},
 		{
-			// Even a session where every set was enormous. Without a range there
-			// is nothing to top out, so nothing advances.
-			name:       "does not advance however many reps were done",
+			name:       "a miss repeats the weight",
 			fallback:   25,
-			last:       perf(40, 30, 30, 30),
+			history:    []progression.SessionResult{ok(35), miss(40)},
 			wantWeight: 40,
-			wantStatus: progression.StatusFixed,
+			wantStatus: progression.StatusHold,
+		},
+		{
+			// Three misses at one weight deload, exactly as they do on a squat.
+			// The old rule refused this on the grounds that a stalled curl is not
+			// a signal; the cost of that was a curl with nowhere to go.
+			name:     "three misses deload",
+			fallback: 25,
+			history: []progression.SessionResult{
+				miss(100), miss(100), miss(100),
+			},
+			wantWeight: 90,
+			wantStatus: progression.StatusDeload,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := progression.NextAssistance(tc.fallback, 0, 0, tc.last, progression.BarLadder)
+			got := progression.NextAssistance(
+				tc.fallback, 0, 0, nil, tc.history, progression.BarLadder,
+			)
 			if got.WeightLb != tc.wantWeight {
 				t.Errorf("weight = %v, want %v", got.WeightLb, tc.wantWeight)
 			}
@@ -54,6 +78,81 @@ func TestNextAssistanceWithoutARange(t *testing.T) {
 				t.Errorf("status = %q, want %q", got.Status, tc.wantStatus)
 			}
 		})
+	}
+}
+
+// The weight last actually worked is the starting point, not the stored
+// fallback. History counts only finished sessions — so an abandoned workout
+// cannot drive progression — but a weight logged ten minutes ago in a session
+// still open must not be forgotten, which for an accessory added at bodyweight
+// would mean dropping from 65 lb back to 0.
+func TestNextAssistanceCarriesAnUnfinishedSessionsWeight(t *testing.T) {
+	got := progression.NextAssistance(
+		0, 0, 0, perf(65, 10, 10), nil, progression.BarLadder,
+	)
+	if got.WeightLb != 65 {
+		t.Errorf("weight = %v, want 65 carried from the open session", got.WeightLb)
+	}
+	// Not "start": the lift has been done, nothing has computed a next weight.
+	if got.Status != progression.StatusFixed {
+		t.Errorf("status = %q, want %q", got.Status, progression.StatusFixed)
+	}
+
+	// Once that session is in the history it advances off it rather than
+	// carrying it again.
+	if adv := progression.NextAssistance(
+		0, 0, 0, perf(65, 10, 10),
+		[]progression.SessionResult{ok(65)}, progression.BarLadder,
+	); adv.WeightLb != 70 || adv.Status != progression.StatusAdvance {
+		t.Errorf("got %v/%q, want 70/advance", adv.WeightLb, adv.Status)
+	}
+}
+
+// Bodyweight work stays bodyweight. A set of push-ups that went well must not
+// come back prescribed at 5 lb — that is a different exercise, and choosing it
+// is the lifter's.
+func TestNextAssistanceDoesNotLoadBodyweightWork(t *testing.T) {
+	got := progression.NextAssistance(
+		0, 0, 0, nil,
+		[]progression.SessionResult{ok(0), ok(0)},
+		progression.BarLadder,
+	)
+	if got.WeightLb != 0 {
+		t.Errorf("weight = %v, want 0 — bodyweight work does not self-load", got.WeightLb)
+	}
+	if got.Status != progression.StatusFixed {
+		t.Errorf("status = %q, want %q", got.Status, progression.StatusFixed)
+	}
+
+	// Once a load is entered it progresses like anything else.
+	loaded := progression.NextAssistance(
+		0, 0, 0, nil,
+		[]progression.SessionResult{ok(0), ok(25)},
+		progression.BarLadder,
+	)
+	if loaded.WeightLb != 30 {
+		t.Errorf("weight = %v, want 30 once the lift carries a load", loaded.WeightLb)
+	}
+}
+
+// An accessory advances by the least its equipment admits, not by a programme's
+// pace. Those agree on a bar and on a pair of dumbbells; they come apart when a
+// lifter owns finer plates, and there the curl takes the smaller jump.
+func TestNextAssistanceAdvancesByTheEquipmentNotThePace(t *testing.T) {
+	db := progression.LadderFor("Dumbbell Curl", "dumbbell", progression.GymSteps{})
+	got := progression.NextAssistance(
+		0, 0, 0, nil, []progression.SessionResult{ok(30)}, db,
+	)
+	if got.WeightLb != 40 {
+		t.Errorf("dumbbell curl = %v, want 40 (5 lb a bell, 10 on the pair)", got.WeightLb)
+	}
+
+	fine := progression.LadderFor("Barbell Curl", "barbell",
+		progression.GymSteps{BarLb: 2.5})
+	if got := progression.NextAssistance(
+		0, 0, 0, nil, []progression.SessionResult{ok(45)}, fine,
+	); got.WeightLb != 47.5 {
+		t.Errorf("curl on 1.25s = %v, want 47.5, not the squat's 50", got.WeightLb)
 	}
 }
 
@@ -110,7 +209,7 @@ func TestNextAssistanceDoubleProgression(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := progression.NextAssistance(25, 8, 12, tc.last, progression.BarLadder)
+			got := progression.NextAssistance(25, 8, 12, tc.last, nil, progression.BarLadder)
 			if got.WeightLb != tc.wantWeight {
 				t.Errorf("weight = %v, want %v", got.WeightLb, tc.wantWeight)
 			}
@@ -135,7 +234,7 @@ func TestNextAssistanceNeverDeloads(t *testing.T) {
 		perf(40, 0),
 	}
 	for _, last := range histories {
-		got := progression.NextAssistance(25, 8, 12, last, progression.BarLadder)
+		got := progression.NextAssistance(25, 8, 12, last, nil, progression.BarLadder)
 		if got.WeightLb < last.WeightLb {
 			t.Errorf("reps %v cut the weight %v → %v", last.Reps, last.WeightLb, got.WeightLb)
 		}
@@ -147,13 +246,16 @@ func TestNextAssistanceNeverDeloads(t *testing.T) {
 
 // A range only half given, or given backwards, is not a range. The database
 // rejects both, but the engine is pure and does not get to assume its caller
-// checked — it collapses to carry-forward rather than inventing a rule.
+// checked — it collapses to the linear path rather than inventing a rule.
 func TestNextAssistanceIgnoresAnUnusableRange(t *testing.T) {
 	last := perf(40, 12, 12, 12)
+	history := []progression.SessionResult{ok(40)}
 	for _, r := range [][2]int32{{0, 12}, {8, 0}, {12, 8}, {0, 0}} {
-		got := progression.NextAssistance(25, r[0], r[1], last, progression.BarLadder)
-		if got.WeightLb != 40 || got.Status != progression.StatusFixed {
-			t.Errorf("range %v: got %v/%q, want 40/fixed", r, got.WeightLb, got.Status)
+		got := progression.NextAssistance(
+			25, r[0], r[1], last, history, progression.BarLadder,
+		)
+		if got.WeightLb != 45 || got.Status != progression.StatusAdvance {
+			t.Errorf("range %v: got %v/%q, want 45/advance", r, got.WeightLb, got.Status)
 		}
 	}
 }
@@ -165,7 +267,7 @@ func TestNextAssistanceTreatsNoLoggedSetsAsNoHistory(t *testing.T) {
 	got := progression.NextAssistance(25, 8, 12, &progression.AssistancePerformance{
 		WeightLb: 40,
 		Reps:     nil,
-	}, progression.BarLadder)
+	}, nil, progression.BarLadder)
 	if got.WeightLb != 25 || got.Status != progression.StatusFixed {
 		t.Errorf("got %v/%q, want the fallback 25/fixed", got.WeightLb, got.Status)
 	}
@@ -179,13 +281,13 @@ func TestNextAssistanceTreatsNoLoggedSetsAsNoHistory(t *testing.T) {
 func TestNextAssistanceStepsByEquipment(t *testing.T) {
 	toppedOut := perf(40, 12, 12, 12)
 
-	bar := progression.NextAssistance(25, 8, 12, toppedOut, progression.BarLadder)
+	bar := progression.NextAssistance(25, 8, 12, toppedOut, nil, progression.BarLadder)
 	if bar.WeightLb != 45 {
 		t.Errorf("barbell accessory = %v, want 45", bar.WeightLb)
 	}
 
 	db := progression.LadderFor("Hammer Curl", "dumbbell", progression.GymSteps{})
-	got := progression.NextAssistance(25, 8, 12, toppedOut, db)
+	got := progression.NextAssistance(25, 8, 12, toppedOut, nil, db)
 	if got.WeightLb != 50 {
 		t.Errorf("dumbbell accessory = %v, want 50 (a pair that exists)", got.WeightLb)
 	}
@@ -201,7 +303,7 @@ func TestNextAssistanceStepsByEquipment(t *testing.T) {
 // A caller that builds a Ladder itself rather than taking one from LadderFor
 // gets the barbell increment this replaced, not a weight that never moves.
 func TestNextAssistanceZeroLadderKeepsTheOldBehaviour(t *testing.T) {
-	got := progression.NextAssistance(25, 8, 12, perf(40, 12, 12, 12), progression.Ladder{})
+	got := progression.NextAssistance(25, 8, 12, perf(40, 12, 12, 12), nil, progression.Ladder{})
 	if got.WeightLb != 40+progression.AssistanceIncrement {
 		t.Errorf("zero ladder = %v, want %v", got.WeightLb, 40+progression.AssistanceIncrement)
 	}

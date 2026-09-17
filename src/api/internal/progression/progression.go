@@ -278,7 +278,7 @@ func NextPlan(startingWeight float64, l Ladder, history []SessionResult) Plan {
 
 	if fails >= FailuresBeforeDeload {
 		return Plan{
-			WeightLb:     roundToStep(last.WeightLb*DeloadFactor, l.Step),
+			WeightLb:     deloadFrom(last.WeightLb, l.Step),
 			Status:       StatusDeload,
 			FailureCount: fails,
 			PreviousLb:   last.WeightLb,
@@ -290,6 +290,31 @@ func NextPlan(startingWeight float64, l Ladder, history []SessionResult) Plan {
 		FailureCount: fails,
 		PreviousLb:   last.WeightLb,
 	}
+}
+
+// deloadFrom is the weight a stall drops to: DeloadFactor of what was worked,
+// snapped to the grid, and guaranteed to be LOWER than what was worked.
+//
+// The guarantee is the point, and snapping alone does not give it. Ten percent
+// off a light weight can be less than half a step, so it rounds back to the
+// weight that just failed three times — 40 lb on a pair of dumbbells goes to 36
+// and snaps to 40, prescribing the identical weight as a fresh run-up, forever.
+// The coarser the grid relative to the weight the likelier that is, which is why
+// it shows up on accessories and on the seeded dumbbell press at 30 lb rather
+// than on a squat at 300.
+//
+// So when the snap fails to descend, take one step off instead. That is a deeper
+// cut than 10% — a third, at 30 lb on a 10 lb grid — but it is the only lower
+// weight the equipment can build, and the alternative is not a gentler deload,
+// it is no deload at all.
+//
+// Clamped at zero, which is where a bodyweight lift already sits.
+func deloadFrom(workedLb, step float64) float64 {
+	w := roundToStep(workedLb*DeloadFactor, step)
+	if w >= workedLb {
+		w = workedLb - step
+	}
+	return math.Max(w, 0)
 }
 
 // roundToStep snaps a weight to the nearest change the equipment admits.

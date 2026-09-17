@@ -160,14 +160,25 @@ describe("the recent section", () => {
     expect(await screen.findByText("Use a rep range")).toBeInTheDocument();
   });
 
-  // The default that decides whether anything ever progresses. It used to be
-  // off, which made carry-forward the silent norm and meant no accessory in the
-  // app had ever gained weight; a lifter who wants that can still untick it.
-  it("turns the rep range on by default", async () => {
+  // Off by default, because the default progresses on its own now: an accessory
+  // with no range runs the prescribed lifts' engine. The copy has to say so —
+  // it used to promise that "nothing moves it but you", which was true and was
+  // the bug.
+  it("leaves the rep range off and promises the linear rule", async () => {
     open(library);
     await fireEvent.click(await screen.findByRole("button", { name: /Dip/ }));
-    expect(await screen.findByLabelText("Use a rep range")).toBeChecked();
-    expect(screen.getByText(/never deloads/)).toBeInTheDocument();
+    expect(await screen.findByLabelText("Use a rep range")).not.toBeChecked();
+    expect(screen.getByText(/the same as the program's own lifts/)).toBeInTheDocument();
+    expect(screen.getByText(/miss three times and it drops back/)).toBeInTheDocument();
+  });
+
+  // Ticking it swaps to double progression, which on a coarse grid is the
+  // gentler rule rather than the only working one.
+  it("offers double progression as the gentler option", async () => {
+    open(library);
+    await fireEvent.click(await screen.findByRole("button", { name: /Dip/ }));
+    await fireEvent.click(await screen.findByLabelText("Use a rep range"));
+    expect(await screen.findByText(/never deloads/)).toBeInTheDocument();
   });
 
   // The stepper offers the jump the lifter's own equipment makes, not a

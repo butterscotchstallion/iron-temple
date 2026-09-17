@@ -940,7 +940,7 @@ paths:
         This is the one write that reaches both a session and a program. It adds
         the movement to the caller's assistance overlay on this session's program
         day — so it is prescribed every time that day comes round, with the
-        weight carry-forward and rep progression that implies — and it
+        progression that implies — and it
         materialises the sets into the session in progress, which
         `/programs/{programId}/days/{dayId}/assistance` deliberately does not.
 
@@ -948,10 +948,10 @@ paths:
         workout the lifter is standing in did not is a worse state than either
         outcome, and nothing in the app could explain it to them.
 
-        The weight and reps are used verbatim rather than run through the
-        carry-forward the next session will use. The lifter has just typed a
-        number; honouring it is less surprising than overriding it, and it is
-        what lets a client show the sets before the server has answered.
+        The weight and reps are used verbatim rather than run through the engine
+        the next session will use. The lifter has just typed a number; honouring
+        it is less surprising than overriding it, and it is what lets a client
+        show the sets before the server has answered.
 
         Refused once the session is over, for the same reason as adding a set:
         changing a closed session's shape can retroactively turn a successful
@@ -1876,9 +1876,10 @@ components:
     ProgramDayAssistance:
       description: >-
         One assistance exercise a lifter has attached to a program day. Unlike
-        ProgramDayExercise it has no starting weight and no progression: the
-        prescribed weight is whatever they last logged for the lift, falling back
-        to weightLb here.
+        ProgramDayExercise it has no starting weight of its own — weightLb here is
+        only the fallback until the lift has been logged once — but it does
+        progress: without a rep range it runs the same linear engine as the
+        prescribed lifts, and with one it runs double progression instead.
       type: object
       required:
         [id, exerciseId, exerciseName, equipment, position, sets, reps, weightLb]
@@ -1906,7 +1907,9 @@ components:
         weightLb:
           type: number
           minimum: 0
-          description: Fallback weight, used until the lift has been logged once.
+          description: >-
+            Fallback weight, used until the lift has been logged once. After that
+            the engine drives it.
           example: 0
         repMin:
           type: integer
@@ -2252,11 +2255,15 @@ components:
             start (no history), advance (last session passed), hold (recent
             failure, repeating the weight), deload (stall hit the threshold, weight
             dropped), layoff (weight cut for time away from training rather than
-            for anything that happened in a session), fixed (the weight was
-            carried forward from what was last logged, rather than computed —
-            assistance work with no rep range), progressing (an assistance lift
-            with a rep range topped it out on every set, so the weight went up
-            and the reps reset to the bottom).
+            for anything that happened in a session), fixed (nothing computed
+            this weight — it is what was last logged, for assistance whose most
+            recent session has not finished yet, or bodyweight work, which does
+            not self-load), progressing (an assistance lift with a rep range
+            topped it out on every set, so the weight went up and the reps reset
+            to the bottom).
+
+            Assistance without a rep range reports the linear statuses — start,
+            advance, hold, deload — because it runs that engine.
           example: hold
         failureCount:
           type: integer

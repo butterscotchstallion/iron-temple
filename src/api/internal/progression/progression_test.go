@@ -182,6 +182,43 @@ func TestAFinerRackReachesWeightsTheDefaultCannot(t *testing.T) {
 	}
 }
 
+// A deload has to actually come down, and snapping alone does not guarantee it.
+// Ten percent off a light weight can be less than half a step, so it rounds back
+// to the weight that just failed three times and prescribes it again as a fresh
+// run-up — forever. The coarser the grid relative to the weight, the likelier,
+// which is why this bites a 30 lb pair of dumbbells and not a 300 lb squat.
+func TestDeloadAlwaysDescends(t *testing.T) {
+	db := LadderFor("Dumbbell Curl", "dumbbell", GymSteps{})
+
+	// 40 * 0.90 = 36, which snaps to 40 on a 10 lb grid. One step off instead.
+	stalled := []SessionResult{fail(40), fail(40), fail(40)}
+	if got := Next(0, db, stalled); got != 30 {
+		t.Errorf("deload from 40 on a 10 lb grid = %v, want 30", got)
+	}
+
+	// The seeded dumbbell press starts here, so this was reachable in a shipped
+	// program: 30 * 0.90 = 27 snaps back to 30.
+	at30 := []SessionResult{fail(30), fail(30), fail(30)}
+	if got := Next(0, db, at30); got != 20 {
+		t.Errorf("deload from 30 = %v, want 20", got)
+	}
+
+	// Never below zero, which is where bodyweight work already sits.
+	at10 := []SessionResult{fail(10), fail(10), fail(10)}
+	if got := Next(0, db, at10); got != 0 {
+		t.Errorf("deload from 10 = %v, want 0", got)
+	}
+
+	// And the weights where the snap already descended are untouched: 10% is
+	// still 10% wherever the grid can express it.
+	if got := Next(0, BarLadder, []SessionResult{fail(135), fail(135), fail(135)}); got != 120 {
+		t.Errorf("deload from 135 on a bar = %v, want 120 (unchanged)", got)
+	}
+	if got := Next(0, db, []SessionResult{fail(130), fail(130), fail(130)}); got != 120 {
+		t.Errorf("deload from 130 on the pair = %v, want 120 (unchanged)", got)
+	}
+}
+
 func ok(w float64) SessionResult   { return SessionResult{WeightLb: w, Success: true} }
 func fail(w float64) SessionResult { return SessionResult{WeightLb: w, Success: false} }
 

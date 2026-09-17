@@ -81,16 +81,27 @@ func LayoffWeight(previousLb float64, weeks int, l Ladder) float64 {
 //
 // Two cases leave the plan alone:
 //
-//   - StatusStart, where there is no history at all. PreviousLb is 0 there, so
-//     without this guard a lift never performed would be prescribed an empty bar
-//     — and a lift you have never done is not one you have detrained on.
+//   - No weight ever worked, which is what PreviousLb == 0 means. A lift you
+//     have never done is not one you have detrained on, and without this guard
+//     it would be prescribed an empty bar: the cut comes off PreviousLb, so a
+//     zero there makes the layoff weight 0, which is below any real target and
+//     therefore wins the comparison below.
+//
+//     Tested against PreviousLb rather than against StatusStart, which is what
+//     this used to check. StatusStart says the LINEAR engine found no history;
+//     it is not the only way to have no history. A ranged accessory that has
+//     never been performed reports StatusFixed with PreviousLb 0 — it is being
+//     prescribed its stored fallback — and under the old check a layoff sent
+//     that lift to 0 lb. The status was a proxy for the condition; this is the
+//     condition.
+//
 //   - A layoff weight that is not below the plan's own. This is what keeps a
 //     stall deload and a layoff deload from compounding into 90% × 80%: they are
 //     two answers to "how light should this be", so the deeper one wins outright
 //     and the other is a no-op. A week off after a stall changes nothing; a month
 //     off after one takes over.
 func ApplyLayoff(p Plan, weeks int, l Ladder) Plan {
-	if LayoffPct(weeks) == 0 || p.Status == StatusStart {
+	if LayoffPct(weeks) == 0 || p.PreviousLb <= 0 {
 		return p
 	}
 	weight := LayoffWeight(p.PreviousLb, weeks, l)

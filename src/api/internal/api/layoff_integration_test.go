@@ -203,3 +203,52 @@ func TestLayoffDeepensWithTimeAwayAndThenCaps(t *testing.T) {
 		})
 	}
 }
+
+// A lift the lifter has never done is not one they have detrained on, and that
+// has to hold for a ranged accessory as well as for a first-ever squat.
+//
+// The regression: a ranged accessory never performed is prescribed its stored
+// fallback and reports "fixed" with nothing worked behind it. ApplyLayoff used
+// to skip only StatusStart, so this plan went through it — the cut comes off the
+// weight last worked, which is 0 here, making the layoff weight 0, which is
+// below the fallback and therefore won. A curl the lifter had never touched came
+// back prescribed at 0 lb the moment they took a month off.
+func TestLayoffDoesNotZeroANeverPerformedAccessory(t *testing.T) {
+	e := expect(t)
+	programID, dayID := firstProgramAndDay(e)
+	curlID := exerciseIDByName(t, e, "Triceps Pushdown")
+
+	// A rep range, a real stored weight, and no history of its own.
+	created := e.POST(fmt.Sprintf("/programs/%d/days/%d/assistance", programID, dayID)).
+		WithJSON(map[string]any{
+			"exerciseId": curlID, "sets": 3, "reps": 8, "weightLb": 25,
+			"repMin": 8, "repMax": 12,
+		}).
+		Expect().Status(http.StatusCreated).JSON().Object()
+	assistanceID := int(created.Value("id").Number().Raw())
+	t.Cleanup(func() {
+		e.DELETE(fmt.Sprintf("/programs/%d/days/%d/assistance/%d",
+			programID, dayID, assistanceID)).Expect()
+	})
+
+	// Time away, established by a different lift entirely.
+	trainedWeeksAgo(t, e, dayID, 4)
+
+	deloaded := preview(e, programID, dayID, true)
+	deloaded.Value("layoff").Object().Value("weeks").Number().Gt(0)
+
+	exercises := deloaded.Value("exercises").Array()
+	var seen bool
+	for i := 0; i < int(exercises.Length().Raw()); i++ {
+		ex := exercises.Value(i).Object()
+		if int(ex.Value("exerciseId").Number().Raw()) != curlID {
+			continue
+		}
+		seen = true
+		ex.Value("weightLb").Number().IsEqual(25)
+		ex.Value("progression").Object().Value("status").String().IsEqual("fixed")
+	}
+	if !seen {
+		t.Fatal("the accessory is missing from the deloaded prescription")
+	}
+}

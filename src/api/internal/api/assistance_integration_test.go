@@ -136,13 +136,15 @@ func TestAssistanceIsPrescribedAndMaterialized(t *testing.T) {
 
 	addAssistance(t, e, programID, dayID, dipID, 3, 8, 0)
 
-	// The preview marks it as assistance, and does not run the engine on it.
+	// The preview marks it as assistance and runs the same engine on it as the
+	// prescribed lifts — so with no history at all it reports "start", exactly
+	// as a squat on its first session does.
 	preview := e.GET(fmt.Sprintf("/programs/%d/days/%d/next-session", programID, dayID)).
 		Expect().Status(http.StatusOK).JSON().Object().Value("exercises").Array()
 	last := preview.Value(int(preview.Length().Raw()) - 1).Object()
 	last.Value("exerciseId").Number().IsEqual(dipID)
 	last.Value("kind").String().IsEqual("assistance")
-	last.Value("progression").Object().Value("status").String().IsEqual("fixed")
+	last.Value("progression").Object().Value("status").String().IsEqual("start")
 	// Everything before it is the program's own prescription.
 	preview.Value(0).Object().Value("kind").String().IsEqual("main")
 
@@ -163,8 +165,13 @@ func TestAssistanceIsPrescribedAndMaterialized(t *testing.T) {
 	lastSet.Value("exerciseId").Number().IsEqual(dipID)
 }
 
-// The carry-forward rule: assistance is prescribed at the weight last logged for
-// the lift, so adding a plate mid-workout is how you progress it.
+// A weight logged in a session that is still open is carried into the next
+// prescription rather than forgotten.
+//
+// This is the carry-forward rule surviving inside the engine that replaced it,
+// and it is load-bearing: the engine's history counts only FINISHED sessions, so
+// without it a curl logged at 65 five minutes ago would be prescribed at the
+// stored fallback — 0, for an accessory added at bodyweight.
 func TestAssistanceWeightCarriesForward(t *testing.T) {
 	e := expect(t)
 	programID, dayID := firstProgramAndDay(e)
@@ -191,8 +198,34 @@ func TestAssistanceWeightCarriesForward(t *testing.T) {
 		Expect().Status(http.StatusOK).JSON().Object().Value("exercises").Array()
 	last := preview.Value(int(preview.Length().Raw()) - 1).Object()
 	last.Value("weightLb").Number().IsEqual(65)
-	// Carried forward, not advanced: the engine did not add five pounds.
+	// Carried, not advanced. Neither session has finished, so there is nothing
+	// in the history for the engine to advance FROM — and "fixed" rather than
+	// "start" because the lift plainly has been done.
 	last.Value("progression").Object().Value("status").String().IsEqual("fixed")
+}
+
+// And once the session is finished, the same lift advances off it — the whole
+// point of the change. A barbell curl at 65 with every set completed comes back
+// at 70, the same way the squat above it moves.
+func TestAssistanceAdvancesOnceTheSessionIsFinished(t *testing.T) {
+	e := expect(t)
+	programID, dayID := firstProgramAndDay(e)
+	curlID := exerciseIDByName(t, e, "Preacher Curl")
+
+	addAssistance(t, e, programID, dayID, curlID, 2, 10, 0)
+
+	session := startSession(t, e, dayID)
+	sessionID := int(session.Value("id").Number().Raw())
+	for _, set := range sessionSetsFor(session, curlID) {
+		logSetAt(e, sessionID, int(set.Value("id").Number().Raw()), 10, 65, true)
+	}
+	// Every prescribed set of every lift has to be logged for the session to be
+	// finishable without the engine reading a failure, so finish it outright.
+	e.POST(fmt.Sprintf("/sessions/%d/finish", sessionID)).Expect()
+
+	advanced := assistancePreview(e, programID, dayID, curlID)
+	advanced.Value("weightLb").Number().IsEqual(70)
+	advanced.Value("progression").Object().Value("status").String().IsEqual("advance")
 }
 
 // The claim the feature is built on. Adding and removing assistance must not
