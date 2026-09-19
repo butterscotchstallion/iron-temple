@@ -15,6 +15,22 @@ const ada = {
   hasAvatar: false,
 };
 
+// `ada` deliberately carries no `mustChangePassword`. The field is required by
+// the spec, but a client must read an absent one as false — that is what the
+// API's own documentation promises — and leaving it off here is what keeps that
+// tolerance tested rather than assumed.
+
+/** The same account as `ada`, in the shape the admin roster returns. */
+const adaAdminRow = {
+  id: 1,
+  username: "ada",
+  displayName: "Ada Lovelace",
+  avatarColor: "",
+  isAdmin: true,
+  mustChangePassword: false,
+  createdAt: "2026-01-04T09:30:00Z",
+};
+
 const emptySessions = { items: [], total: 0, totalVolumeLb: 0, limit: 100, offset: 0 };
 
 const health = { status: "ok", version: "v9.9.9", environment: "production" };
@@ -74,6 +90,14 @@ async function mockSignedOut(
 async function mockSignedIn(page: import("@playwright/test").Page) {
   await mockCommon(page);
   await page.route("**/api/v1/me", (route) => route.fulfill({ json: ada }));
+}
+
+/** Signed in as an ordinary lifter — no install to administer. */
+async function mockSignedInAsNonAdmin(page: import("@playwright/test").Page) {
+  await mockCommon(page);
+  await page.route("**/api/v1/me", (route) =>
+    route.fulfill({ json: { ...ada, id: 2, username: "grace", isAdmin: false } }),
+  );
 }
 
 test("shows the version in the header bar", async ({ page }) => {
@@ -144,6 +168,99 @@ test("the account menu offers racked, profile and sign out", async ({ page }) =>
   await expect(page.getByRole("menuitem", { name: /^racked$/i })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: /configure profile/i })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: /sign out/i })).toBeVisible();
+});
+
+// Account management is the owner's, and the menu is where it is discovered.
+// Asserted here rather than in Vitest for the reason at the top of this file:
+// the menu is a portal-rendered bits-ui dropdown driven by pointer events.
+test("the account menu offers account management to the owner", async ({ page }) => {
+  await mockSignedIn(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: /account menu/i }).click();
+  await expect(page.getByRole("menuitem", { name: /manage accounts/i })).toBeVisible();
+});
+
+test("the account menu hides account management from everyone else", async ({ page }) => {
+  await mockSignedInAsNonAdmin(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: /account menu/i }).click();
+  // The menu is open — this is the entry missing, not the menu failing to open.
+  await expect(page.getByRole("menuitem", { name: /sign out/i })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: /manage accounts/i })).toHaveCount(0);
+});
+
+// Hiding the link is tidiness; the route condition is what makes typing the
+// hash a dead end. (The API refuses /admin/* regardless — that is the boundary,
+// and it is asserted in the Go suite.)
+test("a non-admin typing the admin hash lands on the home screen", async ({ page }) => {
+  await mockSignedInAsNonAdmin(page);
+  await page.goto("/#/admin");
+
+  // The condition fails, so the route falls through to the catch-all, which is
+  // Home. No roster, and no wall of 403s either.
+  await expect(page.getByRole("heading", { name: "Accounts" })).toHaveCount(0);
+  await expect(page.getByRole("navigation")).toBeVisible();
+});
+
+test("the owner can open the roster and add an account", async ({ page }) => {
+  await mockSignedIn(page);
+  await page.route("**/api/v1/admin/users", async (route) => {
+    if (route.request().method() === "POST") {
+      await route.fulfill({
+        status: 201,
+        json: {
+          id: 2,
+          username: "grace",
+          displayName: "Grace Hopper",
+          avatarColor: "",
+          isAdmin: false,
+          mustChangePassword: true,
+          createdAt: "2026-03-17T18:00:00Z",
+        },
+      });
+      return;
+    }
+    await route.fulfill({ json: [adaAdminRow] });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /account menu/i }).click();
+  await page.getByRole("menuitem", { name: /manage accounts/i }).click();
+
+  await expect(page).toHaveURL(/#\/admin$/);
+  await expect(page.getByRole("heading", { name: "Accounts" })).toBeVisible();
+  await expect(page.getByText("1 account")).toBeVisible();
+
+  await page.getByLabel(/username/i).fill("grace");
+  await page.getByLabel(/display name/i).fill("Grace Hopper");
+  await page.getByLabel(/temporary password/i).fill("a-long-enough-password");
+  await page.getByRole("button", { name: /create account/i }).click();
+
+  await expect(page.getByText("Created grace.")).toBeVisible();
+  await expect(page.getByText("2 accounts")).toBeVisible();
+  // The new account has not been picked up yet, and the roster says so.
+  await expect(page.getByText("Hasn't set a password")).toBeVisible();
+});
+
+// An account created by the admin sees one screen and nothing else. The API
+// enforces it (403 password_change_required); this is the client not painting a
+// wall of failures behind a prompt.
+test("an account owing a password change sees only that screen", async ({ page }) => {
+  await mockCommon(page);
+  await page.route("**/api/v1/me", (route) =>
+    route.fulfill({
+      json: { ...ada, id: 2, username: "grace", isAdmin: false, mustChangePassword: true },
+    }),
+  );
+
+  await page.goto("/#/history");
+
+  await expect(page.getByRole("heading", { name: /set your password/i })).toBeVisible();
+  // No nav, and the route named in the hash did not mount.
+  await expect(page.getByRole("navigation")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "History" })).toHaveCount(0);
 });
 
 // Racked is reachable only from this menu — it has no nav-bar tab — so the

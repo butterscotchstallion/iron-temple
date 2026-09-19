@@ -48,12 +48,13 @@ func (s *Server) getMe(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	u := userFrom(ctx)
 	writeJSON(w, http.StatusOK, s.userDTO(ctx, store.GetUserRow{
-		ID:               u.ID,
-		Username:         u.Username,
-		DisplayName:      u.DisplayName,
-		AvatarColor:      u.AvatarColor,
-		IsAdmin:          u.IsAdmin,
-		CurrentProgramID: u.CurrentProgramID,
+		ID:                 u.ID,
+		Username:           u.Username,
+		DisplayName:        u.DisplayName,
+		AvatarColor:        u.AvatarColor,
+		IsAdmin:            u.IsAdmin,
+		MustChangePassword: u.MustChangePassword,
+		CurrentProgramID:   u.CurrentProgramID,
 	}))
 }
 
@@ -191,12 +192,13 @@ func (s *Server) updateMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, s.userDTO(ctx, store.GetUserRow{
-		ID:               updated.ID,
-		Username:         updated.Username,
-		DisplayName:      updated.DisplayName,
-		AvatarColor:      updated.AvatarColor,
-		IsAdmin:          updated.IsAdmin,
-		CurrentProgramID: updated.CurrentProgramID,
+		ID:                 updated.ID,
+		Username:           updated.Username,
+		DisplayName:        updated.DisplayName,
+		AvatarColor:        updated.AvatarColor,
+		IsAdmin:            updated.IsAdmin,
+		MustChangePassword: updated.MustChangePassword,
+		CurrentProgramID:   updated.CurrentProgramID,
 	}))
 }
 
@@ -533,12 +535,13 @@ func (s *Server) getUserAvatar(w http.ResponseWriter, r *http.Request) {
 // without pulling its bytes.
 func (s *Server) userDTO(ctx context.Context, u store.GetUserRow) userDTO {
 	dto := userDTO{
-		ID:               u.ID,
-		Username:         u.Username,
-		DisplayName:      u.DisplayName,
-		AvatarColor:      u.AvatarColor,
-		IsAdmin:          u.IsAdmin,
-		CurrentProgramID: u.CurrentProgramID,
+		ID:                 u.ID,
+		Username:           u.Username,
+		DisplayName:        u.DisplayName,
+		AvatarColor:        u.AvatarColor,
+		IsAdmin:            u.IsAdmin,
+		MustChangePassword: u.MustChangePassword,
+		CurrentProgramID:   u.CurrentProgramID,
 	}
 	etag, err := s.q.GetUserAvatarEtag(ctx, u.ID)
 	if err == nil {

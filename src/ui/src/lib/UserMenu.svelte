@@ -6,6 +6,7 @@
   import LogIn from "@lucide/svelte/icons/log-in";
   import LogOut from "@lucide/svelte/icons/log-out";
   import Settings from "@lucide/svelte/icons/settings";
+  import Users from "@lucide/svelte/icons/users";
   import Avatar from "./Avatar.svelte";
   import { auth, signOut } from "./auth.svelte";
 
@@ -62,6 +63,15 @@
           <Settings class="size-4" aria-hidden="true" />
           Configure profile
         </DropdownMenu.Item>
+        {#if auth.me.isAdmin}
+          <!-- Only the account that claimed the install. Hiding it from everyone
+               else is tidiness, not security — the route condition turns the
+               hash away and the API answers 403 admin_required regardless. -->
+          <DropdownMenu.Item class={itemClass} onSelect={() => go("/admin")}>
+            <Users class="size-4" aria-hidden="true" />
+            Manage accounts
+          </DropdownMenu.Item>
+        {/if}
         <DropdownMenu.Separator class="my-1 h-px bg-border/60" />
         <DropdownMenu.Item class={itemClass} onSelect={handleSignOut}>
           <LogOut class="size-4" aria-hidden="true" />

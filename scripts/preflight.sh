@@ -152,6 +152,38 @@ ui_toolchain() {
     export COREPACK_NPM_REGISTRY
   fi
 
+  # ---- the packageManager pin ------------------------------------------------
+  # pnpm 12 resolves the `packageManager` version in package.json as a "config
+  # dependency", and it fetches that from registry.npmjs.org — hardcoded. This is
+  # a THIRD registry knob, independent of the two above, and the failure is
+  # unmistakable once seen:
+  #
+  #   ERR_PNPM_BAD_CONFIG_DEP
+  #   × resolve package manager dependencies
+  #   ├─▶ Failed to resolve config dependency pnpm@12.4.2: Failed to fetch
+  #   │   metadata from https://registry.npmjs.org/pnpm
+  #   ╰─▶ operation timed out
+  #
+  # It stops every gate below — install, generate:api, check, test:unit — before
+  # any project code is read, and it stops them on a box where the mirror is
+  # working perfectly for everything else.
+  #
+  # NPM_CONFIG_REGISTRY does not reach it: pnpm 12 ignores the npm_config_* env
+  # vars outright. A --registry flag does not either, because this resolution
+  # happens before argument parsing. An npmrc FILE is the one input it still
+  # honours, so point userconfig at a generated one. Written under the cache dir
+  # rather than $HOME/.npmrc on purpose — a real dotfile would silently change
+  # how every other tool on the box resolves packages, long after this run.
+  if [ -z "${NPM_CONFIG_USERCONFIG:-}" ] && [ -n "$(configured_registry)" ]; then
+    npmrc="${XDG_CACHE_HOME:-$HOME/.cache}/iron-temple/npmrc"
+    if writable_dir "$(dirname "$npmrc")"; then
+      printf 'registry=%s\n' "$(configured_registry)" > "$npmrc"
+      printf '  toolchain: pinning pnpm'\''s registry via %s\n' "$npmrc"
+      NPM_CONFIG_USERCONFIG="$npmrc"
+      export NPM_CONFIG_USERCONFIG
+    fi
+  fi
+
   # ---- Node ------------------------------------------------------------------
   # src/ui/package.json declares the floor, and it is not decorative: under an
   # older Node every vitest run dies inside jsdom's undici with

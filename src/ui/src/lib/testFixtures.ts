@@ -26,6 +26,10 @@ export function testUser(overrides: Partial<User> = {}): User {
     displayName: "Ada Lovelace",
     avatarColor: "",
     isAdmin: true,
+    // The ordinary case: an account whose owner chose their own password. Only
+    // accounts the admin area created start out owing a change, and the one
+    // screen that cares overrides this.
+    mustChangePassword: false,
     hasAvatar: false,
     ...overrides,
   };

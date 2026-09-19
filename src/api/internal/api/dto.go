@@ -26,6 +26,11 @@ type userDTO struct {
 	// derive one from the id.
 	AvatarColor string `json:"avatarColor"`
 	IsAdmin     bool   `json:"isAdmin"`
+	// MustChangePassword is true while the account is still carrying the
+	// password an admin chose for it. Always present rather than omitempty: the
+	// client branches the whole app on it, and "absent" and "false" have to mean
+	// the same thing without the client having to decide which.
+	MustChangePassword bool `json:"mustChangePassword"`
 	// CurrentProgramID is the program the user last opened, so the app can land
 	// them on it. Omitted until they have opened one, which the UI reads as
 	// "fall back to the program of my most recent session".
@@ -75,6 +80,33 @@ type liftBaselineDTO struct {
 
 type registrationStatusDTO struct {
 	Open bool `json:"open"`
+}
+
+// adminUserDTO is one row of the admin roster.
+//
+// Deliberately not userDTO. That one carries the lifter's whole gym — bar,
+// plates, dumbbell step — and building it costs four extra queries per user
+// (see userDTO in me.go), which is a strange price for a table of names. It
+// also has no password field for the same reason userDTO has none: the type
+// has nowhere to put one.
+//
+// CreatedAt is the one thing here that is not on userDTO, and it is what makes
+// the list readable as a history of the install: who claimed it, and who was
+// added afterwards.
+type adminUserDTO struct {
+	ID          int32  `json:"id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"displayName"`
+	AvatarColor string `json:"avatarColor"`
+	// IsAdmin is true for exactly one row, enforced by users_single_admin_idx.
+	// Sent anyway rather than inferred from position, because the UI marks that
+	// row and should not be re-deriving a fact the server already knows.
+	IsAdmin bool `json:"isAdmin"`
+	// MustChangePassword tells the admin which accounts have not yet been
+	// picked up by the person they were made for — the one-time password is
+	// still live, and still known to whoever typed it.
+	MustChangePassword bool   `json:"mustChangePassword"`
+	CreatedAt          string `json:"createdAt"`
 }
 
 type avatarDTO struct {
