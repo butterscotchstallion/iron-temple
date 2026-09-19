@@ -200,7 +200,9 @@ test("a non-admin typing the admin hash lands on the home screen", async ({ page
 
   // The condition fails, so the route falls through to the catch-all, which is
   // Home. No roster, and no wall of 403s either.
-  await expect(page.getByRole("heading", { name: "Accounts" })).toHaveCount(0);
+  // exact, like the assertion in the owner's test below — an inexact "Accounts"
+  // also matches the roster card's "N accounts".
+  await expect(page.getByRole("heading", { name: "Accounts", exact: true })).toHaveCount(0);
   await expect(page.getByRole("navigation")).toBeVisible();
 });
 
@@ -230,7 +232,10 @@ test("the owner can open the roster and add an account", async ({ page }) => {
   await page.getByRole("menuitem", { name: /manage accounts/i }).click();
 
   await expect(page).toHaveURL(/#\/admin$/);
-  await expect(page.getByRole("heading", { name: "Accounts" })).toBeVisible();
+  // exact: the roster card's heading is "N accounts", which an inexact name
+  // also matches — two headings, and a strict-mode violation rather than a
+  // failure that says anything useful.
+  await expect(page.getByRole("heading", { name: "Accounts", exact: true })).toBeVisible();
   await expect(page.getByText("1 account")).toBeVisible();
 
   await page.getByLabel(/username/i).fill("grace");
