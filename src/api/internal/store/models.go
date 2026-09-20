@@ -36,17 +36,18 @@ type ProgramDay struct {
 }
 
 type ProgramDayAssistance struct {
-	ID           int32              `json:"id"`
-	UserID       int32              `json:"user_id"`
-	ProgramDayID int32              `json:"program_day_id"`
-	ExerciseID   int32              `json:"exercise_id"`
-	Position     int32              `json:"position"`
-	Sets         int32              `json:"sets"`
-	Reps         int32              `json:"reps"`
-	WeightLb     pgtype.Numeric     `json:"weight_lb"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	RepMin       *int32             `json:"rep_min"`
-	RepMax       *int32             `json:"rep_max"`
+	ID                      int32              `json:"id"`
+	UserID                  int32              `json:"user_id"`
+	ProgramDayID            int32              `json:"program_day_id"`
+	ExerciseID              int32              `json:"exercise_id"`
+	Position                int32              `json:"position"`
+	Sets                    int32              `json:"sets"`
+	Reps                    int32              `json:"reps"`
+	WeightLb                pgtype.Numeric     `json:"weight_lb"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	RepMin                  *int32             `json:"rep_min"`
+	RepMax                  *int32             `json:"rep_max"`
+	WeightSetAfterSessionID *int32             `json:"weight_set_after_session_id"`
 }
 
 type ProgramDayExercise struct {

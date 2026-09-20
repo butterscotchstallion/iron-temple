@@ -478,6 +478,10 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32, 
 			return nil, err
 		}
 		var last *progression.AssistancePerformance
+		// Which session that was. Zero when the lift has never been logged,
+		// matching what UpdateAssistance stores for the same state, so the two
+		// compare without either side special-casing "never performed".
+		var lastSessionID int32
 		if len(lastSets) > 0 {
 			lastReps := make([]int32, 0, len(lastSets))
 			for _, r := range lastSets {
@@ -491,6 +495,8 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32, 
 				WeightLb: numericToFloat(lastSets[0].WeightLb),
 				Reps:     lastReps,
 			}
+			// Every row carries the same session for the same reason.
+			lastSessionID = lastSets[0].SessionID
 		}
 
 		// The same ladder the prescribed lifts get. Topping a rep range earns
@@ -509,6 +515,32 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32, 
 				WeightLb: numericToFloat(h.WeightLb),
 				Success:  h.Success,
 			})
+		}
+
+		// An explicit weight edit outranks the carry-forward, until the lift is
+		// next performed.
+		//
+		// Both answer "what weight does this start from", and before 0022 the
+		// carry-forward always won: a lifter whose curl had climbed to 50 could
+		// set it to 30 on the program page and be prescribed 50 forever, with
+		// the screen showing 50 the whole time. The carry-forward is still right
+		// — it is what stops a weight logged mid-session being forgotten — so
+		// the tie is broken by who spoke last rather than by preferring one
+		// source outright.
+		//
+		// The pin holds the session that was most recent when the weight was
+		// set, so it matches exactly until a newer session exists. Performing
+		// the lift spends it with no write of its own: the id simply stops being
+		// the latest, the carry-forward takes over from the weight actually
+		// lifted, and progression resumes from there. A lift never logged pins
+		// against 0, which is what the query stores for "no session yet".
+		//
+		// Dropping history along with last is deliberate. A weight the lifter
+		// chose is a fresh start, not the next rung from the old one: keeping
+		// the trailing misses at 50 would let a lift deload off a 30 nobody has
+		// failed at yet, which is the opposite of what setting it meant.
+		if pin := a.WeightSetAfterSessionID; pin != nil && *pin == lastSessionID {
+			last, history = nil, nil
 		}
 
 		ladder := progression.LadderFor(a.ExerciseName, a.Equipment, gym)
