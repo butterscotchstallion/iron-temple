@@ -67,12 +67,28 @@ func TestMigrateAppliesSchemaAndSeed(t *testing.T) {
 	// accessory catalogue the exercise library browses; 0012 adds Madcow 5x5 and
 	// 0015 reshapes it from two days to three — nine prescriptions where 0012 had
 	// six; 0018 clones Lite with a dumbbell press, for two more days and six more
-	// prescriptions. None prescribes a lift the seed did not already hold, which
-	// is why the exercise total here is untouched by all of them.
-	assertCount(t, sqlDB, "SELECT count(*) FROM exercises", 53)
-	assertCount(t, sqlDB, "SELECT count(*) FROM programs", 7)
-	assertCount(t, sqlDB, "SELECT count(*) FROM program_days", 16)
-	assertCount(t, sqlDB, "SELECT count(*) FROM program_day_exercises", 46)
+	// prescriptions.
+	//
+	// Every one of those prescribes lifts the seed already held, which is why the
+	// exercise total stood at 53 through all of them. 0023 is the first that does
+	// not: the glutes program needs a barbell hip thrust and four banded
+	// movements the catalogue had never heard of, so 53 becomes 58 alongside the
+	// eighth program, its two days and its ten prescriptions.
+	assertCount(t, sqlDB, "SELECT count(*) FROM exercises", 58)
+	assertCount(t, sqlDB, "SELECT count(*) FROM programs", 8)
+	assertCount(t, sqlDB, "SELECT count(*) FROM program_days", 18)
+	assertCount(t, sqlDB, "SELECT count(*) FROM program_day_exercises", 56)
+
+	// 0023 is the first program to prescribe a lift at 0 lb — four band
+	// movements and a bodyweight back extension, which carry no poundage to
+	// prescribe. Asserted because it is the precondition for the zero guard in
+	// progression.NextPlan being reachable at all: if a later migration quietly
+	// gave these a starting weight, the guard would go untested and band work
+	// would start creeping 5 lb a session again.
+	assertCount(t, sqlDB,
+		"SELECT count(*) FROM program_day_exercises WHERE starting_weight_lb = 0", 5)
+	// And the kind that needed a new CHECK. Four movements, one program.
+	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE equipment = 'band'", 4)
 
 	// Madcow is the only program with per-set prescriptions, and the only one
 	// with a progression kind of its own. Every other program is a uniform block
@@ -93,27 +109,41 @@ func TestMigrateAppliesSchemaAndSeed(t *testing.T) {
 	// and everything else it seeded is. Asserted as a split rather than two magic
 	// numbers because it is what the library's default view leans on — and
 	// because the split is what moves when a program picks up a catalogue
-	// movement, as 0018 does with the dumbbell press. Eleven and forty-two where
-	// 0009 left ten and forty-three; the total is unchanged.
-	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE NOT is_accessory", 11)
-	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE is_accessory", 42)
+	// movement, as 0018 does with the dumbbell press and 0023 does with five
+	// more. Twenty-one and thirty-seven where 0018 left eleven and forty-two:
+	// 0023 promotes five accessories and seeds five lifts that are prescribed
+	// from birth, so the non-accessory side gains ten while the total gains five.
+	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE NOT is_accessory", 21)
+	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE is_accessory", 37)
 	// The promotion itself, named. It must not have dragged the rest tier with
 	// it: 0011 had already given this lift a compound's 180s, so 0018 changing
 	// what it is classed as must leave what it rests unchanged.
 	assertAccessory(t, sqlDB, "Dumbbell Shoulder Press", false)
 	assertRest(t, sqlDB, "Dumbbell Shoulder Press", 180)
+	// 0023's promotions make the same claim, and one of them is the case the
+	// rule is easiest to get wrong. 0011 left the Bulgarian split squat at an
+	// accessory's 90s deliberately — "in the family by name but not by load" —
+	// and being prescribed does not change what it loads, so the promotion must
+	// move is_accessory and nothing else.
+	assertAccessory(t, sqlDB, "Bulgarian Split Squat", false)
+	assertRest(t, sqlDB, "Bulgarian Split Squat", 90)
+	// A lift 0023 seeded rather than promoted, so it must never have been an
+	// accessory at all.
+	assertAccessory(t, sqlDB, "Barbell Hip Thrust", false)
+	assertRest(t, sqlDB, "Barbell Hip Thrust", 180)
 	// Nothing seeded belongs to a user; every seeded row is shared.
 	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE created_by_user_id IS NOT NULL", 0)
 
 	// 0011's rest tiers, as 0017's three-minute cap leaves them: two, not three.
-	// Asserted as a partition — the counts sum to the 53 above — because the
+	// Asserted as a partition — the counts sum to the 58 above — because the
 	// tiers are applied as successive UPDATEs that narrow one another, and the
 	// failure mode worth catching is a lift left behind in the tier before,
-	// which a spot check of one row would miss. The 29 is 0011's 23 plus the six
-	// the cap brought down from 300.
+	// which a spot check of one row would miss. The 30 is 0011's 23, plus the six
+	// the cap brought down from 300, plus 0023's hip thrust; the 28 is 0011's 24
+	// plus 0023's four banded movements.
 	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE rest_seconds > 180", 0)
-	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE rest_seconds = 180", 29)
-	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE rest_seconds = 90", 24)
+	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE rest_seconds = 180", 30)
+	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE rest_seconds = 90", 28)
 	// The two ends of the range, named: the lift the five-minute tier used to
 	// exist for, now capped, and an isolation movement that must not have
 	// inherited a compound's rest.

@@ -252,6 +252,8 @@ func Next(startingWeight float64, l Ladder, history []SessionResult) float64 {
 // A failure streak is only counted at the most recent weight: a deload lowers
 // the weight, so failures before the drop belong to the old weight and do not
 // re-trigger a deload on the next attempt.
+//
+// A lift worked at 0 lb never advances. See the guard below.
 func NextPlan(startingWeight float64, l Ladder, history []SessionResult) Plan {
 	if len(history) == 0 {
 		return Plan{WeightLb: startingWeight, Status: StatusStart}
@@ -259,6 +261,29 @@ func NextPlan(startingWeight float64, l Ladder, history []SessionResult) Plan {
 
 	last := history[len(history)-1]
 	if last.Success {
+		// A lift logged at 0 has nothing to add to. Bodyweight work stays
+		// bodyweight and band work stays band work — "push-ups plus five
+		// pounds" is a decision, not a consequence, and a banded lateral walk
+		// that went well must not come back prescribed at 5 lb.
+		//
+		// This rule is older than this guard: assistance.go has enforced it on
+		// both of its paths since accessories started advancing at all. It
+		// belongs HERE, in the one engine both paths run through, and it was
+		// missing only because it was unreachable — every seeded program
+		// started every lift above zero, so the prescribed path had never been
+		// handed a zero to advance. 0023 seeds the first program that does, in
+		// band work and a bodyweight back extension.
+		//
+		// StatusFixed rather than StatusAdvance, because nothing advanced. It
+		// is the status assistance work already carries for exactly this, and
+		// it is already in the API's status enum, so no contract moves.
+		//
+		// The guard is on what was WORKED, not on what was prescribed: log a
+		// plate against one of these and it starts progressing from there like
+		// any other lift. Entering a load is what opts a lift in.
+		if last.WeightLb <= 0 {
+			return Plan{WeightLb: 0, Status: StatusFixed}
+		}
 		return Plan{
 			WeightLb:   last.WeightLb + l.Increment,
 			Status:     StatusAdvance,

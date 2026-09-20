@@ -91,6 +91,14 @@ Seed data (linear and A/B split unless noted):
 - **Madcow 5×5** — **not linear.** A ramping 5×5 on an A/B/C split that progresses week to
   week rather than session to session, so it runs on its own engine rather than the shared
   linear one (migrations 0012 and 0015).
+- **Glutes & Legs (Bands and Free Weights)** — the first program from outside the StrongLifts
+  family, and the first to prescribe a lift at 0 lb. A: Banded Lateral Walk 3×15 / Front Squat
+  3×8 / Barbell Hip Thrust 3×8 / Bulgarian Split Squat 3×8 / Banded Hip Abduction 3×20 ·
+  B: Banded Glute Bridge 3×15 / Romanian Deadlift 3×8 / Walking Lunge 3×10 / Back Extension
+  3×12 / Banded Kickback 3×15. The banded and bodyweight movements carry no poundage, so they
+  are seeded at 0 and held there by the zero guard in `progression.NextPlan`; which band to
+  pull lives in the program's description, because the schema has nowhere else to put it
+  (migration 0023).
 Progression is **computed** from `session_sets` history, not stored.
 
 ### Phase 2 — OpenAPI v3 spec + red integration tests

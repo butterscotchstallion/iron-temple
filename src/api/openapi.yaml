@@ -1807,7 +1807,7 @@ components:
 
     Equipment:
       type: string
-      enum: [barbell, dumbbell, machine, cable, bodyweight, other]
+      enum: [barbell, dumbbell, machine, cable, bodyweight, band, other]
 
     Exercise:
       description: One movement in the library.

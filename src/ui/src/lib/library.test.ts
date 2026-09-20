@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { Exercise } from "./api";
 import {
+  EQUIPMENT,
   MUSCLE_GROUPS,
   countByGroup,
   equipmentLabel,
@@ -114,6 +115,17 @@ describe("labels", () => {
   it("renders known values in title case", () => {
     expect(muscleGroupLabel("shoulders")).toBe("Shoulders");
     expect(equipmentLabel("bodyweight")).toBe("Bodyweight");
+    expect(equipmentLabel("band")).toBe("Band");
+  });
+
+  // Every kind the catalogue admits needs a label, or the Library's filter
+  // chips render "undefined" for the one nobody remembered. The failure is
+  // silent at the type level once a kind reaches the UI as a bare string.
+  it("labels every equipment kind the library offers", () => {
+    for (const kind of EQUIPMENT) {
+      expect(equipmentLabel(kind)).not.toBe(kind);
+      expect(equipmentLabel(kind)).toBeTruthy();
+    }
   });
 
   it("passes an unknown value through rather than rendering undefined", () => {
@@ -238,7 +250,7 @@ describe("equipmentStepLb", () => {
   });
 
   it("falls back to the bar for equipment this app does not model", () => {
-    for (const kind of ["machine", "cable", "bodyweight", "other", "kettlebell", ""]) {
+    for (const kind of ["machine", "cable", "bodyweight", "band", "other", "kettlebell", ""]) {
       expect(equipmentStepLb(kind)).toBe(5);
     }
   });

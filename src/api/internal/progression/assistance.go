@@ -92,8 +92,12 @@ type AssistancePlan struct {
 const StatusProgressing Status = "progressing"
 
 // StatusFixed means no engine moved this weight — it is what was last logged,
-// or the stored fallback for a lift never performed. The status assistance work
-// carries whenever it has no rep range.
+// or the stored fallback for a lift never performed.
+//
+// Assistance work carries it whenever it has no rep range, which is what this
+// status was introduced for. The linear engine emits it too, for the one case
+// where it declines to advance: a lift worked at 0 lb. See the zero guard in
+// NextPlan.
 const StatusFixed Status = "fixed"
 
 // NextAssistance computes the next session for one assistance lift.
@@ -189,7 +193,9 @@ func NextAssistance(
 // and a successful set of push-ups must not come back prescribed at 5 lb — that
 // is a different exercise, and choosing it is the lifter's. Reported as
 // StatusFixed, which says exactly what happened: no engine moved this weight.
-// Entering a load is what opts the lift into progressing.
+// Entering a load is what opts the lift into progressing. That rule is enforced
+// inside NextPlan now rather than here, because it is true of prescribed lifts
+// too; this function inherits it by calling the engine.
 //
 // The weight last actually worked displaces the stored fallback as the starting
 // point, which is the carry-forward rule surviving inside the engine that
@@ -215,11 +221,13 @@ func linearAssistance(
 		carried = true
 	}
 
+	// The bodyweight guard this function used to hold itself now lives in
+	// NextPlan, which is the engine both assistance paths and every prescribed
+	// lift run through. It returns the same {0, StatusFixed} this branch did,
+	// with the same zero PreviousLb and FailureCount, so the tail below maps it
+	// to the identical AssistancePlan — the rule did not change, it stopped
+	// being stated twice.
 	p := NextPlan(start, step, history)
-
-	if p.Status == StatusAdvance && p.PreviousLb == 0 {
-		return AssistancePlan{WeightLb: 0, Status: StatusFixed}
-	}
 
 	// No finished history, but a weight was carried in: nothing computed this
 	// number, it is simply what was last lifted. "fixed" says that; "start"
