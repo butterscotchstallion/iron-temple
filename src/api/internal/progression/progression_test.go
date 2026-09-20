@@ -349,6 +349,45 @@ func TestNextPlan(t *testing.T) {
 			history: []SessionResult{fail(100), fail(100), fail(100)},
 			want:    Plan{WeightLb: 90, Status: StatusDeload, FailureCount: 3, PreviousLb: 100},
 		},
+		// The zero guard. Band work and bodyweight work are prescribed at 0
+		// because there is no honest number to put there, and a good session
+		// must not turn a banded lateral walk into a 5 lb banded lateral walk.
+		// StatusFixed says what happened: no engine moved this weight.
+		{
+			name:    "a good session at zero does not advance",
+			ladder:  BarLadder,
+			history: []SessionResult{ok(0)},
+			want:    Plan{WeightLb: 0, Status: StatusFixed},
+		},
+		{
+			name:    "and does not start advancing after several",
+			ladder:  BarLadder,
+			history: []SessionResult{ok(0), ok(0), ok(0)},
+			want:    Plan{WeightLb: 0, Status: StatusFixed},
+		},
+		// The guard reads what was WORKED, not what was prescribed. Hang a
+		// plate off the movement and it is a loaded lift from then on — which
+		// is the escape hatch that keeps the guard from being a cage.
+		{
+			name:    "logging a load opts the lift into progressing",
+			ladder:  BarLadder,
+			history: []SessionResult{ok(0), ok(5)},
+			want:    Plan{WeightLb: 10, Status: StatusAdvance, PreviousLb: 5},
+		},
+		// Failing at zero was already coherent before the guard and stays so:
+		// nothing to hold and nothing to cut, since deloadFrom clamps at zero.
+		{
+			name:    "failing at zero holds at zero",
+			ladder:  BarLadder,
+			history: []SessionResult{fail(0)},
+			want:    Plan{WeightLb: 0, Status: StatusHold, FailureCount: 1},
+		},
+		{
+			name:    "and three failures cannot deload below it",
+			ladder:  BarLadder,
+			history: []SessionResult{fail(0), fail(0), fail(0)},
+			want:    Plan{WeightLb: 0, Status: StatusDeload, FailureCount: 3},
+		},
 	}
 
 	for _, tt := range tests {

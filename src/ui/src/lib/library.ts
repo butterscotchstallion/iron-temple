@@ -29,6 +29,7 @@ export const EQUIPMENT: readonly Equipment[] = [
   "machine",
   "cable",
   "bodyweight",
+  "band",
   "other",
 ];
 
@@ -48,6 +49,7 @@ const EQUIPMENT_LABELS: Record<Equipment, string> = {
   machine: "Machine",
   cable: "Cable",
   bodyweight: "Bodyweight",
+  band: "Band",
   other: "Other",
 };
 
@@ -87,8 +89,10 @@ export const DEFAULT_DUMBBELL_STEP_LB = 10;
  * `gymSteps` — and the constants are the fallback for a client that has not
  * loaded one yet.
  *
- * Anything the catalogue calls machine, cable, bodyweight or other is loaded in
- * units this app does not model, and the bar's is the only guess available.
+ * Anything the catalogue calls machine, cable, bodyweight, band or other is
+ * loaded in units this app does not model, and the bar's is the only guess
+ * available. A band never reaches this in practice: band work is prescribed at
+ * 0 lb, and the zero guard in progression.NextPlan means nothing ever steps it.
  *
  * This mirrors progression.LadderFor on the API side, which is what actually
  * moves the weight. It exists here so the copy that promises a lifter a number

@@ -194,13 +194,15 @@ func TestSeedData(t *testing.T) {
 	e := expect(t)
 	// The lifts the programs prescribe, plus the accessory catalogue 0009 seeded
 	// for the exercise library. 0018 moved one movement from the second set to
-	// the first without adding any, so the total holds.
+	// the first without adding any, so the total held at 53 — 0023 is the first
+	// program to need movements the catalogue did not have, and adds five (a
+	// barbell hip thrust and four banded ones) along with the eighth program.
 	e.GET("/exercises").Expect().
 		Status(http.StatusOK).
-		JSON().Array().Length().IsEqual(53)
+		JSON().Array().Length().IsEqual(58)
 	e.GET("/programs").Expect().
 		Status(http.StatusOK).
-		JSON().Array().Length().IsEqual(7)
+		JSON().Array().Length().IsEqual(8)
 }
 
 // TestListExercisesCarriesTopSet pins the top set the list row now carries

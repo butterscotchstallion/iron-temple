@@ -13,12 +13,22 @@ PostgreSQL.
 
 ### Programs
 
-Seven programs ship seeded, all from the StrongLifts family plus Madcow: **StrongLifts
-5x5** and its **Lite**, **Mini** and **Intermediate** variants, **Advanced 3x5** for
-when 5x5 stalls, and **Madcow 5x5**. **Lite (Dumbbell Press)** is Lite with the
-overhead press taken to dumbbells, for a rack without the ceiling height or the
-shoulders for a barbell. Each is a set of days (Workout A, B, C) holding the
-prescribed lifts, sets and reps.
+Eight programs ship seeded. Seven are from the StrongLifts family plus Madcow:
+**StrongLifts 5x5** and its **Lite**, **Mini** and **Intermediate** variants,
+**Advanced 3x5** for when 5x5 stalls, and **Madcow 5x5**. **Lite (Dumbbell Press)**
+is Lite with the overhead press taken to dumbbells, for a rack without the ceiling
+height or the shoulders for a barbell. **Glutes & Legs (Bands and Free Weights)** is
+the odd one out — two days, squat-led and hinge-led, mixing barbell and dumbbell work
+with resistance bands. Each is a set of days (Workout A, B, C) holding the prescribed
+lifts, sets and reps.
+
+- **Band work is prescribed by band, not by weight.** A band carries no poundage, so
+  there is no honest number to put on it: banded movements log at 0 lb and stay
+  there, and the program says which band to pull for each one. The same rule that
+  keeps bodyweight work at bodyweight keeps them there — a lift worked at 0 has
+  nothing to add to, so a good session never turns a banded lateral walk into a 5 lb
+  banded lateral walk. Decide to hang a plate off one and it progresses like anything
+  else from then on; entering a load is what opts a lift in.
 
 - **Put the days on a calendar.** Assign a weekday to each program day, and the app
   knows what you're scheduled to do and when you missed it.

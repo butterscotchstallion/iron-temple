@@ -26,8 +26,9 @@ import (
 const maxExerciseNameLen = 80
 
 // The classification a custom exercise must pick from. These mirror the CHECK
-// constraints added by migration 0009; validating here turns a bad value into a
-// 400 that names the field instead of a 500 from the database.
+// constraints added by migration 0009, as 0023 widened equipment to admit
+// 'band'; validating here turns a bad value into a 400 that names the field
+// instead of a 500 from the database.
 var (
 	muscleGroups = map[string]bool{
 		"chest": true, "back": true, "legs": true,
@@ -35,7 +36,7 @@ var (
 	}
 	equipmentKinds = map[string]bool{
 		"barbell": true, "dumbbell": true, "machine": true,
-		"cable": true, "bodyweight": true, "other": true,
+		"cable": true, "bodyweight": true, "band": true, "other": true,
 	}
 )
 
@@ -122,7 +123,7 @@ func (s *Server) createExercise(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !equipmentKinds[req.Equipment] {
-		badRequest(w, "equipment must be one of barbell, dumbbell, machine, cable, bodyweight, other")
+		badRequest(w, "equipment must be one of barbell, dumbbell, machine, cable, bodyweight, band, other")
 		return
 	}
 
