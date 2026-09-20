@@ -72,19 +72,27 @@
   let weightLb = $state(0);
   let saving = $state(false);
 
-  // Off by default, because the default now progresses on its own.
+  // On by default, and this has now defaulted both ways, so it is worth
+  // recording why rather than quietly flipping back.
   //
   // Without a range an accessory runs the prescribed lifts' engine: hit your
   // reps on every set and the weight goes up next time, miss and it repeats,
-  // miss three times and it deloads. That is what most lifters mean by "make it
-  // increase", and it is why this no longer has to default on to be useful.
+  // miss three times and it deloads. That progresses, which is what earned it
+  // the default when the alternative was a lift that never moved at all.
   //
-  // With a range it is double progression, and on a coarse grid that is the
-  // GENTLER option rather than the only working one — a pair of dumbbells steps
-  // 10 lb, so climbing reps inside 8-12 first is a far smaller weekly increase
-  // than the rack's own jump. Worth reaching for on light isolation work; not
-  // worth making everyone opt out of.
-  let ranged = $state(false);
+  // But what it advances BY is the smallest jump the equipment admits, and that
+  // is the part a coarse rack makes untenable. A pair of dumbbells steps 10 lb,
+  // so a curl goes 30 → 40 → 50 on three good weeks. That is not a pace anyone
+  // chose; it is the rack's own coarseness applied once a session.
+  //
+  // The step cannot be made finer — there is no 35 lb bell in a rack that goes
+  // in 5s, and prescribing one would be the app lying about the gym. So the
+  // only honest way to advance more gently is to advance less OFTEN, which is
+  // exactly what double progression is: climbing 8 to 12 inside the same weight
+  // turns one 10 lb jump into several weeks of work. On a coarse grid that
+  // makes it the better default, and a lifter who wants the linear rule back
+  // unticks it per lift.
+  let ranged = $state(true);
   let repMin = $state(8);
   let repMax = $state(12);
 

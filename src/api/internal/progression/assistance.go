@@ -26,13 +26,18 @@ package progression
 //     pace. See assistanceStep.
 //   - Bodyweight work stays bodyweight. A lift logged at 0 has nothing to add
 //     to, and "push-ups plus five pounds" is a decision, not a consequence.
+//     BOTH paths below enforce this now, not just the linear one.
 //
-// The rep range remains, and is now the gentler option rather than the only
-// working one: on a coarse grid — a pair of dumbbells stepping 10 lb — climbing
-// reps inside 8-12 before the weight moves is a far smaller weekly increase than
-// the grid's own step. A lifter who finds the default too aggressive turns it on
-// per lift, and that path never deloads, because cutting the weight on a lateral
-// raise is still a solution to a problem nobody has.
+// The rep range remains the gentler option, and the picker now defaults it ON
+// for exactly that reason: on a coarse grid — a pair of dumbbells stepping
+// 10 lb — the linear rule advances by the whole of the rack's step every good
+// session, so a curl runs 30 → 40 → 50 in three weeks. The step cannot be made
+// finer, because a 35 lb bell does not exist in a rack that goes in 5s; the only
+// honest way to advance more gently is to advance less OFTEN, which is what
+// climbing 8-12 inside one weight does. A lifter who wants the linear rule back
+// unticks it per lift. Neither choice ever deloads a ranged lift, because
+// cutting the weight on a lateral raise is still a solution to a problem nobody
+// has.
 //
 // Like the linear engine this is pure — history in, a number out, no I/O.
 
@@ -129,6 +134,29 @@ func NextAssistance(
 	}
 
 	if toppedOut(last.Reps, repMax) {
+		// Bodyweight work stays bodyweight here too. linearAssistance has
+		// guarded this since it started advancing accessories at all, and this
+		// path wanted the same guard the whole time — it was simply hard to
+		// reach while a range was something a lifter ticked on deliberately,
+		// and nobody ticks it on push-ups to make them weighted. Now that the
+		// picker defaults it ON, every bodyweight accessory takes this branch
+		// the first time it tops out, and without this a set of dips that went
+		// well would come back prescribed at 5 lb. Same rule, same reason: a
+		// lift logged at 0 has nothing to add to, and choosing to hang a plate
+		// off it is the lifter's.
+		//
+		// Topping the range still earns nothing to load, so the target stays
+		// the bottom — the same number this function returns on every other
+		// ranged path, and what keeps a lifter doing 8+ rather than being told
+		// to do fewer reps than they just did for a weight that never moved.
+		if last.WeightLb <= 0 {
+			return AssistancePlan{
+				WeightLb:   0,
+				TargetReps: repMin,
+				Status:     StatusFixed,
+				PreviousLb: last.WeightLb,
+			}
+		}
 		return AssistancePlan{
 			WeightLb:   last.WeightLb + assistanceStep(l),
 			TargetReps: repMin,

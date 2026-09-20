@@ -108,6 +108,42 @@ func TestNextAssistanceCarriesAnUnfinishedSessionsWeight(t *testing.T) {
 	}
 }
 
+// The same rule on the RANGED path, which had no guard at all until the picker
+// started defaulting a range on.
+//
+// A lifter tops out 12 reps on three sets of dips. There is nothing to add to —
+// the lift is loaded at 0 — so the honest answer is that the reps went up and
+// the weight did not. Without the guard this returned 0 + the ladder's step,
+// which is how "3×12 dips" became "3×8 dips holding a 10 lb dumbbell" without
+// anyone asking for it. Previously this needed a deliberate tick to reach; now
+// every bodyweight accessory takes this branch the first time it tops out.
+func TestNextAssistanceDoesNotLoadRangedBodyweightWork(t *testing.T) {
+	db := progression.LadderFor("Dip", "dumbbell", progression.GymSteps{})
+	got := progression.NextAssistance(0, 8, 12, perf(0, 12, 12, 12), nil, db)
+
+	if got.WeightLb != 0 {
+		t.Errorf("weight = %v, want 0 — topping out adds reps, not a plate", got.WeightLb)
+	}
+	if got.Status != progression.StatusFixed {
+		t.Errorf("status = %q, want %q — no engine moved this weight",
+			got.Status, progression.StatusFixed)
+	}
+	// The bottom of the range stays the target, as on every other ranged path:
+	// being told to do fewer reps than you just did, for a weight that did not
+	// move, is not a prescription.
+	if got.TargetReps != 8 {
+		t.Errorf("target reps = %d, want 8", got.TargetReps)
+	}
+
+	// A loaded lift on the same range still progresses — the guard is about
+	// having nothing to add to, not about ranges.
+	loaded := progression.NextAssistance(0, 8, 12, perf(40, 12, 12, 12), nil, db)
+	if loaded.WeightLb != 50 || loaded.Status != progression.StatusProgressing {
+		t.Errorf("loaded = %v/%q, want 50/progressing",
+			loaded.WeightLb, loaded.Status)
+	}
+}
+
 // Bodyweight work stays bodyweight. A set of push-ups that went well must not
 // come back prescribed at 5 lb — that is a different exercise, and choosing it
 // is the lifter's.
