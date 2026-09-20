@@ -346,12 +346,19 @@
   let editRepMax = $state(12);
   let editSaving = $state(false);
 
-  function startEdit(entry: ProgramDayAssistance) {
+  function startEdit(day: DayView, entry: ProgramDayAssistance) {
     assistanceError = null;
     editingId = entry.id;
     editSets = entry.sets;
     editReps = entry.reps;
-    editWeight = entry.weightLb;
+    // The weight actually in force, which is what the row above is showing.
+    // entry.weightLb is the STORED one, and for any lift that has been
+    // performed the two differ — the carry-forward has moved the prescription
+    // on while the stored number sits at whatever it was added with. Prefilling
+    // the stored one opened the editor on a number that appeared nowhere on
+    // screen: a curl reading 50 offered 0, and "changing" it to 50 looked like
+    // a no-op while actually pinning it there.
+    editWeight = assistanceWeight(day, entry);
     // A range is on when the row has one. The defaults behind the checkbox
     // match the picker's, so ticking it on a lift that never had one offers
     // 8–12 rather than whatever the reps happened to be.
@@ -364,12 +371,20 @@
     if (editSaving) return;
     editSaving = true;
     assistanceError = null;
+    // Omitted when the lifter did not touch it, which the server reads as
+    // "leave the weight alone". Sending it always would be the safer-looking
+    // choice and is the wrong one: naming a weight is what pins the lift to it,
+    // so resending the prefill alongside a sets edit would drag a lift back off
+    // the weight it had carried forward to. Compared against what startEdit
+    // put in the box — the weight in force — so this is true exactly when the
+    // number on screen changed.
+    const inForce = assistanceWeight(day, entry);
     const saved = await updateAssistance(programId, day.id, entry.id, {
       sets: editSets,
       // With a range the bottom is the rep target, the same rule the picker
       // applies: a set is complete at the bottom and the weight moves at the top.
       reps: editRanged ? editRepMin : editReps,
-      weightLb: editWeight,
+      ...(editWeight !== inForce ? { weightLb: editWeight } : {}),
       // null, not omitted. Absent means "leave it alone" on this endpoint, so
       // clearing the range has to be said out loud — that is what puts a lift
       // back on carrying its weight forward.
@@ -861,7 +876,7 @@
                         onclick={() =>
                           editingId === entry.id
                             ? (editingId = null)
-                            : startEdit(entry)}
+                            : startEdit(day, entry)}
                       >
                         <Pencil class="size-4" aria-hidden="true" />
                       </button>
@@ -965,6 +980,17 @@
                           program's own lifts. Miss and it stays; miss three times
                           and it drops back.
                         {/if}
+                      </p>
+
+                      <!-- Says the part that used to be silently untrue. The
+                           weight here outranks what was last lifted, which is
+                           the whole point of editing it, and it stops doing so
+                           once the lift is logged again — so a correction holds
+                           for exactly as long as it is still a correction. -->
+                      <p class="text-xs text-muted-foreground">
+                        The weight you set here is what the next session
+                        prescribes, even if you last lifted something heavier.
+                        After that this lift progresses from what you log.
                       </p>
 
                       <div class="flex gap-2">

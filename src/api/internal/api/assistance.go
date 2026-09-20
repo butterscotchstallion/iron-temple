@@ -322,6 +322,17 @@ func (s *Server) updateAssistance(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.WeightLb = floatToNumeric(*req.WeightLb)
+		// Naming a weight is what arms 0022's pin, so this edit outranks the
+		// carry-forward until the lift is next performed. Presence rather than
+		// a change in value: the stored weight is what the lift was added at,
+		// not the prescribed one the lifter is looking at, so the two are equal
+		// in exactly the case that matters — a curl stored at 30 that has
+		// carried forward to 50 and is being set back to 30.
+		//
+		// This is why the client must omit weightLb when the lifter did not
+		// touch it. Sending it unchanged alongside a sets edit would pin the
+		// lift to its stored weight and undo progression it had earned.
+		params.PinWeight = true
 	}
 
 	// The range is validated as a pair after the merge, not field by field: a

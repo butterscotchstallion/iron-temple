@@ -33,6 +33,7 @@ SELECT pda.id,
        pda.sets,
        pda.reps,
        pda.weight_lb,
+       pda.weight_set_after_session_id,
        pda.rep_min,
        pda.rep_max,
        e.rest_seconds,
@@ -87,12 +88,19 @@ ORDER BY pd.position, pda.position, pda.id;
 --
 -- DENSE_RANK rather than a correlated subquery so the "which session was last"
 -- decision is made once, in the same pass that reads the rows.
+--
+-- session_id rides along so the caller can tell whether 0022's weight pin has
+-- been spent. The pin records which session was last at the moment a lifter set
+-- the weight by hand; it outranks the carry-forward exactly while that is still
+-- the latest session, so the comparison needs the id this query already ranked
+-- by and would otherwise throw away.
 -- name: LastAssistanceSets :many
-SELECT actual_reps, weight_lb
+SELECT actual_reps, weight_lb, session_id
 FROM (
     SELECT ss.actual_reps,
            ss.weight_lb,
            ss.set_number,
+           s.id AS session_id,
            DENSE_RANK() OVER (ORDER BY s.performed_on DESC, s.id DESC) AS recency
     FROM session_sets ss
     JOIN sessions s ON s.id = ss.session_id
@@ -152,15 +160,49 @@ RETURNING id, program_day_id, exercise_id, position, sets, reps, weight_lb, rep_
 -- rep_min and rep_max are narg rather than arg because NULL is meaningful: it is
 -- how a lifter turns the rep range back off and returns the lift to carrying its
 -- weight forward. A COALESCE here would make that unsayable.
+--
+-- Naming a weight arms the pin 0022 added, which is what makes the edit outrank
+-- the carry-forward until the lift is next performed.
+--
+-- The trigger is the field being PRESENT in the patch, decided by the handler
+-- and passed in, rather than the new weight differing from the stored one.
+-- Comparing against the stored weight looks equivalent and is not: the stored
+-- weight is what the lift was ADDED at, while the number the lifter is looking
+-- at is the prescribed one the carry-forward has since moved. A curl added at
+-- 30 that has climbed to 50 is stored as 30, so "set it to 30" compares equal
+-- and would arm nothing — which is precisely the bug this column exists to fix,
+-- surviving inside its own fix. Presence is the only signal that means "a
+-- lifter typed this", and PATCH already carries it.
+--
+-- The subquery is the same "which session was this lift last done in" that
+-- LastAssistanceSets ranks by, down to the actual_reps > 0 filter — a set
+-- nobody touched is not a session the lift was performed in, and the two have
+-- to agree or a pin could be armed against a session the prescription does not
+-- consider the latest. COALESCE to 0 for a lift never logged, so "no session
+-- yet" is a value that can match rather than a NULL that never does.
 -- name: UpdateAssistance :one
-UPDATE program_day_assistance
+UPDATE program_day_assistance pda
 SET sets      = sqlc.arg('sets'),
     reps      = sqlc.arg('reps'),
     weight_lb = sqlc.arg('weight_lb'),
     rep_min   = sqlc.narg('rep_min'),
-    rep_max   = sqlc.narg('rep_max')
-WHERE id = sqlc.arg('id')
-  AND user_id = sqlc.arg('user_id')::int
+    rep_max   = sqlc.narg('rep_max'),
+    weight_set_after_session_id = CASE
+        WHEN NOT sqlc.arg('pin_weight')::boolean
+            THEN pda.weight_set_after_session_id
+        ELSE COALESCE((
+            SELECT s.id
+            FROM session_sets ss
+            JOIN sessions s ON s.id = ss.session_id
+            WHERE ss.exercise_id = pda.exercise_id
+              AND s.user_id = pda.user_id
+              AND ss.actual_reps > 0
+            ORDER BY s.performed_on DESC, s.id DESC
+            LIMIT 1
+        ), 0)
+    END
+WHERE pda.id = sqlc.arg('id')
+  AND pda.user_id = sqlc.arg('user_id')::int
 RETURNING id, program_day_id, exercise_id, position, sets, reps, weight_lb, rep_min, rep_max;
 
 -- name: DeleteAssistance :execrows

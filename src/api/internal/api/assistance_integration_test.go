@@ -848,3 +848,104 @@ func TestSessionAssistanceCarriesARepRange(t *testing.T) {
 		}).
 		Expect().Status(http.StatusBadRequest)
 }
+
+// The bug report, end to end: "the DB curl is at 50 lbs, that's too much, and I
+// can't seem to change the weight."
+//
+// Both halves were real and they compounded. The engine's carry-forward
+// displaces the stored weight with the last one logged, so editing the weight
+// on the program page wrote a number nothing read; and the page renders the
+// PRESCRIBED weight, so the row went on showing 50 with no hint the edit had
+// been discarded. The only lever that worked was the +/- buttons inside a live
+// session, which is not where a lifter looks to change a plan.
+//
+// 0022's pin settles it by asking who spoke last rather than by preferring one
+// source outright. The carry-forward stays — it is what stops a weight logged
+// mid-session being forgotten — and an explicit edit outranks it until the lift
+// is next performed.
+func TestAssistanceWeightEditOutranksTheCarryForward(t *testing.T) {
+	e := expect(t)
+	programID, dayID := firstProgramAndDay(e)
+	curlID := exerciseIDByName(t, e, "Dumbbell Curl")
+
+	created := addAssistance(t, e, programID, dayID, curlID, 3, 10, 30)
+	assistanceID := int(created.Value("id").Number().Raw())
+
+	// Climb it to 50 the way a lifter would: log a clean session at 40 and let
+	// the linear rule advance the pair by the 10 lb the rack admits. Finished,
+	// because only a finished session reaches the history the engine advances
+	// off — an abandoned workout deliberately drives nothing.
+	session := startSession(t, e, dayID)
+	sessionID := int(session.Value("id").Number().Raw())
+	for _, set := range sessionSetsFor(session, curlID) {
+		logSetAt(e, sessionID, int(set.Value("id").Number().Raw()), 10, 40, true)
+	}
+	e.POST(fmt.Sprintf("/sessions/%d/finish", sessionID)).Expect().Status(http.StatusOK)
+	assistancePreview(e, programID, dayID, curlID).
+		Value("weightLb").Number().IsEqual(50)
+
+	// Too heavy. Set it back to 30.
+	e.PATCH(fmt.Sprintf("/programs/%d/days/%d/assistance/%d",
+		programID, dayID, assistanceID)).
+		WithJSON(map[string]any{"weightLb": 30}).
+		Expect().Status(http.StatusOK)
+
+	// The edit sticks. Before 0022 this still read 50: the carry-forward off the
+	// session logged at 40 beat the stored 30 every time.
+	pinned := assistancePreview(e, programID, dayID, curlID)
+	pinned.Value("weightLb").Number().IsEqual(30)
+
+	// And it is a fresh start, not the next rung off the old weight — the
+	// trailing history at 40 must not drag a 30 nobody has failed at into a
+	// deload.
+	pinned.Value("progression").Object().Value("status").String().NotEqual("deload")
+
+	// The pin is spent by performing the lift, with no write of its own: the
+	// session it was armed against stops being the latest. So progression
+	// resumes from what was actually lifted rather than freezing at 30 forever,
+	// which would be the same bug pointing the other way.
+	second := startSession(t, e, dayID)
+	secondID := int(second.Value("id").Number().Raw())
+	for _, set := range sessionSetsFor(second, curlID) {
+		logSetAt(e, secondID, int(set.Value("id").Number().Raw()), 10, 30, true)
+	}
+	e.POST(fmt.Sprintf("/sessions/%d/finish", secondID)).Expect().Status(http.StatusOK)
+	assistancePreview(e, programID, dayID, curlID).
+		Value("weightLb").Number().IsEqual(40)
+}
+
+// A PATCH that does not name a weight must not arm the pin.
+//
+// This is the contract the client half rests on. Editing only the sets omits
+// weightLb, and if that armed the pin anyway, a lift the lifter had progressed
+// to 50 would be dragged back to the 30 it was added at — the original bug,
+// re-entering through the fix for it.
+func TestAssistanceSetsEditDoesNotPinTheWeight(t *testing.T) {
+	e := expect(t)
+	programID, dayID := firstProgramAndDay(e)
+	curlID := exerciseIDByName(t, e, "Hammer Curl")
+
+	created := addAssistance(t, e, programID, dayID, curlID, 3, 10, 30)
+	assistanceID := int(created.Value("id").Number().Raw())
+
+	session := startSession(t, e, dayID)
+	sessionID := int(session.Value("id").Number().Raw())
+	for _, set := range sessionSetsFor(session, curlID) {
+		logSetAt(e, sessionID, int(set.Value("id").Number().Raw()), 10, 40, true)
+	}
+	e.POST(fmt.Sprintf("/sessions/%d/finish", sessionID)).Expect().Status(http.StatusOK)
+	assistancePreview(e, programID, dayID, curlID).
+		Value("weightLb").Number().IsEqual(50)
+
+	// Different sets, no weight named — what the edit form sends when the
+	// lifter leaves the weight box alone.
+	e.PATCH(fmt.Sprintf("/programs/%d/days/%d/assistance/%d",
+		programID, dayID, assistanceID)).
+		WithJSON(map[string]any{"sets": 4}).
+		Expect().Status(http.StatusOK)
+
+	// Still 50: nothing here was a lifter asking for a different weight, so the
+	// carry-forward is still the most recent thing said about it.
+	assistancePreview(e, programID, dayID, curlID).
+		Value("weightLb").Number().IsEqual(50)
+}

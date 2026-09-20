@@ -226,11 +226,13 @@ describe("ProgramDetail assistance editing", () => {
     // reps is the BOTTOM of the range: a set is complete at the bottom and the
     // weight moves at the top, which is what lets a lifter finish at 8s without
     // the app scoring it a failure.
+    //
+    // No weightLb: the lifter came here for the rep range and never touched the
+    // weight box, and naming a weight is what pins the lift to it.
     await waitFor(() =>
       expect(updateAssistance).toHaveBeenCalledWith(1, day, 3, {
         sets: 3,
         reps: 8,
-        weightLb: 30,
         repMin: 8,
         repMax: 12,
       }),
@@ -256,7 +258,9 @@ describe("ProgramDetail assistance editing", () => {
         // of the range. Turning the range off keeps the number that was on
         // screen rather than inventing a fresh default.
         reps: 8,
-        weightLb: 30,
+        // Still no weightLb — untouched here too. repMin/repMax ARE sent as
+        // null because absent and null mean different things for them; the
+        // weight has no such distinction to draw.
         repMin: null,
         repMax: null,
       }),
@@ -273,5 +277,106 @@ describe("ProgramDetail assistance editing", () => {
       screen.getByRole("button", { name: "Edit Dumbbell Curl on Workout A" }),
     );
     expect(await screen.findByLabelText("Weight (lb)")).toHaveAttribute("step", "10");
+  });
+});
+
+// The weight box opens on the number the row is showing, and an untouched box
+// says nothing to the server.
+//
+// Both halves of "I can't seem to change the weight" lived here. The row renders
+// the PRESCRIBED weight — carried forward from the last session — while the
+// editor prefilled the STORED one, so a curl reading 50 opened a box saying 30.
+// And because naming a weight is what pins the lift to it, an editor that always
+// sent the box would pin every sets-only edit to whatever that stale number was.
+describe("ProgramDetail assistance weight editing", () => {
+  const day = 7;
+
+  /** The day's preview, with the curl carried forward past its stored weight. */
+  function prescribedAt(weightLb: number) {
+    previewNextSessions.mockResolvedValue({
+      status: 200,
+      data: {
+        programId: 1,
+        layoff: null,
+        days: [
+          {
+            programDayId: day,
+            exercises: [
+              {
+                exerciseId: 9,
+                exerciseName: "Dumbbell Curl",
+                kind: "assistance",
+                sets: 3,
+                reps: 10,
+                weightLb,
+                restSeconds: 90,
+                progression: {
+                  status: "advance",
+                  failureCount: 0,
+                  previousWeightLb: weightLb - 10,
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+  }
+
+  it("opens the weight box on the weight actually in force", async () => {
+    prescribedAt(50);
+    // Stored at 30 — what it was added at, and not what the row says.
+    await show(todayWeekday(), [], [curl({ weightLb: 30 })]);
+
+    await fireEvent.click(
+      screen.getByRole("button", { name: "Edit Dumbbell Curl on Workout A" }),
+    );
+
+    expect(await screen.findByLabelText("Weight (lb)")).toHaveValue(50);
+  });
+
+  it("sends a weight the lifter changed", async () => {
+    prescribedAt(50);
+    await show(todayWeekday(), [], [curl({ weightLb: 30 })]);
+    updateAssistance.mockResolvedValue({ status: 200, data: curl({ weightLb: 30 }) });
+
+    await fireEvent.click(
+      screen.getByRole("button", { name: "Edit Dumbbell Curl on Workout A" }),
+    );
+    await fireEvent.input(await screen.findByLabelText("Weight (lb)"), {
+      target: { value: "30" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    // 30 reaches the server even though the STORED weight was already 30 — it
+    // is the prescribed 50 the lifter was changing, and presence is what pins.
+    await waitFor(() =>
+      expect(updateAssistance).toHaveBeenCalledWith(
+        1,
+        day,
+        3,
+        expect.objectContaining({ weightLb: 30 }),
+      ),
+    );
+  });
+
+  it("omits the weight when the lifter only changed the sets", async () => {
+    prescribedAt(50);
+    await show(todayWeekday(), [], [curl({ weightLb: 30 })]);
+    updateAssistance.mockResolvedValue({ status: 200, data: curl({ sets: 4 }) });
+
+    await fireEvent.click(
+      screen.getByRole("button", { name: "Edit Dumbbell Curl on Workout A" }),
+    );
+    await fireEvent.input(await screen.findByLabelText("Sets"), {
+      target: { value: "4" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(updateAssistance).toHaveBeenCalled());
+    // Absent, not 50. Sending it would pin the lift to the weight it happened
+    // to be prescribed and stop the carry-forward moving it again.
+    const body = updateAssistance.mock.calls[0][3];
+    expect(body).not.toHaveProperty("weightLb");
   });
 });

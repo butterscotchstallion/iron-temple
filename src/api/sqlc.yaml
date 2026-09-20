@@ -31,6 +31,7 @@ sql:
       - "db/migrations/0019_e1rm_function.up.sql"
       - "db/migrations/0020_dumbbell_step.up.sql"
       - "db/migrations/0021_must_change_password.up.sql"
+      - "db/migrations/0022_assistance_weight_pin.up.sql"
     queries: "db/queries"
     gen:
       go:

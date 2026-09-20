@@ -2145,6 +2145,18 @@ components:
           minimum: 1
           maximum: 100
         weightLb:
+          description: >
+            Sending this sets the weight AND pins the lift to it: the next
+            session prescribes this number even if a heavier one was logged
+            more recently, and the pin lifts as soon as the lift is performed
+            again. That is what makes an edit stick on a lift whose weight has
+            carried forward past the stored one.
+
+
+            So omit it unless the lifter actually changed it. Resending the
+            current value alongside a sets or rep-range edit is not harmless —
+            it pins the lift to whatever was in the box and undoes progression
+            it had already earned.
           type: number
           minimum: 0
         repMin:
