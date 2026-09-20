@@ -937,7 +937,17 @@ test("adds an assistance lift to the workout in progress", async ({ page }) => {
   // exact, because getByText matches case-insensitively on a substring by
   // default and the "Add assistance" button below would match too.
   await expect(page.getByText("Assistance", { exact: true })).toBeVisible();
-  expect(added).toEqual({ exerciseId: 4, sets: 3, reps: 10, weightLb: 0 });
+  // Carrying the rep range the picker defaults to, with reps at its BOTTOM —
+  // a set is complete at the bottom and the weight moves at the top. The
+  // unticked path is covered where a bodyweight accessory is added to a day.
+  expect(added).toEqual({
+    exerciseId: 4,
+    sets: 3,
+    reps: 8,
+    weightLb: 0,
+    repMin: 8,
+    repMax: 12,
+  });
 });
 
 test("renders an already-finished session read-only", async ({ page }) => {
