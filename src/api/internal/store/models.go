@@ -101,15 +101,16 @@ type SessionSet struct {
 }
 
 type User struct {
-	ID               int32              `json:"id"`
-	Username         string             `json:"username"`
-	DisplayName      string             `json:"display_name"`
-	AvatarColor      string             `json:"avatar_color"`
-	PasswordHash     string             `json:"password_hash"`
-	IsAdmin          bool               `json:"is_admin"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	CurrentProgramID *int32             `json:"current_program_id"`
+	ID                 int32              `json:"id"`
+	Username           string             `json:"username"`
+	DisplayName        string             `json:"display_name"`
+	AvatarColor        string             `json:"avatar_color"`
+	PasswordHash       string             `json:"password_hash"`
+	IsAdmin            bool               `json:"is_admin"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	CurrentProgramID   *int32             `json:"current_program_id"`
+	MustChangePassword bool               `json:"must_change_password"`
 }
 
 type UserAvatar struct {

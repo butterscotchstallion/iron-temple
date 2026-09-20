@@ -178,52 +178,78 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 			r.Use(jsonETag)
 
 			r.Route("/me", func(r chi.Router) {
+				// The two endpoints an account with a pending password change
+				// can still reach, and the only two: the UI learns that it must
+				// change the password by reading /me, and the PUT below is the
+				// way out. Gating either would make the state inescapable.
 				r.Get("/", s.getMe)
-				r.Patch("/", s.updateMe)
 				r.Put("/password", s.changePassword)
-				r.Post("/avatar", s.uploadAvatar)
-				r.Delete("/avatar", s.deleteAvatar)
-				r.Get("/baselines", s.listBaselines)
-				r.Put("/baselines/{exerciseId}", s.setBaseline)
-				r.Delete("/baselines/{exerciseId}", s.clearBaseline)
+
+				r.Group(func(r chi.Router) {
+					r.Use(s.blockUntilPasswordChanged)
+					r.Patch("/", s.updateMe)
+					r.Post("/avatar", s.uploadAvatar)
+					r.Delete("/avatar", s.deleteAvatar)
+					r.Get("/baselines", s.listBaselines)
+					r.Put("/baselines/{exerciseId}", s.setBaseline)
+					r.Delete("/baselines/{exerciseId}", s.clearBaseline)
+				})
 			})
 
-			r.Route("/exercises", func(r chi.Router) {
-				r.Get("/", s.listExercises)
-				r.Post("/", s.createExercise)
-				r.Delete("/{exerciseId}", s.deleteExercise)
-				r.Get("/{exerciseId}/history", s.getExerciseHistory)
-			})
+			// Everything else needs a password this account's own owner chose.
+			// Grouped rather than applied route by route for the same reason
+			// requireUser is: a handler added later inherits the gate by sitting
+			// here, and escaping it takes a deliberate move up to the two
+			// exemptions above.
+			r.Group(func(r chi.Router) {
+				r.Use(s.blockUntilPasswordChanged)
 
-			r.Route("/programs", func(r chi.Router) {
-				r.Get("/", s.listPrograms)
-				r.Get("/{programId}", s.getProgram)
-				r.Get("/{programId}/days/{dayId}/next-session", s.previewNextSession)
-				r.Get("/{programId}/next-sessions", s.previewNextSessions)
-				r.Patch("/{programId}/days/{dayId}", s.updateProgramDayWeekday)
-				// Assistance is per-user state hanging off a shared program day,
-				// which is why it is a nested collection rather than a field on
-				// the day: it is created and deleted by the caller alone, and
-				// the program itself is never written to.
-				r.Post("/{programId}/days/{dayId}/assistance", s.addAssistance)
-				r.Patch("/{programId}/days/{dayId}/assistance/{assistanceId}", s.updateAssistance)
-				r.Delete("/{programId}/days/{dayId}/assistance/{assistanceId}", s.removeAssistance)
-			})
+				// The install's account management. requireAdmin is mounted on
+				// the subtree rather than on each handler, so a third admin
+				// endpoint cannot be added unguarded.
+				r.Route("/admin", func(r chi.Router) {
+					r.Use(s.requireAdmin)
+					r.Get("/users", s.listUsers)
+					r.Post("/users", s.createUser)
+				})
 
-			r.Get("/racked", s.getRacked)
+				r.Route("/exercises", func(r chi.Router) {
+					r.Get("/", s.listExercises)
+					r.Post("/", s.createExercise)
+					r.Delete("/{exerciseId}", s.deleteExercise)
+					r.Get("/{exerciseId}/history", s.getExerciseHistory)
+				})
 
-			r.Route("/sessions", func(r chi.Router) {
-				r.Get("/", s.listSessions)
-				r.Post("/", s.createSession)
-				r.Get("/{sessionId}", s.getSession)
-				r.Patch("/{sessionId}", s.updateSession)
-				r.Delete("/{sessionId}", s.deleteSession)
-				r.Post("/{sessionId}/finish", s.finishSession)
-				r.Get("/{sessionId}/recap", s.getSessionRecap)
-				r.Post("/{sessionId}/assistance", s.addSessionAssistance)
-				r.Post("/{sessionId}/sets", s.addSessionSet)
-				r.Patch("/{sessionId}/sets/{setId}", s.updateSessionSet)
-				r.Delete("/{sessionId}/sets/{setId}", s.removeSessionSet)
+				r.Route("/programs", func(r chi.Router) {
+					r.Get("/", s.listPrograms)
+					r.Get("/{programId}", s.getProgram)
+					r.Get("/{programId}/days/{dayId}/next-session", s.previewNextSession)
+					r.Get("/{programId}/next-sessions", s.previewNextSessions)
+					r.Patch("/{programId}/days/{dayId}", s.updateProgramDayWeekday)
+					// Assistance is per-user state hanging off a shared program day,
+					// which is why it is a nested collection rather than a field on
+					// the day: it is created and deleted by the caller alone, and
+					// the program itself is never written to.
+					r.Post("/{programId}/days/{dayId}/assistance", s.addAssistance)
+					r.Patch("/{programId}/days/{dayId}/assistance/{assistanceId}", s.updateAssistance)
+					r.Delete("/{programId}/days/{dayId}/assistance/{assistanceId}", s.removeAssistance)
+				})
+
+				r.Get("/racked", s.getRacked)
+
+				r.Route("/sessions", func(r chi.Router) {
+					r.Get("/", s.listSessions)
+					r.Post("/", s.createSession)
+					r.Get("/{sessionId}", s.getSession)
+					r.Patch("/{sessionId}", s.updateSession)
+					r.Delete("/{sessionId}", s.deleteSession)
+					r.Post("/{sessionId}/finish", s.finishSession)
+					r.Get("/{sessionId}/recap", s.getSessionRecap)
+					r.Post("/{sessionId}/assistance", s.addSessionAssistance)
+					r.Post("/{sessionId}/sets", s.addSessionSet)
+					r.Patch("/{sessionId}/sets/{setId}", s.updateSessionSet)
+					r.Delete("/{sessionId}/sets/{setId}", s.removeSessionSet)
+				})
 			})
 		})
 
@@ -235,7 +261,13 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 		// match. The other is that tagging means buffering the whole response
 		// to hash it, and this is the one endpoint whose response grows without
 		// bound as the training history does.
-		r.With(s.requireUser).Get("/me/export", s.exportAccount)
+		//
+		// The forced-password-change gate is spelled out alongside it for the
+		// same reason: this route inherits nothing, so anything the group above
+		// applies has to be repeated here or it simply does not apply. Handing
+		// an account's entire training history to a session still holding a
+		// password somebody else chose is exactly what that gate is for.
+		r.With(s.requireUser, s.blockUntilPasswordChanged).Get("/me/export", s.exportAccount)
 	})
 
 	return r

@@ -160,6 +160,10 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		PasswordHash: hash,
 		// The founder administers the install; there is nobody else to do it.
 		IsAdmin: true,
+		// They chose this password themselves, a moment ago. The forced change
+		// is for accounts the admin area creates, whose first password was
+		// typed by somebody else — see 0021_must_change_password.
+		MustChangePassword: false,
 	})
 	if err != nil {
 		// users_single_admin_idx rejecting a second owner, or the username
@@ -210,11 +214,12 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	// prescription would otherwise see a bar of 0 and an empty rack until its
 	// next /me.
 	writeJSON(w, http.StatusCreated, s.userDTO(ctx, store.GetUserRow{
-		ID:          user.ID,
-		Username:    user.Username,
-		DisplayName: user.DisplayName,
-		AvatarColor: user.AvatarColor,
-		IsAdmin:     user.IsAdmin,
+		ID:                 user.ID,
+		Username:           user.Username,
+		DisplayName:        user.DisplayName,
+		AvatarColor:        user.AvatarColor,
+		IsAdmin:            user.IsAdmin,
+		MustChangePassword: user.MustChangePassword,
 	}))
 }
 
@@ -273,9 +278,15 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	// The password is in hand and already verified, so this is the one moment a
 	// stored hash can be upgraded to current parameters. Best-effort: failing to
 	// re-hash is not a reason to fail the login.
+	//
+	// RehashUserPassword rather than UpdateUserPassword, and the difference
+	// matters: the latter clears must_change_password, and what just happened
+	// here is a successful login with the OLD password. An account carrying a
+	// one-time password from the admin would clear its own forced change simply
+	// by signing in, which is the single thing the flag exists to prevent.
 	if needsRehash {
 		if fresh, err := s.hasher.Hash(req.Password); err == nil {
-			_, _ = s.q.UpdateUserPassword(ctx, store.UpdateUserPasswordParams{
+			_, _ = s.q.RehashUserPassword(ctx, store.RehashUserPasswordParams{
 				PasswordHash: fresh, ID: user.ID,
 			})
 		}
@@ -289,12 +300,13 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 
 	auth.SetCookie(w, token, req.RememberMe, s.secureCookies())
 	writeJSON(w, http.StatusOK, s.userDTO(ctx, store.GetUserRow{
-		ID:               user.ID,
-		Username:         user.Username,
-		DisplayName:      user.DisplayName,
-		AvatarColor:      user.AvatarColor,
-		IsAdmin:          user.IsAdmin,
-		CurrentProgramID: user.CurrentProgramID,
+		ID:                 user.ID,
+		Username:           user.Username,
+		DisplayName:        user.DisplayName,
+		AvatarColor:        user.AvatarColor,
+		IsAdmin:            user.IsAdmin,
+		MustChangePassword: user.MustChangePassword,
+		CurrentProgramID:   user.CurrentProgramID,
 	}))
 }
 

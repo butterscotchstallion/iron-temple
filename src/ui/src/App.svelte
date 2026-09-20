@@ -6,6 +6,7 @@
   import Programs from "./routes/Programs.svelte";
   import ProgramDetail from "./routes/ProgramDetail.svelte";
   import SignIn from "./routes/SignIn.svelte";
+  import ForcePasswordChange from "./routes/ForcePasswordChange.svelte";
   import NavBar from "./lib/NavBar.svelte";
   import ErrorBoundary from "./lib/ErrorBoundary.svelte";
   import OfflineBanner from "./lib/OfflineBanner.svelte";
@@ -73,6 +74,17 @@
     // and the share-card renderer.
     "/racked": wrap({ asyncComponent: () => import("./routes/Racked.svelte") }),
     "/profile": wrap({ asyncComponent: () => import("./routes/Profile.svelte") }),
+    // Account management, for the one account that claimed the install.
+    //
+    // The condition is the router's own guard: a failing one falls through to
+    // the next matching route, which is the "*" below, so a non-admin typing
+    // #/admin lands on Home rather than on a screen of 403s. It is not the
+    // security boundary — the API refuses /admin/* with admin_required whatever
+    // the client believes, and that is the check that counts.
+    "/admin": wrap({
+      asyncComponent: () => import("./routes/Admin.svelte"),
+      conditions: [() => auth.me?.isAdmin === true],
+    }),
     // Fallback: unknown paths go home.
     "*": Home,
   };
@@ -157,7 +169,7 @@
         Iron Temple
       </h1>
     </a>
-    {#if auth.me}
+    {#if auth.me && !auth.me.mustChangePassword}
       <NavBar />
     {/if}
   </header>
@@ -176,6 +188,18 @@
            is reachable by typing its hash. The API enforces this independently —
            this is about not showing a wall of failed requests. -->
       <SignIn />
+    {:else if auth.me.mustChangePassword}
+      <!-- An account the admin created, still holding the password they were
+           given. Replaces the router for the same reason SignIn does: the API
+           answers 403 password_change_required on everything else, so there is
+           no route behind this worth reaching, and leaving one mounted would
+           only paint a screen of failures.
+
+           Truthy rather than === true on purpose. The field is required by the
+           spec, but the e2e specs stub /me with hand-written objects that
+           predate it, and "absent" has to mean the same as false — which is
+           also what the API's own docs promise. -->
+      <ForcePasswordChange />
     {:else}
       <Router {routes} />
     {/if}

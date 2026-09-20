@@ -47,35 +47,43 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 }
 
 const createUser = `-- name: CreateUser :one
-INSERT INTO users (username, display_name, password_hash, is_admin)
-VALUES ($1, $2, $3, $4)
-RETURNING id, username, display_name, avatar_color, is_admin, created_at, updated_at, current_program_id
+INSERT INTO users (username, display_name, password_hash, is_admin, must_change_password)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, username, display_name, avatar_color, is_admin, created_at, updated_at, current_program_id, must_change_password
 `
 
 type CreateUserParams struct {
-	Username     string `json:"username"`
-	DisplayName  string `json:"display_name"`
-	PasswordHash string `json:"password_hash"`
-	IsAdmin      bool   `json:"is_admin"`
+	Username           string `json:"username"`
+	DisplayName        string `json:"display_name"`
+	PasswordHash       string `json:"password_hash"`
+	IsAdmin            bool   `json:"is_admin"`
+	MustChangePassword bool   `json:"must_change_password"`
 }
 
 type CreateUserRow struct {
-	ID               int32              `json:"id"`
-	Username         string             `json:"username"`
-	DisplayName      string             `json:"display_name"`
-	AvatarColor      string             `json:"avatar_color"`
-	IsAdmin          bool               `json:"is_admin"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	CurrentProgramID *int32             `json:"current_program_id"`
+	ID                 int32              `json:"id"`
+	Username           string             `json:"username"`
+	DisplayName        string             `json:"display_name"`
+	AvatarColor        string             `json:"avatar_color"`
+	IsAdmin            bool               `json:"is_admin"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	CurrentProgramID   *int32             `json:"current_program_id"`
+	MustChangePassword bool               `json:"must_change_password"`
 }
 
+// CreateUser makes an account. Both flags are explicit parameters rather than
+// defaults, because the two callers differ on both: registration creates the
+// install's single admin with a password its owner chose, and the admin area
+// creates an ordinary account with a password somebody else chose — which is
+// exactly the case must_change_password exists for.
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error) {
 	row := q.db.QueryRow(ctx, createUser,
 		arg.Username,
 		arg.DisplayName,
 		arg.PasswordHash,
 		arg.IsAdmin,
+		arg.MustChangePassword,
 	)
 	var i CreateUserRow
 	err := row.Scan(
@@ -87,6 +95,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateU
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CurrentProgramID,
+		&i.MustChangePassword,
 	)
 	return i, err
 }
@@ -171,20 +180,21 @@ func (q *Queries) DeleteUserSessionsExcept(ctx context.Context, arg DeleteUserSe
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, username, display_name, avatar_color, is_admin, created_at, updated_at, current_program_id
+SELECT id, username, display_name, avatar_color, is_admin, created_at, updated_at, current_program_id, must_change_password
 FROM users
 WHERE id = $1
 `
 
 type GetUserRow struct {
-	ID               int32              `json:"id"`
-	Username         string             `json:"username"`
-	DisplayName      string             `json:"display_name"`
-	AvatarColor      string             `json:"avatar_color"`
-	IsAdmin          bool               `json:"is_admin"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	CurrentProgramID *int32             `json:"current_program_id"`
+	ID                 int32              `json:"id"`
+	Username           string             `json:"username"`
+	DisplayName        string             `json:"display_name"`
+	AvatarColor        string             `json:"avatar_color"`
+	IsAdmin            bool               `json:"is_admin"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	CurrentProgramID   *int32             `json:"current_program_id"`
+	MustChangePassword bool               `json:"must_change_password"`
 }
 
 func (q *Queries) GetUser(ctx context.Context, id int32) (GetUserRow, error) {
@@ -199,6 +209,7 @@ func (q *Queries) GetUser(ctx context.Context, id int32) (GetUserRow, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CurrentProgramID,
+		&i.MustChangePassword,
 	)
 	return i, err
 }
@@ -236,7 +247,7 @@ func (q *Queries) GetUserAvatarEtag(ctx context.Context, userID int32) (string, 
 }
 
 const getUserForLogin = `-- name: GetUserForLogin :one
-SELECT id, username, display_name, avatar_color, password_hash, is_admin, created_at, updated_at, current_program_id
+SELECT id, username, display_name, avatar_color, password_hash, is_admin, created_at, updated_at, current_program_id, must_change_password
 FROM users
 WHERE lower(username) = lower($1)
 `
@@ -259,6 +270,7 @@ func (q *Queries) GetUserForLogin(ctx context.Context, username string) (User, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CurrentProgramID,
+		&i.MustChangePassword,
 	)
 	return i, err
 }
@@ -274,7 +286,11 @@ SELECT s.token_hash,
        u.display_name,
        u.avatar_color,
        u.is_admin,
-       u.current_program_id
+       u.current_program_id,
+       -- Joined here rather than read by a second query: the forced-change gate
+       -- runs on every authenticated request, and authenticating one is meant
+       -- to be a single round trip.
+       u.must_change_password
 FROM user_sessions s
 JOIN users u ON u.id = s.user_id
 WHERE s.token_hash = $1
@@ -282,17 +298,18 @@ WHERE s.token_hash = $1
 `
 
 type GetUserSessionRow struct {
-	TokenHash        []byte             `json:"token_hash"`
-	UserID           int32              `json:"user_id"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	LastSeen         pgtype.Timestamptz `json:"last_seen"`
-	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
-	Persistent       bool               `json:"persistent"`
-	Username         string             `json:"username"`
-	DisplayName      string             `json:"display_name"`
-	AvatarColor      string             `json:"avatar_color"`
-	IsAdmin          bool               `json:"is_admin"`
-	CurrentProgramID *int32             `json:"current_program_id"`
+	TokenHash          []byte             `json:"token_hash"`
+	UserID             int32              `json:"user_id"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	LastSeen           pgtype.Timestamptz `json:"last_seen"`
+	ExpiresAt          pgtype.Timestamptz `json:"expires_at"`
+	Persistent         bool               `json:"persistent"`
+	Username           string             `json:"username"`
+	DisplayName        string             `json:"display_name"`
+	AvatarColor        string             `json:"avatar_color"`
+	IsAdmin            bool               `json:"is_admin"`
+	CurrentProgramID   *int32             `json:"current_program_id"`
+	MustChangePassword bool               `json:"must_change_password"`
 }
 
 // GetUserSession resolves a presented cookie to its owner, joined so that
@@ -314,8 +331,60 @@ func (q *Queries) GetUserSession(ctx context.Context, tokenHash []byte) (GetUser
 		&i.AvatarColor,
 		&i.IsAdmin,
 		&i.CurrentProgramID,
+		&i.MustChangePassword,
 	)
 	return i, err
+}
+
+const listUsers = `-- name: ListUsers :many
+SELECT id, username, display_name, avatar_color, is_admin, created_at, must_change_password
+FROM users
+ORDER BY created_at, id
+`
+
+type ListUsersRow struct {
+	ID                 int32              `json:"id"`
+	Username           string             `json:"username"`
+	DisplayName        string             `json:"display_name"`
+	AvatarColor        string             `json:"avatar_color"`
+	IsAdmin            bool               `json:"is_admin"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	MustChangePassword bool               `json:"must_change_password"`
+}
+
+// ListUsers is the admin roster. No password_hash, per the note at the top of
+// this file — and no gym, which the admin screen has no use for and which would
+// cost three more queries per row.
+//
+// Oldest first, so the owner (the account that claimed the install) heads the
+// list and later additions append in the order they were made. id breaks ties
+// for rows created in the same tick.
+func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
+	rows, err := q.db.Query(ctx, listUsers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUsersRow
+	for rows.Next() {
+		var i ListUsersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Username,
+			&i.DisplayName,
+			&i.AvatarColor,
+			&i.IsAdmin,
+			&i.CreatedAt,
+			&i.MustChangePassword,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const lockRegistration = `-- name: LockRegistration :exec
@@ -335,6 +404,35 @@ SELECT pg_advisory_xact_lock($1::bigint)
 func (q *Queries) LockRegistration(ctx context.Context, key int64) error {
 	_, err := q.db.Exec(ctx, lockRegistration, key)
 	return err
+}
+
+const rehashUserPassword = `-- name: RehashUserPassword :execrows
+UPDATE users
+SET password_hash = $1,
+    updated_at    = now()
+WHERE id = $2
+`
+
+type RehashUserPasswordParams struct {
+	PasswordHash string `json:"password_hash"`
+	ID           int32  `json:"id"`
+}
+
+// RehashUserPassword upgrades a stored hash to current parameters, leaving
+// must_change_password alone.
+//
+// Separate from UpdateUserPassword because it runs at a different moment for a
+// different reason: login calls it after verifying the password the account
+// already has. Sharing the query above would mean a lifter clearing the forced
+// change simply by signing in with the one-time password the admin gave them —
+// the flag would be cleared by USING that credential rather than by replacing
+// it, which is the one thing it exists to prevent.
+func (q *Queries) RehashUserPassword(ctx context.Context, arg RehashUserPasswordParams) (int64, error) {
+	result, err := q.db.Exec(ctx, rehashUserPassword, arg.PasswordHash, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const touchUserSession = `-- name: TouchUserSession :exec
@@ -363,8 +461,9 @@ func (q *Queries) TouchUserSession(ctx context.Context, arg TouchUserSessionPara
 
 const updateUserPassword = `-- name: UpdateUserPassword :execrows
 UPDATE users
-SET password_hash = $1,
-    updated_at    = now()
+SET password_hash        = $1,
+    must_change_password = false,
+    updated_at           = now()
 WHERE id = $2
 `
 
@@ -373,6 +472,11 @@ type UpdateUserPasswordParams struct {
 	ID           int32  `json:"id"`
 }
 
+// UpdateUserPassword is the user-initiated change, and it clears
+// must_change_password: an account created by the admin area reaches nothing but
+// /me and this endpoint until the flag goes, so this is the only way out of the
+// gate. Deliberately NOT the query the login re-hash uses — see
+// RehashUserPassword.
 func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateUserPassword, arg.PasswordHash, arg.ID)
 	if err != nil {
@@ -388,7 +492,7 @@ SET display_name       = COALESCE($1, display_name),
     current_program_id = COALESCE($3, current_program_id),
     updated_at         = now()
 WHERE id = $4
-RETURNING id, username, display_name, avatar_color, is_admin, created_at, updated_at, current_program_id
+RETURNING id, username, display_name, avatar_color, is_admin, created_at, updated_at, current_program_id, must_change_password
 `
 
 type UpdateUserProfileParams struct {
@@ -399,14 +503,15 @@ type UpdateUserProfileParams struct {
 }
 
 type UpdateUserProfileRow struct {
-	ID               int32              `json:"id"`
-	Username         string             `json:"username"`
-	DisplayName      string             `json:"display_name"`
-	AvatarColor      string             `json:"avatar_color"`
-	IsAdmin          bool               `json:"is_admin"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	CurrentProgramID *int32             `json:"current_program_id"`
+	ID                 int32              `json:"id"`
+	Username           string             `json:"username"`
+	DisplayName        string             `json:"display_name"`
+	AvatarColor        string             `json:"avatar_color"`
+	IsAdmin            bool               `json:"is_admin"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	CurrentProgramID   *int32             `json:"current_program_id"`
+	MustChangePassword bool               `json:"must_change_password"`
 }
 
 // UpdateUserProfile patches the display fields; NULL args leave a column
@@ -433,6 +538,7 @@ func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfilePa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CurrentProgramID,
+		&i.MustChangePassword,
 	)
 	return i, err
 }

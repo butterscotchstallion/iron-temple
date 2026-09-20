@@ -20,10 +20,27 @@ SELECT COUNT(*) AS total FROM users;
 -- name: LockRegistration :exec
 SELECT pg_advisory_xact_lock(sqlc.arg('key')::bigint);
 
+-- CreateUser makes an account. Both flags are explicit parameters rather than
+-- defaults, because the two callers differ on both: registration creates the
+-- install's single admin with a password its owner chose, and the admin area
+-- creates an ordinary account with a password somebody else chose — which is
+-- exactly the case must_change_password exists for.
 -- name: CreateUser :one
-INSERT INTO users (username, display_name, password_hash, is_admin)
-VALUES (sqlc.arg('username'), sqlc.arg('display_name'), sqlc.arg('password_hash'), sqlc.arg('is_admin'))
-RETURNING id, username, display_name, avatar_color, is_admin, created_at, updated_at, current_program_id;
+INSERT INTO users (username, display_name, password_hash, is_admin, must_change_password)
+VALUES (sqlc.arg('username'), sqlc.arg('display_name'), sqlc.arg('password_hash'), sqlc.arg('is_admin'), sqlc.arg('must_change_password'))
+RETURNING id, username, display_name, avatar_color, is_admin, created_at, updated_at, current_program_id, must_change_password;
+
+-- ListUsers is the admin roster. No password_hash, per the note at the top of
+-- this file — and no gym, which the admin screen has no use for and which would
+-- cost three more queries per row.
+--
+-- Oldest first, so the owner (the account that claimed the install) heads the
+-- list and later additions append in the order they were made. id breaks ties
+-- for rows created in the same tick.
+-- name: ListUsers :many
+SELECT id, username, display_name, avatar_color, is_admin, created_at, must_change_password
+FROM users
+ORDER BY created_at, id;
 
 -- GetUserForLogin is the only query that reads password_hash. Username is
 -- matched case-insensitively, which is why users_username_lower_idx exists.
@@ -31,12 +48,12 @@ RETURNING id, username, display_name, avatar_color, is_admin, created_at, update
 -- The column list is in table order, which is what makes sqlc return the User
 -- model here rather than a bespoke row struct. Keep new columns at the end.
 -- name: GetUserForLogin :one
-SELECT id, username, display_name, avatar_color, password_hash, is_admin, created_at, updated_at, current_program_id
+SELECT id, username, display_name, avatar_color, password_hash, is_admin, created_at, updated_at, current_program_id, must_change_password
 FROM users
 WHERE lower(username) = lower(sqlc.arg('username'));
 
 -- name: GetUser :one
-SELECT id, username, display_name, avatar_color, is_admin, created_at, updated_at, current_program_id
+SELECT id, username, display_name, avatar_color, is_admin, created_at, updated_at, current_program_id, must_change_password
 FROM users
 WHERE id = sqlc.arg('id');
 
@@ -54,9 +71,30 @@ SET display_name       = COALESCE(sqlc.narg('display_name'), display_name),
     current_program_id = COALESCE(sqlc.narg('current_program_id'), current_program_id),
     updated_at         = now()
 WHERE id = sqlc.arg('id')
-RETURNING id, username, display_name, avatar_color, is_admin, created_at, updated_at, current_program_id;
+RETURNING id, username, display_name, avatar_color, is_admin, created_at, updated_at, current_program_id, must_change_password;
 
+-- UpdateUserPassword is the user-initiated change, and it clears
+-- must_change_password: an account created by the admin area reaches nothing but
+-- /me and this endpoint until the flag goes, so this is the only way out of the
+-- gate. Deliberately NOT the query the login re-hash uses — see
+-- RehashUserPassword.
 -- name: UpdateUserPassword :execrows
+UPDATE users
+SET password_hash        = sqlc.arg('password_hash'),
+    must_change_password = false,
+    updated_at           = now()
+WHERE id = sqlc.arg('id');
+
+-- RehashUserPassword upgrades a stored hash to current parameters, leaving
+-- must_change_password alone.
+--
+-- Separate from UpdateUserPassword because it runs at a different moment for a
+-- different reason: login calls it after verifying the password the account
+-- already has. Sharing the query above would mean a lifter clearing the forced
+-- change simply by signing in with the one-time password the admin gave them —
+-- the flag would be cleared by USING that credential rather than by replacing
+-- it, which is the one thing it exists to prevent.
+-- name: RehashUserPassword :execrows
 UPDATE users
 SET password_hash = sqlc.arg('password_hash'),
     updated_at    = now()
@@ -92,7 +130,11 @@ SELECT s.token_hash,
        u.display_name,
        u.avatar_color,
        u.is_admin,
-       u.current_program_id
+       u.current_program_id,
+       -- Joined here rather than read by a second query: the forced-change gate
+       -- runs on every authenticated request, and authenticating one is meant
+       -- to be a single round trip.
+       u.must_change_password
 FROM user_sessions s
 JOIN users u ON u.id = s.user_id
 WHERE s.token_hash = sqlc.arg('token_hash')

@@ -10,7 +10,17 @@ info:
     `POST /auth/login` and revoked by `POST /auth/logout`. Every endpoint
     requires it except `/health`, the `/auth/*` endpoints, and avatar images.
     Registration is open only while no account exists: the first sign-up claims
-    the install and closes the door behind it.
+    the install and closes the door behind it. Further accounts are made by that
+    owner through `/admin/users`, and they start with a forced password change.
+
+    Two authorisation rules apply beyond "is there a session?". `/admin/*` is
+    refused with `403 admin_required` unless the caller owns the install. And an
+    account whose `mustChangePassword` is true is refused with
+    `403 password_change_required` on EVERY endpoint except `GET /me`,
+    `PUT /me/password` and `POST /auth/logout` — the two it needs to learn about
+    the state and leave it, and the one it needs to give up. That second rule is
+    global, so it is stated here once rather than listed as a `403` on each of
+    the forty operations it can reach.
 
     Programs, days and exercises are shared — the prescription is the same for
     everyone. Sessions are per-user: what you lifted is yours, and progression
@@ -36,6 +46,7 @@ tags:
   - name: meta
   - name: auth
   - name: users
+  - name: admin
   - name: exercises
   - name: programs
   - name: sessions
@@ -387,6 +398,70 @@ paths:
           description: Not modified
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /admin/users:
+    get:
+      tags: [admin]
+      operationId: listUsers
+      summary: Every account on this install
+      description: >
+        The roster, oldest first, so the owner heads the list. Carries no gym
+        setup and no avatar — this is a table of names, not a set of profiles.
+      responses:
+        "200":
+          description: The accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [admin]
+      operationId: createUser
+      summary: Create an account
+      description: >
+        The only way to add an account after the first: self-registration closes
+        permanently once the install is claimed.
+
+        Two properties are fixed and so are not in the request body. The account
+        is never an admin — the schema permits exactly one per install, and the
+        owner already holds it. And it always starts with `mustChangePassword`
+        set, because the password in this request was chosen by the admin rather
+        than by the person who will use the account; until it is replaced, that
+        account can reach only `GET /me` and `PUT /me/password`.
+
+        The new account is given the standard plate set, in the same transaction
+        that creates it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserRequest"
+      responses:
+        "201":
+          description: Account created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUser"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: That username is already taken
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /exercises:
     get:
@@ -1186,6 +1261,15 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: >
+        Signed in, but not allowed. `code` says which rule: `admin_required` for
+        an account that does not own the install, `password_change_required` for
+        one that has not yet replaced the password an admin chose for it.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
     Conflict:
       description: The request is valid but collides with existing state
       content:
@@ -1212,7 +1296,8 @@ components:
 
     User:
       type: object
-      required: [id, username, displayName, avatarColor, isAdmin, hasAvatar]
+      required:
+        [id, username, displayName, avatarColor, isAdmin, mustChangePassword, hasAvatar]
       properties:
         id:
           type: integer
@@ -1231,6 +1316,13 @@ components:
           example: "#b026ff"
         isAdmin:
           type: boolean
+        mustChangePassword:
+          type: boolean
+          description: >
+            True while this account is still carrying the password an admin
+            chose for it. The API refuses every endpoint but `GET /me` and
+            `PUT /me/password` until it is replaced, so a client seeing this
+            should show the change-password screen and nothing else.
         currentProgramId:
           type: integer
           format: int64
@@ -1274,6 +1366,71 @@ components:
             much the weight goes up when every set tops out. 5 until the setup
             screen says otherwise.
           example: 5
+
+    AdminUser:
+      type: object
+      required:
+        [id, username, displayName, avatarColor, isAdmin, mustChangePassword, createdAt]
+      description: >
+        One row of the admin roster. Not a `User`: it omits the gym setup and
+        the avatar, which cost four extra queries per row and which a table of
+        names has no use for, and it adds `createdAt`, which is what makes the
+        list readable as the install's history.
+      properties:
+        id:
+          type: integer
+          format: int64
+        username:
+          type: string
+          example: grace
+        displayName:
+          type: string
+          example: Grace Hopper
+        avatarColor:
+          type: string
+          description: >
+            Hex colour for the initials chip. Empty means the UI derives one
+            from the id.
+        isAdmin:
+          type: boolean
+          description: >
+            True for exactly one account — the one that claimed the install.
+            Enforced by a partial unique index, not by the API.
+        mustChangePassword:
+          type: boolean
+          description: >
+            True until the account replaces the password the admin gave it, so
+            the roster shows which invitations have not been taken up yet.
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateUserRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 32
+          description: >
+            Letters, digits, dot, underscore and hyphen. Compared
+            case-insensitively against existing accounts, so `Ada` collides
+            with `ada`.
+          example: grace
+        displayName:
+          type: string
+          maxLength: 64
+          description: Defaults to the username when omitted or blank.
+          example: Grace Hopper
+        password:
+          type: string
+          minLength: 8
+          maxLength: 256
+          description: >
+            A one-time password for the new account's first sign-in. It is
+            handed over out of band and must be replaced before the account can
+            do anything else.
 
     Plate:
       type: object

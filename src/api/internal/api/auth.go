@@ -22,6 +22,13 @@ type currentUser struct {
 	DisplayName string
 	AvatarColor string
 	IsAdmin     bool
+	// MustChangePassword is set on accounts the admin area created, whose first
+	// password was chosen by somebody else. It rides the session join for the
+	// same reason IsAdmin does — blockUntilPasswordChanged consults it on every
+	// authenticated request, and a second query per request to answer "may this
+	// one proceed" is a poor trade against one more column on a join already
+	// being made.
+	MustChangePassword bool
 	// CurrentProgramID is the program the user last opened, nil until they open
 	// one. It rides the session join rather than a second query because getMe
 	// serves the whole profile from this struct.
@@ -91,14 +98,66 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) (currentUs
 	s.slideSession(ctx, row)
 
 	return currentUser{
-		ID:               row.UserID,
-		Username:         row.Username,
-		DisplayName:      row.DisplayName,
-		AvatarColor:      row.AvatarColor,
-		IsAdmin:          row.IsAdmin,
-		CurrentProgramID: row.CurrentProgramID,
-		tokenHash:        digest,
+		ID:                 row.UserID,
+		Username:           row.Username,
+		DisplayName:        row.DisplayName,
+		AvatarColor:        row.AvatarColor,
+		IsAdmin:            row.IsAdmin,
+		MustChangePassword: row.MustChangePassword,
+		CurrentProgramID:   row.CurrentProgramID,
+		tokenHash:          digest,
 	}, true
+}
+
+// requireAdmin rejects a caller who does not administer this install.
+//
+// Mounts under requireUser and nowhere else: it reads the authenticated user
+// through userFrom, which panics rather than guesses when there isn't one. That
+// is the behaviour wanted — an admin route accidentally mounted outside the
+// session middleware must fail loudly in tests, not quietly admit everybody.
+//
+// There is exactly one admin per install (users_single_admin_idx), so this is
+// "is this the owner?" rather than the first rung of a role hierarchy. If more
+// roles ever arrive, this is the seam they arrive at.
+func (s *Server) requireAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !userFrom(r.Context()).IsAdmin {
+			// 403, not 404. Hiding the route's existence would buy nothing here
+			// — it is documented in the spec the UI is generated from — and a
+			// 404 would send an admin whose session had silently become an
+			// ordinary one hunting for a broken link instead of a lost session.
+			forbidden(w, "admin_required", "this account does not administer this install")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// blockUntilPasswordChanged refuses an account that is still carrying the
+// one-time password the admin gave it.
+//
+// The exemptions are not listed here, they are expressed by where this mounts:
+// GET /me and PUT /me/password sit outside it in Router, and everything else
+// sits inside. That is deliberate. Matching on the route pattern would not work
+// — chi populates it during routing, which happens after middleware runs (see
+// the comment on observe) — and matching on the raw path would put the
+// allowlist somewhere a new route could quietly disagree with it. Mounting is
+// the check, so the gate is on by default and an exemption has to be written on
+// purpose.
+//
+// 403 rather than 401: the session is perfectly valid and the credentials are
+// not in question. A 401 would tell the UI to show the sign-in form, which is
+// the one screen that cannot help — signing in again lands in exactly the same
+// state.
+func (s *Server) blockUntilPasswordChanged(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if userFrom(r.Context()).MustChangePassword {
+			forbidden(w, "password_change_required",
+				"set a new password before using this account")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // slideSession pushes a "remember me" session's expiry forward once a day of
