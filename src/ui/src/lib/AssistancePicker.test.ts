@@ -160,25 +160,29 @@ describe("the recent section", () => {
     expect(await screen.findByText("Use a rep range")).toBeInTheDocument();
   });
 
-  // Off by default, because the default progresses on its own now: an accessory
-  // with no range runs the prescribed lifts' engine. The copy has to say so —
-  // it used to promise that "nothing moves it but you", which was true and was
-  // the bug.
-  it("leaves the rep range off and promises the linear rule", async () => {
+  // On by default. The linear rule does progress, but it advances by the
+  // smallest jump the equipment admits, and on a pair of dumbbells that is
+  // 10 lb every session — a pace the rack chose rather than the lifter. The
+  // range spends those weeks on reps instead, so it is what a new accessory
+  // gets unless asked otherwise.
+  it("defaults the rep range on and promises double progression", async () => {
     open(library);
     await fireEvent.click(await screen.findByRole("button", { name: /Dip/ }));
-    expect(await screen.findByLabelText("Use a rep range")).not.toBeChecked();
-    expect(screen.getByText(/the same as the program's own lifts/)).toBeInTheDocument();
-    expect(screen.getByText(/miss three times and it drops back/)).toBeInTheDocument();
+    expect(await screen.findByLabelText("Use a rep range")).toBeChecked();
+    expect(screen.getByText(/never deloads/)).toBeInTheDocument();
   });
 
-  // Ticking it swaps to double progression, which on a coarse grid is the
-  // gentler rule rather than the only working one.
-  it("offers double progression as the gentler option", async () => {
+  // Unticking it is still the prescribed lifts' engine, and the copy still has
+  // to say so — it once promised that "nothing moves it but you", which was
+  // true and was the bug.
+  it("offers the linear rule when the range is unticked", async () => {
     open(library);
     await fireEvent.click(await screen.findByRole("button", { name: /Dip/ }));
     await fireEvent.click(await screen.findByLabelText("Use a rep range"));
-    expect(await screen.findByText(/never deloads/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/the same as the program's own lifts/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/miss three times and it drops back/)).toBeInTheDocument();
   });
 
   // The stepper offers the jump the lifter's own equipment makes, not a
