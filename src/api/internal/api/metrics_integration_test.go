@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The unit suite in internal/metrics proves the registry counts and renders.
@@ -43,6 +44,75 @@ func counter(t *testing.T, page, series string) int {
 	return 0
 }
 
+// metricsSettleTimeout bounds how long a delta assertion waits for the
+// registry to catch up. Generous, because it costs nothing when the
+// observation is already there — awaitDelta returns on the first scrape that
+// satisfies it, and only a genuine miss ever waits the full time.
+const metricsSettleTimeout = 2 * time.Second
+
+// awaitDelta polls until `series` has advanced by at least `want` from
+// `before`, and returns the delta it settled on.
+//
+// Reading the counter ONCE after the request is a race, and it is the request
+// that loses it. What the client synchronises on is the response; what this
+// asserts on is the registry, and those are written at different moments by
+// different goroutines. observe records in a deferred call that runs after the
+// handler returns, while net/http can already have put the response on the
+// wire — and httpexpect's Expect() resolves on the response HEADERS, because it
+// wraps the body lazily (see bodyWrapper) and .Status() never reads it. So the
+// test can be running again while the server goroutine has not yet reached its
+// defer. On an idle box the gap is nanoseconds and never observed — 800
+// attempts under full CPU contention did not reproduce it — but CI is a shared
+// k8s runner, and one deschedule in the wrong microsecond is all it takes.
+// TestMetricsRecordLatencyAlongsideTheCount failed there exactly once, on a
+// commit whose diff was seven lines of a Playwright spec.
+//
+// Waiting is the honest fix rather than a bigger hammer: it removes the
+// "asserted too early" failure and NOTHING else. Callers still compare the
+// returned delta for equality, so an over-count fails as loudly as before, and
+// an observation that never arrives still fails — just with a report of what
+// the registry actually held, which is what this failure lacked the first time.
+func awaitDelta(t *testing.T, series string, before, want int) int {
+	t.Helper()
+	deadline := time.Now().Add(metricsSettleTimeout)
+	for {
+		page := scrape(t)
+		got := counter(t, page, series) - before
+		if got >= want {
+			return got
+		}
+		if time.Now().After(deadline) {
+			// A series that never moved is usually a series recorded under a
+			// DIFFERENT label — a route folded to "unmatched", a pattern that
+			// grew a trailing slash. Print the neighbours so the next failure
+			// names its own cause instead of being a number with no context.
+			t.Logf("series %s reached %d of %d within %s; siblings on the page:\n%s",
+				series, got, want, metricsSettleTimeout, siblingSeries(page, series))
+			return got
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// siblingSeries returns every line sharing a metric name with series — the same
+// metric under every label set the registry currently holds.
+func siblingSeries(page, series string) string {
+	name, _, ok := strings.Cut(series, "{")
+	if !ok {
+		return "  (no metric name to match)"
+	}
+	var b strings.Builder
+	for _, line := range strings.Split(page, "\n") {
+		if strings.HasPrefix(line, name+"{") || strings.HasPrefix(line, name+" ") {
+			b.WriteString("  " + line + "\n")
+		}
+	}
+	if b.Len() == 0 {
+		return "  (none — the metric is absent entirely)"
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
 func TestMetricsLabelBySessionRoutePatternNotPath(t *testing.T) {
 	e := expect(t)
 	_, dayID := firstProgramAndDay(e)
@@ -54,7 +124,7 @@ func TestMetricsLabelBySessionRoutePatternNotPath(t *testing.T) {
 	e.GET("/sessions/{id}", sessionID).Expect().Status(http.StatusOK)
 	e.GET("/sessions/{id}", sessionID).Expect().Status(http.StatusOK)
 
-	if got := counter(t, scrape(t), series) - before; got != 2 {
+	if got := awaitDelta(t, series, before, 2); got != 2 {
 		t.Errorf("pattern series moved by %d, want 2", got)
 	}
 }
@@ -106,13 +176,16 @@ func TestMetricsFoldUnroutedRequestsIntoOneSeries(t *testing.T) {
 		_ = resp.Body.Close()
 	}
 
-	page := scrape(t)
-	if got := counter(t, page, wildcard) - beforeWildcard; got != 2 {
+	if got := awaitDelta(t, wildcard, beforeWildcard, 2); got != 2 {
 		t.Errorf("the /api/v1 wildcard series moved by %d, want 2", got)
 	}
-	if got := counter(t, page, unmatched) - beforeUnmatched; got != 2 {
+	if got := awaitDelta(t, unmatched, beforeUnmatched, 2); got != 2 {
 		t.Errorf("the unmatched series moved by %d, want 2", got)
 	}
+
+	// Scraped after both waits, not before: a label that arrives late is still
+	// a leaked label, and a page read too early would miss it.
+	page := scrape(t)
 	for _, leaked := range []string{"no-such-endpoint", "invented", "wp-login", ".env"} {
 		if strings.Contains(page, leaked) {
 			t.Errorf("an unrouted path reached a label value: %q", leaked)
@@ -130,7 +203,7 @@ func TestMetricsCountRejectedRequests(t *testing.T) {
 
 	e.GET("/me").Expect().Status(http.StatusUnauthorized)
 
-	if got := counter(t, scrape(t), series) - before; got != 1 {
+	if got := awaitDelta(t, series, before, 1); got != 1 {
 		t.Errorf("401 series moved by %d, want 1", got)
 	}
 }
@@ -165,7 +238,7 @@ func TestMetricsRecordLatencyAlongsideTheCount(t *testing.T) {
 
 	e.GET("/exercises").Expect().Status(http.StatusOK)
 
-	if got := counter(t, scrape(t), series) - before; got != 1 {
+	if got := awaitDelta(t, series, before, 1); got != 1 {
 		t.Errorf("duration count moved by %d, want 1", got)
 	}
 }
