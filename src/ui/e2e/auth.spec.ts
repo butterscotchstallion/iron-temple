@@ -238,7 +238,18 @@ test("the owner can open the roster and add an account", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Accounts", exact: true })).toBeVisible();
   await expect(page.getByText("1 account")).toBeVisible();
 
-  await page.getByLabel(/username/i).fill("grace");
+  // The username opens pre-filled with a suggested name, and the dice beside it
+  // rolls another. Exercised here rather than only in jsdom because the button
+  // sits inside the form: a stray submit would be invisible to a unit test that
+  // never had a form to submit.
+  const usernameField = page.getByLabel(/username/i);
+  const firstSuggestion = await usernameField.inputValue();
+  expect(firstSuggestion).not.toBe("");
+  await page.getByRole("button", { name: /suggest another name/i }).click();
+  await expect(usernameField).not.toHaveValue(firstSuggestion);
+  await expect(page.getByText("Created grace.")).toHaveCount(0);
+
+  await usernameField.fill("grace");
   await page.getByLabel(/display name/i).fill("Grace Hopper");
 
   // The password field arrives filled in with four random words, and the admin
@@ -260,6 +271,9 @@ test("the owner can open the roster and add an account", async ({ page }) => {
   // A fresh passphrase for the next account, never the one just handed out.
   await expect(temporary).toHaveValue(/^[a-z]+-[a-z]+-[a-z]+-[a-z]+$/);
   await expect(temporary).not.toHaveValue(handedOut);
+  // And a fresh name, which can't be the account that was just made.
+  await expect(usernameField).not.toHaveValue("grace");
+  expect(await usernameField.inputValue()).not.toBe("");
 });
 
 // An account created by the admin sees one screen and nothing else. The API

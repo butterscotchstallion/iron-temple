@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import Admin from "./Admin.svelte";
 import type { AdminUser } from "../lib/api";
 import { auth } from "../lib/auth.svelte";
+import { PUN_NAMES } from "../lib/punNames";
 import { testUser } from "../lib/testFixtures";
 
 // A render test for a route, which the suite otherwise leaves to Playwright —
@@ -49,6 +50,7 @@ const member = adminUser({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.restoreAllMocks();
   listUsers.mockResolvedValue({ status: 200, data: [owner, member] });
   auth.me = testUser();
   auth.loaded = true;
@@ -81,6 +83,49 @@ describe("Admin", () => {
 
     await screen.findByText("Grace Hopper");
     expect(screen.getAllByText("Hasn't set a password")).toHaveLength(1);
+  });
+
+  // Naming an account is the part of this form with no right answer, so the
+  // field opens with a pun already in it and a dice to roll another.
+  it("opens with a suggested username", async () => {
+    render(Admin);
+
+    await screen.findByText("Ada Lovelace");
+    const field = screen.getByLabelText(/username/i) as HTMLInputElement;
+    expect(PUN_NAMES).toContain(field.value);
+  });
+
+  it("rolls a different name on every click of the dice", async () => {
+    render(Admin);
+    await screen.findByText("Ada Lovelace");
+
+    const field = screen.getByLabelText(/username/i) as HTMLInputElement;
+    const before = field.value;
+
+    await fireEvent.click(screen.getByRole("button", { name: /suggest another name/i }));
+
+    const after = field.value;
+    // A button that can appear to do nothing reads as a broken button.
+    expect(after).not.toBe(before);
+    expect(PUN_NAMES).toContain(after);
+  });
+
+  // The first suggestion is made before the roster arrives, so it is the one
+  // roll that cannot check itself against it.
+  it("re-rolls a suggestion the roster already has", async () => {
+    // Math.random pinned to 0 takes the first name still available, so the
+    // collision and the name that replaces it are both known.
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    listUsers.mockResolvedValue({
+      status: 200,
+      data: [adminUser({ username: PUN_NAMES[0] })],
+    });
+
+    render(Admin);
+
+    await waitFor(() =>
+      expect(screen.getByLabelText(/username/i)).toHaveValue(PUN_NAMES[1]),
+    );
   });
 
   it("creates an account and appends it to the roster", async () => {
@@ -116,6 +161,9 @@ describe("Admin", () => {
     expect(listUsers).toHaveBeenCalledTimes(1);
     expect(await screen.findByText("3 accounts")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Created hopper.");
+    // Ready for the next one: a fresh suggestion rather than an empty field.
+    const field = screen.getByLabelText(/username/i) as HTMLInputElement;
+    expect(PUN_NAMES).toContain(field.value);
   });
 
   // The server names the reason — a taken username, a password too short — and
