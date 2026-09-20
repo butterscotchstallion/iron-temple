@@ -6,6 +6,7 @@
   import ErrorBanner from "../lib/ErrorBanner.svelte";
   import { auth } from "../lib/auth.svelte";
   import { formatLongDate } from "../lib/date";
+  import { passphrase } from "../lib/passphrase";
   import { createUser, listUsers, type AdminUser } from "../lib/api";
 
   // Who has an account on this install, and how to add one.
@@ -26,7 +27,12 @@
 
   let username = $state("");
   let displayName = $state("");
-  let password = $state("");
+  // Filled in before the admin gets here, not left blank for them to invent
+  // something. Asking one person to choose a password for another reliably
+  // produces the lifter's own first name; a generated passphrase makes the good
+  // answer the default and the bad one extra work. Still an ordinary editable
+  // field — see passphrase.ts for why words rather than characters.
+  let password = $state(passphrase());
   let creating = $state(false);
   let createError = $state<string | null>(null);
   let created = $state<string | null>(null);
@@ -71,7 +77,10 @@
     created = result.data.username;
     username = "";
     displayName = "";
-    password = "";
+    // A fresh one rather than an empty field, so adding two people in a row is
+    // the same two keystrokes as adding one — and so the second account never
+    // reuses the password just read down the phone for the first.
+    password = passphrase();
   }
 
   // createdAt is an RFC 3339 instant; formatLongDate takes a date-only string.
@@ -144,7 +153,13 @@
         <!-- type="text": the admin has to read this back to the person it is
              for, and a field of dots they cannot check is how a typo becomes an
              account nobody can sign in to. It is a one-time credential on a
-             screen only the owner can open. -->
+             screen only the owner can open. Doubly so now it is generated —
+             a masked field of words nobody chose would be unreadable AND
+             unmemorable.
+
+             autocomplete="off" and not "new-password": the browser offering to
+             save this would file somebody else's one-time credential under the
+             admin's own login. -->
         <input
           bind:value={password}
           name="password"
@@ -154,7 +169,10 @@
           minlength="8"
           class="rounded-md border border-border/60 bg-input/40 px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
         />
-        <span class="text-xs text-muted-foreground">At least 8 characters.</span>
+        <span class="text-xs text-muted-foreground">
+          Four random words, generated in your browser. Read it to them as it is, or
+          type over it — at least 8 characters.
+        </span>
       </label>
 
       <div class="flex items-center gap-3">

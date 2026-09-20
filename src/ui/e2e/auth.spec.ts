@@ -240,13 +240,26 @@ test("the owner can open the roster and add an account", async ({ page }) => {
 
   await page.getByLabel(/username/i).fill("grace");
   await page.getByLabel(/display name/i).fill("Grace Hopper");
-  await page.getByLabel(/temporary password/i).fill("a-long-enough-password");
+
+  // The password field arrives filled in with four random words, and the admin
+  // is expected to use it as-is — so the test does too, rather than typing over
+  // it. Asserted in a real browser as well as in jsdom because the generator
+  // runs on crypto.getRandomValues, and "does that exist here" is exactly the
+  // kind of question a jsdom shim answers too generously.
+  const temporary = page.getByLabel(/temporary password/i);
+  await expect(temporary).toHaveValue(/^[a-z]+-[a-z]+-[a-z]+-[a-z]+$/);
+  const handedOut = await temporary.inputValue();
+
   await page.getByRole("button", { name: /create account/i }).click();
 
   await expect(page.getByText("Created grace.")).toBeVisible();
   await expect(page.getByText("2 accounts")).toBeVisible();
   // The new account has not been picked up yet, and the roster says so.
   await expect(page.getByText("Hasn't set a password")).toBeVisible();
+
+  // A fresh passphrase for the next account, never the one just handed out.
+  await expect(temporary).toHaveValue(/^[a-z]+-[a-z]+-[a-z]+-[a-z]+$/);
+  await expect(temporary).not.toHaveValue(handedOut);
 });
 
 // An account created by the admin sees one screen and nothing else. The API

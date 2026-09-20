@@ -34,6 +34,9 @@ function adminUser(overrides: Partial<AdminUser> = {}): AdminUser {
   };
 }
 
+/** What the generated temporary password looks like: four hyphenated words. */
+const FOUR_WORDS = /^[a-z]+-[a-z]+-[a-z]+-[a-z]+$/;
+
 const owner = adminUser();
 const member = adminUser({
   id: 2,
@@ -139,6 +142,66 @@ describe("Admin", () => {
     // corrected rather than retyped.
     expect(screen.getByText("2 accounts")).toBeInTheDocument();
     expect(screen.getByLabelText(/username/i)).toHaveValue("ada");
+  });
+
+  // The admin is never asked to invent a password for somebody else — the field
+  // arrives filled in. See passphrase.ts for why that matters more than it
+  // sounds.
+  it("arrives with a generated passphrase in the password field", async () => {
+    render(Admin);
+    await screen.findByText("Ada Lovelace");
+
+    const field = screen.getByLabelText(/temporary password/i) as HTMLInputElement;
+    expect(field.value).toMatch(FOUR_WORDS);
+    // Readable, not masked: it has to be read down a phone.
+    expect(field).toHaveAttribute("type", "text");
+  });
+
+  it("rotates the passphrase after creating an account", async () => {
+    createUser.mockResolvedValue({
+      status: 201,
+      data: adminUser({ id: 3, username: "hopper", isAdmin: false }),
+    });
+
+    render(Admin);
+    await screen.findByText("Ada Lovelace");
+
+    const field = screen.getByLabelText(/temporary password/i) as HTMLInputElement;
+    const first = field.value;
+
+    await fireEvent.input(screen.getByLabelText(/username/i), {
+      target: { value: "hopper" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: /create account/i }));
+
+    // Not cleared, and above all not left holding the credential just handed to
+    // the previous account.
+    await waitFor(() => expect(field.value).not.toBe(first));
+    expect(field.value).toMatch(FOUR_WORDS);
+  });
+
+  // A failed create must keep the passphrase on screen. Rotating it here would
+  // change the credential under an admin who has already read it out, and the
+  // account they are retrying would end up with a different one.
+  it("keeps the passphrase when the create is rejected", async () => {
+    createUser.mockResolvedValue({
+      status: 409,
+      data: { code: "username_taken", message: "that username is already taken" },
+    });
+
+    render(Admin);
+    await screen.findByText("Ada Lovelace");
+
+    const field = screen.getByLabelText(/temporary password/i) as HTMLInputElement;
+    const before = field.value;
+
+    await fireEvent.input(screen.getByLabelText(/username/i), {
+      target: { value: "ada" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: /create account/i }));
+
+    await screen.findByText(/that username is already taken/i);
+    expect(field.value).toBe(before);
   });
 
   it("says so when the roster cannot be loaded", async () => {
