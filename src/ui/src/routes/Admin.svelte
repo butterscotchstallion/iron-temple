@@ -71,7 +71,10 @@
     // roll that can't check itself against it. Re-roll if it turns out to be
     // taken — but only while it is still untouched, because the admin typing
     // over it outranks anything this can offer.
-    if (username === suggested && users.some((user) => user.username === suggested)) {
+    const collides = users.some(
+      (user) => user.username.toLowerCase() === suggested.toLowerCase(),
+    );
+    if (username === suggested && collides) {
       suggest();
     }
   }

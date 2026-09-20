@@ -183,7 +183,12 @@ export const PUN_NAMES: readonly string[] = [
  * moment the account exists.
  */
 export function randomPunName(exclude: Iterable<string> = []): string {
-  const taken = new Set(exclude);
+  // Lowercased on the way in, because uniqueness is enforced on lower(username)
+  // (users_username_lower_idx) rather than on the exact string: an account
+  // called "Squat.Dogg" is what makes "squat.dogg" a 409, and an exact-string
+  // Set would not have noticed. Every name below is already lowercase, so this
+  // only has to normalise what it is handed.
+  const taken = new Set([...exclude].map((name) => name.toLowerCase()));
   const free = PUN_NAMES.filter((name) => !taken.has(name));
   const pool = free.length > 0 ? free : PUN_NAMES;
   return pool[Math.floor(Math.random() * pool.length)];

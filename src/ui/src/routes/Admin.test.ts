@@ -112,13 +112,17 @@ describe("Admin", () => {
 
   // The first suggestion is made before the roster arrives, so it is the one
   // roll that cannot check itself against it.
+  //
+  // The roster row is upper-cased on purpose: uniqueness is enforced on
+  // lower(username), so this still collides, and a comparison that missed it
+  // would hand the admin a name the server then refuses.
   it("re-rolls a suggestion the roster already has", async () => {
     // Math.random pinned to 0 takes the first name still available, so the
     // collision and the name that replaces it are both known.
     vi.spyOn(Math, "random").mockReturnValue(0);
     listUsers.mockResolvedValue({
       status: 200,
-      data: [adminUser({ username: PUN_NAMES[0] })],
+      data: [adminUser({ username: PUN_NAMES[0].toUpperCase() })],
     });
 
     render(Admin);

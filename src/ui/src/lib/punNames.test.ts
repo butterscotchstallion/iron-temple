@@ -36,6 +36,19 @@ describe("randomPunName", () => {
     expect(randomPunName(exclude)).toBe(PUN_NAMES[PUN_NAMES.length - 1]);
   });
 
+  // The database enforces uniqueness on lower(username), so "Squat.Dogg" on the
+  // roster is what makes "squat.dogg" a 409. An exact-string comparison would
+  // have offered it anyway.
+  it("excludes a name the roster holds in a different case", () => {
+    const exclude = PUN_NAMES.slice(0, PUN_NAMES.length - 1).map((name) =>
+      name.toUpperCase(),
+    );
+    // Pinned so the assertion can't pass by luck: a comparison that ignored
+    // case would leave every name in the pool and take the first of them.
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    expect(randomPunName(exclude)).toBe(PUN_NAMES[PUN_NAMES.length - 1]);
+  });
+
   // An install whose roster has grown past the list still has to suggest
   // something: an empty field is worse than one that might collide.
   it("falls back to the full list when everything is excluded", () => {
