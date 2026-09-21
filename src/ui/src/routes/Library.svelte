@@ -19,8 +19,6 @@
     muscleGroupLabel,
   } from "../lib/library";
   import { exerciseEmoji } from "../lib/exerciseIcon";
-  import { exerciseDemo } from "../lib/exerciseDemo";
-  import FormFigure from "../lib/FormFigure.svelte";
   import { CACHE_KEYS, cachedValue, fetchThrough, invalidate } from "../lib/cache.svelte";
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
@@ -193,18 +191,14 @@
         <Card class="divide-y divide-border/60 p-0">
           {#each section.exercises as exercise (exercise.id)}
             <div class="flex items-center gap-3 px-4 py-2.5">
-              <!-- The figure replaces the emoji rather than joining it: one
-                   glyph per row. Static, because fifty-eight looping animations
-                   on one screen is a battery cost for no reading gained — the
-                   shape is what makes the row scannable. A movement with no
-                   figure keeps its emoji, so the column is never empty. -->
-              {#if exerciseDemo(exercise.name)}
-                <FormFigure name={exercise.name} static class="size-7 shrink-0" />
-              {:else}
-                <span class="w-7 shrink-0 text-center text-xl" aria-hidden="true">
-                  {exerciseEmoji(exercise.name)}
-                </span>
-              {/if}
+              <!-- An emoji, not a form figure. The figures were tried here and
+                   taken out: a stick figure needs room to read, and at the size
+                   a list row can spare it is a smudge that costs the name its
+                   space. They live on the lift's own page, where there is room
+                   to see one. -->
+              <span class="text-xl" aria-hidden="true">
+                {exerciseEmoji(exercise.name)}
+              </span>
               <a
                 use:link
                 href="/exercises/{exercise.id}"

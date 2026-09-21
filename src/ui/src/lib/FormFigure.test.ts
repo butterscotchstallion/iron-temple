@@ -65,10 +65,4 @@ describe("FormFigure", () => {
     const { container } = render(FormFigure, { name: "Copenhagen Plank" });
     expect(container.querySelector("svg")).toBeNull();
   });
-
-  it("renders a single pose when asked for a static figure", () => {
-    const { container } = render(FormFigure, { name: "Squat", static: true });
-    expect(container.querySelector("svg")).toBeInTheDocument();
-    expect(container.querySelector("animate")).toBeNull();
-  });
 });

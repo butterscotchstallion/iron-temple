@@ -33,6 +33,14 @@ export type Frame = {
   chains: Point[][];
   head: Point;
   bar?: Point;
+  /**
+   * Set by a builder that used ik() when the target was out of reach.
+   *
+   * Reported rather than inferred, because a clamped chain is geometrically
+   * indistinguishable from a legitimately straight limb — both are exactly
+   * l1 + l2 end to end. Only the builder knows which it meant.
+   */
+  clamped?: boolean;
 };
 
 /** A pose: joint angles in degrees, keyed by whatever the skeleton calls them. */
