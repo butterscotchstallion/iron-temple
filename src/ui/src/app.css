@@ -28,6 +28,15 @@
 
   --font-sans: 'Inter Variable', sans-serif;
 
+  /* The streak card's fire, from streakHeat.ts. Three layers whose durations
+     share no small common multiple (2.3 / 3.7 / 2.9) — matched durations would
+     re-sync every cycle and the flicker would read as a mechanical pulse rather
+     than as burning. StreakCard overrides animation-duration inline to speed all
+     three up as the streak climbs. */
+  --animate-flame-flicker: flame-flicker 2.3s ease-in-out infinite;
+  --animate-flame-lick: flame-lick 3.7s ease-in-out infinite;
+  --animate-ember-pulse: ember-pulse 2.9s ease-in-out infinite;
+
   --color-chart-5: var(--chart-5);
 
   --color-chart-4: var(--chart-4);
@@ -170,6 +179,33 @@ body {
   --chart-3: #199e70;
   --chart-4: #c98500;
   --chart-5: #b060e0;
+}
+
+/* Flame motion for the streak card. Declared here rather than in a component
+   <style> block because no .svelte file in this app has one, and because the
+   --animate-* tokens above have to resolve against these names.
+
+   Everything animated is opacity or transform, so the whole effect stays on the
+   compositor: this sits at the top of the home screen and must not cost a layout
+   pass on a phone. StreakCard drops these classes entirely under
+   prefers-reduced-motion; they are not defended by a media query here, since the
+   card also has to change what it renders, not just hold still. */
+@keyframes flame-flicker {
+  0%, 100% { opacity: 0.85; transform: scaleY(1) translateY(0); }
+  30% { opacity: 0.55; transform: scaleY(0.82) translateY(4%); }
+  55% { opacity: 1; transform: scaleY(1.08) translateY(-3%); }
+  80% { opacity: 0.68; transform: scaleY(0.92) translateY(2%); }
+}
+
+@keyframes flame-lick {
+  0%, 100% { opacity: 0.6; transform: scaleX(1) scaleY(0.95); }
+  40% { opacity: 0.95; transform: scaleX(1.09) scaleY(1.14); }
+  70% { opacity: 0.7; transform: scaleX(0.93) scaleY(1); }
+}
+
+@keyframes ember-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.12); opacity: 0.86; }
 }
 
 @layer base {
