@@ -363,7 +363,13 @@ function benchFrame(incline: number) {
 function benchPressBody(p: { barX: number; barY: number; incline: number }): Frame {
   const { shoulder, hip, knee, ankle } = benchFrame(p.incline);
   const bar: Point = { x: p.barX, y: p.barY };
-  const arm = ik(shoulder, bar, SEG.upperArm, SEG.foreArm, 1);
+  // bend -1 puts the elbow on the FEET side of the shoulder and below it, which
+  // is the only way a shoulder bends. The mirror solution is geometrically just
+  // as valid and anatomically impossible: it folds the upper arm up and back
+  // over the lifter's head while the hand stays out in front. Both keep every
+  // segment its proper length, so neither the length test nor the clamp test
+  // has anything to say about it — see the elbow test in formKinematics.test.ts.
+  const arm = ik(shoulder, bar, SEG.upperArm, SEG.foreArm, -1);
   return {
     chains: [
       [shoulder, hip, knee],
