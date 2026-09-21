@@ -139,3 +139,29 @@ describe.each(entries)("%s", (name, archetype) => {
     ).toBe(true);
   });
 });
+
+// A two-link IK has two solutions, mirrored about the line from the shoulder to
+// the hand. Both are perfectly rigid and both reach the bar, so segment length,
+// reach and viewBox all pass either way — and one of them folds the arm
+// backwards over the lifter's head. Nothing generic catches that; the joint has
+// to be checked against the movement it belongs to.
+//
+// A supine press is the clearest case, and the one that shipped wrong: a lifter
+// on a bench presses with the elbow on the FEET side of the shoulder. An elbow
+// behind the shoulder is a shoulder bending the way shoulders do not.
+describe.each([
+  ["benchPress", ARCHETYPES.benchPress],
+  ["inclinePress", ARCHETYPES.inclinePress],
+])("%s elbow", (name, archetype) => {
+  it("keeps the elbow in front of the shoulder, where an arm can go", () => {
+    for (const frame of archetype.frames()) {
+      // The arm is the last chain: shoulder, elbow, hand.
+      const [shoulder, elbow] = frame.chains[frame.chains.length - 1];
+      expect(
+        elbow.x,
+        `${name}: elbow at x=${elbow.x.toFixed(1)} is behind the shoulder at ${shoulder.x.toFixed(1)}`,
+      ).toBeGreaterThan(shoulder.x);
+      expect(elbow.y).toBeLessThan(frame.bar!.y);
+    }
+  });
+});
