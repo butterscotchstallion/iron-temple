@@ -161,9 +161,8 @@ waking on the 1st, so downtime delays a recap instead of dropping it.
 ### Library, history and progress
 
 - **Exercise library** — everything seeded plus your own movements, each with a
-  muscle group and its equipment, grouped so a long list stays navigable. Each
-  seeded movement carries a little figure showing how it goes, animated on the
-  lift's own page and still in the list.
+  muscle group and its equipment, grouped so a long list stays navigable. Open
+  any seeded movement and a little figure shows you how it goes.
 
   The figures are **drawn, not filmed**: a movement is stored as a handful of
   joint angles and the shape is computed in the browser, the way the plate math

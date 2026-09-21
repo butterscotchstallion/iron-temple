@@ -14,19 +14,14 @@
   import { r1, type Frame, type Point } from "./formKinematics";
   import { prefersReducedMotion } from "./reducedMotion";
 
-  let {
-    name,
-    /** Draw a single pose with no animation — for dense lists like the library. */
-    static: isStatic = false,
-    class: className = "",
-  }: { name: string; static?: boolean; class?: string } = $props();
+  let { name, class: className = "" }: { name: string; class?: string } = $props();
 
   const demo = $derived(exerciseDemo(name));
 
   // Asked once per render rather than cached at module scope, matching
   // celebrate()'s reasoning: the preference is a Control Centre toggle people
   // reach for mid-session.
-  const still = $derived(isStatic || prefersReducedMotion());
+  const still = $derived(prefersReducedMotion());
 
   const frames = $derived(still ? [] : (demo?.frames() ?? []));
 

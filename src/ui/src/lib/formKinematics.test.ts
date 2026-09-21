@@ -81,15 +81,13 @@ describe.each(entries)("%s", (name, archetype) => {
   // A clamp is correct behaviour at runtime and a DATA bug in shipped poses: it
   // means a hand that never reaches its bar. Nothing else would surface it —
   // the figure just draws slightly wrong, forever.
+  //
+  // Asked of the builder rather than measured off the result, which was this
+  // test's first mistake: a clamped chain spans exactly l1 + l2, and so does a
+  // legitimately straight arm, so no amount of geometry can separate them.
   it("never asks the IK for something out of reach", () => {
     for (const frame of frames) {
-      for (const chain of frame.chains) {
-        for (let i = 2; i < chain.length; i++) {
-          const span = dist(chain[i - 2], chain[i]);
-          const reach = dist(chain[i - 2], chain[i - 1]) + dist(chain[i - 1], chain[i]);
-          expect(span).toBeLessThanOrEqual(reach + 1e-6);
-        }
-      }
+      expect(frame.clamped ?? false).toBe(false);
     }
   });
 

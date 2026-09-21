@@ -13,17 +13,17 @@ start
 
 
 
-
-
-
-
-
-
-
-             ooo             ###
-           oo   oo          **
-           o     o        **
-           ooo  oo********
+                       ###
+                       *
+                      *
+                     *
+                    *
+                    *
+                   *
+             ooo   *
+           oo   oo *
+           o     o*
+           ooo  oo*
              ooo   **
          ............**
                .       **
@@ -44,17 +44,17 @@ finish
 
 
 
-                   ###
+
+
+
+
+
+
                     *
-                    *
-                    *
-                    *
-                    *
-                    *
-                    *
-                   *
-             ooo   *
-           oo   oo *
+                    **
+                   *  *
+             ooo   *   *
+           oo   oo *   ###
            o     o*
            ooo  oo*
              ooo   **

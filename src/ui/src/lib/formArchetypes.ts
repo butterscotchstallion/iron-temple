@@ -228,8 +228,14 @@ function hipThrustBody(p: { torso: number; head: number }): Frame {
   const shoulder: Point = { x: 0, y: 22 };
   const hip = polar(shoulder, p.torso, SEG.torso);
   const ankle: Point = { x: 48, y: 5 };
-  const knee = ik(hip, ankle, SEG.thigh, SEG.shank, 1).joint;
-  const bar: Point = { x: hip.x, y: hip.y + 5 };
+  const leg = ik(hip, ankle, SEG.thigh, SEG.shank, 1);
+  const knee = leg.joint;
+  // The bar rests across the hip CREASE, not the hip joint — a little up the
+  // body from it. That is where hands grip it, and it is also the only place
+  // they can: the arm is marginally shorter than the torso, so a bar drawn at
+  // the joint itself sat just out of reach and the IK quietly straightened the
+  // arm at it. The clamp test is what surfaced that.
+  const bar = barOnBack(polar(shoulder, p.torso, SEG.torso * 0.86), p.torso, -5);
   const arm = ik(shoulder, bar, SEG.upperArm, SEG.foreArm, -1);
   return {
     chains: [
@@ -240,6 +246,7 @@ function hipThrustBody(p: { torso: number; head: number }): Frame {
     ],
     head: polar(shoulder, p.head, SEG.neck),
     bar,
+    clamped: leg.clamped || arm.clamped,
   };
 }
 
@@ -331,16 +338,48 @@ function calfBody(p: { pitch: number; head: number }): Frame {
   };
 }
 
-/** Lying on the bench, pressing or extending. The shoulder is pinned to the pad. */
-function benchBody(p: { upperArm: number; foreArm: number; incline: number; head: number }): Frame {
-  // The incline tilts the whole torso off the pad; at 0 the lifter is flat.
-  const hip = polar({ x: 0, y: 22 }, -p.incline, SEG.torso);
+/** The lifter's body on the bench: shoulder pinned to the pad, feet on the floor. */
+function benchFrame(incline: number) {
   const shoulder: Point = { x: 0, y: 22 };
+  const hip = polar(shoulder, -incline, SEG.torso);
   // Swept with the incline: on a flat bench the thigh drops toward the floor,
   // and on an incline the hips are already high enough that the same angle
   // would bury the knee underground.
-  const knee = polar(hip, -40 + p.incline, SEG.thigh);
+  const knee = polar(hip, -40 + incline, SEG.thigh);
   const ankle: Point = { x: knee.x + 4, y: 5 };
+  return { shoulder, hip, knee, ankle };
+}
+
+/**
+ * A press on the bench, driven by where the BAR is rather than by arm angles.
+ *
+ * The bar path is the whole point of a press, and angles cannot state it: an
+ * arm swung from the shoulder traces an arc, so the first version of this
+ * pressed the bar diagonally up from somewhere around the lifter's knees.
+ * Giving IK the hand position and letting the elbow fall out makes the bar
+ * travel straight up and down, which is what a press actually looks like and
+ * what the lifter is being shown.
+ */
+function benchPressBody(p: { barX: number; barY: number; incline: number }): Frame {
+  const { shoulder, hip, knee, ankle } = benchFrame(p.incline);
+  const bar: Point = { x: p.barX, y: p.barY };
+  const arm = ik(shoulder, bar, SEG.upperArm, SEG.foreArm, 1);
+  return {
+    chains: [
+      [shoulder, hip, knee],
+      [knee, ankle],
+      [ankle, { x: ankle.x + 11, y: 0 }],
+      [shoulder, arm.joint, arm.end],
+    ],
+    head: polar(shoulder, 165, SEG.neck),
+    bar: arm.end,
+    clamped: arm.clamped,
+  };
+}
+
+/** Lying on the bench with the elbow held still — the skull crusher's shape. */
+function benchBody(p: { upperArm: number; foreArm: number; incline: number; head: number }): Frame {
+  const { shoulder, hip, knee, ankle } = benchFrame(p.incline);
   const elbow = polar(shoulder, p.upperArm, SEG.upperArm);
   const hand = polar(elbow, p.foreArm, SEG.foreArm);
   return {
@@ -690,19 +729,22 @@ const backExtension = defineArchetype({
 /** Bench press: flat, the bar travelling from the chest to a locked-out arm. */
 const benchPress = defineArchetype({
   skeleton: SUPINE,
-  build: benchBody,
-  start: { upperArm: 0, foreArm: 20, incline: 0, head: 165 },
-  finish: { upperArm: 70, foreArm: 88, incline: 0, head: 165 },
-  still: "start",
+  build: benchPressBody,
+  // Starts locked out and lowers to the chest, because that is the order a rep
+  // happens in: the bar is already overhead when it is unracked. barX holds
+  // still so the bar goes straight up and down.
+  start: { barX: 8, barY: 47, incline: 0 },
+  finish: { barX: 8, barY: 29, incline: 0 },
+  still: "finish",
 });
 
 /** Incline press: the same movement with the bench tilted up under the lifter. */
 const inclinePress = defineArchetype({
   skeleton: SUPINE,
-  build: benchBody,
-  start: { upperArm: 5, foreArm: 25, incline: 28, head: 165 },
-  finish: { upperArm: 72, foreArm: 90, incline: 28, head: 165 },
-  still: "start",
+  build: benchPressBody,
+  start: { barX: 14, barY: 44, incline: 28 },
+  finish: { barX: 14, barY: 28, incline: 28 },
+  still: "finish",
 });
 
 /** Skull crusher: the upper arm holds still and the forearm folds past the head. */
