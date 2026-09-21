@@ -18,10 +18,26 @@
   const heat = $derived(streakHeat(streak));
   const h = $derived(combinedHeat(heat));
 
-  // Asked once per render rather than cached at module scope, matching
-  // FormFigure and celebrate(): the preference is a Control Centre toggle people
-  // reach for mid-session.
-  const still = $derived(prefersReducedMotion());
+  // The preference is a Control Centre toggle people reach for mid-session, and
+  // unlike every other caller of prefersReducedMotion() this card is long-lived:
+  // it stays mounted for as long as the lifter is on the home screen. So it
+  // subscribes rather than asks.
+  //
+  // `$derived(prefersReducedMotion())` would look equivalent and be wrong — it
+  // reads no reactive state, so Svelte computes it at init and memoizes it
+  // forever, leaving the flames animating after someone has asked for stillness.
+  // Seeded from the current value so the first paint is right, then kept in step
+  // for as long as the card lives.
+  let still = $state(prefersReducedMotion());
+
+  $effect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const sync = () => (still = query.matches);
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  });
 
   /** The heat colour at `pct` opacity. */
   const tint = (pct: number) =>

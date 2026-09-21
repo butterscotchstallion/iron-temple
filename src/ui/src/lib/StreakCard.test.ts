@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen } from "@testing-library/svelte";
+import { tick } from "svelte";
 import StreakCard from "./StreakCard.svelte";
 import { combinedHeat, heatColor, streakHeat } from "./streakHeat";
 
@@ -117,6 +118,36 @@ describe("StreakCard", () => {
     expect(container.querySelector(".animate-flame-lick")).not.toBeNull();
     expect(container.querySelector(".animate-flame-flicker")).not.toBeNull();
     expect(container.querySelector(".animate-ember-pulse")).not.toBeNull();
+  });
+
+  it("stops moving when the lifter toggles reduced motion mid-session", async () => {
+    // This card stays mounted for as long as the home screen is open, so reading
+    // the preference once at init is not enough: someone who reaches for the
+    // Control Centre toggle would keep watching the flames animate until they
+    // navigated away and back. jsdom has no matchMedia, hence the stub.
+    const listeners = new Set<() => void>();
+    let reduced = false;
+    vi.stubGlobal("matchMedia", (media: string) => ({
+      media,
+      get matches() {
+        return reduced;
+      },
+      addEventListener: (_: string, fn: () => void) => void listeners.add(fn),
+      removeEventListener: (_: string, fn: () => void) => void listeners.delete(fn),
+    }));
+
+    const { container } = render(StreakCard, { streak: 12 });
+    expect(container.querySelector(".animate-flame-flicker")).not.toBeNull();
+
+    reduced = true;
+    listeners.forEach((fn) => fn());
+    await tick();
+
+    expect(container.querySelectorAll("[class*='animate-']")).toHaveLength(0);
+    // The fire itself must survive: it is the reward, not the motion.
+    expect(flames(container)).not.toBeNull();
+
+    vi.unstubAllGlobals();
   });
 
   it("hides the decoration from assistive tech", () => {
