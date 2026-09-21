@@ -161,7 +161,23 @@ waking on the 1st, so downtime delays a recap instead of dropping it.
 ### Library, history and progress
 
 - **Exercise library** — everything seeded plus your own movements, each with a
-  muscle group and its equipment, grouped so a long list stays navigable.
+  muscle group and its equipment, grouped so a long list stays navigable. Each
+  seeded movement carries a little figure showing how it goes, animated on the
+  lift's own page and still in the list.
+
+  The figures are **drawn, not filmed**: a movement is stored as a handful of
+  joint angles and the shape is computed in the browser, the way the plate math
+  draws your bar rather than photographing it. That is what keeps them working
+  in a basement — there is no clip to fetch, so there is nothing to fail when
+  the signal doesn't. They follow the theme, and a lifter who has asked their
+  phone for less movement gets the single most informative pose instead of a
+  loop.
+
+  Not every movement has one. A Russian twist is a rotation that a side view
+  cannot show and a front view draws as sitting still, and a shrug moves about
+  two inches — drawing those would teach something untrue, so they keep their
+  icon and say nothing. Your own movements have no figure either, for the
+  ordinary reason that nobody has drawn them.
 - **Your gym** — the bar's weight, the plates you own, and what your dumbbell rack
   steps by, on the profile. Every weight the app draws is loaded onto them, and
   every jump it prescribes is one they can build.

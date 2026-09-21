@@ -10,6 +10,8 @@
   import ChartLine from "@lucide/svelte/icons/chart-line";
   import Trophy from "@lucide/svelte/icons/trophy";
   import ErrorCard from "../lib/ErrorCard.svelte";
+  import FormFigure from "../lib/FormFigure.svelte";
+  import { exerciseDemo } from "../lib/exerciseDemo";
 
   let { params }: { params?: { id?: string } } = $props();
   let exerciseId = $derived(Number(params?.id));
@@ -82,6 +84,21 @@
     <ErrorCard message="Couldn't load this lift's history." onRetry={load} />
   {:else}
     <h2 class="text-2xl font-black text-foreground">{name}</h2>
+
+    <!-- Above the history, and deliberately outside the empty-history branch
+         below: a lifter who has never performed the movement is exactly the one
+         who wants to see how it goes. Renders nothing at all for a movement
+         with no figure, so there is no empty state to design. -->
+    {#if exerciseDemo(name)}
+      <Card class="p-4">
+        <h3
+          class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground"
+        >
+          How it goes
+        </h3>
+        <FormFigure {name} class="h-48" />
+      </Card>
+    {/if}
 
     {#if points.length === 0}
       <Card class="flex flex-col items-center p-6 text-center">
