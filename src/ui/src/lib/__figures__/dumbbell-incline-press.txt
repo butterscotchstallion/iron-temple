@@ -1,0 +1,72 @@
+Dumbbell Incline Press
+======================
+
+(A terminal cell is about twice as tall as it is wide, so these are
+stretched vertically against what the SVG draws. Judge shapes and travel,
+not proportions.)
+
+start
+-----
+
+
+
+
+
+
+
+
+
+
+
+
+
+             ooo             ###
+           oo   oo          **
+           o     o        **
+           ooo  oo********
+             ooo   **
+         ............**
+               .       **
+               .         **
+               .           **
+               .             **
+               .               ****
+               .                   ****   **
+               .                       ***  **
+      ........................................**...
+
+
+
+
+finish
+------
+
+
+
+
+                   ###
+                    *
+                    *
+                    *
+                    *
+                    *
+                    *
+                    *
+                   *
+             ooo   *
+           oo   oo *
+           o     o*
+           ooo  oo*
+             ooo   **
+         ............**
+               .       **
+               .         **
+               .           **
+               .             **
+               .               ****
+               .                   ****   **
+               .                       ***  **
+      ........................................**...
+
+
+

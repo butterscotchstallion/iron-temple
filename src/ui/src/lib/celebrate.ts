@@ -1,5 +1,7 @@
 import type { Options as ConfettiOptions } from "canvas-confetti";
 
+import { prefersReducedMotion } from "./reducedMotion";
+
 /**
  * Confetti, on the two occasions the app has to celebrate: a set that beats a
  * record, and the recap of a finished workout.
@@ -27,31 +29,15 @@ let loader: Promise<ConfettiFn> | undefined;
  * at runtime.
  */
 export function celebrate(options: ConfettiOptions): void {
+  // Two hundred particles thrown across the screen is exactly the kind of
+  // motion the preference exists to stop — for some people it is nausea or a
+  // migraine, and this app is used in a gym where they cannot simply look away.
+  // The record still gets its banner and the recap still gets its page; only the
+  // physics is withheld. Returning early also skips the dynamic import below, so
+  // a lifter who will never see confetti never downloads it.
   if (prefersReducedMotion()) return;
   const fired = (loader ??= import("canvas-confetti").then(
     (m) => (m as unknown as { default: ConfettiFn }).default,
   ));
   void fired.then((fire) => fire(options)).catch(() => {});
-}
-
-/**
- * Whether the lifter has asked their system for less movement.
- *
- * Checked rather than assumed, and checked at each celebration rather than
- * once: the setting can change while the app is open, and on iOS it is a
- * Control Centre toggle people reach for mid-session.
- *
- * Two hundred particles thrown across the screen is exactly the kind of motion
- * the preference exists to stop — for some people it is nausea or a migraine,
- * and this app is used in a gym where they cannot simply look away. The record
- * still gets its banner and the recap still gets its page; only the physics is
- * withheld. Returning early also skips the dynamic import, so a lifter who will
- * never see confetti never downloads it.
- *
- * Defaults to celebrating where the query cannot be asked — a browser too old
- * for matchMedia, or jsdom — because no answer is not the same as "yes".
- */
-function prefersReducedMotion(): boolean {
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
-  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }

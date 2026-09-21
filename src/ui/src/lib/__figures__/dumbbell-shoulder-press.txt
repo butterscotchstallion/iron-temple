@@ -1,0 +1,72 @@
+Dumbbell Shoulder Press
+=======================
+
+(A terminal cell is about twice as tall as it is wide, so these are
+stretched vertically against what the SVG draws. Judge shapes and travel,
+not proportions.)
+
+start
+-----
+
+
+
+
+
+                         ooooo
+                         o   o
+                         ooooo
+                         ###
+                          **
+                         ***
+                         * *
+                           *
+                           *
+                           *
+                           *
+                           *
+                           *
+                           *
+                           *
+                           *
+                           *
+                           *
+                           *
+                           *
+                           *
+                           *
+                           ***
+                  ........*...*........
+
+
+finish
+------
+
+
+                           ###
+                            *
+                            *
+                         ooooo
+                         o  *o
+                         ooooo
+                           *
+                           *
+                           *
+                           *
+                           *
+                           *
+                           *
+                           *
+                           *
+                           *
+                           *
+                           *
+                           *
+                           *
+                           *
+                           *
+                           *
+                           *
+                           *
+                           ***
+                  ........*...*........
+
