@@ -5,6 +5,7 @@
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import LogIn from "@lucide/svelte/icons/log-in";
   import LogOut from "@lucide/svelte/icons/log-out";
+  import Medal from "@lucide/svelte/icons/medal";
   import Rss from "@lucide/svelte/icons/rss";
   import Settings from "@lucide/svelte/icons/settings";
   import Users from "@lucide/svelte/icons/users";
@@ -74,6 +75,10 @@
         <DropdownMenu.Item class={itemClass} onSelect={() => go("/feed")}>
           <Rss class="size-4" aria-hidden="true" />
           Around the gym
+        </DropdownMenu.Item>
+        <DropdownMenu.Item class={itemClass} onSelect={() => go("/leaderboard")}>
+          <Medal class="size-4" aria-hidden="true" />
+          Leaderboard
         </DropdownMenu.Item>
         <DropdownMenu.Item class={itemClass} onSelect={() => go("/profile")}>
           <Settings class="size-4" aria-hidden="true" />

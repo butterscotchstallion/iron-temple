@@ -216,6 +216,9 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 				// The install's recent activity. Not under /lifters because no id
 				// in its path names a person — see feed.go.
 				r.Get("/feed", s.getFeed)
+				// How the lifters compare. Also top-level, and for the same
+				// reason: the subject is the install, not a lifter.
+				r.Get("/leaderboard", s.getLeaderboard)
 
 				// One lifter reading another. Every route is a GET, and that is
 				// load-bearing rather than incidental: the id in these paths
