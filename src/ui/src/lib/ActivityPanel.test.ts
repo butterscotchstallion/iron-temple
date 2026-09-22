@@ -15,6 +15,8 @@ const backfillActivity = vi.hoisted(() => vi.fn());
 const startActivity = vi.hoisted(() => vi.fn());
 const stopActivity = vi.hoisted(() => vi.fn());
 const deleteActivity = vi.hoisted(() => vi.fn());
+const getActivitySchedule = vi.hoisted(() => vi.fn());
+const setActivitySchedule = vi.hoisted(() => vi.fn());
 vi.mock("./api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./api")>()),
   getActivityStatus,
@@ -22,7 +24,13 @@ vi.mock("./api", async (importOriginal) => ({
   startActivity,
   stopActivity,
   deleteActivity,
+  getActivitySchedule,
+  setActivitySchedule,
 }));
+
+function daily(over: Partial<{ enabled: boolean; lifters: number; lastRunOn: string; lastSessions: number; lastReactions: number; lastComments: number }> = {}) {
+  return { status: 200 as const, data: { enabled: false, lifters: 4, ...over } };
+}
 
 function status(over: Partial<ActivityStatus> = {}): { status: 200; data: ActivityStatus } {
   return {
@@ -52,6 +60,8 @@ beforeEach(() => {
   startActivity.mockResolvedValue({ status: 204, data: undefined });
   stopActivity.mockResolvedValue({ status: 204, data: undefined });
   deleteActivity.mockResolvedValue({ status: 200, data: { removed: 4 } });
+  getActivitySchedule.mockResolvedValue(daily());
+  setActivitySchedule.mockImplementation(async (body) => daily(body));
 });
 
 afterEach(() => {
@@ -218,6 +228,85 @@ describe("ActivityPanel", () => {
     expect(
       screen.getByText(/a real lifter who happens to share one of those names/i),
     ).toBeInTheDocument();
+  });
+
+  // ---- the unattended daily run ----
+  //
+  // Distinct from Live above: this one is a row in the database, so it survives a
+  // restart. The panel has to make that difference legible rather than offering two
+  // switches that look the same.
+  it("offers to switch the daily run on when it is off", async () => {
+    render(ActivityPanel);
+
+    await waitFor(() => {
+      expect(screen.getByText("Switch on")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Off.")).toBeInTheDocument();
+  });
+
+  it("switches it on, carrying the lifter count with it", async () => {
+    render(ActivityPanel);
+    await waitFor(() => expect(screen.getByText("Switch on")).toBeInTheDocument());
+
+    await fireEvent.click(screen.getByText("Switch on"));
+
+    await waitFor(() => {
+      expect(setActivitySchedule).toHaveBeenCalledWith({ enabled: true, lifters: 4 });
+    });
+    // Said plainly, because the hourly tick means the first day is not immediate and
+    // an operator who expected instant activity would think it was broken.
+    await waitFor(() => {
+      expect(screen.getByText(/first day lands within the hour/)).toBeInTheDocument();
+    });
+  });
+
+  it("offers to switch it off once it is on", async () => {
+    getActivitySchedule.mockResolvedValue(daily({ enabled: true, lifters: 3 }));
+    render(ActivityPanel);
+
+    await waitFor(() => {
+      expect(screen.getByText("Switch off")).toBeInTheDocument();
+    });
+    expect(screen.getByText("On, across 3 lifters.")).toBeInTheDocument();
+    expect(screen.queryByText("Switch on")).not.toBeInTheDocument();
+
+    await fireEvent.click(screen.getByText("Switch off"));
+    await waitFor(() => {
+      expect(setActivitySchedule).toHaveBeenCalledWith({ enabled: false, lifters: 3 });
+    });
+  });
+
+  // Enabled and never having run is the ordinary state for the first hour, so the
+  // absence is explained rather than left blank.
+  it("explains that an enabled schedule has not run yet", async () => {
+    getActivitySchedule.mockResolvedValue(daily({ enabled: true, lifters: 4 }));
+    render(ActivityPanel);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Hasn't run yet/)).toBeInTheDocument();
+    });
+  });
+
+  // What it last DID, not only that it is on — which is the difference between a
+  // schedule you can trust and a flag.
+  it("reports the last day it generated", async () => {
+    getActivitySchedule.mockResolvedValue(
+      daily({
+        enabled: true,
+        lifters: 4,
+        lastRunOn: "2026-03-17",
+        lastSessions: 3,
+        lastReactions: 11,
+        lastComments: 2,
+      }),
+    );
+    render(ActivityPanel);
+
+    await waitFor(() => {
+      expect(screen.getByText("2026-03-17")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/3 sessions, 11 reactions, 2 comments/)).toBeInTheDocument();
+    expect(screen.queryByText(/Hasn't run yet/)).not.toBeInTheDocument();
   });
 
   // The server sends its own bounds so the inputs cannot offer a number the

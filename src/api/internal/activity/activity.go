@@ -24,6 +24,7 @@ package activity
 
 import (
 	"math/rand"
+	"time"
 )
 
 // Persona is one simulated lifter's habits.
@@ -155,6 +156,49 @@ func Usernames(n int) []string {
 	out := make([]string, 0, len(roster))
 	for _, p := range roster {
 		out = append(out, p.Username)
+	}
+	return out
+}
+
+// CatchUpWindow is how far back an unattended run will fill in.
+//
+// Seven days rather than racked's forty. The reporter's window is generous because
+// a late email is still worth sending and there is at most one per period; this
+// generates a day of training per day it covers, so a month of downtime would
+// otherwise produce a month of sessions in one tick — a spike that looks nothing
+// like a gym and takes a while to write.
+//
+// A week is the useful amount: a laptop closed over a weekend or a deploy on
+// Tuesday catches up completely, and anything longer than that is an install
+// nobody was looking at anyway.
+const CatchUpWindow = 7 * 24 * time.Hour
+
+// DueDays lists the days an unattended run should consider, oldest first.
+//
+// A pure function of the clock, exactly as racked.DuePeriods is, and for the same
+// reason: whether a given day has ALREADY been generated is not decided here — that
+// is generated_activity_runs' job — so this stays trivially testable across month
+// and year boundaries without a database.
+//
+// Today is included. A day is generated as soon as it starts rather than once it
+// has finished, because the point is an install that looks alive now; a lifter who
+// trains on Tuesday morning should appear in the feed on Tuesday, not on Wednesday.
+//
+// Dates are returned at UTC midnight, which is how every date in this schema is
+// held.
+func DueDays(now time.Time, window time.Duration) []time.Time {
+	if window < 0 {
+		window = 0
+	}
+	// Truncated to a date in the caller's zone first, so "today" means the operator's
+	// today rather than an instant. Rebuilt at UTC midnight afterwards because that
+	// is the form a DATE column round-trips.
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+	days := int(window / (24 * time.Hour))
+	out := make([]time.Time, 0, days+1)
+	for i := days; i >= 0; i-- {
+		out = append(out, today.AddDate(0, 0, -i))
 	}
 	return out
 }

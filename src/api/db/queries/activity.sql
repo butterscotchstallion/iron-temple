@@ -155,3 +155,77 @@ WHERE lower(username) = ANY(sqlc.arg('usernames')::text[])
 DELETE FROM users
 WHERE id = ANY(sqlc.arg('ids')::int[])
   AND NOT is_admin;
+
+-- ---- the daily schedule ----
+
+-- GetActivitySchedule reads the singleton settings row.
+--
+-- :one with no argument and no empty case to handle: 0025 seeds the row, and the
+-- CHECK (id = 1) means there can never be a second. So every caller gets a
+-- schedule rather than a "not configured yet" branch.
+-- name: GetActivitySchedule :one
+SELECT id, enabled, lifters, updated_at FROM generated_activity_schedule WHERE id = 1;
+
+-- SetActivitySchedule replaces it.
+--
+-- An UPDATE rather than an upsert for the same reason: the row is guaranteed to
+-- exist, so an ON CONFLICT clause would be dead code that implied otherwise.
+-- name: SetActivitySchedule :one
+UPDATE generated_activity_schedule
+SET enabled    = sqlc.arg('enabled'),
+    lifters    = sqlc.arg('lifters')::int,
+    updated_at = now()
+WHERE id = 1
+RETURNING id, enabled, lifters, updated_at;
+
+-- ClaimActivityDay takes ownership of one day's generation, or reports that
+-- somebody already has it.
+--
+-- THE WHOLE CONCURRENCY STORY IS THIS ONE STATEMENT. day is the primary key, so
+-- ON CONFLICT DO NOTHING means exactly one caller can insert a given day: the
+-- winner gets a row back, the losers get none and do nothing. That is what makes
+-- the scheduler safe to run in more than one replica without any counting of
+-- processes, and it is report_runs' argument applied to a simpler problem.
+--
+-- Claiming BEFORE generating rather than recording after is deliberate. Recording
+-- afterwards would let two replicas both generate the same day and only then
+-- discover the collision, by which point the duplicate sessions exist. The cost is
+-- that a crash between claim and commit leaves a day marked done that produced
+-- nothing — which ReleaseActivityDay exists to undo on the failure path.
+--
+-- The counts go in as zero and are filled in by FinishActivityDay once the work is
+-- known, so a claim carries no figures it has not earned.
+-- name: ClaimActivityDay :one
+INSERT INTO generated_activity_runs (day)
+VALUES (sqlc.arg('day'))
+ON CONFLICT (day) DO NOTHING
+RETURNING day, sessions, reactions, comments, generated_at;
+
+-- FinishActivityDay records what a claimed day actually produced.
+-- name: FinishActivityDay :exec
+UPDATE generated_activity_runs
+SET sessions     = sqlc.arg('sessions')::int,
+    reactions    = sqlc.arg('reactions')::int,
+    comments     = sqlc.arg('comments')::int,
+    generated_at = now()
+WHERE day = sqlc.arg('day');
+
+-- ReleaseActivityDay gives a claim back after the generation behind it failed.
+--
+-- The alternative to a status column. report_runs needs sending/sent/failed
+-- because delivery is somebody else's system and can fail halfway; generating is
+-- local work, so a day either produced something or is worth retrying, and
+-- deleting the claim is how the next tick learns it is outstanding again.
+-- name: ReleaseActivityDay :exec
+DELETE FROM generated_activity_runs WHERE day = sqlc.arg('day');
+
+-- LastActivityRun is the most recent day that was generated, for the admin screen.
+--
+-- Ordered by day rather than by generated_at: a catch-up writes several days in one
+-- pass with nearly identical timestamps, and what an operator wants to know is how
+-- far the activity reaches, not which row was written last.
+-- name: LastActivityRun :one
+SELECT day, sessions, reactions, comments, generated_at
+FROM generated_activity_runs
+ORDER BY day DESC
+LIMIT 1;

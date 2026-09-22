@@ -123,6 +123,11 @@ func run() error {
 	// The Racked recap. Hourly rather than daily because the tick is a question
 	// ("is a period outstanding?"), not an alarm — see StartRackedReporter.
 	apiSrv.StartRackedReporter(sweepCtx, time.Hour)
+	// Generated activity, for an install that wants to keep looking alive. Also a
+	// question rather than an alarm — "which recent days have no run?" — so a
+	// restart delays a day instead of losing it. Does nothing at all until the
+	// owner switches it on, which is a row in the database rather than a flag here.
+	apiSrv.StartGeneratedActivityScheduler(sweepCtx, time.Hour)
 
 	srv := &http.Server{
 		Addr:              ":" + port,

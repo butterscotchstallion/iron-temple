@@ -15,9 +15,47 @@ comments. A few lifters over a few months takes a couple of seconds.
 
 **Live** starts a loop where one lifter acts per tick — a session, a reaction or a
 comment — so things arrive while you have a screen open. Useful for watching the
-feed move; pointless for anything historical, which is what the backfill is for.
+feed move; pointless for anything historical, which is what the backfill is for. It
+dies with the process.
+
+**Daily** is the unattended one, and the only one that survives a restart. Switch it
+on and the install keeps generating a day's training each day, on the lifters' own
+scheduled weekdays, without anybody pressing anything.
 
 **Clean up** removes the generated lifters and everything of theirs.
+
+## How the daily run works
+
+It is **a ticker that asks, not an alarm that fires**. Every hour it asks the
+database which of the last few days have no run recorded, and generates those. It
+does not wake at midnight.
+
+That distinction is the whole design, and it is borrowed from the Racked reporter
+(`report_runs`, migration 0008) which solved the same problem first: a clock-driven
+job that misses its instant has missed it, where a question asked hourly is answered
+correctly the moment the process comes back. So a restart, a closed laptop or a
+deploy **delays** a day's activity instead of losing it.
+
+Three consequences worth knowing:
+
+- **Switching it on takes effect within the hour**, not immediately. That is the
+  cost of having no boot-time flag and needing no restart. Press *Generate history*
+  if you don't want to wait.
+- **A day is generated at most once.** Each day is claimed through a primary key
+  before any work happens, so repeated ticks, a restart, or more than one replica
+  cannot double up. Correctness comes from the constraint rather than from counting
+  processes. If the generation behind a claim fails, the claim is released so the
+  next tick retries.
+- **Catch-up is bounded to a week.** Long enough for a weekend or a deploy; short
+  enough that a month away does not produce a month of training in a single tick.
+
+The schedule lives in `generated_activity_schedule` — one row, enforced by a
+`CHECK (id = 1)` so "one row" is a property of the schema rather than a convention.
+It is **off** after the migration, so an existing install generates nothing until its
+owner asks.
+
+`DueDays` is a pure function of the clock, exactly as `racked.DuePeriods` is, which
+is what makes month ends, year ends and leap days testable without a database.
 
 ## The history is real
 

@@ -635,6 +635,67 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /admin/activity/schedule:
+    get:
+      tags: [admin]
+      operationId: getActivitySchedule
+      summary: The unattended daily run
+      description: >
+        Owner-only. Whether generated activity runs on its own once a day, how many
+        lifters it keeps active, and what the most recent day produced.
+
+        Unlike the live loop, this survives a restart — it is a row in the database
+        rather than a flag on the process.
+      responses:
+        "200":
+          description: The schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivitySchedule"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    put:
+      tags: [admin]
+      operationId: setActivitySchedule
+      summary: Turn the daily run on or off
+      description: >
+        Owner-only.
+
+        **Takes effect within the hour, not immediately.** The scheduler asks the
+        database what is outstanding once an hour rather than waking at midnight,
+        which is what makes a restart delay a day's activity instead of losing it —
+        and the cost of that design is this latency. `POST /admin/activity/backfill`
+        is there for anybody who does not want to wait.
+
+        A day already generated is never generated twice: each day is claimed
+        through a primary key before any work happens, so re-running, restarting, or
+        running more than one replica cannot double up. After downtime it fills in
+        the days it missed, bounded to a week — long enough for a closed laptop or a
+        deploy, short enough that a month away does not produce a month of training
+        in one tick.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActivityScheduleRequest"
+      responses:
+        "200":
+          description: The updated schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivitySchedule"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
   /admin/activity/backfill:
     post:
       tags: [admin]
@@ -2038,6 +2099,41 @@ components:
             Worth showing in a teardown confirmation regardless: it is the scope of
             the operation, and an operator who recognises a name should be able to
             see it listed and understand why that account is nonetheless safe.
+
+    ActivitySchedule:
+      type: object
+      required: [enabled, lifters]
+      properties:
+        enabled:
+          type: boolean
+        lifters:
+          type: integer
+          minimum: 1
+          maximum: 8
+        lastRunOn:
+          type: string
+          format: date
+          description: >
+            The most recent day generated, absent until one has been. Ordered by the
+            DAY rather than by when the row was written, so after a catch-up this is
+            how far the activity reaches rather than which row landed last.
+        lastSessions:
+          type: integer
+        lastReactions:
+          type: integer
+        lastComments:
+          type: integer
+
+    ActivityScheduleRequest:
+      type: object
+      required: [enabled, lifters]
+      properties:
+        enabled:
+          type: boolean
+        lifters:
+          type: integer
+          minimum: 1
+          maximum: 8
 
     BackfillActivityRequest:
       type: object

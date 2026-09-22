@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"math"
 	"math/rand"
 	"net/http"
 	"slices"
@@ -845,7 +846,244 @@ func (s *Server) generateRecognitionOnce(
 	return reactions, comments, nil
 }
 
+// ---- the daily schedule ----
+
+// StartGeneratedActivityScheduler generates a day's activity for any recent day
+// that has not had one, on a ticker, until ctx is done.
+//
+// A TICKER THAT ASKS, NOT AN ALARM THAT FIRES. It runs every hour and each time
+// asks the database which of the last few days have no run recorded — rather than
+// waking at midnight and generating "today". A clock-driven job that misses its
+// instant has missed it; a question asked hourly is answered correctly the moment
+// the process comes back, so a restart or a closed laptop DELAYS a day's activity
+// instead of losing it. That is StartRackedReporter's argument, and this is
+// deliberately built the same way, down to running one pass immediately on start
+// so a freshly booted server does not wait an hour to notice it is behind.
+//
+// Started unconditionally from main.go alongside the reporter and the sweeper. The
+// schedule is read from the database on every pass, so an install with it switched
+// off does one cheap SELECT an hour and nothing else — there is no boot-time
+// decision to get wrong, and turning it on takes effect within the hour without a
+// restart.
+func (s *Server) StartGeneratedActivityScheduler(ctx context.Context, every time.Duration) {
+	go func() {
+		t := time.NewTicker(every)
+		defer t.Stop()
+		s.generateDueActivity(ctx)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				s.generateDueActivity(ctx)
+			}
+		}
+	}()
+}
+
+// generateDueActivity is one pass over the days that are owed activity.
+func (s *Server) generateDueActivity(ctx context.Context) {
+	schedule, err := s.q.GetActivitySchedule(ctx)
+	if err != nil {
+		log.Printf("activity scheduler: read schedule: %v", err)
+		return
+	}
+	if !schedule.Enabled {
+		return
+	}
+
+	lifters := int(schedule.Lifters)
+	if lifters < 1 {
+		return
+	}
+	if lifters > activity.MaxRoster {
+		lifters = activity.MaxRoster
+	}
+
+	// Oldest first, which is load-bearing rather than tidy: every weight comes from
+	// s.prescribe, which reads the lifter's history, so generating a catch-up
+	// backwards would prescribe each day from a future that had not happened yet.
+	for _, day := range activity.DueDays(s.reportToday(), activity.CatchUpWindow) {
+		if err := ctx.Err(); err != nil {
+			return
+		}
+		s.generateActivityForDay(ctx, day, lifters)
+	}
+}
+
+// generateActivityForDay claims one day and generates it, or returns quietly if
+// somebody already has.
+func (s *Server) generateActivityForDay(ctx context.Context, day time.Time, lifters int) {
+	date := pgtype.Date{Time: day, Valid: true}
+
+	// The claim is the whole concurrency story — see ClaimActivityDay. No row back
+	// means another replica, or an earlier pass, already owns this day.
+	if _, err := s.q.ClaimActivityDay(ctx, date); err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			log.Printf("activity scheduler: claim %s: %v", day.Format(dateLayout), err)
+		}
+		return
+	}
+
+	summary, err := s.generateOneDay(ctx, day, lifters)
+	if err != nil {
+		// Hand the claim back so the next tick finds the day outstanding again.
+		// Without this a transient failure would mark the day done forever, which is
+		// the one way this design can silently lose activity.
+		log.Printf("activity scheduler: generate %s: %v", day.Format(dateLayout), err)
+		if err := s.q.ReleaseActivityDay(ctx, date); err != nil {
+			log.Printf("activity scheduler: release %s: %v", day.Format(dateLayout), err)
+		}
+		return
+	}
+
+	if err := s.q.FinishActivityDay(ctx, store.FinishActivityDayParams{
+		Day:       date,
+		Sessions:  int32Count(summary.Sessions),
+		Reactions: int32Count(summary.Reactions),
+		Comments:  int32Count(summary.Comments),
+	}); err != nil {
+		log.Printf("activity scheduler: record %s: %v", day.Format(dateLayout), err)
+	}
+}
+
+// generateOneDay is a backfill narrowed to a single date.
+//
+// Shares ensureGeneratedLifters and generateSession with the manual backfill rather
+// than duplicating them, so a scheduled day and a hand-pressed one produce the same
+// kind of data — real prescriptions, real stalls, a plausible clock.
+//
+// Recognition runs every day, not only on days somebody trained. People scroll a
+// feed far more often than they lift, and a day where the only activity is two
+// reactions is a realistic day rather than an empty one.
+func (s *Server) generateOneDay(
+	ctx context.Context, day time.Time, lifters int,
+) (activitySummaryDTO, error) {
+	var summary activitySummaryDTO
+
+	// Seeded from the date so a day regenerated after a release-and-retry produces
+	// the same history rather than a different one.
+	rng := simulationRNG(day.Unix(), int64(lifters))
+
+	people, created, err := s.ensureGeneratedLifters(ctx, lifters)
+	if err != nil {
+		return summary, err
+	}
+	summary.Accounts = created
+
+	for i := range people {
+		person := &people[i]
+		for _, pd := range person.days {
+			if pd.Weekday == nil || int(*pd.Weekday) != int(day.Weekday()) {
+				continue
+			}
+			if !person.persona.Trains(rng) {
+				continue
+			}
+			logged, err := s.generateSession(ctx, person, pd, day, rng)
+			if err != nil {
+				return summary, err
+			}
+			if logged {
+				summary.Sessions++
+			}
+		}
+	}
+
+	reactions, comments, err := s.generateRecognition(ctx, people, rng)
+	if err != nil {
+		return summary, err
+	}
+	summary.Reactions = reactions
+	summary.Comments = comments
+	return summary, nil
+}
+
+// ---- schedule handlers ----
+
+type activityScheduleRequest struct {
+	Enabled bool `json:"enabled"`
+	Lifters int  `json:"lifters"`
+}
+
+// getActivitySchedule reports the daily schedule and when it last ran.
+func (s *Server) getActivitySchedule(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	schedule, err := s.q.GetActivitySchedule(ctx)
+	if err != nil {
+		internalError(w)
+		return
+	}
+
+	dto := activityScheduleDTO{
+		Enabled: schedule.Enabled,
+		Lifters: int(schedule.Lifters),
+	}
+	// No run yet is the ordinary state of a schedule that has just been switched on,
+	// so an absent row is not an error.
+	if last, err := s.q.LastActivityRun(ctx); err == nil {
+		dto.LastRunOn = dateToString(last.Day)
+		dto.LastSessions = int(last.Sessions)
+		dto.LastReactions = int(last.Reactions)
+		dto.LastComments = int(last.Comments)
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		internalError(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, dto)
+}
+
+// putActivitySchedule turns the daily run on or off.
+//
+// Takes effect within the hour rather than immediately, because the scheduler reads
+// the schedule on each pass. That is the trade for having no boot-time flag and no
+// restart: an operator switching it on may wait up to an hour for the first day,
+// and "Generate history" is there for anybody who does not want to.
+func (s *Server) putActivitySchedule(w http.ResponseWriter, r *http.Request) {
+	var req activityScheduleRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		badRequest(w, "invalid JSON body")
+		return
+	}
+	// Bounded exactly as the manual endpoints are, so a schedule cannot ask for a
+	// roster the generator would refuse.
+	if req.Lifters < 1 || req.Lifters > activity.MaxRoster {
+		badRequest(w, "lifters must be between 1 and 8")
+		return
+	}
+
+	updated, err := s.q.SetActivitySchedule(r.Context(), store.SetActivityScheduleParams{
+		Enabled: req.Enabled,
+		Lifters: int32Count(req.Lifters),
+	})
+	if err != nil {
+		internalError(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, activityScheduleDTO{
+		Enabled: updated.Enabled,
+		Lifters: int(updated.Lifters),
+	})
+}
+
 // ---- helpers ----
+
+// int32Count narrows a count for a column that stores one.
+//
+// Every caller is a per-day tally or a value the handlers have already bounded, so
+// the clamp cannot fire in practice. It exists so the narrowing is BOUNDED rather
+// than asserted — a conversion that "cannot" overflow is the kind that eventually
+// does, and a silently negative figure in a bookkeeping row is worse than a
+// saturated one, because it reads as real.
+func int32Count(n int) int32 {
+	if n < 0 {
+		return 0
+	}
+	if n > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return int32(n)
+}
 
 // weekdayValues are the seven values program_days.weekday admits, 0 = Sunday.
 var weekdayValues = [7]int32{0, 1, 2, 3, 4, 5, 6}

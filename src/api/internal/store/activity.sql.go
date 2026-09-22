@@ -11,6 +11,43 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimActivityDay = `-- name: ClaimActivityDay :one
+INSERT INTO generated_activity_runs (day)
+VALUES ($1)
+ON CONFLICT (day) DO NOTHING
+RETURNING day, sessions, reactions, comments, generated_at
+`
+
+// ClaimActivityDay takes ownership of one day's generation, or reports that
+// somebody already has it.
+//
+// THE WHOLE CONCURRENCY STORY IS THIS ONE STATEMENT. day is the primary key, so
+// ON CONFLICT DO NOTHING means exactly one caller can insert a given day: the
+// winner gets a row back, the losers get none and do nothing. That is what makes
+// the scheduler safe to run in more than one replica without any counting of
+// processes, and it is report_runs' argument applied to a simpler problem.
+//
+// Claiming BEFORE generating rather than recording after is deliberate. Recording
+// afterwards would let two replicas both generate the same day and only then
+// discover the collision, by which point the duplicate sessions exist. The cost is
+// that a crash between claim and commit leaves a day marked done that produced
+// nothing — which ReleaseActivityDay exists to undo on the failure path.
+//
+// The counts go in as zero and are filled in by FinishActivityDay once the work is
+// known, so a claim carries no figures it has not earned.
+func (q *Queries) ClaimActivityDay(ctx context.Context, day pgtype.Date) (GeneratedActivityRun, error) {
+	row := q.db.QueryRow(ctx, claimActivityDay, day)
+	var i GeneratedActivityRun
+	err := row.Scan(
+		&i.Day,
+		&i.Sessions,
+		&i.Reactions,
+		&i.Comments,
+		&i.GeneratedAt,
+	)
+	return i, err
+}
+
 const createLoggedSessionSet = `-- name: CreateLoggedSessionSet :exec
 INSERT INTO session_sets
     (session_id, exercise_id, set_number, target_reps, weight_lb, actual_reps, completed)
@@ -128,6 +165,81 @@ func (q *Queries) FindUserIDByUsername(ctx context.Context, username string) (in
 	return id, err
 }
 
+const finishActivityDay = `-- name: FinishActivityDay :exec
+UPDATE generated_activity_runs
+SET sessions     = $1::int,
+    reactions    = $2::int,
+    comments     = $3::int,
+    generated_at = now()
+WHERE day = $4
+`
+
+type FinishActivityDayParams struct {
+	Sessions  int32       `json:"sessions"`
+	Reactions int32       `json:"reactions"`
+	Comments  int32       `json:"comments"`
+	Day       pgtype.Date `json:"day"`
+}
+
+// FinishActivityDay records what a claimed day actually produced.
+func (q *Queries) FinishActivityDay(ctx context.Context, arg FinishActivityDayParams) error {
+	_, err := q.db.Exec(ctx, finishActivityDay,
+		arg.Sessions,
+		arg.Reactions,
+		arg.Comments,
+		arg.Day,
+	)
+	return err
+}
+
+const getActivitySchedule = `-- name: GetActivitySchedule :one
+
+SELECT id, enabled, lifters, updated_at FROM generated_activity_schedule WHERE id = 1
+`
+
+// ---- the daily schedule ----
+// GetActivitySchedule reads the singleton settings row.
+//
+// :one with no argument and no empty case to handle: 0025 seeds the row, and the
+// CHECK (id = 1) means there can never be a second. So every caller gets a
+// schedule rather than a "not configured yet" branch.
+func (q *Queries) GetActivitySchedule(ctx context.Context) (GeneratedActivitySchedule, error) {
+	row := q.db.QueryRow(ctx, getActivitySchedule)
+	var i GeneratedActivitySchedule
+	err := row.Scan(
+		&i.ID,
+		&i.Enabled,
+		&i.Lifters,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const lastActivityRun = `-- name: LastActivityRun :one
+SELECT day, sessions, reactions, comments, generated_at
+FROM generated_activity_runs
+ORDER BY day DESC
+LIMIT 1
+`
+
+// LastActivityRun is the most recent day that was generated, for the admin screen.
+//
+// Ordered by day rather than by generated_at: a catch-up writes several days in one
+// pass with nearly identical timestamps, and what an operator wants to know is how
+// far the activity reaches, not which row was written last.
+func (q *Queries) LastActivityRun(ctx context.Context) (GeneratedActivityRun, error) {
+	row := q.db.QueryRow(ctx, lastActivityRun)
+	var i GeneratedActivityRun
+	err := row.Scan(
+		&i.Day,
+		&i.Sessions,
+		&i.Reactions,
+		&i.Comments,
+		&i.GeneratedAt,
+	)
+	return i, err
+}
+
 const listGeneratedActivityCandidates = `-- name: ListGeneratedActivityCandidates :many
 SELECT id, username, password_hash
 FROM users
@@ -189,6 +301,51 @@ func (q *Queries) ListGeneratedActivityCandidates(ctx context.Context, usernames
 		return nil, err
 	}
 	return items, nil
+}
+
+const releaseActivityDay = `-- name: ReleaseActivityDay :exec
+DELETE FROM generated_activity_runs WHERE day = $1
+`
+
+// ReleaseActivityDay gives a claim back after the generation behind it failed.
+//
+// The alternative to a status column. report_runs needs sending/sent/failed
+// because delivery is somebody else's system and can fail halfway; generating is
+// local work, so a day either produced something or is worth retrying, and
+// deleting the claim is how the next tick learns it is outstanding again.
+func (q *Queries) ReleaseActivityDay(ctx context.Context, day pgtype.Date) error {
+	_, err := q.db.Exec(ctx, releaseActivityDay, day)
+	return err
+}
+
+const setActivitySchedule = `-- name: SetActivitySchedule :one
+UPDATE generated_activity_schedule
+SET enabled    = $1,
+    lifters    = $2::int,
+    updated_at = now()
+WHERE id = 1
+RETURNING id, enabled, lifters, updated_at
+`
+
+type SetActivityScheduleParams struct {
+	Enabled bool  `json:"enabled"`
+	Lifters int32 `json:"lifters"`
+}
+
+// SetActivitySchedule replaces it.
+//
+// An UPDATE rather than an upsert for the same reason: the row is guaranteed to
+// exist, so an ON CONFLICT clause would be dead code that implied otherwise.
+func (q *Queries) SetActivitySchedule(ctx context.Context, arg SetActivityScheduleParams) (GeneratedActivitySchedule, error) {
+	row := q.db.QueryRow(ctx, setActivitySchedule, arg.Enabled, arg.Lifters)
+	var i GeneratedActivitySchedule
+	err := row.Scan(
+		&i.ID,
+		&i.Enabled,
+		&i.Lifters,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const setProgramDayWeekdayIfUnset = `-- name: SetProgramDayWeekdayIfUnset :exec

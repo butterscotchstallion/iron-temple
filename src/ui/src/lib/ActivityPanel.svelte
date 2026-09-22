@@ -7,9 +7,12 @@
   import {
     backfillActivity,
     deleteActivity,
+    getActivitySchedule,
     getActivityStatus,
+    setActivitySchedule,
     startActivity,
     stopActivity,
+    type ActivitySchedule,
     type ActivityStatus,
   } from "./api";
 
@@ -31,6 +34,7 @@
   let error = $state<string | null>(null);
   let note = $state<string | null>(null);
   let confirmingTeardown = $state(false);
+  let schedule = $state<ActivitySchedule | null>(null);
 
   // Defaults chosen to be immediately useful rather than minimal: four lifters over
   // twelve weeks is enough for a monthly leaderboard to rank, a heatmap to have
@@ -66,6 +70,13 @@
     if (result.status === 200) {
       status = result.data;
       schedulePoll();
+    }
+    // The daily schedule is a separate resource — it lives in the database rather
+    // than on the process — but it is read here so the panel has one load path and
+    // one place that can fail.
+    const daily = await getActivitySchedule();
+    if (daily.status === 200) {
+      schedule = daily.data;
     }
   }
 
@@ -105,6 +116,20 @@
     act(async () => (await startActivity({ lifters, tickSeconds })).status === 204, "Running.");
 
   const stop = () => act(async () => (await stopActivity()).status === 204, "Stopped.");
+
+  // Toggling writes immediately rather than behind a Save button: it is one
+  // boolean, and a switch that needs confirming reads as though it might not have
+  // taken. The lifter count goes with it, so changing either persists both.
+  const setDaily = (enabled: boolean, lifters: number) =>
+    act(async () => {
+      const result = await setActivitySchedule({ enabled, lifters });
+      if (result.status !== 200) return false;
+      schedule = result.data;
+      note = enabled
+        ? "Running daily. The first day lands within the hour."
+        : "Daily run switched off.";
+      return true;
+    });
 
   const teardown = () =>
     act(async () => {
@@ -205,6 +230,51 @@
           ? ` · ${status.lastAction}`
           : ""}
       </p>
+    {/if}
+  </div>
+
+  <div class="mt-6 border-t border-border/60 pt-4">
+    <h4 class={labelClass}>Daily</h4>
+    <p class="mt-1 text-sm text-muted-foreground">
+      Keeps generating on its own — a day's training each day, on the lifters' own
+      scheduled weekdays. Unlike Live above, this survives a restart.
+    </p>
+
+    {#if schedule}
+      <!-- Captured so the click handler has a non-null reference: the {#if} narrows
+           the render pass, not a closure that runs later. -->
+      {@const daily = schedule}
+      <div class="mt-3 flex flex-wrap items-center gap-3">
+        <Button
+          variant="outline"
+          onclick={() => setDaily(!daily.enabled, daily.lifters)}
+          disabled={busy}
+        >
+          {daily.enabled ? "Switch off" : "Switch on"}
+        </Button>
+        <span class="text-sm text-muted-foreground">
+          {daily.enabled
+            ? `On, across ${daily.lifters} ${daily.lifters === 1 ? "lifter" : "lifters"}.`
+            : "Off."}
+        </span>
+      </div>
+
+      <!-- The last day it actually generated, rather than only that it is enabled.
+           Switched on and never having run is the ordinary state for the first hour,
+           so the absence is explained instead of left blank. -->
+      {#if daily.lastRunOn}
+        <p class="mt-2 text-xs text-muted-foreground">
+          Last ran for <span class="font-semibold text-foreground">{daily.lastRunOn}</span>
+          — {daily.lastSessions ?? 0}
+          {(daily.lastSessions ?? 0) === 1 ? "session" : "sessions"},
+          {daily.lastReactions ?? 0} reactions, {daily.lastComments ?? 0} comments.
+        </p>
+      {:else if daily.enabled}
+        <p class="mt-2 text-xs text-muted-foreground">
+          Hasn't run yet — it checks once an hour, so the first day lands within the
+          hour.
+        </p>
+      {/if}
     {/if}
   </div>
 

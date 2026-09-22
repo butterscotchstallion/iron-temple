@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // samePersona compares two personas field by field.
@@ -145,6 +146,125 @@ func TestRosterHoldsAMixOfHabits(t *testing.T) {
 	}
 	if !fallible {
 		t.Error("no persona fails often enough to stall a lift and deload")
+	}
+}
+
+// ---- the daily schedule's clock ----
+
+// The window's worth of days plus today, oldest first. Oldest first matters: a
+// catch-up generates history forward, and the progression engine reads a lifter's
+// past to prescribe each session, so running the days backwards would prescribe
+// from a future that had not happened yet.
+func TestDueDaysCoversTheWindowEndingToday(t *testing.T) {
+	now := time.Date(2026, 3, 17, 14, 30, 0, 0, time.UTC)
+	got := DueDays(now, 3*24*time.Hour)
+
+	want := []string{"2026-03-14", "2026-03-15", "2026-03-16", "2026-03-17"}
+	if len(got) != len(want) {
+		t.Fatalf("got %d days, want %d: %v", len(got), len(want), got)
+	}
+	for i, day := range got {
+		if day.Format("2006-01-02") != want[i] {
+			t.Errorf("day %d is %s, want %s", i, day.Format("2006-01-02"), want[i])
+		}
+		// Every date in this schema is held at UTC midnight, which is the form a
+		// DATE column round-trips.
+		if day.Hour()+day.Minute()+day.Second()+day.Nanosecond() != 0 {
+			t.Errorf("day %d is not midnight: %s", i, day)
+		}
+		if day.Location() != time.UTC {
+			t.Errorf("day %d is not UTC: %s", i, day.Location())
+		}
+	}
+}
+
+// Today is included rather than waiting for the day to finish — the point is an
+// install that looks alive NOW, so a lifter who trains on Tuesday morning should
+// appear in the feed on Tuesday.
+func TestDueDaysIncludesToday(t *testing.T) {
+	now := time.Date(2026, 3, 17, 0, 1, 0, 0, time.UTC)
+	got := DueDays(now, 0)
+	if len(got) != 1 {
+		t.Fatalf("a zero window should yield today alone, got %v", got)
+	}
+	if got[0].Format("2006-01-02") != "2026-03-17" {
+		t.Errorf("got %s, want today", got[0].Format("2006-01-02"))
+	}
+}
+
+// The reason this is a pure function of the clock rather than a query: month and
+// year boundaries are where date arithmetic goes wrong, and they are free to test
+// here.
+func TestDueDaysCrossesMonthAndYearBoundaries(t *testing.T) {
+	cases := []struct {
+		name string
+		now  time.Time
+		want []string
+	}{
+		{
+			"across a month end",
+			time.Date(2026, 3, 2, 9, 0, 0, 0, time.UTC),
+			[]string{"2026-02-28", "2026-03-01", "2026-03-02"},
+		},
+		{
+			"across a year end",
+			time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC),
+			[]string{"2025-12-30", "2025-12-31", "2026-01-01"},
+		},
+		{
+			// 2028 is a leap year, so the 29th exists and must not be skipped.
+			"across a leap day",
+			time.Date(2028, 3, 1, 9, 0, 0, 0, time.UTC),
+			[]string{"2028-02-28", "2028-02-29", "2028-03-01"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := DueDays(tc.now, 2*24*time.Hour)
+			if len(got) != len(tc.want) {
+				t.Fatalf("got %d days, want %d: %v", len(got), len(tc.want), got)
+			}
+			for i, day := range got {
+				if day.Format("2006-01-02") != tc.want[i] {
+					t.Errorf("day %d is %s, want %s", i, day.Format("2006-01-02"), tc.want[i])
+				}
+			}
+		})
+	}
+}
+
+// The window bounds the catch-up, which is the point of having one: a month of
+// downtime must not produce a month of training in a single tick.
+func TestDueDaysIsBoundedByItsWindow(t *testing.T) {
+	now := time.Date(2026, 3, 17, 12, 0, 0, 0, time.UTC)
+	if got := len(DueDays(now, CatchUpWindow)); got != 8 {
+		t.Errorf("the default window yielded %d days, want 8 (a week plus today)", got)
+	}
+	// A negative window is treated as none rather than panicking on a loop that
+	// counts down from below zero.
+	if got := DueDays(now, -48*time.Hour); len(got) != 1 {
+		t.Errorf("a negative window yielded %d days, want today alone", len(got))
+	}
+}
+
+// The time of day must not change which days come back — only the date does. A
+// scheduler ticking hourly asks this question over and over, and an answer that
+// drifted through the day would generate a day twice or skip one.
+func TestDueDaysIgnoresTheTimeOfDay(t *testing.T) {
+	var first []string
+	for _, hour := range []int{0, 6, 13, 23} {
+		now := time.Date(2026, 3, 17, hour, 45, 0, 0, time.UTC)
+		var got []string
+		for _, day := range DueDays(now, CatchUpWindow) {
+			got = append(got, day.Format("2006-01-02"))
+		}
+		if first == nil {
+			first = got
+			continue
+		}
+		if !slices.Equal(first, got) {
+			t.Errorf("hour %d gave %v, want %v", hour, got, first)
+		}
 	}
 }
 
