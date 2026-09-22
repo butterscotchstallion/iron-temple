@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -176,6 +177,55 @@ func TestActivityRestartSurvivesTheOldLoopWindingDown(t *testing.T) {
 	status.HasValue("tickSeconds", 3600)
 
 	e.POST("/admin/activity/stop").Expect().Status(http.StatusNoContent)
+}
+
+// Concurrent starts must leave exactly one loop running.
+//
+// Taking over the slot and cancelling the loop it replaces used to be two separate
+// lock acquisitions, so two starts could interleave as stopA, stopB, beginA, beginB
+// — and B would overwrite A's CancelFunc without anybody ever calling it, leaving
+// goroutine A running forever alongside B, doubling the activity and leaking until
+// the process exited. The generation counter does not catch that; only doing both
+// under one lock does.
+//
+// What this can assert over HTTP is that the reported state is coherent and that a
+// stop afterwards genuinely stops everything. The goroutine leak itself is what the
+// -race build and the runner's own accounting would show.
+func TestActivityConcurrentStartsLeaveOneLoop(t *testing.T) {
+	tearDownActivity(t)
+	e := expect(t)
+
+	// Fired together rather than in sequence: sequential starts were already
+	// handled by the generation counter, and it is the overlap that was broken.
+	var wg sync.WaitGroup
+	for i := range 6 {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			// A fresh client per goroutine — httpexpect instances are not built to
+			// be shared across them.
+			expectAs(t, primaryToken).POST("/admin/activity/start").
+				WithJSON(map[string]any{"lifters": 2, "tickSeconds": 3600 - n}).
+				Expect().Status(http.StatusNoContent)
+		}(i)
+	}
+	wg.Wait()
+
+	// One loop, and the status describes a real one rather than a mixture.
+	status := e.GET("/admin/activity").Expect().Status(http.StatusOK).JSON().Object()
+	status.HasValue("running", true)
+	status.HasValue("lifters", 2)
+	tick := int(status.Value("tickSeconds").Number().Raw())
+	if tick < 3595 || tick > 3600 {
+		t.Errorf("tickSeconds is %d, which is not one of the ticks that were started", tick)
+	}
+
+	// And one stop is enough. If a start had leaked a loop, the flag would clear
+	// while an uncancelled goroutine kept going — which is the state this exists to
+	// prevent and the reason the cancel must never be dropped.
+	e.POST("/admin/activity/stop").Expect().Status(http.StatusNoContent)
+	e.GET("/admin/activity").Expect().Status(http.StatusOK).
+		JSON().Object().HasValue("running", false)
 }
 
 // Stopping is idempotent: the caller asked for a state and it holds either way.
@@ -439,6 +489,59 @@ func TestActivityBackfillGivesEachLifterItsOwnVoice(t *testing.T) {
 		t.Fatal("the backfill wrote no comments, so nothing was tested")
 	}
 	t.Logf("%d comments across 6 lifters, %d shared phrases", total, shared)
+}
+
+// A GENERATED ACCOUNT MUST NOT BE ABLE TO SIGN IN.
+//
+// Those accounts hold a real hash of a password that is a constant in this
+// repository, and they do not owe a forced change — so without a block at the door
+// anyone who has read the source could authenticate as one of the roster's lifters
+// and post comments and reactions as them. That the generator is admin-only says
+// nothing about the login route.
+//
+// The credential cannot just be made unusable, because teardown proves which
+// accounts it created by verifying that same hash. Refusing at login keeps both:
+// the hash stays verifiable server-side and is worthless as a way in.
+func TestActivityGeneratedAccountsCannotSignIn(t *testing.T) {
+	tearDownActivity(t)
+	expect(t).POST("/admin/activity/backfill").
+		WithJSON(map[string]any{"lifters": 3, "weeks": 1}).
+		Expect().Status(http.StatusOK)
+
+	// The exact constant the generator uses. Spelled out rather than referenced so
+	// this test fails loudly if somebody changes it without thinking about this
+	// route — which is the whole point of having the test.
+	const generated = "generated-activity-not-for-sign-in"
+
+	for _, username := range activity.Usernames(3) {
+		// Refused, and refused with the same answer a wrong password gets, so the
+		// response does not disclose which accounts are generated.
+		body := expectAnon(t).POST("/auth/login").
+			WithJSON(map[string]any{"username": username, "password": generated}).
+			Expect().Status(http.StatusUnauthorized).
+			JSON().Object()
+		body.Value("message").String().IsEqual("invalid username or password")
+
+		// And no cookie came back, which is the thing that would actually matter.
+		expectAnon(t).POST("/auth/login").
+			WithJSON(map[string]any{"username": username, "password": generated}).
+			Expect().Status(http.StatusUnauthorized).
+			Cookies().NotContainsAll(sessionCookie)
+	}
+}
+
+// A real account is unaffected — the block is on the credential, and refusing every
+// login would be a cure worse than the disease.
+func TestRealAccountsCanStillSignIn(t *testing.T) {
+	createAccount(t, "still-can-log-in", "still-can-log-in-pw")
+
+	expectAnon(t).POST("/auth/login").
+		WithJSON(map[string]any{
+			"username": "still-can-log-in",
+			"password": "still-can-log-in-pw",
+		}).
+		Expect().Status(http.StatusOK).
+		Cookie(sessionCookie).Value().NotEmpty()
 }
 
 // ---- teardown ----

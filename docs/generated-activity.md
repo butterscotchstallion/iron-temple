@@ -106,6 +106,23 @@ query reading `password_hash`. The hash here is evidence, not a credential: it i
 verified in process, used as a boolean and discarded, and nothing derived from it is
 returned. Both `db/queries/users.sql` and `db/queries/activity.sql` say so.
 
+### Generated accounts cannot sign in
+
+The flip side of using the password as proof is that the password is a constant in
+this repository. So **login refuses it outright** — anyone who has read the source
+would otherwise be able to authenticate as `mara.quinn` and post comments and
+reactions as her. The generator being owner-only says nothing about the login route;
+that is a separate door and it is now shut.
+
+The refusal is worded and timed exactly like a wrong password, so it does not
+disclose which accounts are generated, and it is checked against the presented
+credential rather than the stored hash — the only thing a generated account's hash
+verifies is that one string, so anything else has already failed, and this costs no
+extra work on a real login.
+
+Changing `generatedPassword` orphans every account an earlier run created: their
+hashes stop verifying, so a clean-up will leave them behind.
+
 ## Where it lives
 
 | | |

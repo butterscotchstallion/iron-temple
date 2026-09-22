@@ -58,13 +58,21 @@ const (
 	minActivityTick  = 5 * time.Second
 	maxActivityTick  = time.Hour
 
-	// A generated account's password. It is never used: nothing signs in as these
-	// lifters, because the runner writes as them directly. It exists because the
-	// column is NOT NULL, and it is a fixed string rather than a random one so
-	// that a re-run is idempotent rather than locking out an account it made
-	// earlier. Safe only because this is dev tooling on a box whose owner asked
-	// for it; if these accounts ever needed to be signed into, this is the line
-	// that has to change first.
+	// A generated account's password. Nothing signs in as these lifters — the
+	// runner writes as them directly — and nothing CAN: login refuses this
+	// credential outright (see the check in login), because it is a constant in a
+	// readable repository and would otherwise let anybody authenticate as one of
+	// the roster's lifters and post as them.
+	//
+	// So it is not really a password. It is two things: something to put in a NOT
+	// NULL column, and the PROOF OF ORIGIN a teardown uses — a hash only this
+	// generator could have produced, which is what lets clean-up tell an account it
+	// made from a real lifter who happens to share a name. That second job is why
+	// it cannot simply be replaced with unusable bytes.
+	//
+	// Fixed rather than random so a re-run is idempotent and so the proof survives
+	// a restart. Changing it orphans every account an earlier run created: they
+	// stop verifying, so a teardown will keep them.
 	generatedPassword = "generated-activity-not-for-sign-in"
 )
 
@@ -118,10 +126,24 @@ func (a *activityRunner) stop() {
 	}
 }
 
-// begin claims the slot for a new loop and returns its generation.
+// begin claims the slot for a new loop, cancelling whatever held it, and returns
+// the new generation.
+//
+// TAKING OVER AND CANCELLING THE PREDECESSOR ARE ONE ATOMIC STEP, and they have to
+// be. This was a stop() followed by a begin() from the handler — two separate lock
+// acquisitions — and two concurrent starts could interleave as stopA, stopB,
+// beginA, beginB: B then overwrote A's CancelFunc without anybody ever calling it,
+// so goroutine A ran forever alongside B, doubling the activity and leaking until
+// the process exited. The generation counter does not help there; it only settles
+// the sequential case, where an old loop winds down after its replacement is
+// installed.
+//
+// Capturing the predecessor's cancel under the same lock that replaces it is what
+// makes each one cancelled exactly once: only one caller can observe a given
+// CancelFunc as the incumbent, and that caller is obliged to call it.
 func (a *activityRunner) begin(cancel context.CancelFunc, tick time.Duration, lifters int) int {
 	a.mu.Lock()
-	defer a.mu.Unlock()
+	previous := a.cancel
 	a.gen++
 	a.cancel = cancel
 	a.running = true
@@ -130,7 +152,17 @@ func (a *activityRunner) begin(cancel context.CancelFunc, tick time.Duration, li
 	a.started = time.Now()
 	a.actions = 0
 	a.last = ""
-	return a.gen
+	gen := a.gen
+	a.mu.Unlock()
+
+	// Outside the lock: a CancelFunc does not touch this mutex, but calling arbitrary
+	// code while holding one is a habit worth not forming. Correctness does not
+	// depend on the timing — the capture above already guarantees exactly one caller
+	// reaches this line for any given predecessor.
+	if previous != nil {
+		previous()
+	}
+	return gen
 }
 
 // finish releases a loop's slot as it exits — but only if it still holds it.
@@ -244,8 +276,11 @@ func (s *Server) postActivityStart(w http.ResponseWriter, r *http.Request) {
 	// Replaces any loop already running rather than refusing. Starting twice is
 	// what an admin does when they want a different tick, and a 409 would make
 	// them stop it first for no reason.
-	s.activity.stop()
-
+	//
+	// The replacement happens inside begin rather than as a stop() here, because
+	// the two have to be one atomic step — see begin for the interleaving that
+	// separating them allowed.
+	//
 	// Deliberately NOT the request's context: that is cancelled the moment this
 	// response is written, and a loop tied to it would stop before the admin's
 	// browser had finished rendering the button they just pressed. The loop's

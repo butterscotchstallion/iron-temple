@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"net"
@@ -273,6 +274,36 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		unauthorized(w, "invalid username or password")
 		return
 	}
+
+	// A generated-activity account can never sign in, however correct the password.
+	//
+	// Those accounts hold a real hash of generatedPassword, which is a constant in
+	// this repository — so without this, anyone who has read the source can
+	// authenticate as one of the roster's lifters and post comments and reactions as
+	// them. That the generator itself is admin-only says nothing about this route.
+	//
+	// The credential cannot simply be made unusable: teardown proves which accounts
+	// it created by verifying that same hash (see ListGeneratedActivityCandidates),
+	// so storing junk would trade this hole for an inability to clean up. Refusing
+	// at the door keeps both properties — the hash stays verifiable server-side and
+	// is worthless as a login.
+	//
+	// Comparing the PRESENTED password is sufficient and free. The only thing a
+	// generated account's hash verifies is generatedPassword, so any other input has
+	// already failed above; checking the plaintext avoids a second PBKDF2 pass on
+	// every successful login. Constant-time because this is an auth path, even
+	// though the value being compared against is public.
+	//
+	// Placed AFTER the verify rather than before it so the timing profile of this
+	// handler is unchanged — see DummyVerify above for why that is guarded here.
+	// Answered identically to a wrong password, so it discloses nothing about which
+	// accounts are generated.
+	if subtle.ConstantTimeCompare([]byte(req.Password), []byte(generatedPassword)) == 1 {
+		s.logins.Fail(key)
+		unauthorized(w, "invalid username or password")
+		return
+	}
+
 	s.logins.Reset(key)
 
 	// The password is in hand and already verified, so this is the one moment a
