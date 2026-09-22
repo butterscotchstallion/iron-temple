@@ -49,6 +49,7 @@ tags:
   - name: admin
   - name: lifters
   - name: recognition
+  - name: notifications
   - name: exercises
   - name: programs
   - name: sessions
@@ -517,6 +518,107 @@ paths:
                 $ref: "#/components/schemas/Feed"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /notifications:
+    get:
+      tags: [notifications]
+      operationId: listNotifications
+      summary: What happened to you
+      description: >
+        The caller's notifications, newest first, with the unread count over all
+        of them rather than over this page.
+
+        This is the endpoint the header polls, so it is built to be asked
+        repeatedly and answered cheaply: it is a GET under the authenticated
+        group, which means the ETag middleware serves a 304 whenever nothing has
+        changed — and on a household install nothing has changed almost every
+        time.
+
+        Notifications are raised by the recognition endpoints and by account
+        creation, never directly. There is no way to send one, which is why this
+        resource has no POST.
+
+        A session a lifter can be notified about is one they can already read,
+        so nothing here widens what an account may see. `sessionOwnerId` says
+        which recap a row points at — see `Notification`.
+
+        There is no total. Page until a short page says to stop, the same as the
+        feed. Unlike the feed, the count that matters is `unreadCount`, and it
+        is not a page length.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: The notifications
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    delete:
+      tags: [notifications]
+      operationId: clearNotifications
+      summary: Clear them all
+      description: >
+        Deletes every one of the caller's notifications. Not a soft delete and
+        not a watermark — the rows go.
+
+        That is what makes this different from marking them read. Read is about
+        attention and clear is about the list, and keeping them separate is the
+        reason notifications are stored rather than derived from the reactions
+        and comments they describe: a watermark can only express one of the two.
+
+        Nothing is lost that was not already somewhere else. The applause and
+        the conversation live on their sessions and are untouched; what goes is
+        the record that the caller had been told.
+
+        Answers 204 whether or not there was anything to clear, like withdrawing
+        applause: the caller asked for a state, and that state is the same
+        either way.
+      responses:
+        "204":
+          description: Cleared, or was already empty
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /notifications/read:
+    post:
+      tags: [notifications]
+      operationId: markNotificationsRead
+      summary: Mark them all read
+      description: >
+        Drops the unread count to zero and leaves the list alone.
+
+        A POST to a sub-resource rather than a PATCH on each notification: this
+        is the only read operation the panel offers, there is no per-row control
+        to back one, and "mark the ones I just looked at" is a single gesture
+        the client should not have to decompose into N requests.
+
+        Idempotent, and only stamps rows that are still unread — so a second tap
+        writes nothing rather than moving every timestamp forward. `readAt` is
+        when a notification was FIRST read.
+      responses:
+        "204":
+          description: All read, or already were
         "401":
           $ref: "#/components/responses/Unauthorized"
 
@@ -2407,6 +2509,117 @@ components:
             needs the session in front of you, which is the recap the row links to.
         commentCount:
           type: integer
+
+    NotificationList:
+      type: object
+      required: [items, limit, offset, unreadCount]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Notification"
+        limit:
+          type: integer
+        offset:
+          type: integer
+        unreadCount:
+          type: integer
+          description: >
+            How many of the caller's notifications are unread — ALL of them, not
+            just the ones on this page.
+
+            It rides on the list response rather than living at its own endpoint
+            because the client needs both on the same schedule: the badge is the
+            reason anything polls at all, and the panel's first page is what the
+            poll already costs. One request answers "is there anything?" and
+            "what is it?", and the ETag on this endpoint makes the usual answer
+            a 304.
+
+    Notification:
+      type: object
+      required: [id, kind, actor, createdAt]
+      description: >
+        One thing that happened, addressed to the caller.
+
+        The optional fields are optional BY KIND rather than by chance, and a
+        client should switch on `kind` rather than testing them for presence:
+        `joined` carries no session, and only `reaction` carries an emoji.
+      properties:
+        id:
+          type: integer
+          format: int64
+        kind:
+          $ref: "#/components/schemas/NotificationKind"
+        actor:
+          $ref: "#/components/schemas/Lifter"
+          description: >
+            Who did it. Never the caller — every notification is about somebody
+            else's action, and the queries filter the actor out of their own
+            recipients.
+        sessionId:
+          type: integer
+          format: int64
+          description: The session it happened on. Absent on `joined`.
+        sessionOwnerId:
+          type: integer
+          format: int64
+          description: >
+            Whose session it is, which is usually but NOT always the caller — a
+            `reply` reaches somebody who joined a conversation on a session that
+            was never theirs.
+
+            Returned instead of a ready-made link because the two recaps are
+            different screens reading different endpoints: your own session and
+            another lifter's are not one route with a parameter. Which of them a
+            row points at is a routing decision, and routing belongs to the
+            client. Compare this against the signed-in lifter's own id.
+        programDayName:
+          type: string
+          description: >
+            What the session was, so a row can say which workout drew the
+            applause rather than making the lifter open it to find out.
+        emoji:
+          $ref: "#/components/schemas/ReactionEmoji"
+          description: Present on `reaction` and nothing else.
+        commentBody:
+          type: string
+          description: >
+            The comment in full, on `comment` and `reply`. Not truncated by the
+            API: where to cut it depends on how wide the panel is, and a comment
+            is already capped at 256 runes.
+
+            Absent if the comment has since been deleted — though in practice
+            the notification goes with it, since the row references the comment
+            and the reference cascades.
+        createdAt:
+          type: string
+          format: date-time
+        readAt:
+          type: string
+          format: date-time
+          description: >
+            When the caller first read it, absent while unread. A timestamp
+            rather than a flag because it costs the same and answers "when".
+
+    NotificationKind:
+      type: string
+      description: >
+        What happened. Enumerated so a client generates its own exhaustive
+        switch and a new kind shows up as a compile error rather than as a blank
+        row.
+
+        `comment` is somebody talking on YOUR session; `reply` is somebody
+        talking on a session you had also commented on, which is what makes a
+        conversation followable by the people in it. A lifter never gets both
+        for one comment.
+
+        Unlike `ReactionEmoji`, this set is never validated on the way in,
+        because it never arrives on the way in: a client cannot raise a
+        notification, and every kind is written as a literal by the query that
+        fans it out. The database does not constrain the column either — see
+        migration 0026 for why.
+      enum: [reaction, comment, reply, joined]
+      example: reaction
 
     Lifter:
       type: object

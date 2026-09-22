@@ -156,11 +156,46 @@ func (s *Server) addSessionReaction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.q.AddSessionReaction(ctx, store.AddSessionReactionParams{
+	// The applause and the telling of it go in one transaction. They are two
+	// statements and they must not be separable: applause nobody was told about
+	// is exactly the state 0026 exists to abolish, and it would be invisible —
+	// the lifter's tap worked, the count went up, and the only sign of the
+	// failure would be a notification that never came.
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		internalError(w)
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := s.q.WithTx(tx)
+
+	added, err := qtx.AddSessionReaction(ctx, store.AddSessionReactionParams{
 		SessionID: session.ID,
 		UserID:    caller,
 		Emoji:     req.Emoji,
-	}); err != nil {
+	})
+	if err != nil {
+		internalError(w)
+		return
+	}
+
+	// Only a tap that actually recorded something tells anybody. A repeat tap is
+	// a no-op on the applause — the primary key settles that, which is why the
+	// query is :execrows — and it has to be a no-op on the notification too, or
+	// a lifter leaning on a button would fill somebody's panel with one row over
+	// and over.
+	if added > 0 {
+		if err := qtx.CreateReactionNotification(ctx, store.CreateReactionNotificationParams{
+			ActorID:   caller,
+			SessionID: session.ID,
+			Emoji:     req.Emoji,
+		}); err != nil {
+			internalError(w)
+			return
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
 		internalError(w)
 		return
 	}
@@ -187,11 +222,45 @@ func (s *Server) removeSessionReaction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	if _, err := s.q.RemoveSessionReaction(ctx, store.RemoveSessionReactionParams{
+	caller := userFrom(ctx).ID
+
+	// Withdrawing takes the notification with it, in one transaction for the
+	// same reason giving it does.
+	//
+	// This is the asymmetry 0026 records: a deleted comment's notification goes
+	// by cascade, because a notification references a comment by id. A reaction
+	// has no id to reference — 0024 gave session_reactions a composite primary
+	// key and no surrogate — so there is nothing to cascade from and the row has
+	// to be deleted by hand, matched on the three columns that identify it.
+	//
+	// Unconditional about what it finds, like the withdrawal itself: taking back
+	// applause that was never given removes nothing and reports nothing.
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		internalError(w)
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := s.q.WithTx(tx)
+
+	if _, err := qtx.RemoveSessionReaction(ctx, store.RemoveSessionReactionParams{
 		SessionID: session.ID,
-		UserID:    userFrom(ctx).ID,
+		UserID:    caller,
 		Emoji:     emoji,
 	}); err != nil {
+		internalError(w)
+		return
+	}
+	if err := qtx.DeleteReactionNotification(ctx, store.DeleteReactionNotificationParams{
+		ActorID:   caller,
+		SessionID: session.ID,
+		Emoji:     emoji,
+	}); err != nil {
+		internalError(w)
+		return
+	}
+
+	if err := tx.Commit(ctx); err != nil {
 		internalError(w)
 		return
 	}
@@ -268,12 +337,47 @@ func (s *Server) addSessionComment(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	caller := userFrom(ctx)
-	row, err := s.q.AddSessionComment(ctx, store.AddSessionCommentParams{
+
+	// One transaction, as the reaction path does it. A comment that reached
+	// nobody is worse here than there: applause is ambient, but a comment is
+	// addressed to somebody and may be a question waiting on an answer.
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		internalError(w)
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := s.q.WithTx(tx)
+
+	row, err := qtx.AddSessionComment(ctx, store.AddSessionCommentParams{
 		SessionID: session.ID,
 		UserID:    caller.ID,
 		Body:      body,
 	})
 	if err != nil {
+		internalError(w)
+		return
+	}
+
+	// Who hears about this is decided entirely in SQL — the session's owner, and
+	// everybody else already talking on it, minus the author. See
+	// CreateCommentNotifications for why that rule lives there and not here: the
+	// generated-activity scheduler has to apply the same one, and it is not
+	// going through this handler to do it.
+	//
+	// Runs after the insert on purpose. The query reads the session's other
+	// comments to find the thread, and the comment just posted is among them by
+	// then — excluded by id, and its author excluded again by actor.
+	if err := qtx.CreateCommentNotifications(ctx, store.CreateCommentNotificationsParams{
+		ActorID:   caller.ID,
+		SessionID: session.ID,
+		CommentID: row.ID,
+	}); err != nil {
+		internalError(w)
+		return
+	}
+
+	if err := tx.Commit(ctx); err != nil {
 		internalError(w)
 		return
 	}
