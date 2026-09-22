@@ -7,6 +7,7 @@ import {
   type User,
 } from "./api";
 import { clearCache } from "./cache.svelte";
+import { resetNotifications } from "./notifications.svelte";
 import { flush } from "./writeQueue.svelte";
 
 // Shared authentication state. A module-level `$state` object rather than a
@@ -109,6 +110,10 @@ export async function signOut(): Promise<void> {
     // history, and the next person to use this browser must not be shown a
     // frame of it while their own /me is in flight.
     clearCache();
+    // Same reasoning, and not covered by clearCache — notifications are their
+    // own reactive module, not cache entries. Without this the header would
+    // keep the previous lifter's unread badge until the next poll.
+    resetNotifications();
     window.location.hash = "#/";
     await loadMe();
   }

@@ -534,6 +534,17 @@ func (s *Server) ensureGeneratedAccount(
 	if err := qtx.SeedDefaultPlates(ctx, user.ID); err != nil {
 		return 0, false, err
 	}
+	// Announced like any other new account, in the transaction that made it.
+	// A generated lifter turning up is a real thing that happened on the
+	// install, and it is most of what makes the notification panel worth opening
+	// on a demo box.
+	//
+	// Seeding a roster of four therefore puts four 'joined' rows in the owner's
+	// panel, one per persona, which is what actually happened. The teardown
+	// takes them back out by cascade when it deletes the accounts.
+	if err := qtx.CreateJoinNotifications(ctx, user.ID); err != nil {
+		return 0, false, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return 0, false, err
 	}
@@ -759,12 +770,31 @@ func (s *Server) generateRecognition(
 				continue
 			}
 			if person.persona.Reacts(rng) {
-				if err := q.AddSessionReaction(ctx, store.AddSessionReactionParams{
+				// Held in a local because the notification has to record the
+				// same one: Emoji() draws from the rng, so calling it twice
+				// would applaud with one and announce another.
+				chosen := activity.Emoji(emoji, rng)
+				added, err := q.AddSessionReaction(ctx, store.AddSessionReactionParams{
 					SessionID: row.ID,
 					UserID:    person.userID,
-					Emoji:     activity.Emoji(emoji, rng),
-				}); err != nil {
+					Emoji:     chosen,
+				})
+				if err != nil {
 					return reactions, comments, err
+				}
+				// Told the same way a real tap is, and gated the same way: a
+				// persona reaching for an emoji it already gave this session
+				// records nothing and announces nothing. This is the path that
+				// puts anything in a real lifter's panel on an install nobody
+				// else uses — see notifications.go.
+				if added > 0 {
+					if err := q.CreateReactionNotification(ctx, store.CreateReactionNotificationParams{
+						ActorID:   person.userID,
+						SessionID: row.ID,
+						Emoji:     chosen,
+					}); err != nil {
+						return reactions, comments, err
+					}
 				}
 				reactions++
 			}
@@ -778,10 +808,23 @@ func (s *Server) generateRecognition(
 				if body == "" || len([]rune(body)) > maxCommentBody {
 					continue
 				}
-				if _, err := q.AddSessionComment(ctx, store.AddSessionCommentParams{
+				posted, err := q.AddSessionComment(ctx, store.AddSessionCommentParams{
 					SessionID: row.ID,
 					UserID:    person.userID,
 					Body:      body,
+				})
+				if err != nil {
+					return reactions, comments, err
+				}
+				// The same fan-out the handler triggers, which is the point of
+				// that rule living in SQL: the owner hears they were commented
+				// on, and anybody else already talking on the session hears a
+				// reply — including, on a busy generated session, other
+				// personas.
+				if err := q.CreateCommentNotifications(ctx, store.CreateCommentNotificationsParams{
+					ActorID:   person.userID,
+					SessionID: row.ID,
+					CommentID: posted.ID,
 				}); err != nil {
 					return reactions, comments, err
 				}
@@ -884,6 +927,14 @@ func (s *Server) runActivity(
 }
 
 // generateRecognitionOnce responds to at most one session, for the live loop.
+//
+// Transactional for the same reason addSessionReaction is, and it is the one
+// recognition path where that had to be added rather than inherited: the bulk
+// generateRecognition is handed a transactional `q` by its caller, and the two
+// handlers open their own. This one ran on s.q, so its write and the
+// notification for it auto-committed separately — and the loop above only logs
+// and carries on, so a failed notification would have left applause nobody was
+// told about, silently, which is the state 0026 exists to abolish.
 func (s *Server) generateRecognitionOnce(
 	ctx context.Context, person *simulatedLifter, rng *rand.Rand,
 ) (reactions, comments int, err error) {
@@ -895,28 +946,65 @@ func (s *Server) generateRecognitionOnce(
 	}
 	row := seen[rng.Intn(len(seen))]
 
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := s.q.WithTx(tx)
+
+	// Counted into locals rather than the named returns, so a rolled-back tick
+	// cannot report activity the database does not have. The loop turns these
+	// into the "Mara reacted to a session" line it shows the owner.
+	var reacted, commented int
+
 	if person.persona.Reacts(rng) {
-		if err := s.q.AddSessionReaction(ctx, store.AddSessionReactionParams{
+		// One draw from the rng, reused by the notification — see the same
+		// local in generateRecognition.
+		chosen := activity.Emoji(allowedReactionList(), rng)
+		added, err := q.AddSessionReaction(ctx, store.AddSessionReactionParams{
 			SessionID: row.ID,
 			UserID:    person.userID,
-			Emoji:     activity.Emoji(allowedReactionList(), rng),
-		}); err != nil {
+			Emoji:     chosen,
+		})
+		if err != nil {
 			return 0, 0, err
 		}
-		reactions++
+		if added > 0 {
+			if err := q.CreateReactionNotification(ctx, store.CreateReactionNotificationParams{
+				ActorID:   person.userID,
+				SessionID: row.ID,
+				Emoji:     chosen,
+			}); err != nil {
+				return 0, 0, err
+			}
+		}
+		reacted++
 	}
 	if person.persona.Comments(rng) {
 		body := person.persona.Comment(rng)
 		if body != "" && len([]rune(body)) <= maxCommentBody {
-			if _, err := s.q.AddSessionComment(ctx, store.AddSessionCommentParams{
+			posted, err := q.AddSessionComment(ctx, store.AddSessionCommentParams{
 				SessionID: row.ID, UserID: person.userID, Body: body,
-			}); err != nil {
-				return reactions, 0, err
+			})
+			if err != nil {
+				return 0, 0, err
 			}
-			comments++
+			if err := q.CreateCommentNotifications(ctx, store.CreateCommentNotificationsParams{
+				ActorID:   person.userID,
+				SessionID: row.ID,
+				CommentID: posted.ID,
+			}); err != nil {
+				return 0, 0, err
+			}
+			commented++
 		}
 	}
-	return reactions, comments, nil
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, 0, err
+	}
+	return reacted, commented, nil
 }
 
 // ---- the daily schedule ----

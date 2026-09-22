@@ -239,6 +239,15 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 				// reason: the subject is the install, not a lifter.
 				r.Get("/leaderboard", s.getLeaderboard)
 
+				// What happened to the caller. Top-level like the two above,
+				// but for the opposite reason: the subject IS a person, and it
+				// is always the one holding the session cookie. There is no id
+				// in the path because there is nobody else these could be for
+				// — see notifications.go for why there is no POST either.
+				r.Get("/notifications", s.listNotifications)
+				r.Delete("/notifications", s.clearNotifications)
+				r.Post("/notifications/read", s.markNotificationsRead)
+
 				// One lifter reading another. Every route is a GET, and that is
 				// load-bearing rather than incidental: the id in these paths
 				// names a person whose history is being read, so a write

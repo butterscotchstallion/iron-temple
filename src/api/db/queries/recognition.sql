@@ -38,7 +38,13 @@ SELECT id, user_id FROM sessions WHERE id = sqlc.arg('id');
 -- a no-op, which is what a lifter tapping twice means. Returning a 409 for it
 -- would be reporting a mistake nobody made, and checking first would be a race
 -- under concurrent taps that the constraint settles for free.
--- name: AddSessionReaction :exec
+--
+-- :execrows because 0026 needs to tell those two apart. The lifter sees 204
+-- either way, but a repeat tap must not mint a second notification, and with
+-- ON CONFLICT DO NOTHING the row count is the only thing that knows. Under
+-- concurrent taps exactly one of them reports a row, which is the same
+-- guarantee the primary key is already giving.
+-- name: AddSessionReaction :execrows
 INSERT INTO session_reactions (session_id, user_id, emoji)
 VALUES (sqlc.arg('session_id')::int, sqlc.arg('user_id')::int, sqlc.arg('emoji'))
 ON CONFLICT (session_id, user_id, emoji) DO NOTHING;

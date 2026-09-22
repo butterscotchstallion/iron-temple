@@ -41,7 +41,7 @@ func (q *Queries) AddSessionComment(ctx context.Context, arg AddSessionCommentPa
 	return i, err
 }
 
-const addSessionReaction = `-- name: AddSessionReaction :exec
+const addSessionReaction = `-- name: AddSessionReaction :execrows
 
 INSERT INTO session_reactions (session_id, user_id, emoji)
 VALUES ($1::int, $2::int, $3)
@@ -61,9 +61,18 @@ type AddSessionReactionParams struct {
 // a no-op, which is what a lifter tapping twice means. Returning a 409 for it
 // would be reporting a mistake nobody made, and checking first would be a race
 // under concurrent taps that the constraint settles for free.
-func (q *Queries) AddSessionReaction(ctx context.Context, arg AddSessionReactionParams) error {
-	_, err := q.db.Exec(ctx, addSessionReaction, arg.SessionID, arg.UserID, arg.Emoji)
-	return err
+//
+// :execrows because 0026 needs to tell those two apart. The lifter sees 204
+// either way, but a repeat tap must not mint a second notification, and with
+// ON CONFLICT DO NOTHING the row count is the only thing that knows. Under
+// concurrent taps exactly one of them reports a row, which is the same
+// guarantee the primary key is already giving.
+func (q *Queries) AddSessionReaction(ctx context.Context, arg AddSessionReactionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, addSessionReaction, arg.SessionID, arg.UserID, arg.Emoji)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteSessionComment = `-- name: DeleteSessionComment :execrows

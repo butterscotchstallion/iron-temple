@@ -335,6 +335,52 @@ type feedDTO struct {
 	Offset int32          `json:"offset"`
 }
 
+// notificationDTO is one thing that happened, addressed to the caller.
+//
+// Almost everything below the actor is a pointer, and that is the kind system
+// carrying a shape the schema cannot: a 'joined' has no session, only a
+// 'reaction' has an emoji, and only a 'comment' or 'reply' has a body. They are
+// omitempty so a row on the wire is the fields that mean something for its kind
+// and nothing else — a client switches on Kind rather than probing for nulls.
+//
+// The actor is a lifterDTO for the reason sessionCommentDTO's author is: every
+// one of these is drawn as somebody's avatar next to somebody's name, which is
+// what that type is for.
+type notificationDTO struct {
+	ID    int32     `json:"id"`
+	Kind  string    `json:"kind"`
+	Actor lifterDTO `json:"actor"`
+
+	SessionID *int32 `json:"sessionId,omitempty"`
+	// SessionOwnerID is usually the caller and deliberately not assumed to be:
+	// a 'reply' reaches somebody who joined a conversation on a session that was
+	// never theirs. The client compares it against its own id to decide which of
+	// the two recap routes a row points at — see the note in openapi.yaml about
+	// why that is a routing decision and not the API's to make.
+	SessionOwnerID *int32  `json:"sessionOwnerId,omitempty"`
+	ProgramDayName *string `json:"programDayName,omitempty"`
+	Emoji          *string `json:"emoji,omitempty"`
+	CommentBody    *string `json:"commentBody,omitempty"`
+
+	CreatedAt string `json:"createdAt"`
+	// ReadAt is absent while unread, which is the state the badge counts.
+	ReadAt string `json:"readAt,omitempty"`
+}
+
+// notificationListDTO is a page of the panel.
+//
+// No total, following feedDTO — but UnreadCount is not that total in disguise.
+// It counts the caller's unread notifications across all of them rather than
+// the ones on this page, because it is what the header badge draws and the
+// header has not asked for a page in any meaningful sense: it asks for this
+// endpoint once a minute and mostly gets a 304.
+type notificationListDTO struct {
+	Items       []notificationDTO `json:"items"`
+	Limit       int32             `json:"limit"`
+	Offset      int32             `json:"offset"`
+	UnreadCount int64             `json:"unreadCount"`
+}
+
 type avatarDTO struct {
 	Etag string `json:"etag"`
 }

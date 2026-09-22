@@ -141,6 +141,20 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 	// install; there is nothing left for a later account to adopt, and doing it
 	// again would move the owner's history onto somebody else.
 
+	// Tell everybody already here. In the same transaction as the account, so
+	// an account that exists has been announced and one that was rolled back
+	// was never mentioned.
+	//
+	// This is the only place in the API a 'joined' notification is raised.
+	// register does NOT do it, and that is not an omission: registration is open
+	// only while the install has no accounts, so the lifter it creates is the
+	// first one and there is nobody to tell. Calling it there would be a query
+	// that can only ever select zero rows.
+	if err := qtx.CreateJoinNotifications(ctx, user.ID); err != nil {
+		internalError(w)
+		return
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		internalError(w)
 		return

@@ -34,6 +34,18 @@ type GeneratedActivitySchedule struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
+type Notification struct {
+	ID        int32              `json:"id"`
+	UserID    int32              `json:"user_id"`
+	ActorID   int32              `json:"actor_id"`
+	Kind      string             `json:"kind"`
+	SessionID *int32             `json:"session_id"`
+	CommentID *int32             `json:"comment_id"`
+	Emoji     *string            `json:"emoji"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	ReadAt    pgtype.Timestamptz `json:"read_at"`
+}
+
 type Program struct {
 	ID              int32              `json:"id"`
 	Name            string             `json:"name"`

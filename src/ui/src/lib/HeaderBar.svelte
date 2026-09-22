@@ -1,6 +1,8 @@
 <script lang="ts">
+  import NotificationBell from "./NotificationBell.svelte";
   import UserMenu from "./UserMenu.svelte";
   import VersionChangelog from "./VersionChangelog.svelte";
+  import { auth } from "./auth.svelte";
   import { version } from "./version.svelte";
 
   // The black bar across the top: build version on the left, account on the
@@ -33,6 +35,19 @@
       environment={version.environment}
     />
 
-    <UserMenu />
+    <div class="flex items-center gap-1">
+      <!-- Only once there is somebody to notify. Signed out, the right-hand
+           side is a Sign in link and a bell would be counting nothing — and
+           the endpoint behind it answers 401 anyway.
+
+           Also held back during a forced password change: that state refuses
+           every endpoint except the two it needs to escape, so polling here
+           would be a 403 a minute for a panel the lifter cannot act on. Same
+           condition App.svelte uses to start the polling at all. -->
+      {#if auth.me && !auth.me.mustChangePassword}
+        <NotificationBell />
+      {/if}
+      <UserMenu />
+    </div>
   </div>
 </header>
