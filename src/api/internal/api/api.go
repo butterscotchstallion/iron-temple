@@ -46,6 +46,10 @@ type Server struct {
 	// which is how tests and local development avoid sending real mail — the
 	// integration suite drives sendDueReports directly instead.
 	mailer *racked.Mailer
+	// activity is the generated-training runner's state. Always present: it holds
+	// a mutex and a flag, and the flag is false until an admin turns it on, so
+	// there is nothing to configure and nothing to nil-check.
+	activity *activityRunner
 	// metrics counts what the API serves. Always present — a nil check at every
 	// observation point is a worse trade than a registry nobody scrapes, and
 	// the exposition page is only reachable from the address main.go binds it
@@ -64,6 +68,7 @@ func NewServer(pool *pgxpool.Pool, version, environment string) *Server {
 		environment: environment,
 		logins:      auth.NewRateLimiter(auth.DefaultAttempts, auth.DefaultWindow),
 		reportLoc:   time.UTC,
+		activity:    &activityRunner{},
 		metrics:     metrics.New(version, environment),
 	}
 	// Pool saturation is the failure this deployment is most likely to hit —
@@ -211,6 +216,18 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 					r.Use(s.requireAdmin)
 					r.Get("/users", s.listUsers)
 					r.Post("/users", s.createUser)
+
+					// Generated training activity, for an install that needs
+					// some to look at. Inside this subtree on purpose: these are
+					// the most powerful handlers in the app — one fabricates
+					// history and one deletes accounts — and sitting here is what
+					// makes them admin-only without anybody having to remember,
+					// exactly as the note above intends.
+					r.Get("/activity", s.getActivityStatus)
+					r.Post("/activity/backfill", s.postActivityBackfill)
+					r.Post("/activity/start", s.postActivityStart)
+					r.Post("/activity/stop", s.postActivityStop)
+					r.Delete("/activity", s.deleteActivity)
 				})
 
 				// The install's recent activity. Not under /lifters because no id

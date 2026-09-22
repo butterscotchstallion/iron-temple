@@ -198,6 +198,43 @@ type feedEntryDTO struct {
 	CommentCount  int64 `json:"commentCount"`
 }
 
+// activityStatusDTO is what the generated-activity runner is doing.
+//
+// MaxLifters and MaxWeeks are sent rather than assumed by the client, so the admin
+// screen's inputs cannot offer a number the endpoint will refuse.
+type activityStatusDTO struct {
+	Running bool `json:"running"`
+	// Lifters and TickSeconds describe the RUNNING loop, so both are zero when
+	// none is.
+	Lifters     int `json:"lifters"`
+	TickSeconds int `json:"tickSeconds"`
+	// Actions and LastAction are how the screen shows the loop is alive rather
+	// than merely flagged as running.
+	Actions    int    `json:"actions"`
+	LastAction string `json:"lastAction,omitempty"`
+	StartedAt  string `json:"startedAt,omitempty"`
+	MaxLifters int    `json:"maxLifters"`
+	MaxWeeks   int    `json:"maxWeeks"`
+}
+
+// activitySummaryDTO is what one backfill did.
+//
+// Accounts counts the ones it CREATED, not the ones it used: a second backfill
+// adds history to the lifters the first one made, and reporting four again would
+// read as four more people.
+type activitySummaryDTO struct {
+	Accounts  int `json:"accounts"`
+	Sessions  int `json:"sessions"`
+	Reactions int `json:"reactions"`
+	Comments  int `json:"comments"`
+}
+
+// activityTeardownDTO is what a teardown removed — rows actually deleted rather
+// than names attempted, which differ whenever an account was never created.
+type activityTeardownDTO struct {
+	Removed int64 `json:"removed"`
+}
+
 // leaderboardDTO is every board for one period.
 //
 // All of them in one response rather than one per request: a single pass of

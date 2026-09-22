@@ -1,0 +1,443 @@
+package api_test
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"testing"
+)
+
+// Generated training activity.
+//
+// Two things here matter more than the rest. The authorisation, because these are
+// the most powerful handlers in the app — one fabricates history and one deletes
+// accounts. And that the history is REAL: generated through the actual progression
+// engine, so an install populated this way exercises the same code a lifter's own
+// history would, rather than looking plausible and being wrong.
+
+// tearDownActivity removes the generated accounts. Registered by every test that
+// creates them, because they are ordinary accounts on a database the whole suite
+// shares — left behind, they would appear in every roster, feed and leaderboard
+// assertion in the package.
+func tearDownActivity(t *testing.T) {
+	t.Helper()
+	t.Cleanup(func() {
+		expect(t).DELETE("/admin/activity").Expect().Status(http.StatusOK)
+	})
+}
+
+// ---- who can reach it ----
+
+func TestActivityRoutesRejectAnonymousCallers(t *testing.T) {
+	e := expectAnon(t)
+	e.GET("/admin/activity").Expect().Status(http.StatusUnauthorized)
+	e.POST("/admin/activity/backfill").
+		WithJSON(map[string]any{"lifters": 2, "weeks": 2}).
+		Expect().Status(http.StatusUnauthorized)
+	e.POST("/admin/activity/start").
+		WithJSON(map[string]any{"lifters": 2, "tickSeconds": 10}).
+		Expect().Status(http.StatusUnauthorized)
+	e.POST("/admin/activity/stop").Expect().Status(http.StatusUnauthorized)
+	e.DELETE("/admin/activity").Expect().Status(http.StatusUnauthorized)
+}
+
+// An ordinary lifter must not be able to fabricate history or delete accounts.
+// Asserted on every verb rather than the cheapest one: this is the whole
+// authorisation model for the feature.
+func TestActivityRoutesRejectNonAdmins(t *testing.T) {
+	_, token := secondLifter(t, "activity-outsider")
+	e := expectAs(t, token)
+
+	for _, call := range []struct {
+		method, path string
+		body         map[string]any
+	}{
+		{http.MethodGet, "/admin/activity", nil},
+		{http.MethodPost, "/admin/activity/backfill", map[string]any{"lifters": 2, "weeks": 2}},
+		{http.MethodPost, "/admin/activity/start", map[string]any{"lifters": 2, "tickSeconds": 10}},
+		{http.MethodPost, "/admin/activity/stop", nil},
+		{http.MethodDelete, "/admin/activity", nil},
+	} {
+		req := e.Request(call.method, call.path)
+		if call.body != nil {
+			req = req.WithJSON(call.body)
+		}
+		req.Expect().
+			Status(http.StatusForbidden).
+			JSON().Object().HasValue("code", "admin_required")
+	}
+}
+
+// ---- bounds ----
+
+func TestActivityBackfillValidatesItsRequest(t *testing.T) {
+	e := expect(t)
+	for _, body := range []map[string]any{
+		{"lifters": 0, "weeks": 4},
+		{"lifters": 99, "weeks": 4},
+		{"lifters": -1, "weeks": 4},
+		{"lifters": 2, "weeks": 0},
+		{"lifters": 2, "weeks": 27},
+		{"lifters": 2, "weeks": -4},
+	} {
+		e.POST("/admin/activity/backfill").WithJSON(body).
+			Expect().Status(http.StatusBadRequest)
+	}
+}
+
+func TestActivityStartValidatesItsRequest(t *testing.T) {
+	e := expect(t)
+	for _, body := range []map[string]any{
+		{"lifters": 2, "tickSeconds": 1},
+		{"lifters": 2, "tickSeconds": 0},
+		{"lifters": 2, "tickSeconds": 4000},
+		{"lifters": 0, "tickSeconds": 10},
+		{"lifters": 99, "tickSeconds": 10},
+	} {
+		e.POST("/admin/activity/start").WithJSON(body).
+			Expect().Status(http.StatusBadRequest)
+	}
+}
+
+// ---- status ----
+
+func TestActivityStatusReportsItsBoundsAndIsIdleByDefault(t *testing.T) {
+	status := expect(t).GET("/admin/activity").Expect().
+		Status(http.StatusOK).JSON().Object()
+
+	// Sent so a client cannot offer a number the endpoints would refuse.
+	status.Value("maxLifters").Number().Gt(0)
+	status.HasValue("maxWeeks", 26)
+	status.Value("running").Boolean()
+}
+
+// Stopping is idempotent: the caller asked for a state and it holds either way.
+func TestActivityStopIsIdempotent(t *testing.T) {
+	e := expect(t)
+	e.POST("/admin/activity/stop").Expect().Status(http.StatusNoContent)
+	e.POST("/admin/activity/stop").Expect().Status(http.StatusNoContent)
+	e.GET("/admin/activity").Expect().Status(http.StatusOK).
+		JSON().Object().HasValue("running", false)
+}
+
+func TestActivityStartThenStopFlipsTheFlag(t *testing.T) {
+	tearDownActivity(t)
+	e := expect(t)
+
+	// A long tick, so nothing actually fires during the test — what is under
+	// assertion is the flag and the reported shape, not the loop's output.
+	e.POST("/admin/activity/start").
+		WithJSON(map[string]any{"lifters": 2, "tickSeconds": 3600}).
+		Expect().Status(http.StatusNoContent)
+
+	running := e.GET("/admin/activity").Expect().Status(http.StatusOK).JSON().Object()
+	running.HasValue("running", true)
+	running.HasValue("lifters", 2)
+	running.HasValue("tickSeconds", 3600)
+	running.Value("startedAt").String().NotEmpty()
+
+	e.POST("/admin/activity/stop").Expect().Status(http.StatusNoContent)
+	e.GET("/admin/activity").Expect().Status(http.StatusOK).
+		JSON().Object().HasValue("running", false)
+}
+
+// Starting again replaces the loop rather than refusing, because that is what an
+// admin does when they want a different tick.
+func TestActivityStartTwiceReplacesTheLoop(t *testing.T) {
+	tearDownActivity(t)
+	e := expect(t)
+
+	e.POST("/admin/activity/start").
+		WithJSON(map[string]any{"lifters": 2, "tickSeconds": 3600}).
+		Expect().Status(http.StatusNoContent)
+	e.POST("/admin/activity/start").
+		WithJSON(map[string]any{"lifters": 3, "tickSeconds": 1800}).
+		Expect().Status(http.StatusNoContent)
+
+	status := e.GET("/admin/activity").Expect().Status(http.StatusOK).JSON().Object()
+	status.HasValue("running", true)
+	status.HasValue("lifters", 3)
+	status.HasValue("tickSeconds", 1800)
+
+	e.POST("/admin/activity/stop").Expect().Status(http.StatusNoContent)
+}
+
+// ---- what a backfill produces ----
+
+func TestActivityBackfillCreatesLiftersWithHistory(t *testing.T) {
+	tearDownActivity(t)
+	e := expect(t)
+
+	summary := e.POST("/admin/activity/backfill").
+		WithJSON(map[string]any{"lifters": 3, "weeks": 4}).
+		Expect().Status(http.StatusOK).JSON().Object()
+
+	summary.HasValue("accounts", 3)
+	summary.Value("sessions").Number().Gt(0)
+
+	// They show up as ordinary lifters, because that is all they are.
+	roster := e.GET("/lifters").Expect().Status(http.StatusOK).JSON().Array()
+	roster.Length().Ge(4) // the owner plus three
+
+	// And with real training behind them, dated in the past.
+	listed := 0
+	for _, entry := range roster.Iter() {
+		obj := entry.Object()
+		if obj.Value("username").String().Raw() == primaryUsername {
+			continue
+		}
+		if _, ok := obj.Raw()["lastTrainedOn"]; ok {
+			listed++
+		}
+	}
+	if listed == 0 {
+		t.Error("no generated lifter has a last-trained date")
+	}
+}
+
+// A second backfill adds history to the lifters the first one made rather than
+// failing on a taken username — and says it created nobody new.
+func TestActivityBackfillIsRerunnable(t *testing.T) {
+	tearDownActivity(t)
+	e := expect(t)
+
+	first := e.POST("/admin/activity/backfill").
+		WithJSON(map[string]any{"lifters": 2, "weeks": 2}).
+		Expect().Status(http.StatusOK).JSON().Object()
+	first.HasValue("accounts", 2)
+
+	second := e.POST("/admin/activity/backfill").
+		WithJSON(map[string]any{"lifters": 2, "weeks": 2}).
+		Expect().Status(http.StatusOK).JSON().Object()
+	second.HasValue("accounts", 0)
+}
+
+// The weights come from the real progression engine, which is the claim that makes
+// generated history worth having. A session's sets must carry a load the app would
+// actually have prescribed — never zero, and matching the target reps it was
+// asked for.
+func TestActivityBackfillUsesTheRealPrescription(t *testing.T) {
+	tearDownActivity(t)
+	e := expect(t)
+
+	e.POST("/admin/activity/backfill").
+		WithJSON(map[string]any{"lifters": 2, "weeks": 3}).
+		Expect().Status(http.StatusOK)
+
+	// Read one generated lifter's session back through the ordinary endpoints.
+	lifterID := 0
+	for _, entry := range e.GET("/lifters").Expect().Status(http.StatusOK).JSON().Array().Iter() {
+		obj := entry.Object()
+		if obj.Value("username").String().Raw() != primaryUsername {
+			lifterID = int(obj.Value("id").Number().Raw())
+			break
+		}
+	}
+	if lifterID == 0 {
+		t.Fatal("no generated lifter found")
+	}
+
+	// Their Racked report is the same report they would read themselves, so a
+	// non-zero volume here means real sets at real weights.
+	racked := e.GET(fmt.Sprintf("/lifters/%d/racked", lifterID)).
+		WithQuery("period", "year").
+		Expect().Status(http.StatusOK).JSON().Object()
+	racked.Value("totals").Object().Value("volumeLb").Number().Gt(0)
+	racked.Value("totals").Object().Value("sets").Number().Gt(0)
+}
+
+// Sessions get a plausible clock, not the instant they were generated. Duration
+// drives session pace, the fastest-session highlight and the ranking of a workout
+// against its own history — an install full of zero-second sessions shows those
+// features working on nonsense.
+func TestActivityBackfillGivesSessionsARealDuration(t *testing.T) {
+	tearDownActivity(t)
+	e := expect(t)
+
+	e.POST("/admin/activity/backfill").
+		WithJSON(map[string]any{"lifters": 2, "weeks": 3}).
+		Expect().Status(http.StatusOK)
+
+	var shortest int
+	err := testPool.QueryRow(context.Background(), `
+		SELECT COALESCE(MIN(EXTRACT(EPOCH FROM (s.finished_at - s.created_at))::int), -1)
+		FROM sessions s
+		JOIN users u ON u.id = s.user_id
+		WHERE NOT u.is_admin AND s.finished_at IS NOT NULL`).Scan(&shortest)
+	if err != nil {
+		t.Fatalf("read durations: %v", err)
+	}
+	if shortest < 0 {
+		t.Fatal("no finished generated session to measure")
+	}
+	// Half an hour is the floor the generator picks from; anything near zero means
+	// the clock was never set.
+	if shortest < 20*60 {
+		t.Errorf("shortest generated session lasted %ds, which is not a workout", shortest)
+	}
+}
+
+// No lifter applauds their own session. The generator reads through the feed query,
+// which excludes the viewer's own — so this holds without an explicit check, and
+// this test is what says so.
+func TestActivityBackfillNeverReactsToItsOwnSessions(t *testing.T) {
+	tearDownActivity(t)
+	expect(t).POST("/admin/activity/backfill").
+		WithJSON(map[string]any{"lifters": 3, "weeks": 4}).
+		Expect().Status(http.StatusOK)
+
+	var selfReactions int
+	err := testPool.QueryRow(context.Background(), `
+		SELECT COUNT(*)
+		FROM session_reactions r
+		JOIN sessions s ON s.id = r.session_id
+		WHERE s.user_id = r.user_id`).Scan(&selfReactions)
+	if err != nil {
+		t.Fatalf("count self-reactions: %v", err)
+	}
+	if selfReactions != 0 {
+		t.Errorf("%d reactions are on the reactor's own session, which the API forbids", selfReactions)
+	}
+}
+
+// Every generated comment must satisfy the rules addSessionComment enforces, since
+// this path does not go through that handler.
+func TestActivityBackfillWritesAcceptableComments(t *testing.T) {
+	tearDownActivity(t)
+	expect(t).POST("/admin/activity/backfill").
+		WithJSON(map[string]any{"lifters": 3, "weeks": 6}).
+		Expect().Status(http.StatusOK)
+
+	var bad int
+	err := testPool.QueryRow(context.Background(), `
+		SELECT COUNT(*) FROM session_comments
+		WHERE btrim(body) = '' OR char_length(body) > 256`).Scan(&bad)
+	if err != nil {
+		t.Fatalf("count comments: %v", err)
+	}
+	if bad != 0 {
+		t.Errorf("%d generated comments are blank or over the cap", bad)
+	}
+}
+
+// ---- teardown ----
+
+func TestActivityTeardownRemovesWhatItMadeAndNothingElse(t *testing.T) {
+	e := expect(t)
+
+	// A real account that must survive, alongside the generated ones.
+	_, bystanderToken := secondLifter(t, "activity-bystander")
+
+	e.POST("/admin/activity/backfill").
+		WithJSON(map[string]any{"lifters": 3, "weeks": 2}).
+		Expect().Status(http.StatusOK)
+
+	removed := e.DELETE("/admin/activity").Expect().Status(http.StatusOK).
+		JSON().Object().Value("removed").Number().Raw()
+	if removed != 3 {
+		t.Errorf("teardown removed %v accounts, want 3", removed)
+	}
+
+	// The owner and the bystander are untouched — the owner because the query
+	// refuses an admin outright, the bystander because its name is not on the
+	// roster.
+	e.GET("/me").Expect().Status(http.StatusOK)
+	expectAs(t, bystanderToken).GET("/me").Expect().Status(http.StatusOK)
+
+	roster := e.GET("/lifters").Expect().Status(http.StatusOK).JSON().Array()
+	for _, entry := range roster.Iter() {
+		name := entry.Object().Value("username").String().Raw()
+		if name != primaryUsername && name != "activity-bystander" {
+			t.Errorf("account %q survived teardown", name)
+		}
+	}
+}
+
+// Nothing to remove is not an error: the caller asked for an install with no
+// generated accounts, and it has one.
+func TestActivityTeardownOnAnUntouchedInstall(t *testing.T) {
+	expect(t).DELETE("/admin/activity").Expect().Status(http.StatusOK).
+		JSON().Object().HasValue("removed", 0)
+}
+
+// Teardown stops the loop first. A loop still writing while its accounts are
+// deleted would spend the next tick failing into the log.
+func TestActivityTeardownStopsTheLoop(t *testing.T) {
+	e := expect(t)
+	e.POST("/admin/activity/start").
+		WithJSON(map[string]any{"lifters": 2, "tickSeconds": 3600}).
+		Expect().Status(http.StatusNoContent)
+
+	e.DELETE("/admin/activity").Expect().Status(http.StatusOK)
+
+	e.GET("/admin/activity").Expect().Status(http.StatusOK).
+		JSON().Object().HasValue("running", false)
+}
+
+// Generated accounts must never administer the install: the single-admin index
+// permits exactly one and the owner holds it, and teardown's NOT is_admin guard
+// depends on these never being one.
+func TestActivityAccountsAreNeverAdmins(t *testing.T) {
+	tearDownActivity(t)
+	expect(t).POST("/admin/activity/backfill").
+		WithJSON(map[string]any{"lifters": 3, "weeks": 1}).
+		Expect().Status(http.StatusOK)
+
+	users := expect(t).GET("/admin/users").Expect().Status(http.StatusOK).JSON().Array()
+	admins := 0
+	for _, user := range users.Iter() {
+		obj := user.Object()
+		if obj.Value("isAdmin").Boolean().Raw() {
+			admins++
+			obj.HasValue("username", primaryUsername)
+		}
+		// Nor may they owe a password change: nothing signs in as them to clear
+		// it, and the flag would lock them out of the app they exist to populate.
+		if obj.Value("username").String().Raw() != primaryUsername {
+			obj.HasValue("mustChangePassword", false)
+		}
+	}
+	if admins != 1 {
+		t.Errorf("%d accounts administer the install, want exactly 1", admins)
+	}
+}
+
+// The generated lifters must be indistinguishable from real ones on the wire —
+// there is no marker in the schema and none in any response, which is the whole
+// reason teardown works by re-deriving the roster.
+func TestActivityAccountsCarryNoMarkerOnTheWire(t *testing.T) {
+	tearDownActivity(t)
+	e := expect(t)
+	e.POST("/admin/activity/backfill").
+		WithJSON(map[string]any{"lifters": 2, "weeks": 1}).
+		Expect().Status(http.StatusOK)
+
+	for _, entry := range e.GET("/lifters").Expect().Status(http.StatusOK).JSON().Array().Iter() {
+		obj := entry.Object()
+		for _, key := range []string{"generated", "isBot", "bot", "simulated", "synthetic"} {
+			obj.NotContainsKey(key)
+		}
+	}
+}
+
+// A generated lifter reads exactly like any other through the social endpoints —
+// which is the real test of whether the history is usable for looking at these
+// screens.
+func TestActivityBackfillPopulatesTheSocialSurfaces(t *testing.T) {
+	tearDownActivity(t)
+	e := expect(t)
+
+	e.POST("/admin/activity/backfill").
+		WithJSON(map[string]any{"lifters": 4, "weeks": 8}).
+		Expect().Status(http.StatusOK)
+
+	// The feed has other people's sessions in it.
+	e.GET("/feed").Expect().Status(http.StatusOK).
+		JSON().Object().Value("items").Array().NotEmpty()
+
+	// And the leaderboard ranks more than one lifter.
+	boards := e.GET("/leaderboard").WithQuery("period", "year").
+		Expect().Status(http.StatusOK).JSON().Object().Value("boards").Array()
+	boards.NotEmpty()
+	boards.Value(0).Object().Value("entries").Array().Length().Ge(2)
+}

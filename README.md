@@ -240,6 +240,7 @@ decide their weights and must never be read as a basis for yours.
 | [`docs/api-integration-tests.md`](docs/api-integration-tests.md) | The DB-backed API suite |
 | [`docs/ci-branch-protection.md`](docs/ci-branch-protection.md) | CI and branch rules |
 | [`docs/observability.md`](docs/observability.md) | Prometheus metrics and how to scrape them |
+| [`docs/generated-activity.md`](docs/generated-activity.md) | Filling an install with lifters and history to look at |
 | [`docs/sandbox-ui-tooling.md`](docs/sandbox-ui-tooling.md) | Offline UI tooling in the sandbox |
 | [`AGENTS.md`](AGENTS.md) | Commit conventions and generated-code rules |
 
