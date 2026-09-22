@@ -42,6 +42,9 @@
   const maxLifters = $derived(status?.maxLifters ?? 8);
   const maxWeeks = $derived(status?.maxWeeks ?? 26);
   const running = $derived(status?.running === true);
+  // Every name clean-up would match. Empty until the status arrives, which is why
+  // the markup guards on length rather than assuming.
+  const roster = $derived(status?.roster ?? []);
 
   // Polled only while a loop is running, and that is the whole reason to poll: the
   // action count is how the screen shows the thing is alive rather than merely
@@ -209,8 +212,20 @@
     <h4 class={labelClass}>Clean up</h4>
     <p class="mt-1 text-sm text-muted-foreground">
       Deletes the generated lifters and everything of theirs — sessions, reactions,
-      comments. Your own account and anyone you created by hand are left alone.
+      comments. Your own account is never touched.
     </p>
+    <!-- Named rather than described. Clean-up matches on USERNAME, because these
+         accounts carry no marker and there is nothing else to match on — so an
+         account you made by hand under one of these names would go too, with
+         everything it ever logged. Listing them is the only safeguard there is,
+         which is why the server publishes the roster at all. -->
+    {#if roster.length > 0}
+      <p class="mt-2 text-xs text-muted-foreground">
+        Matches on username, so it removes any non-admin account called
+        <span class="font-semibold text-foreground">{roster.join(", ")}</span> —
+        including one you made yourself under that name.
+      </p>
+    {/if}
     <Button
       variant="outline"
       class="mt-3"
@@ -234,9 +249,14 @@
     <AlertDialog.Header>
       <AlertDialog.Title>Remove the generated lifters?</AlertDialog.Title>
       <AlertDialog.Description>
-        Their accounts go, and so does everything of theirs — every session, set,
-        reaction and comment. Your own account and anyone you added by hand are not
-        touched. This can't be undone, but you can generate more afterwards.
+        Every non-admin account called
+        <span class="font-semibold text-foreground">{roster.join(", ")}</span>
+        will be deleted, and so will everything of theirs — every session, set,
+        reaction and comment.
+        <br /><br />
+        This matches on username, not on whether the account was generated: if you
+        made one of those yourself, it goes too. Your own account is safe. This
+        can't be undone, though you can generate more afterwards.
       </AlertDialog.Description>
     </AlertDialog.Header>
     <AlertDialog.Footer>

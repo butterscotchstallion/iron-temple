@@ -34,6 +34,9 @@ function status(over: Partial<ActivityStatus> = {}): { status: 200; data: Activi
       actions: 0,
       maxLifters: 8,
       maxWeeks: 26,
+      // Two names is enough to assert the list is rendered from the server's
+      // roster rather than hard-coded.
+      roster: ["mara.quinn", "dev.oyelaran"],
       ...over,
     },
   };
@@ -185,6 +188,37 @@ describe("ActivityPanel", () => {
 
     await vi.advanceTimersByTimeAsync(11_000);
     expect(getActivityStatus.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  // Clean-up matches on USERNAME, not on whether an account was generated, so an
+  // account the owner made by hand under one of these names would be deleted with
+  // all its history. Naming them is the only safeguard against that, which makes
+  // these two assertions load-bearing rather than cosmetic.
+  it("names the accounts clean-up would match, from the server's roster", async () => {
+    render(ActivityPanel);
+
+    await waitFor(() => {
+      expect(screen.getByText(/mara\.quinn, dev\.oyelaran/)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/including one you made yourself/)).toBeInTheDocument();
+  });
+
+  it("repeats the names inside the confirmation", async () => {
+    render(ActivityPanel);
+    await waitFor(() => expect(getActivityStatus).toHaveBeenCalled());
+
+    await fireEvent.click(screen.getByText("Remove generated lifters"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Remove the generated lifters?")).toBeInTheDocument();
+    });
+    // Twice now — under the button and again in the dialog, which is the last
+    // thing read before agreeing.
+    expect(screen.getAllByText(/mara\.quinn, dev\.oyelaran/)).toHaveLength(2);
+    // The dialog's own wording, which the panel's shorter note does not use.
+    expect(
+      screen.getByText(/not on whether the account was generated/i),
+    ).toBeInTheDocument();
   });
 
   // The server sends its own bounds so the inputs cannot offer a number the

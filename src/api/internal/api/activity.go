@@ -85,6 +85,12 @@ type activityRunner struct {
 	// flagged as running.
 	actions int
 	last    string
+	// gen identifies which loop owns the fields above, and exists because starting
+	// replaces rather than refuses. A restart cancels the old loop and installs a
+	// new one immediately, so the old goroutine wakes up some time LATER to wind
+	// down — by which point the flag and the cancel belong to its successor. gen
+	// is what lets it tell. See finish.
+	gen int
 }
 
 func (a *activityRunner) snapshot() (running bool, tick time.Duration, lifters, actions int, started time.Time, last string) {
@@ -112,6 +118,47 @@ func (a *activityRunner) stop() {
 	}
 }
 
+// begin claims the slot for a new loop and returns its generation.
+func (a *activityRunner) begin(cancel context.CancelFunc, tick time.Duration, lifters int) int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.gen++
+	a.cancel = cancel
+	a.running = true
+	a.tick = tick
+	a.lifters = lifters
+	a.started = time.Now()
+	a.actions = 0
+	a.last = ""
+	return a.gen
+}
+
+// finish releases a loop's slot as it exits — but only if it still holds it.
+//
+// Every exit from runActivity comes through here, including the early ones. The
+// flag is raised by the handler before the goroutine is even scheduled, so a loop
+// that fails to start would otherwise leave the status reporting a loop that does
+// not exist, recoverable only by pressing Stop on nothing.
+//
+// The generation check is what keeps that from becoming a worse bug than the one
+// it fixes. Starting replaces rather than refuses, so a restart cancels this loop
+// and installs its successor at once; this goroutine then wakes some time later to
+// wind down. Clearing unconditionally at that point would switch the NEW loop's
+// flag off and fire its cancel, killing a loop the admin had just started.
+func (a *activityRunner) finish(gen int, cancel context.CancelFunc) {
+	// Released whoever owns the slot: this loop's context is done or about to be,
+	// and a CancelFunc that is never called leaks it.
+	cancel()
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.gen != gen {
+		return
+	}
+	a.running = false
+	a.cancel = nil
+}
+
 // ---- requests and handlers ----
 
 type backfillRequest struct {
@@ -136,6 +183,10 @@ func (s *Server) getActivityStatus(w http.ResponseWriter, r *http.Request) {
 		MaxLifters:  activity.MaxRoster,
 		MaxWeeks:    maxBackfillWeeks,
 		TickSeconds: int(tick / time.Second),
+		// The whole roster, not the count a loop happens to be using: teardown
+		// deletes by name across all of it, so all of it is what an operator needs
+		// to see before confirming one.
+		Roster: activity.Usernames(activity.MaxRoster),
 	}
 	if running && !started.IsZero() {
 		dto.StartedAt = started.UTC().Format(time.RFC3339)
@@ -201,17 +252,9 @@ func (s *Server) postActivityStart(w http.ResponseWriter, r *http.Request) {
 	// lifetime is the server's, and the only things that end it are stop() and
 	// the process exiting.
 	ctx, cancel := context.WithCancel(context.Background())
-	s.activity.mu.Lock()
-	s.activity.cancel = cancel
-	s.activity.running = true
-	s.activity.tick = tick
-	s.activity.lifters = req.Lifters
-	s.activity.started = time.Now()
-	s.activity.actions = 0
-	s.activity.last = ""
-	s.activity.mu.Unlock()
+	gen := s.activity.begin(cancel, tick, req.Lifters)
 
-	go s.runActivity(ctx, req.Lifters, tick)
+	go s.runActivity(ctx, gen, cancel, req.Lifters, tick)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -599,7 +642,9 @@ func (s *Server) generateRecognition(
 // One lifter acts per tick rather than all of them, which is what makes it look
 // like a gym instead of a cron job: activity arrives one item at a time while a
 // screen is open, which is the whole reason to watch it.
-func (s *Server) runActivity(ctx context.Context, lifters int, tick time.Duration) {
+func (s *Server) runActivity(
+	ctx context.Context, gen int, cancel context.CancelFunc, lifters int, tick time.Duration,
+) {
 	// Seeded from the tick and the roster size rather than the clock, for the same
 	// reproducibility reason the backfill is.
 	// Seconds, not the raw Duration: a Duration is nanoseconds, so an hour is
@@ -607,6 +652,12 @@ func (s *Server) runActivity(ctx context.Context, lifters int, tick time.Duratio
 	// is whole seconds by construction anyway — the handler builds it from
 	// TickSeconds.
 	rng := simulationRNG(int64(tick/time.Second), int64(lifters))
+
+	// Every exit from here releases the slot — see finish, which also explains why
+	// it is generation-checked rather than a plain stop(). Deferred rather than
+	// repeated at each return, because there are three exits below and the next
+	// one added would not remember.
+	defer s.activity.finish(gen, cancel)
 
 	// Resolved once, before the ticker, rather than per tick. Per tick it would be
 	// four queries a lifter every few seconds to re-derive a roster that does not
@@ -641,7 +692,17 @@ func (s *Server) runActivity(ctx context.Context, lifters int, tick time.Duratio
 			// Sometimes a session, otherwise a reaction or a comment. Training is
 			// the rarer event because it is the rarer event: a lifter trains a few
 			// times a week and scrolls a feed far more often.
-			if person.persona.Trains(rng) && rng.Intn(4) == 0 {
+			//
+			// The len check is not defensive tidiness. rng.Intn(0) PANICS, and this
+			// runs in a goroutine with no recover — chi's Recoverer wraps HTTP
+			// handlers, not this — so a persona whose program has no days would
+			// take the whole process down rather than return a 500. The backfill
+			// path cannot hit it because it ranges over the days instead of
+			// indexing them.
+			//
+			// Falling through to recognition rather than skipping the tick: a
+			// lifter with nothing to train can still react to somebody else.
+			if len(person.days) > 0 && person.persona.Trains(rng) && rng.Intn(4) == 0 {
 				day := person.days[rng.Intn(len(person.days))]
 				if _, err := s.generateSession(ctx, person, day, s.reportToday(), rng); err != nil {
 					log.Printf("activity loop session: %v", err)

@@ -215,6 +215,16 @@ type activityStatusDTO struct {
 	StartedAt  string `json:"startedAt,omitempty"`
 	MaxLifters int    `json:"maxLifters"`
 	MaxWeeks   int    `json:"maxWeeks"`
+	// Roster is every username a backfill could create and a teardown would
+	// delete, whether or not any of them exists yet.
+	//
+	// Published so the confirmation on the admin screen can list them. Teardown
+	// matches on name rather than on origin — the accounts carry no marker, so it
+	// cannot do otherwise — which means an account the owner made by hand under one
+	// of these names would be deleted with all its history. Showing the names is
+	// the only safeguard against that, so this is load-bearing rather than
+	// informational.
+	Roster []string `json:"roster"`
 }
 
 // activitySummaryDTO is what one backfill did.

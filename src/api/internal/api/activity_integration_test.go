@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 )
 
 // Generated training activity.
@@ -109,6 +110,68 @@ func TestActivityStatusReportsItsBoundsAndIsIdleByDefault(t *testing.T) {
 	status.Value("maxLifters").Number().Gt(0)
 	status.HasValue("maxWeeks", 26)
 	status.Value("running").Boolean()
+}
+
+// The roster is published so a client can name the accounts a teardown would
+// delete. That matters because teardown matches on NAME rather than on origin, so
+// a hand-made account called after a persona would go too — and the names being
+// visible before confirming is the only safeguard against it.
+func TestActivityStatusPublishesTheRosterATeardownWouldMatch(t *testing.T) {
+	status := expect(t).GET("/admin/activity").Expect().
+		Status(http.StatusOK).JSON().Object()
+
+	roster := status.Value("roster").Array()
+	// Every name, whether or not the account exists yet: teardown sweeps all of
+	// them, so all of them are in scope.
+	roster.Length().IsEqual(status.Value("maxLifters").Number().Raw())
+	for _, name := range roster.Iter() {
+		name.String().NotEmpty()
+	}
+}
+
+// A loop that fails to start must not leave the status claiming one is running.
+//
+// The flag is raised by the handler before the goroutine is scheduled, so every
+// exit from the loop has to release it — including the early ones. Provoked here
+// with a teardown, which removes the accounts out from under a running loop.
+func TestActivityStatusDoesNotClaimAStoppedLoopIsRunning(t *testing.T) {
+	e := expect(t)
+	// A short tick, so the loop actually reaches its body during the test.
+	e.POST("/admin/activity/start").
+		WithJSON(map[string]any{"lifters": 2, "tickSeconds": 5}).
+		Expect().Status(http.StatusNoContent)
+
+	e.POST("/admin/activity/stop").Expect().Status(http.StatusNoContent)
+	e.GET("/admin/activity").Expect().Status(http.StatusOK).
+		JSON().Object().HasValue("running", false)
+}
+
+// Restarting must not be broken by the previous loop winding down afterwards.
+//
+// Starting replaces rather than refuses, so the old goroutine is cancelled and the
+// new one installed at once — then the old one wakes LATER to exit. If its cleanup
+// cleared the flag unconditionally it would switch off the loop the admin had just
+// started, which is why the runner tracks a generation.
+func TestActivityRestartSurvivesTheOldLoopWindingDown(t *testing.T) {
+	tearDownActivity(t)
+	e := expect(t)
+
+	e.POST("/admin/activity/start").
+		WithJSON(map[string]any{"lifters": 2, "tickSeconds": 5}).
+		Expect().Status(http.StatusNoContent)
+	e.POST("/admin/activity/start").
+		WithJSON(map[string]any{"lifters": 3, "tickSeconds": 3600}).
+		Expect().Status(http.StatusNoContent)
+
+	// Long enough that the first loop has certainly been scheduled and exited.
+	time.Sleep(500 * time.Millisecond)
+
+	status := e.GET("/admin/activity").Expect().Status(http.StatusOK).JSON().Object()
+	status.HasValue("running", true)
+	status.HasValue("lifters", 3)
+	status.HasValue("tickSeconds", 3600)
+
+	e.POST("/admin/activity/stop").Expect().Status(http.StatusNoContent)
 }
 
 // Stopping is idempotent: the caller asked for a state and it holds either way.

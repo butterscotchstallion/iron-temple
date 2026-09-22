@@ -617,6 +617,12 @@ paths:
         The accounts carry no marker of any kind, so this works by re-deriving the
         same fixed roster that named them. An account that administers the install
         is never touched, whatever it is called.
+
+        **It is name-scoped, not origin-scoped.** A non-admin account the owner
+        created by hand under one of the roster's names is indistinguishable from a
+        generated one here, and would be deleted with everything it ever logged.
+        Read `roster` from `GET /admin/activity` and show those names in a
+        confirmation before calling this.
       responses:
         "200":
           description: What was removed
@@ -1995,7 +2001,7 @@ components:
 
     ActivityStatus:
       type: object
-      required: [running, lifters, tickSeconds, actions, maxLifters, maxWeeks]
+      required: [running, lifters, tickSeconds, actions, maxLifters, maxWeeks, roster]
       properties:
         running:
           type: boolean
@@ -2019,6 +2025,20 @@ components:
           type: integer
         maxWeeks:
           type: integer
+        roster:
+          type: array
+          items:
+            type: string
+          description: >
+            Every username a backfill could create and a teardown would delete,
+            whether or not any of them exists yet.
+
+            **Load-bearing rather than informational.** Teardown matches on name
+            rather than on origin — the accounts carry no marker, so it cannot do
+            otherwise — which means an account the owner created by hand under one
+            of these names would be deleted along with everything it ever logged.
+            A client must show these names in its teardown confirmation; that is
+            the only safeguard against it.
 
     BackfillActivityRequest:
       type: object

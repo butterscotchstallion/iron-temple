@@ -51,12 +51,26 @@ roster is required to be stable and append-only, and why there are tests that fa
 if it stops being either. Change a name and the account carrying the old one
 becomes unremovable from the panel.
 
-Two things are never touched:
+**An account that administers the install is never touched**, whatever it is
+called. The delete refuses on `NOT is_admin`, so a roster name colliding with yours
+cannot cost you your training history.
 
-- **An account that administers the install**, whatever it is called. The delete
-  refuses on `NOT is_admin`, so a roster name colliding with yours cannot cost you
-  your training history.
-- **Anyone you created by hand**, because their name is not on the roster.
+### Clean-up is name-scoped, not origin-scoped
+
+This is the sharp edge of the markerless design, and it is worth reading twice.
+
+Clean-up deletes **every non-admin account whose username is on the roster**. It
+cannot tell an account it created from one you made by hand that happens to share a
+name — that is exactly the distinction the missing marker throws away. So if you
+create an ordinary lifter called `otto.brandt`, a clean-up removes them and
+cascades away every session they ever logged.
+
+The personas are deliberately ordinary household names, so this is a little more
+likely than it would be with obviously-synthetic ones. The mitigation is that the
+names are shown rather than described: `GET /admin/activity` publishes the roster,
+and the panel lists it both under the button and inside the confirmation, so you see
+the actual names before agreeing. Anything that calls the endpoint without showing
+them has removed the only safeguard there is.
 
 ## Where it lives
 
