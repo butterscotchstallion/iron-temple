@@ -899,3 +899,81 @@ func generatedSessionCount(t *testing.T) int {
 	}
 	return n
 }
+
+// A CATCH-UP MUST NOT PILE COMMENTS ONTO THE OLDEST SESSIONS.
+//
+// Recognition runs once per day generated, and a catch-up covers up to eight days in
+// a single pass. Unbounded, each of those walked the same sixty-session feed, so the
+// earliest sessions collected eight rounds of comments at once — reactions are
+// idempotent on their primary key, but comments are not and must not be, because a
+// lifter commenting twice on a session is legitimate in the real feature.
+//
+// Two bounds together. A window means only a couple of passes see a given session at
+// all, and a per-lifter guard means any one of them adds at most one comment — so the
+// assertion here is the strong one: no lifter says more than one thing about the same
+// workout, however long the catch-up runs.
+func TestActivityCatchUpDoesNotPileCommentsOnOneSession(t *testing.T) {
+	resetActivitySchedule(t)
+	tearDownActivity(t)
+	e := expect(t)
+
+	// History first, so the catch-up has older sessions available to pile onto — the
+	// failure mode needs something already there to be the victim.
+	e.POST("/admin/activity/backfill").
+		WithJSON(map[string]any{"lifters": 4, "weeks": 4}).
+		Expect().Status(http.StatusOK)
+
+	e.PUT("/admin/activity/schedule").
+		WithJSON(map[string]any{"enabled": true, "lifters": 4}).
+		Expect().Status(http.StatusOK)
+
+	// One pass covers the whole catch-up window at once, which is precisely the case
+	// that used to multiply.
+	testAPI.GenerateDueActivityForTest(context.Background())
+
+	rows, err := testPool.Query(context.Background(), `
+		SELECT c.session_id, c.user_id, COUNT(*) AS n
+		FROM session_comments c
+		JOIN users u ON u.id = c.user_id
+		WHERE NOT u.is_admin
+		GROUP BY c.session_id, c.user_id
+		HAVING COUNT(*) > 1`)
+	if err != nil {
+		t.Fatalf("query comments: %v", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var sessionID, userID, n int
+		if err := rows.Scan(&sessionID, &userID, &n); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		t.Errorf("lifter %d commented %d times on session %d", userID, n, sessionID)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows: %v", err)
+	}
+}
+
+// The catch-up still records every day in its window, so bounding recognition did not
+// quietly stop the thing from running.
+func TestActivityCatchUpRecordsEveryDayInTheWindow(t *testing.T) {
+	resetActivitySchedule(t)
+	tearDownActivity(t)
+	e := expect(t)
+
+	e.PUT("/admin/activity/schedule").
+		WithJSON(map[string]any{"enabled": true, "lifters": 3}).
+		Expect().Status(http.StatusOK)
+	testAPI.GenerateDueActivityForTest(context.Background())
+
+	var days int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM generated_activity_runs`).Scan(&days); err != nil {
+		t.Fatalf("count runs: %v", err)
+	}
+	// A week plus today, which is what DueDays yields for the default window.
+	if days != 8 {
+		t.Errorf("the catch-up recorded %d days, want 8", days)
+	}
+}

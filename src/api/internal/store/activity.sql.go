@@ -29,9 +29,17 @@ RETURNING day, sessions, reactions, comments, generated_at
 //
 // Claiming BEFORE generating rather than recording after is deliberate. Recording
 // afterwards would let two replicas both generate the same day and only then
-// discover the collision, by which point the duplicate sessions exist. The cost is
-// that a crash between claim and commit leaves a day marked done that produced
-// nothing — which ReleaseActivityDay exists to undo on the failure path.
+// discover the collision, by which point the duplicate sessions exist.
+//
+// CALLED INSIDE THE SAME TRANSACTION AS THE GENERATION, which is what makes that
+// safe: a failed day rolls the claim back with everything else, so an aborted day is
+// indistinguishable from one nobody has touched and the retry is clean rather than
+// additive. There is deliberately no release query — a rollback is the release.
+//
+// It also sharpens the race rather than blunting it. Two replicas attempting the same
+// day both reach this statement; the second blocks on the primary key until the first
+// commits or aborts, then either gets no row (already done) or takes the day itself.
+// No window exists in which a day is claimed but abandoned.
 //
 // The counts go in as zero and are filled in by FinishActivityDay once the work is
 // known, so a claim carries no figures it has not earned.
@@ -303,19 +311,44 @@ func (q *Queries) ListGeneratedActivityCandidates(ctx context.Context, usernames
 	return items, nil
 }
 
-const releaseActivityDay = `-- name: ReleaseActivityDay :exec
-DELETE FROM generated_activity_runs WHERE day = $1
+const listSessionsCommentedOnBy = `-- name: ListSessionsCommentedOnBy :many
+SELECT DISTINCT session_id FROM session_comments WHERE user_id = $1::int
 `
 
-// ReleaseActivityDay gives a claim back after the generation behind it failed.
+// ListSessionsCommentedOnBy is the sessions one lifter has already commented on.
 //
-// The alternative to a status column. report_runs needs sending/sent/failed
-// because delivery is somebody else's system and can fail halfway; generating is
-// local work, so a day either produced something or is worth retrying, and
-// deleting the claim is how the next tick learns it is outstanding again.
-func (q *Queries) ReleaseActivityDay(ctx context.Context, day pgtype.Date) error {
-	_, err := q.db.Exec(ctx, releaseActivityDay, day)
-	return err
+// The generator's guard against saying something twice about the same workout. There
+// is deliberately NO uniqueness constraint on session_comments — a real lifter
+// replying to a thread on their own session is legitimate, and the app must allow it
+// — so "one comment per lifter per session" is a property of the GENERATOR rather
+// than of the schema, and this is how it enforces it.
+//
+// Without it, recognition running once per generated day meant a catch-up could stack
+// several comments from the same persona onto the same older session in a single tick.
+// The window on recent sessions bounds how many passes see a session; this bounds it
+// to one regardless.
+//
+// Read once per persona per pass rather than checked per candidate: a set in memory is
+// cheaper than a query per session, and the answer cannot change underneath a pass
+// that holds the only transaction writing it.
+func (q *Queries) ListSessionsCommentedOnBy(ctx context.Context, userID int32) ([]int32, error) {
+	rows, err := q.db.Query(ctx, listSessionsCommentedOnBy, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int32
+	for rows.Next() {
+		var session_id int32
+		if err := rows.Scan(&session_id); err != nil {
+			return nil, err
+		}
+		items = append(items, session_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const setActivitySchedule = `-- name: SetActivitySchedule :one

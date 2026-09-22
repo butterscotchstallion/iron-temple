@@ -41,11 +41,19 @@ Three consequences worth knowing:
 - **Switching it on takes effect within the hour**, not immediately. That is the
   cost of having no boot-time flag and needing no restart. Press *Generate history*
   if you don't want to wait.
-- **A day is generated at most once.** Each day is claimed through a primary key
-  before any work happens, so repeated ticks, a restart, or more than one replica
-  cannot double up. Correctness comes from the constraint rather than from counting
-  processes. If the generation behind a claim fails, the claim is released so the
-  next tick retries.
+- **A day is generated at most once, including on the failure path.** The claim,
+  every write and the recorded counts all happen in **one transaction**, so a
+  rollback takes the claim with it and an aborted day is indistinguishable from one
+  nobody touched. There is no release step — a rollback *is* the release. Repeated
+  ticks, a restart, or more than one replica all end up safe because correctness comes
+  from the primary key rather than from counting processes.
+- **Recognition is bounded twice.** A day's pass only looks at sessions from the last
+  couple of days, and a lifter never comments twice on the same session. Both matter
+  because a catch-up runs one pass per day it covers: unbounded, eight days of
+  catch-up stacked eight rounds of comments onto the oldest sessions in a single tick.
+  Reactions are already idempotent on their primary key; comments are not, and must
+  not be, because a real lifter replying twice is legitimate — so the guard lives in
+  the generator.
 - **Catch-up is bounded to a week.** Long enough for a weekend or a deploy; short
   enough that a month away does not produce a month of training in a single tick.
 

@@ -56,10 +56,15 @@ INSERT INTO generated_activity_schedule (id) VALUES (1);
 --
 -- No status column, unlike report_runs, and the difference is real rather than an
 -- omission. That table needs sending/sent/failed because delivery is somebody
--- else's system and can fail halfway. Generating is local work in one transaction:
--- it either committed or it did not. A day whose generation fails has its claim
--- DELETED, so the next tick finds it outstanding again and retries — which is the
--- same recovery a 'failed' row buys, without a state machine to keep honest.
+-- else's system and can fail halfway, leaving a row that is neither done nor
+-- retryable without one.
+--
+-- Generating has no such halfway: the claim, every write and the recorded counts all
+-- happen in ONE transaction, so a failure rolls the claim back along with the data
+-- and the day simply looks untouched again. That property is the reason this table
+-- needs no state machine, and it is a property of the code rather than a hope — an
+-- earlier version took the claim outside the generation and had to delete it on
+-- failure, which duplicated every session the failed attempt had already committed.
 CREATE TABLE generated_activity_runs (
     day         DATE        PRIMARY KEY,
     -- Recorded so the admin screen can say what the last run actually did rather

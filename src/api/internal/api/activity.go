@@ -413,7 +413,7 @@ func (s *Server) backfillActivity(ctx context.Context, lifters, weeks int) (acti
 				if !person.persona.Trains(rng) {
 					continue
 				}
-				logged, err := s.generateSession(ctx, person, day, on, rng)
+				logged, err := s.generateSessionTx(ctx, person, day, on, rng)
 				if err != nil {
 					return summary, err
 				}
@@ -424,7 +424,7 @@ func (s *Server) backfillActivity(ctx context.Context, lifters, weeks int) (acti
 		}
 	}
 
-	reactions, comments, err := s.generateRecognition(ctx, people, rng)
+	reactions, comments, err := s.generateRecognition(ctx, s.q, people, time.Time{}, rng)
 	if err != nil {
 		return summary, err
 	}
@@ -574,8 +574,22 @@ func (s *Server) scheduleProgram(
 
 // generateSession materialises one session, logs it, finishes it and sets its
 // clock. Reports whether anything was logged.
+// q is the caller's handle, and the CALLER OWNS THE TRANSACTION. That is not
+// stylistic: the daily scheduler needs a whole day to commit or roll back as one
+// unit, which it cannot get if this opens and commits its own transaction per
+// session. The manual backfill passes a per-session transaction and keeps exactly
+// the behaviour it had.
+//
+// The consequence to know about is that s.prescribe below reads through the POOL
+// rather than through q, so sessions written earlier in the caller's transaction are
+// not visible to it. Across days that is fine — each day commits before the next is
+// prescribed — and within one day it only matters for a lifter with two program days
+// on the same weekday, who would then be prescribed the same weight twice. That is a
+// plausible two-workout day rather than a wrong number, and it is the price of the
+// atomicity above.
 func (s *Server) generateSession(
 	ctx context.Context,
+	q *store.Queries,
 	person *simulatedLifter,
 	day store.ProgramDay,
 	on time.Time,
@@ -595,14 +609,7 @@ func (s *Server) generateSession(
 
 	wentWell := person.persona.SessionGoesWell(rng)
 
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	qtx := s.q.WithTx(tx)
-
-	session, err := qtx.CreateSession(ctx, store.CreateSessionParams{
+	session, err := q.CreateSession(ctx, store.CreateSessionParams{
 		ProgramDayID: day.ID,
 		PerformedOn:  pgtype.Date{Time: on, Valid: true},
 		UserID:       person.userID,
@@ -622,7 +629,7 @@ func (s *Server) generateSession(
 			// made its target. The progression engine reads exactly that to decide
 			// whether the weight moves, so a generated session that ticked a short
 			// set would advance a lift it should have stalled.
-			if err := qtx.CreateLoggedSessionSet(ctx, store.CreateLoggedSessionSetParams{
+			if err := q.CreateLoggedSessionSet(ctx, store.CreateLoggedSessionSetParams{
 				SessionID:  session.ID,
 				ExerciseID: pe.ExerciseID,
 				SetNumber:  set.SetNumber,
@@ -636,7 +643,7 @@ func (s *Server) generateSession(
 		}
 	}
 
-	if _, err := qtx.FinishSession(ctx, store.FinishSessionParams{
+	if _, err := q.FinishSession(ctx, store.FinishSessionParams{
 		ID: session.ID, UserID: person.userID,
 	}); err != nil {
 		return false, err
@@ -647,7 +654,7 @@ func (s *Server) generateSession(
 	startedAt := on.Add(time.Duration(17+rng.Intn(4))*time.Hour +
 		time.Duration(rng.Intn(60))*time.Minute)
 	finishedAt := startedAt.Add(time.Duration(38+rng.Intn(35)) * time.Minute)
-	if err := qtx.SetSessionClock(ctx, store.SetSessionClockParams{
+	if err := q.SetSessionClock(ctx, store.SetSessionClockParams{
 		ID:         session.ID,
 		UserID:     person.userID,
 		StartedAt:  pgtype.Timestamptz{Time: startedAt, Valid: true},
@@ -656,10 +663,36 @@ func (s *Server) generateSession(
 		return false, err
 	}
 
+	return true, nil
+}
+
+// generateSessionTx is generateSession in a transaction of its own.
+//
+// What the manual paths want: each session commits independently, so a failure
+// halfway through a twelve-week backfill keeps the weeks it already wrote and the
+// progression engine sees them when prescribing the next one. The daily scheduler
+// deliberately does NOT use this — it needs the whole day to be one unit.
+func (s *Server) generateSessionTx(
+	ctx context.Context,
+	person *simulatedLifter,
+	day store.ProgramDay,
+	on time.Time,
+	rng *rand.Rand,
+) (bool, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	logged, err := s.generateSession(ctx, s.q.WithTx(tx), person, day, on, rng)
+	if err != nil {
+		return false, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return false, err
 	}
-	return true, nil
+	return logged, nil
 }
 
 // generateRecognition has each lifter look at what the others did and respond.
@@ -669,14 +702,32 @@ func (s *Server) generateSession(
 // including the exclusion of their own sessions. That exclusion is why no explicit
 // self-check is needed here, and the one in addSessionReaction is still the rule
 // of record.
+// q is the caller's handle, for the same reason generateSession takes one.
+//
+// notBefore BOUNDS WHICH SESSIONS ARE IN SCOPE, and it is what keeps a catch-up from
+// piling up. A day's recognition used to walk the whole sixty-session feed, so an
+// eight-day catch-up ran eight full passes and the earliest sessions collected eight
+// rounds of comments in a single tick — reactions are idempotent on their primary key,
+// but comments are not, and nothing should be: a lifter commenting twice on a session
+// is legitimate in the real feature. That spike is exactly what the session-side
+// window exists to prevent, and recognition was not bounded the same way.
+//
+// With a window, each session is in scope for only a couple of days, so any one of
+// them can draw at most that many rounds however long the catch-up. Zero means no
+// bound, which is what the manual backfill passes — it generates its own history in
+// one pass and there is nothing older to pile onto.
 func (s *Server) generateRecognition(
-	ctx context.Context, people []simulatedLifter, rng *rand.Rand,
+	ctx context.Context,
+	q *store.Queries,
+	people []simulatedLifter,
+	notBefore time.Time,
+	rng *rand.Rand,
 ) (reactions, comments int, err error) {
 	emoji := allowedReactionList()
 
 	for i := range people {
 		person := &people[i]
-		seen, err := s.q.ListFeedSessions(ctx, store.ListFeedSessionsParams{
+		seen, err := q.ListFeedSessions(ctx, store.ListFeedSessionsParams{
 			ViewerID: person.userID,
 			Lim:      60,
 			Off:      0,
@@ -685,9 +736,30 @@ func (s *Server) generateRecognition(
 			return reactions, comments, err
 		}
 
+		// One comment per lifter per session, ever. The window above bounds how many
+		// passes see a given session; this bounds what any one of them may add, which
+		// is what a feed actually looks like — people say one thing about a workout,
+		// not four. Enforced here rather than by a constraint because the real feature
+		// must keep allowing a lifter to reply more than once.
+		commented := map[int32]bool{}
+		already, err := q.ListSessionsCommentedOnBy(ctx, person.userID)
+		if err != nil {
+			return reactions, comments, err
+		}
+		for _, id := range already {
+			commented[id] = true
+		}
+
 		for _, row := range seen {
+			// Filtered here rather than in SQL: the feed query is shared with the
+			// app's own feed, which has no business carrying a bound only the
+			// generator wants, and sixty rows is nothing to walk.
+			if !notBefore.IsZero() && row.PerformedOn.Valid &&
+				row.PerformedOn.Time.Before(notBefore) {
+				continue
+			}
 			if person.persona.Reacts(rng) {
-				if err := s.q.AddSessionReaction(ctx, store.AddSessionReactionParams{
+				if err := q.AddSessionReaction(ctx, store.AddSessionReactionParams{
 					SessionID: row.ID,
 					UserID:    person.userID,
 					Emoji:     activity.Emoji(emoji, rng),
@@ -696,7 +768,7 @@ func (s *Server) generateRecognition(
 				}
 				reactions++
 			}
-			if person.persona.Comments(rng) {
+			if person.persona.Comments(rng) && !commented[row.ID] {
 				body := person.persona.Comment(rng)
 				// The same two rules addSessionComment applies: trimmed, non-blank,
 				// within the cap. Persona.Comment cannot produce a body that fails
@@ -706,13 +778,14 @@ func (s *Server) generateRecognition(
 				if body == "" || len([]rune(body)) > maxCommentBody {
 					continue
 				}
-				if _, err := s.q.AddSessionComment(ctx, store.AddSessionCommentParams{
+				if _, err := q.AddSessionComment(ctx, store.AddSessionCommentParams{
 					SessionID: row.ID,
 					UserID:    person.userID,
 					Body:      body,
 				}); err != nil {
 					return reactions, comments, err
 				}
+				commented[row.ID] = true
 				comments++
 			}
 		}
@@ -787,7 +860,7 @@ func (s *Server) runActivity(
 			// lifter with nothing to train can still react to somebody else.
 			if len(person.days) > 0 && person.persona.Trains(rng) && rng.Intn(4) == 0 {
 				day := person.days[rng.Intn(len(person.days))]
-				if _, err := s.generateSession(ctx, person, day, s.reportToday(), rng); err != nil {
+				if _, err := s.generateSessionTx(ctx, person, day, s.reportToday(), rng); err != nil {
 					log.Printf("activity loop session: %v", err)
 					continue
 				}
@@ -911,65 +984,108 @@ func (s *Server) generateDueActivity(ctx context.Context) {
 	}
 }
 
-// generateActivityForDay claims one day and generates it, or returns quietly if
-// somebody already has.
+// generateActivityForDay claims one day and generates it, ALL IN ONE TRANSACTION,
+// or returns quietly if somebody already owns it.
+//
+// The claim, every write and the record of what was produced commit together. That is
+// not tidiness — it is the only way the "a day is generated at most once" property
+// actually holds on the failure path.
+//
+// It did not before. The claim was taken, generation ran with a transaction PER
+// SESSION, and a failure part-way — a transient error on the third lifter, or during
+// recognition — left the earlier sessions committed and then deleted the claim so the
+// next tick would retry. The retry regenerated the day from scratch and inserted
+// those sessions, and their comments, a second time. The comment justifying the design
+// asserted "generating is local work in one transaction: it either committed or it did
+// not", which was simply untrue of the code it described.
+//
+// Now it is true. A rollback takes the claim with it, so there is no state to release
+// and no ReleaseActivityDay: an aborted day looks exactly like a day nobody has
+// touched, which is what makes the retry clean rather than additive.
+//
+// Claiming inside the transaction also improves the concurrency story rather than
+// weakening it. Two replicas racing the same day both attempt the insert; the second
+// blocks on the primary key until the first commits or aborts, and then either gets no
+// row (already generated, give up) or takes the day itself (the first rolled back). No
+// window exists in which a day is claimed but abandoned.
 func (s *Server) generateActivityForDay(ctx context.Context, day time.Time, lifters int) {
 	date := pgtype.Date{Time: day, Valid: true}
+	stamp := day.Format(dateLayout)
 
-	// The claim is the whole concurrency story — see ClaimActivityDay. No row back
-	// means another replica, or an earlier pass, already owns this day.
-	if _, err := s.q.ClaimActivityDay(ctx, date); err != nil {
-		if !errors.Is(err, pgx.ErrNoRows) {
-			log.Printf("activity scheduler: claim %s: %v", day.Format(dateLayout), err)
-		}
-		return
-	}
-
-	summary, err := s.generateOneDay(ctx, day, lifters)
+	// Outside the transaction on purpose. Account creation is idempotent —
+	// FindUserIDByUsername then create — so re-running it after a failed day is a
+	// no-op, and keeping it out means a late failure does not roll back the roster
+	// only for the next tick to rebuild it.
+	people, _, err := s.ensureGeneratedLifters(ctx, lifters)
 	if err != nil {
-		// Hand the claim back so the next tick finds the day outstanding again.
-		// Without this a transient failure would mark the day done forever, which is
-		// the one way this design can silently lose activity.
-		log.Printf("activity scheduler: generate %s: %v", day.Format(dateLayout), err)
-		if err := s.q.ReleaseActivityDay(ctx, date); err != nil {
-			log.Printf("activity scheduler: release %s: %v", day.Format(dateLayout), err)
+		log.Printf("activity scheduler: lifters for %s: %v", stamp, err)
+		return
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		log.Printf("activity scheduler: begin %s: %v", stamp, err)
+		return
+	}
+	// Rolled back unless the commit below is reached. This is what releases a failed
+	// day's claim, which is why no explicit release exists.
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := s.q.WithTx(tx)
+
+	if _, err := qtx.ClaimActivityDay(ctx, date); err != nil {
+		// No row means the day is already generated. Not an error, and not logged:
+		// on a healthy install every tick but the first finds every day taken.
+		if !errors.Is(err, pgx.ErrNoRows) {
+			log.Printf("activity scheduler: claim %s: %v", stamp, err)
 		}
 		return
 	}
 
-	if err := s.q.FinishActivityDay(ctx, store.FinishActivityDayParams{
+	summary, err := s.generateOneDay(ctx, qtx, day, people, lifters)
+	if err != nil {
+		log.Printf("activity scheduler: generate %s: %v", stamp, err)
+		return
+	}
+
+	if err := qtx.FinishActivityDay(ctx, store.FinishActivityDayParams{
 		Day:       date,
 		Sessions:  int32Count(summary.Sessions),
 		Reactions: int32Count(summary.Reactions),
 		Comments:  int32Count(summary.Comments),
 	}); err != nil {
-		log.Printf("activity scheduler: record %s: %v", day.Format(dateLayout), err)
+		log.Printf("activity scheduler: record %s: %v", stamp, err)
+		return
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		log.Printf("activity scheduler: commit %s: %v", stamp, err)
 	}
 }
 
-// generateOneDay is a backfill narrowed to a single date.
+// generateOneDay is a backfill narrowed to a single date, writing through the
+// caller's transaction.
 //
-// Shares ensureGeneratedLifters and generateSession with the manual backfill rather
-// than duplicating them, so a scheduled day and a hand-pressed one produce the same
-// kind of data — real prescriptions, real stalls, a plausible clock.
+// Shares ensureGeneratedLifters, generateSession and generateRecognition with the
+// manual backfill rather than duplicating them, so a scheduled day and a
+// hand-pressed one produce the same kind of data — real prescriptions, real stalls,
+// a plausible clock.
 //
-// Recognition runs every day, not only on days somebody trained. People scroll a
-// feed far more often than they lift, and a day where the only activity is two
-// reactions is a realistic day rather than an empty one.
+// Recognition runs every day, not only on days somebody trained: people scroll a feed
+// far more often than they lift, so a day whose only activity is two reactions is a
+// realistic day rather than an empty one. It is bounded to a short window of recent
+// sessions — see recognitionWindow.
 func (s *Server) generateOneDay(
-	ctx context.Context, day time.Time, lifters int,
+	ctx context.Context,
+	q *store.Queries,
+	day time.Time,
+	people []simulatedLifter,
+	lifters int,
 ) (activitySummaryDTO, error) {
 	var summary activitySummaryDTO
 
-	// Seeded from the date so a day regenerated after a release-and-retry produces
-	// the same history rather than a different one.
+	// Seeded from the date, so a day retried after a rollback produces the same
+	// history rather than a different one.
 	rng := simulationRNG(day.Unix(), int64(lifters))
-
-	people, created, err := s.ensureGeneratedLifters(ctx, lifters)
-	if err != nil {
-		return summary, err
-	}
-	summary.Accounts = created
 
 	for i := range people {
 		person := &people[i]
@@ -980,7 +1096,7 @@ func (s *Server) generateOneDay(
 			if !person.persona.Trains(rng) {
 				continue
 			}
-			logged, err := s.generateSession(ctx, person, pd, day, rng)
+			logged, err := s.generateSession(ctx, q, person, pd, day, rng)
 			if err != nil {
 				return summary, err
 			}
@@ -990,7 +1106,8 @@ func (s *Server) generateOneDay(
 		}
 	}
 
-	reactions, comments, err := s.generateRecognition(ctx, people, rng)
+	reactions, comments, err := s.generateRecognition(
+		ctx, q, people, day.Add(-recognitionWindow), rng)
 	if err != nil {
 		return summary, err
 	}
@@ -998,6 +1115,18 @@ func (s *Server) generateOneDay(
 	summary.Comments = comments
 	return summary, nil
 }
+
+// recognitionWindow is how far back a day's recognition pass will look.
+//
+// Two days, so any one session is in scope for at most three passes however long a
+// catch-up runs. Without a bound, each of the eight days a catch-up can cover ran a
+// full pass over the same sixty-session feed, and the oldest sessions collected eight
+// rounds of comments in a single tick — the spike the session-side CatchUpWindow
+// exists to avoid, arriving through the door recognition left open.
+//
+// Short rather than zero because a rest day should still produce something: nobody
+// trains, but somebody reacts to what was logged yesterday.
+const recognitionWindow = 2 * 24 * time.Hour
 
 // ---- schedule handlers ----
 
