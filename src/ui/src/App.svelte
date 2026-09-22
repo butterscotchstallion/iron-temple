@@ -10,6 +10,7 @@
   import NavBar from "./lib/NavBar.svelte";
   import ErrorBoundary from "./lib/ErrorBoundary.svelte";
   import OfflineBanner from "./lib/OfflineBanner.svelte";
+  import Toaster from "./lib/Toaster.svelte";
   import { auth, loadMe } from "./lib/auth.svelte";
   import { loadHomeSessions } from "./lib/homeData";
   import { startPolling } from "./lib/version.svelte";
@@ -83,6 +84,21 @@
     // the client believes, and that is the check that counts.
     "/admin": wrap({
       asyncComponent: () => import("./routes/Admin.svelte"),
+      conditions: [() => auth.me?.isAdmin === true],
+    }),
+    // Generated activity, and the only screen in the app whose subject is that
+    // some of the lifters aren't real. Its own area rather than a panel on
+    // /admin: that screen is about who can sign in, this one is about populating
+    // the install, and the two were only ever adjacent because both are
+    // owner-only.
+    //
+    // Same route condition as /admin, and the same caveat — it turns the hash
+    // away for tidiness, while the API refuses /admin/activity/* with
+    // admin_required whatever the client believes. Note the endpoints stay under
+    // /admin and are still named for activity rather than for this screen: the
+    // wire deliberately gives nothing away about which accounts are generated.
+    "/astroturfing": wrap({
+      asyncComponent: () => import("./routes/Astroturfing.svelte"),
       conditions: [() => auth.me?.isAdmin === true],
     }),
     // Other lifters on this install. Reached from the account menu, not the nav
@@ -180,6 +196,12 @@
      What it reports is true of the whole app rather than of one screen, and it
      has to survive navigating away from the session that filled the queue. -->
 <OfflineBanner />
+
+<!-- Fixed to the viewport, so its position in the markup decides nothing about
+     where it draws. It is here for the reason the two banners above are: what it
+     reports has to outlive the route that raised it, and it must not be inside
+     the boundary that catches a route throwing. -->
+<Toaster />
 
 <main class="mx-auto flex max-w-3xl flex-col gap-8 px-5 py-10">
   <header class="text-center">

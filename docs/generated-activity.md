@@ -5,7 +5,14 @@ profile — need more than one lifter and more than one week of history before t
 show anything worth looking at. This fills that in, so you can see them without
 waiting three months for four people to do it for real.
 
-Find it on **Account menu → Manage accounts**, above the roster. It is owner-only.
+Find it on **Account menu → Astroturfing**. It is owner-only.
+
+The screen is named for what it does, which the rest of the system deliberately is
+not: nothing on the wire, in the schema or in any response calls these accounts
+generated, because a lifter reading the feed should not be able to tell. That
+discretion is owed to the people using the install, not to the person who set it
+up — so the one screen only its owner can see says the quiet part, while the
+endpoints under it stay named for *activity*.
 
 ## What it does
 
@@ -23,6 +30,36 @@ on and the install keeps generating a day's training each day, on the lifters' o
 scheduled weekdays, without anybody pressing anything.
 
 **Clean up** removes the generated lifters and everything of theirs.
+
+## What it tells you while it runs
+
+Anything that worked raises a **toast** — bottom of the screen, gone in six
+seconds. Anything that failed does not: it goes to the error banner on the panel,
+which stays until dismissed. The split is the point. "Generated 137 sessions" is a
+moment worth reading once; "check the server log" is an errand, and it must still
+be there when you come back from the log.
+
+Two of those notices are worth calling out.
+
+The **backfill's** notice opens before the request and resolves in place into the
+counts, because that call is synchronous and three months across four lifters is
+several seconds of a screen with nothing arriving on it. It has no dismiss button
+while it is pending — there is nothing to dismiss yet, and taking it down would
+leave a screen that looks idle with the request still open.
+
+The **live loop** raises one per tick, in the server's own words — "Mara Quinn
+logged Workout A" — which is the actual reason to leave this screen open. Work done
+*before* the screen opened is deliberately silent: the panel compares each poll
+against the previous one rather than against a stored count, so a loop that has
+been ticking for an hour does not greet you with forty toasts. If a tick produced
+more than one action the notice says how many it could not name, because only the
+last one carries a description.
+
+**The daily run cannot toast**, and that is not an oversight worth fixing. It runs
+whether or not anybody has a browser open — that is the whole point of it — and the
+panel only polls while the live loop is going. What it last did is reported on the
+panel instead, which is the honest channel for something that happened while you
+were asleep.
 
 ## How the daily run works
 
@@ -176,6 +213,9 @@ hashes stop verifying, so a clean-up will leave them behind.
 | `src/api/internal/activity/` | Personas and decisions. No database, no HTTP — just "did they turn up", "did they hit their reps", "do they say something". Unit tested. |
 | `src/api/internal/api/activity.go` | The runner and the handlers. Calls `prescribe`, and reuses `allowedReactions` and `maxCommentBody` rather than holding second copies. |
 | `src/api/db/queries/activity.sql` | Four queries reachable only from here. Two of them can do things no ordinary request may — rewrite a session's clock, and delete accounts — which is why they are in a file of their own rather than mixed in with the rest. |
+| `src/ui/src/routes/Astroturfing.svelte` | The screen. A heading and the panel — it exists so this stopped being a card on the accounts page. |
+| `src/ui/src/lib/ActivityPanel.svelte` | The controls: backfill, live loop, daily schedule, clean-up. |
+| `src/ui/src/lib/toast.svelte.ts` | The notice store, and general shell furniture rather than anything to do with generating — this was simply the first feature that needed it. |
 
 ## Authorisation
 
