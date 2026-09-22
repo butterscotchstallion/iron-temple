@@ -213,6 +213,18 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 					r.Post("/users", s.createUser)
 				})
 
+				// One lifter reading another. Every route is a GET, and that is
+				// load-bearing rather than incidental: the id in these paths
+				// names a person whose history is being read, so a write
+				// handler here would be one lifter editing another's training.
+				// See the header comment in lifters.go.
+				r.Route("/lifters", func(r chi.Router) {
+					r.Get("/", s.listLifters)
+					r.Get("/{lifterId}", s.getLifter)
+					r.Get("/{lifterId}/racked", s.getLifterRacked)
+					r.Get("/{lifterId}/sessions/{sessionId}/recap", s.getLifterSessionRecap)
+				})
+
 				r.Route("/exercises", func(r chi.Router) {
 					r.Get("/", s.listExercises)
 					r.Post("/", s.createExercise)

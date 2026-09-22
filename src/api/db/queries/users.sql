@@ -42,6 +42,108 @@ SELECT id, username, display_name, avatar_color, is_admin, created_at, must_chan
 FROM users
 ORDER BY created_at, id;
 
+-- ListLifters is the social roster: every account on this install, as one
+-- lifter sees another.
+--
+-- Deliberately not ListUsers, though the FROM clause is identical. That one
+-- answers an administrative question and carries two administrative columns:
+-- is_admin, and must_change_password. Neither belongs in an answer given to an
+-- ordinary account. must_change_password is the sharper of the two — it means
+-- "the one-time password this account was created with is still live, and still
+-- known to whoever typed it", which is a fact about a credential and is the
+-- owner's business alone. Sending it to every lifter on the install would leak
+-- which accounts have not yet been picked up.
+--
+-- is_admin is milder but goes the same way: who administers the install is not
+-- part of how lifters see each other, and a roster that marked one row as the
+-- owner would be answering a question nobody on this screen asked.
+--
+-- last_trained_on is the one column this has and ListUsers does not, and it is
+-- what makes the roster read as people rather than rows. It is a correlated
+-- subquery rather than a LEFT JOIN with a GROUP BY because the join would fan
+-- one user out per session and the grouping would have to put it back; at a
+-- handful of accounts the planner runs this once per row and the cost is
+-- nothing.
+--
+-- The EXISTS guard is the same "at least one logged rep" definition of a
+-- started session that ListSessions' HAVING and SessionTotals' own EXISTS use.
+-- Keeping the three in agreement is the point: a session somebody opened and
+-- walked away from without logging anything is not a day they trained, and a
+-- roster that dated it as one would be the app disagreeing with its own history
+-- page about the same row.
+--
+-- NULL means this account has never logged a rep, which the API sends as an
+-- absent field and the UI reads as "has not trained yet" — not as a date it
+-- has to invent.
+--
+-- Ordered like ListUsers, and for the same reason: oldest account first, so the
+-- list is stable. Sorting by last_trained_on would be the more obviously social
+-- choice and is the wrong one here — it makes a roster of five people reorder
+-- itself every time somebody trains, so the row a lifter reaches for moves
+-- between visits to buy an ordering nobody needed at this size.
+--
+-- avatar_etag is joined rather than looked up per row. The avatar bytes are not
+-- read — only the tag, which is what the UI needs to decide between an <img> and
+-- an initials chip and to bust its cache, exactly as GetUserAvatarEtag serves
+-- /me. Joining it is what keeps a roster one query instead of one per lifter;
+-- LEFT, because most accounts never upload anything, and COALESCE so "no
+-- avatar" arrives as an empty string rather than a NULL every caller would have
+-- to branch on.
+-- name: ListLifters :many
+SELECT u.id,
+       u.username,
+       u.display_name,
+       u.avatar_color,
+       COALESCE(ua.etag, '') AS avatar_etag,
+       (
+         SELECT MAX(s.performed_on)
+         FROM sessions s
+         WHERE s.user_id = u.id
+           AND EXISTS (
+             SELECT 1 FROM session_sets ss
+             WHERE ss.session_id = s.id AND ss.actual_reps > 0
+           )
+       )::date AS last_trained_on
+FROM users u
+LEFT JOIN user_avatars ua ON ua.user_id = u.id
+ORDER BY u.created_at, u.id;
+
+-- GetLifter is one row of the roster above, for the profile page.
+--
+-- Same column list and the same reasoning about what is left out, so the two
+-- cannot disagree about what one lifter may know about another — if a column is
+-- ever added to one of these, it belongs in both or in neither.
+--
+-- Not GetUser, which returns the administrative columns. Reusing it and simply
+-- declining to copy those into the DTO would work today and is the arrangement
+-- that rots: the fields would be sitting in a struct in a social handler, one
+-- careless assignment away from being sent. The compiler enforcing their absence
+-- is worth a near-duplicate query, which is the same trade the note at the top
+-- of this file makes for password_hash.
+--
+-- current_program_id rides along because the profile names what this lifter is
+-- currently running. It is a program id, not a prescription — shared data that
+-- every account can already read through /programs.
+-- name: GetLifter :one
+SELECT u.id,
+       u.username,
+       u.display_name,
+       u.avatar_color,
+       COALESCE(ua.etag, '') AS avatar_etag,
+       u.current_program_id,
+       (
+         SELECT MAX(s.performed_on)
+         FROM sessions s
+         WHERE s.user_id = u.id
+           AND EXISTS (
+             SELECT 1 FROM session_sets ss
+             WHERE ss.session_id = s.id AND ss.actual_reps > 0
+           )
+       )::date AS last_trained_on
+FROM users u
+LEFT JOIN user_avatars ua ON ua.user_id = u.id
+WHERE u.id = sqlc.arg('id');
+
 -- GetUserForLogin is the only query that reads password_hash. Username is
 -- matched case-insensitively, which is why users_username_lower_idx exists.
 --

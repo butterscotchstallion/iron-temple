@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import Racked from "./Racked.svelte";
 import type { RackedReport } from "../lib/api";
 import { clearCache } from "../lib/cache.svelte";
+import { testRackedReport } from "../lib/testFixtures";
 
 // A render test for a route, which the suite otherwise leaves to Playwright.
 //
@@ -19,58 +20,16 @@ vi.mock("../lib/api", async (importOriginal) => ({
   getRacked,
 }));
 
-/** A recap with every optional section absent — the shape of a quiet month. */
+/**
+ * A recap with every optional section absent — the shape of a quiet month.
+ *
+ * The fixture itself lives in testFixtures.ts, because a lifter's profile
+ * renders this type too and `RackedReport` has too many required fields for two
+ * files to keep a hand-built copy of one in step. Kept as a local name so the
+ * dozen `emptyReport()` call sites below read unchanged.
+ */
 function emptyReport(): RackedReport {
-  return {
-    period: {
-      kind: "month",
-      start: "2026-03-01",
-      end: "2026-03-31",
-      label: "March 2026",
-      inProgress: false,
-    },
-    totals: { volumeLb: 0, sessions: 0, sets: 0, reps: 0 },
-    change: null,
-    comparison: { count: 0, label: "", unitLb: 0 },
-    split: {
-      main: { volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0 },
-      assistance: { volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0 },
-    },
-    muscles: [
-    { group: "chest", volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0, trained: false },
-    { group: "back", volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0, trained: false },
-    { group: "legs", volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0, trained: false },
-    { group: "shoulders", volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0, trained: false },
-    { group: "arms", volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0, trained: false },
-    { group: "core", volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0, trained: false },
-    { group: "other", volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0, trained: false },
-    ],
-    lifts: [],
-    series: [],
-    mostImproved: null,
-    bodyweight: null,
-    days: [],
-    weekdays: [0, 0, 0, 0, 0, 0, 0],
-    bestWeekday: -1,
-    hours: Array.from({ length: 24 }, () => 0) as RackedReport["hours"],
-    peakHour: -1,
-    hourLabel: "",
-    streak: { longestWeeks: 0, currentWeeks: 0 },
-    attendance: {
-      basis: "none",
-      expected: 0,
-      actual: 0,
-      rate: 0,
-      sessionsPerWeek: 0,
-      weekdays: [],
-    },
-    prs: [],
-    milestones: [],
-    heaviestSet: null,
-    fastestSession: null,
-    deloads: [],
-    archetype: { name: "", description: "" },
-  };
+  return testRackedReport();
 }
 
 /** A recap with every section populated. */

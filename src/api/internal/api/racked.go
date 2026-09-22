@@ -13,30 +13,49 @@ import (
 	"gitea.homelab/gitadmin/iron-temple/api/internal/store"
 )
 
-// getRacked serves the recap for the week, month or year containing the `on`
-// query parameter, defaulting to the month in progress.
-func (s *Server) getRacked(w http.ResponseWriter, r *http.Request) {
-	kind := racked.PeriodMonth
+// rackedWindow reads the `period` and `on` query parameters into the three
+// values buildRacked wants, writing the 400 itself when either is malformed.
+// ok=false means the caller should stop.
+//
+// Extracted so that getRacked and getLifterRacked cannot drift. They are the
+// same report of the same shape differing only in whose history it covers, and
+// two copies of this parsing would be two places for the default period, the
+// date format and the single reading of the clock to disagree — which would show
+// up as one lifter's profile summarising a different window from their own page.
+func (s *Server) rackedWindow(
+	w http.ResponseWriter, r *http.Request,
+) (kind racked.PeriodKind, on, today time.Time, ok bool) {
+	kind = racked.PeriodMonth
 	if v := r.URL.Query().Get("period"); v != "" {
-		parsed, ok := racked.ParsePeriodKind(v)
-		if !ok {
+		parsed, valid := racked.ParsePeriodKind(v)
+		if !valid {
 			badRequest(w, "period must be week, month or year")
-			return
+			return kind, on, today, false
 		}
 		kind = parsed
 	}
 
 	// Both the period and the point it is measured to come from this one
 	// reading — see reportToday.
-	today := s.reportToday()
-	on := today
+	today = s.reportToday()
+	on = today
 	if v := r.URL.Query().Get("on"); v != "" {
 		parsed, err := time.Parse(dateLayout, v)
 		if err != nil {
 			badRequest(w, "on must be a date in YYYY-MM-DD form")
-			return
+			return kind, on, today, false
 		}
 		on = parsed
+	}
+	return kind, on, today, true
+}
+
+// getRacked serves the recap for the week, month or year containing the `on`
+// query parameter, defaulting to the month in progress.
+func (s *Server) getRacked(w http.ResponseWriter, r *http.Request) {
+	kind, on, today, ok := s.rackedWindow(w, r)
+	if !ok {
+		return
 	}
 
 	report, err := s.buildRacked(r.Context(), userFrom(r.Context()).ID, kind, on, today)

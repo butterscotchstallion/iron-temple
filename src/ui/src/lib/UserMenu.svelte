@@ -7,6 +7,10 @@
   import LogOut from "@lucide/svelte/icons/log-out";
   import Settings from "@lucide/svelte/icons/settings";
   import Users from "@lucide/svelte/icons/users";
+  // Distinct from Users above, which marks "Manage accounts". Two entries that
+  // both concern people need two silhouettes, or the menu reads as one item
+  // repeated.
+  import UsersRound from "@lucide/svelte/icons/users-round";
   import Avatar from "./Avatar.svelte";
   import { auth, signOut } from "./auth.svelte";
 
@@ -58,6 +62,10 @@
         <DropdownMenu.Item class={itemClass} onSelect={() => go("/racked")}>
           <BarChart3 class="size-4" aria-hidden="true" />
           Racked
+        </DropdownMenu.Item>
+        <DropdownMenu.Item class={itemClass} onSelect={() => go("/lifters")}>
+          <UsersRound class="size-4" aria-hidden="true" />
+          Lifters
         </DropdownMenu.Item>
         <DropdownMenu.Item class={itemClass} onSelect={() => go("/profile")}>
           <Settings class="size-4" aria-hidden="true" />

@@ -4,9 +4,11 @@ A fitness tracker for barbell training. You pick a program, it tells you what to
 lift and how much, you tap through the sets, and it works out the next session's
 weights from what you actually did.
 
-It is built for one lifter on a phone at the rack — registration closes after the
-first account, there is no feed and no social layer, and every screen is sized for
-a thumb between sets. Go + chi API (`src/api`), Svelte + Tailwind UI (`src/ui`),
+It is built for a phone at the rack — self-registration closes after the first
+account, and every screen is sized for a thumb between sets. One lifter is the
+expected install and the one everything is tuned for; where a household or a gym
+crew share a box, the owner adds the other accounts by hand and they can see each
+other's training. Go + chi API (`src/api`), Svelte + Tailwind UI (`src/ui`),
 PostgreSQL.
 
 ## Features
@@ -189,9 +191,20 @@ waking on the 1st, so downtime delays a recap instead of dropping it.
 ### Accounts
 
 Password login on a session cookie, with **registration closing as soon as the first
-account exists** — this is a homelab app that expects exactly one lifter, and an open
+account exists** — this is a homelab app that expects one lifter, and an open
 signup form on the public internet is an open door. Profile carries a display name,
 an uploaded avatar or a colour, and a password change.
+
+The owner can add further accounts by hand, each starting with a one-time password
+it must replace before it can do anything else. Where an install has more than one,
+**Lifters** lists them, and opening one shows what they have been lifting: their
+lifetime tonnage, the month's volume, streak and muscle split, and a heatmap of the
+days they trained. Every figure there is the *same* report the lifter reads on their
+own Racked page, computed by the same code over the same rows — so the install can
+never hold two answers about one history. There is no visibility setting: accounts
+exist only because the owner created them, so admission is the consent. The gym
+setup is the one thing that stays private, because another lifter's bar and plates
+decide their weights and must never be read as a basis for yours.
 
 ## Documentation
 

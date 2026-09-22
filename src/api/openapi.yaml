@@ -47,6 +47,7 @@ tags:
   - name: auth
   - name: users
   - name: admin
+  - name: lifters
   - name: exercises
   - name: programs
   - name: sessions
@@ -462,6 +463,147 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+
+  /lifters:
+    get:
+      tags: [lifters]
+      operationId: listLifters
+      summary: Every lifter on this install
+      description: >
+        The roster as one lifter sees another: who trains here, and when each of
+        them last logged a rep.
+
+        Deliberately not the admin roster. This carries neither `isAdmin` nor
+        `mustChangePassword` — who administers the install is not part of how
+        lifters see each other, and whether an account is still holding the
+        one-time password it was created with is a fact about a credential that
+        is the owner's business alone.
+
+        Every account appears, including the caller's own, and there is no
+        visibility setting to respect. The owner creates each account by hand,
+        so admission to the install is the consent.
+
+        `lastTrainedOn` uses the same "at least one logged rep" definition of a
+        session as the history page, so a workout somebody opened and walked away
+        from is not a day they trained. It is absent for an account that has
+        never logged a rep.
+      responses:
+        "200":
+          description: The lifters
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Lifter"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /lifters/{lifterId}:
+    parameters:
+      - $ref: "#/components/parameters/LifterId"
+    get:
+      tags: [lifters]
+      operationId: getLifter
+      summary: One lifter's profile
+      description: >
+        A roster row plus what this lifter is currently running and what they
+        have lifted in total.
+
+        The statistics stop there on purpose. Streaks, records, per-lift trends
+        and the rest are not restated here in a second shape — they come from
+        `GET /lifters/{lifterId}/racked`, which is the same report, computed by
+        the same code, that the lifter sees on their own Racked page. A profile
+        that recomputed any of it would be a second opinion about the same
+        history.
+      responses:
+        "200":
+          description: The profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LifterProfile"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /lifters/{lifterId}/racked:
+    parameters:
+      - $ref: "#/components/parameters/LifterId"
+    get:
+      tags: [lifters]
+      operationId: getLifterRacked
+      summary: Another lifter's statistics recap
+      description: >
+        `GET /racked` pointed at somebody else: the identical report, from the
+        identical code, for the week, month or year containing `on`.
+
+        That identity is the point rather than an implementation detail. A record
+        announced at the rack, the same record listed in a monthly recap, and the
+        same record read off another lifter's profile are all decided by one
+        function over the same rows — so the three can never disagree about the
+        same history.
+      parameters:
+        - name: period
+          in: query
+          required: false
+          description: Granularity of the recap. Defaults to month.
+          schema:
+            type: string
+            enum: [week, month, year]
+            default: month
+        - name: on
+          in: query
+          required: false
+          description: >
+            Any date inside the wanted period; the server expands it to the
+            whole week, month or year. Defaults to today.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Recap
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RackedReport"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /lifters/{lifterId}/sessions/{sessionId}/recap:
+    parameters:
+      - $ref: "#/components/parameters/LifterId"
+      - $ref: "#/components/parameters/SessionId"
+    get:
+      tags: [lifters]
+      operationId: getLifterSessionRecap
+      summary: Another lifter's session, in review
+      description: >
+        `GET /sessions/{sessionId}/recap` pointed at somebody else, and the same
+        report from the same code.
+
+        The session id is scoped by the lifter in the path, not by the caller: a
+        session that exists but belongs to a third lifter answers 404 for this
+        pair, exactly as an unknown id does. That is the ownership check the
+        recap already performs, reading a different owner — it is not relaxed
+        here, only pointed elsewhere.
+      responses:
+        "200":
+          description: The recap
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionRecap"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /exercises:
     get:
@@ -1206,6 +1348,17 @@ components:
       schema:
         type: integer
         format: int64
+    LifterId:
+      name: lifterId
+      in: path
+      required: true
+      description: >
+        The lifter whose history is being read. Distinct from `userId`, which
+        names the subject of an avatar request; this one scopes every query the
+        handler makes, and it is only ever read from.
+      schema:
+        type: integer
+        format: int64
     ProgramId:
       name: programId
       in: path
@@ -1404,6 +1557,77 @@ components:
         createdAt:
           type: string
           format: date-time
+
+    Lifter:
+      type: object
+      required: [id, username, displayName, avatarColor, hasAvatar]
+      description: >
+        One lifter as another sees them. A `User` stripped to what is somebody
+        else's business: no gym setup, because another lifter's bar and plates
+        decide their numbers and not yours, and none of the administrative flags
+        an `AdminUser` carries.
+      properties:
+        id:
+          type: integer
+          format: int64
+        username:
+          type: string
+          example: grace
+        displayName:
+          type: string
+          example: Grace Hopper
+        avatarColor:
+          type: string
+          description: >
+            Hex colour for the initials chip. Empty means the UI derives one
+            from the id.
+        hasAvatar:
+          type: boolean
+          description: >
+            Whether to render an `<img>` or the initials chip, so the UI need not
+            request an image that may 404.
+        avatarEtag:
+          type: string
+          description: >
+            Appended to the avatar URL as a cache-buster, so a re-upload appears
+            at once. Absent when there is no avatar.
+        lastTrainedOn:
+          type: string
+          format: date
+          description: >
+            The most recent day this lifter logged a rep. Absent for an account
+            that has never logged one — which the UI reads as "has not trained
+            yet" rather than as a date it must invent.
+
+    LifterProfile:
+      type: object
+      required: [id, username, displayName, avatarColor, hasAvatar, sessionCount, lifetimeVolumeLb]
+      description: >
+        A `Lifter` plus the two lifetime figures and the program they are
+        currently running. Everything else a profile page draws comes from
+        `GET /lifters/{lifterId}/racked`.
+      allOf:
+        - $ref: "#/components/schemas/Lifter"
+        - type: object
+          properties:
+            currentProgramId:
+              type: integer
+              format: int64
+              description: >
+                The program this lifter last opened. Absent until they have
+                opened one. An id rather than a name: programs are shared across
+                the install and the client already has them from `/programs`.
+            sessionCount:
+              type: integer
+              description: >
+                How many sessions this lifter has logged a rep in, over their
+                whole history.
+            lifetimeVolumeLb:
+              type: number
+              description: >
+                Every pound this lifter has moved, counting logged reps whether
+                or not the set was ticked off — the same definition the history
+                page totals.
 
     CreateUserRequest:
       type: object

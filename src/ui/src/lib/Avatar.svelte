@@ -5,11 +5,30 @@
   // Renders a user's avatar: their uploaded image, or an initials chip on a
   // colour derived from their id. The chip is not a placeholder for a missing
   // image — it is the default, so most users never need to upload anything.
+
+  // The six fields an avatar is drawn from, rather than `User` itself. Two
+  // different account shapes reach this component — `User` for the signed-in
+  // lifter, `Lifter` for somebody else on the install — and they agree on
+  // exactly these. Taking the narrow type means the component needs no knowledge
+  // of which one it was handed, and a third shape costs nothing.
+  //
+  // `username` is in the list because the chip falls back to it for initials
+  // when a display name is empty, which is the case for an account created
+  // without one.
+  //
+  // Derived from `User` with Pick rather than written out, so the field types
+  // stay tied to the generated client: if `avatarEtag` ever stops being an
+  // optional string, this breaks here instead of silently disagreeing.
+  type AvatarUser = Pick<
+    User,
+    "id" | "username" | "displayName" | "avatarColor" | "hasAvatar" | "avatarEtag"
+  >;
+
   let {
     user,
     size = 32,
     class: className = "",
-  }: { user: User; size?: number; class?: string } = $props();
+  }: { user: AvatarUser; size?: number; class?: string } = $props();
 
   // An upload can 404 if it was removed in another tab. Falling back to the
   // chip beats a broken-image icon.
