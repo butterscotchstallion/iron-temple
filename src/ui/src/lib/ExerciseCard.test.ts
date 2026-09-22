@@ -162,6 +162,59 @@ describe("ExerciseCard", () => {
     expect(warmups[1]).toHaveAttribute("aria-label", expect.stringContaining("Warm-up 180 lb"));
   });
 
+  // The cap is the count of work sets, and sets get added at the rack. Before
+  // the ramp is tapped through, more sets means more room for it; after, the
+  // lifter is warm and a new rung is a rung they'd have to go back and do.
+  describe("when a set is added mid-session", () => {
+    const ramp = (c: HTMLElement) =>
+      Array.from(
+        c.querySelectorAll<HTMLButtonElement>('button[aria-label^="Warm-up"]'),
+      );
+
+    it("makes room for another rung while the ramp is unfinished", async () => {
+      const { container, rerender } = render(ExerciseCard, {
+        name: "Squat",
+        sets: workSets(200, 2),
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+      });
+      expect(ramp(container)).toHaveLength(2);
+
+      await rerender({ sets: workSets(200, 3) });
+      expect(ramp(container)).toHaveLength(3);
+      expect(ramp(container)[0]).toHaveAttribute(
+        "aria-label",
+        expect.stringContaining("Warm-up 100 lb"),
+      );
+    });
+
+    it("leaves the ramp alone once it is complete", async () => {
+      const { container, rerender } = render(ExerciseCard, {
+        name: "Squat",
+        sets: workSets(200, 2),
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+      });
+
+      // Tap both rungs out to their targets: 140x3 and 180x2.
+      for (const [i, reps] of [3, 2].entries()) {
+        for (let k = 0; k < reps; k++) await fireEvent.click(ramp(container)[i]);
+      }
+      expect(ramp(container).map((b) => b.textContent?.trim())).toEqual(["3", "2"]);
+
+      await rerender({ sets: workSets(200, 3) });
+
+      // Still two rungs, still the heavy ones, and the reps still belong to the
+      // sets they were logged against.
+      expect(ramp(container)).toHaveLength(2);
+      expect(ramp(container)[0]).toHaveAttribute(
+        "aria-label",
+        expect.stringContaining("Warm-up 140 lb"),
+      );
+      expect(ramp(container).map((b) => b.textContent?.trim())).toEqual(["3", "2"]);
+    });
+  });
+
   // Everything this card said about loading a weight used to assume a barbell.
   // On a pair of dumbbells all of it was fiction: a lifter curling 30 lb was
   // told to open with two sets of an 80 lb bar, shown a diagram of the plates to
