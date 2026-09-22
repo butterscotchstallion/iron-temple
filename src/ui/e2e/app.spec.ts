@@ -327,6 +327,49 @@ test.beforeEach(async ({ page }) => {
   );
   // Default the Progress page to no exercises; individual tests override this.
   await page.route("**/api/v1/exercises**", (route) => route.fulfill({ json: [] }));
+
+  // ---- the social endpoints ----
+  //
+  // REGISTERED AFTER `**/api/v1/sessions**` ON PURPOSE. Playwright matches routes
+  // in reverse registration order, so the last one to claim a URL wins — and that
+  // wildcard claims `/sessions/1/reactions` too, answering an ARRAY endpoint with
+  // the `{items,total,…}` object a session list returns. SessionSocial assigns
+  // that straight to its reactions and then calls .find on it, which throws,
+  // which takes the whole recap page down to the error boundary. Moving either of
+  // these above the wildcard brings that back.
+  await page.route("**/api/v1/sessions/*/reactions**", (route) =>
+    route.fulfill({ json: [] }),
+  );
+  await page.route("**/api/v1/sessions/*/comments**", (route) =>
+    route.fulfill({ json: [] }),
+  );
+
+  // The feed card at the foot of Home, which every test that loads "/" now
+  // reaches. Empty, so the card renders nothing at all — which is what a
+  // one-lifter install looks like and what these tests were written against.
+  await page.route("**/api/v1/feed**", (route) =>
+    route.fulfill({ json: { items: [], limit: 20, offset: 0 } }),
+  );
+
+  // Not reached by any test here, and stubbed anyway: the suite mocks the API to
+  // stay self-contained, and an unstubbed route is a real request out to a Go API
+  // this workflow never starts — an ECONNREFUSED in the log for every page load.
+  // See the /health note above; same reasoning, same fix.
+  await page.route("**/api/v1/lifters", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/leaderboard**", (route) =>
+    route.fulfill({
+      json: {
+        period: {
+          kind: "month",
+          start: "2026-03-01",
+          end: "2026-03-31",
+          label: "March 2026",
+          inProgress: false,
+        },
+        boards: [],
+      },
+    }),
+  );
 });
 
 test("renders the programs list", async ({ page }) => {

@@ -580,6 +580,142 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /admin/activity:
+    get:
+      tags: [admin]
+      operationId: getActivityStatus
+      summary: What the generated-activity runner is doing
+      description: >
+        Owner-only, like everything under `/admin`.
+
+        Generated training activity exists so the screens built for a shared gym
+        can be looked at without waiting three months for four people to fill
+        them. Weights come from the real progression engine, so the history it
+        makes stalls and deloads exactly as a lifter's would.
+
+        `maxLifters` and `maxWeeks` are sent so a client cannot offer a number the
+        endpoints below would refuse.
+      responses:
+        "200":
+          description: Runner status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivityStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    delete:
+      tags: [admin]
+      operationId: deleteActivity
+      summary: Remove the generated accounts
+      description: >
+        Stops the loop, then deletes the generated accounts and everything that
+        cascades from them — sessions, sets, reactions, comments, gym, avatars.
+
+        The accounts carry no marker of any kind, so the roster supplies the
+        CANDIDATES — the non-admin accounts whose usernames it could have created —
+        and each one's stored password hash decides whether it actually goes. Every
+        generated account is made with one fixed password nothing signs in with, so
+        the hash is a proof of origin only the generator could have produced.
+
+        A real lifter who happens to be named after a persona therefore survives:
+        they chose their own password, so their hash does not verify. An account that
+        administers the install is never even a candidate.
+      responses:
+        "200":
+          description: What was removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivityTeardown"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/activity/backfill:
+    post:
+      tags: [admin]
+      operationId: backfillActivity
+      summary: Generate training history
+      description: >
+        Owner-only. Creates the roster's accounts if they are absent and walks
+        forward through the requested number of weeks, generating sessions on each
+        lifter's scheduled days, then a pass of reactions and comments.
+
+        Re-runnable: an account that already exists is reused rather than
+        recreated, so a second call adds history to the lifters the first one made.
+        `accounts` therefore counts the ones this call CREATED, not the ones it
+        used.
+
+        Synchronous. A few lifters over a few months is seconds of work, and the
+        bounds are what keep it that way.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BackfillActivityRequest"
+      responses:
+        "200":
+          description: What was generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivitySummary"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/activity/start:
+    post:
+      tags: [admin]
+      operationId: startActivity
+      summary: Start generating activity live
+      description: >
+        Owner-only. One lifter acts per tick — a session, a reaction or a comment —
+        so activity arrives a piece at a time while a screen is open.
+
+        Starting again replaces a loop already running rather than refusing, since
+        that is what an admin does when they want a different tick.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartActivityRequest"
+      responses:
+        "204":
+          description: Running
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/activity/stop:
+    post:
+      tags: [admin]
+      operationId: stopActivity
+      summary: Stop generating activity
+      description: >
+        Owner-only. Answers 204 whether or not a loop was running: the caller asked
+        for a state and it holds either way. Generated history is left alone —
+        removing it is `DELETE /admin/activity`.
+      responses:
+        "204":
+          description: Stopped, or was not running
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
   /lifters:
     get:
       tags: [lifters]
@@ -1862,6 +1998,103 @@ components:
         createdAt:
           type: string
           format: date-time
+
+    ActivityStatus:
+      type: object
+      required: [running, lifters, tickSeconds, actions, maxLifters, maxWeeks, roster]
+      properties:
+        running:
+          type: boolean
+        lifters:
+          type: integer
+          description: The running loop's roster size. Zero when none is running.
+        tickSeconds:
+          type: integer
+          description: The running loop's interval. Zero when none is running.
+        actions:
+          type: integer
+          description: >
+            Things the loop has done since it started. With `lastAction`, this is
+            how a screen shows it is alive rather than merely flagged as running.
+        lastAction:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+        maxLifters:
+          type: integer
+        maxWeeks:
+          type: integer
+        roster:
+          type: array
+          items:
+            type: string
+          description: >
+            Every username a backfill could create, whether or not any of them
+            exists yet. These are the accounts a teardown CONSIDERS; which of them
+            it removes is decided by each one's password hash, so a real lifter
+            sharing a name is kept.
+
+            Worth showing in a teardown confirmation regardless: it is the scope of
+            the operation, and an operator who recognises a name should be able to
+            see it listed and understand why that account is nonetheless safe.
+
+    BackfillActivityRequest:
+      type: object
+      required: [lifters, weeks]
+      properties:
+        lifters:
+          type: integer
+          minimum: 1
+          maximum: 8
+          description: >
+            How many of the roster to use. Capped at the roster's size rather than
+            generating names, because an invented name could not be re-derived and
+            so could never be torn down.
+        weeks:
+          type: integer
+          minimum: 1
+          maximum: 26
+          description: How far back to generate.
+
+    StartActivityRequest:
+      type: object
+      required: [lifters, tickSeconds]
+      properties:
+        lifters:
+          type: integer
+          minimum: 1
+          maximum: 8
+        tickSeconds:
+          type: integer
+          minimum: 5
+          maximum: 3600
+
+    ActivitySummary:
+      type: object
+      required: [accounts, sessions, reactions, comments]
+      properties:
+        accounts:
+          type: integer
+          description: >
+            Accounts this call created. Not the number it used — a second backfill
+            reuses the first one's lifters, and reporting them again would read as
+            more people.
+        sessions:
+          type: integer
+        reactions:
+          type: integer
+        comments:
+          type: integer
+
+    ActivityTeardown:
+      type: object
+      required: [removed]
+      properties:
+        removed:
+          type: integer
+          description: Accounts actually deleted, which is fewer than attempted
+            whenever some were never created.
 
     Leaderboard:
       type: object
