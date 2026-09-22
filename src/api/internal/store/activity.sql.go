@@ -80,6 +80,20 @@ WHERE lower(username) = ANY($1::text[])
 // those. That is why the roster has to be stable, and it is asserted in
 // internal/activity's tests for exactly this reason.
 //
+// THIS IS NAME-SCOPED, NOT ORIGIN-SCOPED, and the difference is a real hazard
+// rather than a pedantic one. If the install's owner creates an ordinary account
+// that happens to be named after a persona — and the personas are deliberately
+// ordinary household names, precisely so they do not read as fixtures — then a
+// teardown deletes it and cascades away everything that lifter ever logged. The
+// markerless design is what makes that impossible to detect here: this query
+// cannot tell an account it created from an account that merely shares a name.
+//
+// Nothing in SQL can fix that, so it is mitigated where a human is: the status
+// endpoint publishes the roster and the admin screen lists those names in the
+// confirmation, so an operator sees exactly which accounts are in scope before
+// agreeing. Anyone adding a caller that skips the confirmation is removing the
+// only safeguard there is.
+//
 // NOT is_admin is a guard against the one mistake with no undo. The install's
 // owner is an admin and everything they have ever lifted cascades from their row;
 // if a roster name ever collided with theirs, this predicate is what stands
