@@ -1,14 +1,14 @@
 package activity
 
 import (
-	"math/rand/v2"
+	"math/rand"
 	"testing"
 )
 
 // A fixed source, so every assertion below is about the decision logic rather
 // than about luck. PCG with constant seeds is reproducible across runs and across
 // machines, which is the property the whole package is arranged around.
-func fixed() *rand.Rand { return rand.New(rand.NewPCG(1, 2)) }
+func fixed() *rand.Rand { return rand.New(rand.NewSource(1)) }
 
 func TestRosterIsStableAcrossCalls(t *testing.T) {
 	// The teardown path re-derives the roster to find accounts a previous run

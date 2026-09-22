@@ -23,7 +23,7 @@
 package activity
 
 import (
-	"math/rand/v2"
+	"math/rand"
 )
 
 // Persona is one simulated lifter's habits.
@@ -192,7 +192,7 @@ func (p Persona) SetReps(target int32, setNumber, totalSets int, wentWell bool, 
 	// this way there is no int-to-int32 narrowing for a reader — or a linter — to
 	// have to convince themselves about.
 	shortfall := int32(1)
-	if rng.IntN(2) == 1 {
+	if rng.Intn(2) == 1 {
 		shortfall = 2
 	}
 	if reps := target - shortfall; reps >= 1 {
@@ -226,7 +226,7 @@ var phrases = []string{
 }
 
 // Comment picks something to say.
-func Comment(rng *rand.Rand) string { return phrases[rng.IntN(len(phrases))] }
+func Comment(rng *rand.Rand) string { return phrases[rng.Intn(len(phrases))] }
 
 // Emoji picks a reaction from the set the caller offers.
 //
@@ -238,5 +238,5 @@ func Emoji(allowed []string, rng *rand.Rand) string {
 	if len(allowed) == 0 {
 		return ""
 	}
-	return allowed[rng.IntN(len(allowed))]
+	return allowed[rng.Intn(len(allowed))]
 }

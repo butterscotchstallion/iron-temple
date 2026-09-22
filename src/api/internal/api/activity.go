@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
-	"math/rand/v2"
+	"math/rand"
 	"net/http"
 	"slices"
 	"sync"
@@ -518,9 +518,9 @@ func (s *Server) generateSession(
 
 	// An evening session of a plausible length. Without this the whole thing reads
 	// as having taken no time — see SetSessionClock for why that is not cosmetic.
-	startedAt := on.Add(time.Duration(17+rng.IntN(4))*time.Hour +
-		time.Duration(rng.IntN(60))*time.Minute)
-	finishedAt := startedAt.Add(time.Duration(38+rng.IntN(35)) * time.Minute)
+	startedAt := on.Add(time.Duration(17+rng.Intn(4))*time.Hour +
+		time.Duration(rng.Intn(60))*time.Minute)
+	finishedAt := startedAt.Add(time.Duration(38+rng.Intn(35)) * time.Minute)
 	if err := qtx.SetSessionClock(ctx, store.SetSessionClockParams{
 		ID:         session.ID,
 		UserID:     person.userID,
@@ -602,7 +602,11 @@ func (s *Server) generateRecognition(
 func (s *Server) runActivity(ctx context.Context, lifters int, tick time.Duration) {
 	// Seeded from the tick and the roster size rather than the clock, for the same
 	// reproducibility reason the backfill is.
-	rng := simulationRNG(int64(tick), int64(lifters))
+	// Seconds, not the raw Duration: a Duration is nanoseconds, so an hour is
+	// 3.6e12 and simulationRNG's shift would run off the top of an int64. The tick
+	// is whole seconds by construction anyway — the handler builds it from
+	// TickSeconds.
+	rng := simulationRNG(int64(tick/time.Second), int64(lifters))
 
 	// Resolved once, before the ticker, rather than per tick. Per tick it would be
 	// four queries a lifter every few seconds to re-derive a roster that does not
@@ -637,8 +641,8 @@ func (s *Server) runActivity(ctx context.Context, lifters int, tick time.Duratio
 			// Sometimes a session, otherwise a reaction or a comment. Training is
 			// the rarer event because it is the rarer event: a lifter trains a few
 			// times a week and scrolls a feed far more often.
-			if person.persona.Trains(rng) && rng.IntN(4) == 0 {
-				day := person.days[rng.IntN(len(person.days))]
+			if person.persona.Trains(rng) && rng.Intn(4) == 0 {
+				day := person.days[rng.Intn(len(person.days))]
 				if _, err := s.generateSession(ctx, person, day, s.reportToday(), rng); err != nil {
 					log.Printf("activity loop session: %v", err)
 					continue
@@ -672,7 +676,7 @@ func (s *Server) generateRecognitionOnce(
 	if err != nil || len(seen) == 0 {
 		return 0, 0, err
 	}
-	row := seen[rng.IntN(len(seen))]
+	row := seen[rng.Intn(len(seen))]
 
 	if person.persona.Reacts(rng) {
 		if err := s.q.AddSessionReaction(ctx, store.AddSessionReactionParams{
@@ -707,15 +711,25 @@ var weekdayValues = [7]int32{0, 1, 2, 3, 4, 5, 6}
 //
 // One function so the justification is written once rather than at each call site,
 // and so a future caller cannot reach for a different source by accident.
+// Both seeds are folded into the one int64 NewSource takes. `a` is shifted rather
+// than added so the pair maps to distinct seeds — 4 lifters over 12 weeks and 12
+// over 4 should not generate the same history. Every caller's values are small
+// (bounded by the handlers at 1..8, 1..26 and 5..3600), so the shift cannot reach
+// the sign bit.
+//
+// math/rand and NOT math/rand/v2. The v2 package is the better API and it broke
+// the build: gosec 2.28.0 cannot read its export data when the toolchain is newer
+// than its own (`internal error in importing "math/rand/v2" (function with type
+// parameters cannot have a receiver)`), which failed CI on Go 1.27 while passing
+// locally on 1.26. Nothing here needs v2 — a seeded source, Float64 and Intn are
+// all of it — so the dependency was not worth the incompatibility.
 func simulationRNG(a, b int64) *rand.Rand {
-	// #nosec G404,G115 -- math/rand is the right choice here and crypto/rand would
-	// be the wrong one: this generates fake training data, and what is required of
-	// it is REPRODUCIBILITY — the same request producing the same history, so a
-	// screen that looks wrong can be regenerated exactly — rather than
-	// unpredictability. Nothing derived from it is a secret, a token or a password.
-	// The conversions are safe because every seed is a value the handlers have
-	// already bounded: 1..MaxRoster lifters, 1..26 weeks, 5..3600 second ticks.
-	return rand.New(rand.NewPCG(uint64(a), uint64(b)))
+	// #nosec G404 -- math/rand is the right choice here and crypto/rand would be
+	// the wrong one: this generates fake training data, and what is required of it
+	// is REPRODUCIBILITY — the same request producing the same history, so a screen
+	// that looks wrong can be regenerated exactly — rather than unpredictability.
+	// Nothing derived from it is a secret, a token or a password.
+	return rand.New(rand.NewSource(a<<32 ^ b))
 }
 
 // allowedReactionList is the reaction allowlist as a slice.
