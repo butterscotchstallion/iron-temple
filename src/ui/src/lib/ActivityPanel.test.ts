@@ -1,6 +1,8 @@
 import { render, screen, waitFor, fireEvent } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ActivityPanel from "./ActivityPanel.svelte";
+import Toaster from "./Toaster.svelte";
+import { resetToasts } from "./toast.svelte";
 import type { ActivityStatus } from "./api";
 
 // The owner's control for generated activity.
@@ -9,6 +11,11 @@ import type { ActivityStatus } from "./api";
 // deletes accounts and everything that cascades from them; and the status is
 // polled only while a loop is running, because idle there is nothing to watch and
 // a panel that asked anyway would be a request every five seconds forever.
+//
+// Successes leave this component entirely — they go to the toast store, which the
+// shell renders. So the tests that read one mount the Toaster alongside the panel
+// via `renderWithToasts` below. Failures stay in the panel's own error banner, and
+// those assertions need no toaster.
 
 const getActivityStatus = vi.hoisted(() => vi.fn());
 const backfillActivity = vi.hoisted(() => vi.fn());
@@ -50,8 +57,23 @@ function status(over: Partial<ActivityStatus> = {}): { status: 200; data: Activi
   };
 }
 
+/**
+ * The panel plus the notice region the shell normally provides.
+ *
+ * Two renders rather than a fixture component: both mount into document.body, so
+ * `screen` spans them, and nothing about the pairing needs its own markup. The
+ * real App.svelte keeps them apart for a reason — a notice has to outlive the
+ * route that raised it — and a fixture would quietly imply otherwise.
+ */
+function renderWithToasts() {
+  render(ActivityPanel);
+  render(Toaster);
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  // Module state, shared by every test in the process.
+  resetToasts();
   getActivityStatus.mockResolvedValue(status());
   backfillActivity.mockResolvedValue({
     status: 200,
@@ -61,11 +83,20 @@ beforeEach(() => {
   stopActivity.mockResolvedValue({ status: 204, data: undefined });
   deleteActivity.mockResolvedValue({ status: 200, data: { removed: 4 } });
   getActivitySchedule.mockResolvedValue(daily());
-  setActivitySchedule.mockImplementation(async (body) => daily(body));
+  // A write is reflected by subsequent reads, because every action reloads when it
+  // succeeds. A mock that answered the old state afterwards would have the panel
+  // report "Off." immediately after switching it on — and would quietly let a
+  // regression there pass.
+  setActivitySchedule.mockImplementation(async (body) => {
+    const written = daily(body);
+    getActivitySchedule.mockResolvedValue(written);
+    return written;
+  });
 });
 
 afterEach(() => {
   vi.useRealTimers();
+  resetToasts();
 });
 
 describe("ActivityPanel", () => {
@@ -75,7 +106,7 @@ describe("ActivityPanel", () => {
   });
 
   it("generates history and reports what it made", async () => {
-    render(ActivityPanel);
+    renderWithToasts();
     await waitFor(() => expect(getActivityStatus).toHaveBeenCalled());
 
     await fireEvent.click(screen.getByText("Generate history"));
@@ -86,6 +117,49 @@ describe("ActivityPanel", () => {
     await waitFor(() => {
       expect(screen.getByText(/4 new lifters, 137 sessions/)).toBeInTheDocument();
     });
+  });
+
+  // The request is synchronous and generating three months takes seconds with
+  // nothing arriving, so the notice opens before the call and says what it is
+  // doing — then becomes the result rather than being replaced by a second toast.
+  it("says it is generating while the request is open, and resolves that notice", async () => {
+    let finish: (value: unknown) => void = () => {};
+    backfillActivity.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    renderWithToasts();
+    await waitFor(() => expect(getActivityStatus).toHaveBeenCalled());
+
+    await fireEvent.click(screen.getByText("Generate history"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Generating history…")).toBeInTheDocument();
+    });
+    expect(screen.getByText("12 weeks across 4 lifters.")).toBeInTheDocument();
+
+    finish({ status: 200, data: { accounts: 4, sessions: 137, reactions: 210, comments: 64 } });
+
+    await waitFor(() => {
+      expect(screen.getByText("History generated")).toBeInTheDocument();
+    });
+    // Resolved in place: the pending wording is gone rather than sitting above it.
+    expect(screen.queryByText("Generating history…")).not.toBeInTheDocument();
+  });
+
+  // Otherwise a failed backfill leaves a spinner on screen forever, next to a
+  // banner saying it didn't work.
+  it("takes the pending notice down when generating fails", async () => {
+    backfillActivity.mockResolvedValue({ status: 500, data: undefined });
+    renderWithToasts();
+    await waitFor(() => expect(getActivityStatus).toHaveBeenCalled());
+
+    await fireEvent.click(screen.getByText("Generate history"));
+
+    await waitFor(() => expect(screen.getByText(/That didn't work/)).toBeInTheDocument());
+    expect(screen.queryByText("Generating history…")).not.toBeInTheDocument();
   });
 
   it("says so when generating fails instead of claiming it worked", async () => {
@@ -154,7 +228,7 @@ describe("ActivityPanel", () => {
   });
 
   it("removes them once confirmed, and says how many went", async () => {
-    render(ActivityPanel);
+    renderWithToasts();
     await waitFor(() => expect(getActivityStatus).toHaveBeenCalled());
 
     await fireEvent.click(screen.getByText("Remove generated lifters"));
@@ -165,7 +239,7 @@ describe("ActivityPanel", () => {
 
     await waitFor(() => expect(deleteActivity).toHaveBeenCalled());
     await waitFor(() => {
-      expect(screen.getByText("Removed 4 accounts.")).toBeInTheDocument();
+      expect(screen.getByText("Removed 4 accounts")).toBeInTheDocument();
     });
   });
 
@@ -198,6 +272,69 @@ describe("ActivityPanel", () => {
 
     await vi.advanceTimersByTimeAsync(11_000);
     expect(getActivityStatus.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  // The point of leaving this screen open. A poll that finds the count has moved
+  // says what was done, in the server's own words.
+  it("raises a notice for work the loop does while the screen is open", async () => {
+    vi.useFakeTimers();
+    getActivityStatus.mockResolvedValue(
+      status({ running: true, lifters: 3, tickSeconds: 20, actions: 7 }),
+    );
+    renderWithToasts();
+    await vi.waitFor(() => expect(getActivityStatus).toHaveBeenCalledTimes(1));
+
+    getActivityStatus.mockResolvedValue(
+      status({
+        running: true,
+        lifters: 3,
+        tickSeconds: 20,
+        actions: 8,
+        lastAction: "Mara Quinn logged Workout A",
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(5_500);
+
+    await vi.waitFor(() => {
+      expect(screen.getByText("Mara Quinn logged Workout A")).toBeInTheDocument();
+    });
+  });
+
+  // A loop that has been running for an hour must not greet the screen with a
+  // toast for each of the forty things it did before anyone was looking.
+  it("says nothing about work already done when the screen opens", async () => {
+    getActivityStatus.mockResolvedValue(
+      status({
+        running: true,
+        lifters: 3,
+        tickSeconds: 20,
+        actions: 40,
+        lastAction: "Mara Quinn logged Workout A",
+      }),
+    );
+    renderWithToasts();
+
+    // The panel's own status line reports it; the toaster does not.
+    await waitFor(() => expect(screen.getByText(/40 actions/)).toBeInTheDocument());
+    expect(screen.queryByTestId("toaster")?.textContent?.trim()).toBe("");
+  });
+
+  // Several actions between two polls: only the last one has a description, so the
+  // notice says so rather than quietly reporting one of them.
+  it("counts the ones it could not name", async () => {
+    vi.useFakeTimers();
+    getActivityStatus.mockResolvedValue(status({ running: true, lifters: 3, actions: 2 }));
+    renderWithToasts();
+    await vi.waitFor(() => expect(getActivityStatus).toHaveBeenCalledTimes(1));
+
+    getActivityStatus.mockResolvedValue(
+      status({ running: true, lifters: 3, actions: 5, lastAction: "Dev Oyelaran said something" }),
+    );
+    await vi.advanceTimersByTimeAsync(5_500);
+
+    await vi.waitFor(() => {
+      expect(screen.getByText(/and 2 more since the last check/)).toBeInTheDocument();
+    });
   });
 
   // The roster is the SCOPE of a clean-up, and it comes from the server rather
@@ -255,8 +392,23 @@ describe("ActivityPanel", () => {
     });
     // Said plainly, because the hourly tick means the first day is not immediate and
     // an operator who expected instant activity would think it was broken.
+    //
+    // Rendered without the toaster: switching on also reveals the panel's own
+    // "Hasn't run yet" line, which carries the same sentence, so mounting both
+    // would give this query two matches. The toast is asserted in the next test.
     await waitFor(() => {
       expect(screen.getByText(/first day lands within the hour/)).toBeInTheDocument();
+    });
+  });
+
+  it("raises a notice when the daily run is switched on", async () => {
+    renderWithToasts();
+    await waitFor(() => expect(screen.getByText("Switch on")).toBeInTheDocument());
+
+    await fireEvent.click(screen.getByText("Switch on"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Running daily")).toBeInTheDocument();
     });
   });
 

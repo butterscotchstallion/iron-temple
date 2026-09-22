@@ -15,13 +15,15 @@
     type ActivitySchedule,
     type ActivityStatus,
   } from "./api";
+  import { dismissToast, pushToast, updateToast } from "./toast.svelte";
 
-  // Generated training activity, on the owner's account screen.
+  // The controls for generated activity. Mounted by routes/Astroturfing.svelte,
+  // which owns the heading and says what the screen is for.
   //
   // Only reachable by the account that claimed the install: the route condition on
-  // /admin keeps the link and the hash from working for anybody else, and every
-  // endpoint below sits inside the API's /admin subtree, which is the check that
-  // actually counts.
+  // /astroturfing keeps the link and the hash from working for anybody else, and
+  // every endpoint below sits inside the API's /admin subtree, which is the check
+  // that actually counts.
   //
   // Nothing about the lifters this creates is marked anywhere — not in the schema,
   // not in any response — so this panel is the only place in the app that knows
@@ -29,10 +31,17 @@
   // the roster that named them rather than by looking up a flag, and why it is
   // behind a confirmation: it deletes accounts, and the sessions, reactions and
   // comments that cascade from them.
+  //
+  // Successes are toasts; failures are not.
+  //
+  // That split is deliberate rather than stylistic. What went well here is a
+  // moment — a day generated, a loop started — and reads once. A failure is
+  // "check the server log", which is an errand: it has to survive scrolling, and
+  // it must not expire while the reader is in another window looking at the log.
+  // So the banner stays, and the toast carries the good news. See toast.svelte.ts.
   let status = $state<ActivityStatus | null>(null);
   let busy = $state(false);
   let error = $state<string | null>(null);
-  let note = $state<string | null>(null);
   let confirmingTeardown = $state(false);
   let schedule = $state<ActivitySchedule | null>(null);
 
@@ -68,6 +77,7 @@
   async function load() {
     const result = await getActivityStatus();
     if (result.status === 200) {
+      announce(status, result.data);
       status = result.data;
       schedulePoll();
     }
@@ -80,42 +90,96 @@
     }
   }
 
-  // Every action funnels through here so that `busy` and the two message slots
-  // cannot get out of step — five call sites each clearing their own would be five
-  // places for a stale error to survive a successful retry.
-  async function act(what: () => Promise<boolean>, success = "") {
+  // What the generator has already been seen doing, so a poll can tell new work
+  // from the running total.
+  //
+  // The comparison is against the PREVIOUS status rather than against a count kept
+  // here, which is what makes the first load silent: on mount there is no previous
+  // reading, so a loop that has been ticking for an hour does not greet the screen
+  // with a toast for each of the forty things it did before anyone was looking.
+  function announce(previous: ActivityStatus | null, next: ActivityStatus) {
+    if (previous === null || !next.running) return;
+    const fresh = next.actions - previous.actions;
+    if (fresh <= 0) return;
+    pushToast({
+      // The server's own description of the last thing done — "Mara Quinn logged
+      // Workout A". A toast that only said "1 new action" would be a counter, and
+      // the point of watching this screen is seeing the gym move.
+      title: next.lastAction ?? "Generated some activity",
+      // Only the last action has a description, so a tick that produced several
+      // says so rather than quietly reporting one of them.
+      body: fresh > 1 ? `and ${fresh - 1} more since the last check` : "",
+    });
+  }
+
+  // Every action funnels through here so that `busy` and the error banner cannot
+  // get out of step — five call sites each clearing their own would be five places
+  // for a stale error to survive a successful retry.
+  //
+  // Successes are left to the callers: each knows something this doesn't (counts
+  // it alone was told, the tick it just set), and a generic "done" toast here
+  // would throw that away.
+  async function act(what: () => Promise<boolean>) {
     if (busy) return;
     busy = true;
     error = null;
-    note = null;
     const ok = await what();
     busy = false;
     if (!ok) {
       error = "That didn't work. Check the server log.";
       return;
     }
-    // Only when the action did not write its own. Backfill and teardown report
-    // counts they alone know, and an unconditional assignment here would throw
-    // those away for a generic "done" — which is exactly what it used to do.
-    if (note === null && success !== "") note = success;
     await load();
   }
 
+  // The one call worth a pending toast: it is synchronous, and generating three
+  // months across four lifters is seconds of a request with nothing arriving. The
+  // notice opens saying what it is doing and resolves in place into what it did —
+  // see updateToast's note on why it isn't two toasts.
   const backfill = () =>
     act(async () => {
+      const notice = pushToast({
+        title: "Generating history…",
+        body: `${weeks} ${weeks === 1 ? "week" : "weeks"} across ${lifters} ${
+          lifters === 1 ? "lifter" : "lifters"
+        }.`,
+        pending: true,
+      });
       const result = await backfillActivity({ lifters, weeks });
-      if (result.status !== 200) return false;
+      if (result.status !== 200) {
+        // Taken down rather than turned red: the error banner is about to say the
+        // same thing in the place that survives being scrolled past.
+        dismissToast(notice);
+        return false;
+      }
       const s = result.data;
-      note =
-        `${s.accounts} new ${s.accounts === 1 ? "lifter" : "lifters"}, ` +
-        `${s.sessions} sessions, ${s.reactions} reactions, ${s.comments} comments.`;
+      updateToast(notice, {
+        title: "History generated",
+        body:
+          `${s.accounts} new ${s.accounts === 1 ? "lifter" : "lifters"}, ` +
+          `${s.sessions} sessions, ${s.reactions} reactions, ${s.comments} comments.`,
+        tone: "success",
+      });
       return true;
     });
 
   const start = () =>
-    act(async () => (await startActivity({ lifters, tickSeconds })).status === 204, "Running.");
+    act(async () => {
+      if ((await startActivity({ lifters, tickSeconds })).status !== 204) return false;
+      pushToast({
+        title: "Live activity running",
+        body: `One lifter acts every ${tickSeconds}s. Each one will show up here.`,
+        tone: "success",
+      });
+      return true;
+    });
 
-  const stop = () => act(async () => (await stopActivity()).status === 204, "Stopped.");
+  const stop = () =>
+    act(async () => {
+      if ((await stopActivity()).status !== 204) return false;
+      pushToast({ title: "Live activity stopped" });
+      return true;
+    });
 
   // Toggling writes immediately rather than behind a Save button: it is one
   // boolean, and a switch that needs confirming reads as though it might not have
@@ -125,9 +189,18 @@
       const result = await setActivitySchedule({ enabled, lifters });
       if (result.status !== 200) return false;
       schedule = result.data;
-      note = enabled
-        ? "Running daily. The first day lands within the hour."
-        : "Daily run switched off.";
+      pushToast(
+        enabled
+          ? {
+              title: "Running daily",
+              // Said in the toast as well as on the panel, because the hourly tick
+              // means the first day is not immediate and an operator who expected
+              // instant activity would think the switch hadn't taken.
+              body: "The first day lands within the hour.",
+              tone: "success",
+            }
+          : { title: "Daily run switched off" },
+      );
       return true;
     });
 
@@ -135,7 +208,11 @@
     act(async () => {
       const result = await deleteActivity();
       if (result.status !== 200) return false;
-      note = `Removed ${result.data.removed} ${result.data.removed === 1 ? "account" : "accounts"}.`;
+      const { removed } = result.data;
+      pushToast({
+        title: `Removed ${removed} ${removed === 1 ? "account" : "accounts"}`,
+        body: "Their sessions, reactions and comments went with them.",
+      });
       return true;
     });
 
@@ -151,21 +228,24 @@
 </script>
 
 <Card class="p-6" data-testid="activity-panel">
-  <h3 class="text-lg font-bold text-card-foreground">Generated activity</h3>
+  <!-- No heading of its own: the screen this sits on is titled, and a card that
+       repeated it would be a section header for the only section. The three
+       sub-headings below are the ones that earn their place, because the three
+       modes are easy to mistake for each other. -->
+  <!-- "History" rather than "Generate history", which is what the button says.
+       Two elements carrying the same words is a real cost here: the panel's tests
+       reach that button by its text. -->
+  <h3 class={labelClass}>History</h3>
   <p class="mt-1 text-sm text-muted-foreground">
-    Fills the install with lifters and training history, so the screens built for a
-    shared gym have something on them. Weights come from the real progression engine,
-    so the history stalls and deloads like anyone's would.
+    Creates the lifters and walks forward through the weeks you ask for, logging
+    sessions on each one's scheduled days. Weights come from the real progression
+    engine, so the history stalls and deloads like anyone's would.
   </p>
 
   {#if error}
     <div class="mt-4">
       <ErrorBanner message={error} onDismiss={() => (error = null)} />
     </div>
-  {/if}
-
-  {#if note}
-    <p class="mt-4 text-sm text-muted-foreground" role="status">{note}</p>
   {/if}
 
   <div class="mt-4 flex flex-wrap items-end gap-3">

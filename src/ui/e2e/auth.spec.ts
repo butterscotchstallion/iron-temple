@@ -87,9 +87,14 @@ async function mockCommon(page: import("@playwright/test").Page) {
   );
   await page.route("**/api/v1/lifters", (route) => route.fulfill({ json: [] }));
 
-  // The generated-activity panel on the admin screen loads this on mount, so the
-  // owner's roster test reaches it. Idle, which is the state the panel's own
-  // assertions here assume.
+  // The two the Astroturfing screen reads on mount. Idle and switched off, which
+  // is the state that screen's assertions here assume.
+  //
+  // Exact paths rather than one `**/admin/activity**` wildcard, so each answers
+  // its own shape: a status object and a schedule object are different types, and
+  // a wildcard would hand the panel the wrong one for whichever it claimed. The
+  // schedule is the specific case that caught this — nothing was stubbing it, so
+  // the request fell through to a proxy error in the log.
   await page.route("**/api/v1/admin/activity", (route) =>
     route.fulfill({
       json: {
@@ -99,8 +104,12 @@ async function mockCommon(page: import("@playwright/test").Page) {
         actions: 0,
         maxLifters: 8,
         maxWeeks: 26,
+        roster: ["mara.quinn", "dev.oyelaran"],
       },
     }),
+  );
+  await page.route("**/api/v1/admin/activity/schedule", (route) =>
+    route.fulfill({ json: { enabled: false, lifters: 4 } }),
   );
 }
 
@@ -212,6 +221,9 @@ test("the account menu offers account management to the owner", async ({ page })
 
   await page.getByRole("button", { name: /account menu/i }).click();
   await expect(page.getByRole("menuitem", { name: /manage accounts/i })).toBeVisible();
+  // Generated activity sits in the same isAdmin block, and is the entry it would
+  // be worst to leak: it names the install's own astroturfing.
+  await expect(page.getByRole("menuitem", { name: /astroturfing/i })).toBeVisible();
 });
 
 test("the account menu hides account management from everyone else", async ({ page }) => {
@@ -222,6 +234,7 @@ test("the account menu hides account management from everyone else", async ({ pa
   // The menu is open — this is the entry missing, not the menu failing to open.
   await expect(page.getByRole("menuitem", { name: /sign out/i })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: /manage accounts/i })).toHaveCount(0);
+  await expect(page.getByRole("menuitem", { name: /astroturfing/i })).toHaveCount(0);
 });
 
 // Hiding the link is tidiness; the route condition is what makes typing the
@@ -237,6 +250,32 @@ test("a non-admin typing the admin hash lands on the home screen", async ({ page
   // also matches the roster card's "N accounts".
   await expect(page.getByRole("heading", { name: "Accounts", exact: true })).toHaveCount(0);
   await expect(page.getByRole("navigation")).toBeVisible();
+});
+
+// The same dead end for the generated-activity screen, which has its own route
+// and therefore its own condition to get wrong. Worth its own test rather than
+// trusting that /admin's condition covers both: they are two entries in the
+// route table, and a copied one is exactly the kind that loses its guard.
+test("a non-admin typing the astroturfing hash lands on the home screen", async ({
+  page,
+}) => {
+  await mockSignedInAsNonAdmin(page);
+  await page.goto("/#/astroturfing");
+
+  await expect(page.getByRole("heading", { name: "Astroturfing", exact: true })).toHaveCount(
+    0,
+  );
+  await expect(page.getByRole("navigation")).toBeVisible();
+});
+
+test("the owner can reach the astroturfing screen", async ({ page }) => {
+  await mockSignedIn(page);
+  await page.goto("/#/astroturfing");
+
+  await expect(page.getByRole("heading", { name: "Astroturfing", exact: true })).toBeVisible();
+  // The controls, not just the heading — the panel reads two endpoints on mount
+  // and a failure there would leave a titled but empty screen.
+  await expect(page.getByRole("button", { name: /generate history/i })).toBeVisible();
 });
 
 test("the owner can open the roster and add an account", async ({ page }) => {

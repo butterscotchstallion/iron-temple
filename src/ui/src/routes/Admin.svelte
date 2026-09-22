@@ -4,7 +4,6 @@
   import { Button } from "$lib/components/ui/button";
   import UserPlus from "@lucide/svelte/icons/user-plus";
   import Dices from "@lucide/svelte/icons/dices";
-  import ActivityPanel from "../lib/ActivityPanel.svelte";
   import ErrorBanner from "../lib/ErrorBanner.svelte";
   import { auth } from "../lib/auth.svelte";
   import { formatLongDate } from "../lib/date";
@@ -242,10 +241,6 @@
       </div>
     </form>
   </Card>
-
-  <!-- Above the roster rather than below it: generating lifters changes what the
-       roster says, so the control belongs before the thing it changes. -->
-  <ActivityPanel />
 
   <Card class="p-6">
     <h3 class="text-lg font-bold text-card-foreground">

@@ -8,6 +8,9 @@
   import Medal from "@lucide/svelte/icons/medal";
   import Rss from "@lucide/svelte/icons/rss";
   import Settings from "@lucide/svelte/icons/settings";
+  // Fake grass. The one place in the app that gets to be honest about what the
+  // generated lifters are, because it is only ever rendered for the owner.
+  import Sprout from "@lucide/svelte/icons/sprout";
   import Users from "@lucide/svelte/icons/users";
   // Distinct from Users above, which marks "Manage accounts". Two entries that
   // both concern people need two silhouettes, or the menu reads as one item
@@ -91,6 +94,14 @@
           <DropdownMenu.Item class={itemClass} onSelect={() => go("/admin")}>
             <Users class="size-4" aria-hidden="true" />
             Manage accounts
+          </DropdownMenu.Item>
+          <!-- Below "Manage accounts" because it is the stranger of the two and
+               the ordinary errand should come first. Inside the same isAdmin
+               block: one guard for both, so a future entry cannot be added
+               outside it by accident. -->
+          <DropdownMenu.Item class={itemClass} onSelect={() => go("/astroturfing")}>
+            <Sprout class="size-4" aria-hidden="true" />
+            Astroturfing
           </DropdownMenu.Item>
         {/if}
         <DropdownMenu.Separator class="my-1 h-px bg-border/60" />
