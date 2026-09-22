@@ -520,6 +520,66 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /leaderboard:
+    get:
+      tags: [lifters]
+      operationId: getLeaderboard
+      summary: How the lifters on this install compare
+      description: >
+        Every board for the week, month or year containing `on`, in the order a
+        surface should offer them — the first is the one to open on.
+
+        **That order is a decision, not a convenience.** Raw tonnage ranks lifters
+        by how much they weigh and how long they have been training, which on a
+        shared box is a contest the newest lifter cannot win and the strongest
+        cannot lose. So `volume` is last: available, because people want it, and
+        not what the page opens on. What leads is how often somebody trained and
+        how well they kept their own schedule — measures relative to the lifter
+        rather than to the others.
+
+        **No `metric` parameter.** One pass of the Racked report per lifter
+        computes every figure here, so a per-metric endpoint would re-run the
+        heaviest query in the API to read a different field off the same result.
+        Take all the boards and switch between them client-side.
+
+        Every figure is read off the same report each lifter sees on their own
+        Racked page, computed by the same code over the same rows. Nothing is
+        recomputed — the install must not hold two answers about one history.
+
+        A lifter appears on a board when the metric is DEFINED for them, which is
+        not the same as non-zero: somebody who trained nothing has a volume of zero
+        and is listed saying so, where somebody whose program carries no scheduled
+        weekdays has no attendance at all and is left off that board. Hiding the
+        first would flatter the board; inventing the second would grade a target
+        nobody entered.
+      parameters:
+        - name: period
+          in: query
+          required: false
+          description: Granularity. Defaults to month.
+          schema:
+            type: string
+            enum: [week, month, year]
+            default: month
+        - name: on
+          in: query
+          required: false
+          description: Any date inside the wanted period. Defaults to today.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: The boards
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Leaderboard"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /lifters:
     get:
       tags: [lifters]
@@ -1802,6 +1862,68 @@ components:
         createdAt:
           type: string
           format: date-time
+
+    Leaderboard:
+      type: object
+      required: [period, boards]
+      properties:
+        period:
+          $ref: "#/components/schemas/RackedPeriod"
+        boards:
+          type: array
+          description: >
+            In the order a surface should offer them; the first is the one to open
+            on. See the endpoint description for why volume is last.
+          items:
+            $ref: "#/components/schemas/LeaderboardBoard"
+
+    LeaderboardBoard:
+      type: object
+      required: [metric, label, unit, note, entries]
+      properties:
+        metric:
+          type: string
+          enum: [sessionsPerWeek, attendance, improvement, streak, volume]
+        label:
+          type: string
+          example: Sessions a week
+        unit:
+          type: string
+          description: >
+            How to render `value` without parsing `metric`. `percent` values are
+            fractions — 0.12 is 12%.
+          enum: [per_week, percent, count, pounds]
+        note:
+          type: string
+          description: >
+            What the board measures, in its own words. Carried on the wire because
+            a board that omits some lifters — attendance does — has to say so
+            where it is drawn.
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/LeaderboardEntry"
+
+    LeaderboardEntry:
+      type: object
+      required: [rank, lifter, value]
+      properties:
+        rank:
+          type: integer
+          description: >
+            Equal figures share a rank and the next distinct figure skips the ones
+            they used up — 1, 2, 2, 4. Computed server-side so every surface
+            agrees, and so a board never shows two identical numbers as different
+            places.
+        lifter:
+          $ref: "#/components/schemas/Lifter"
+        value:
+          type: number
+        detail:
+          type: string
+          description: >
+            The thing behind the figure, where there is one — the lift on the
+            most-improved board. Absent elsewhere.
 
     SessionReaction:
       type: object

@@ -12,7 +12,15 @@
  * can be read next to the assertions that depend on it.
  */
 
-import type { FeedEntry, Lifter, RackedReport, SessionRecap, User } from "./api";
+import type {
+  FeedEntry,
+  LeaderboardBoard,
+  LeaderboardEntry,
+  Lifter,
+  RackedReport,
+  SessionRecap,
+  User,
+} from "./api";
 
 /**
  * A signed-in lifter. An admin, because the first account to register claims the
@@ -55,6 +63,37 @@ export function testLifter(overrides: Partial<Lifter> = {}): Lifter {
     displayName: "Grace Hopper",
     avatarColor: "",
     hasAvatar: false,
+    ...overrides,
+  };
+}
+
+/**
+ * One leaderboard board, defaulting to a sessions-a-week board with no entries.
+ *
+ * Entries are supplied per test rather than defaulted, because what a board says
+ * about who is on it IS the thing under test — a fixture that arrived populated
+ * would hide the empty and single-lifter cases, which are the two a renderer is
+ * most likely to get wrong.
+ */
+export function testBoard(overrides: Partial<LeaderboardBoard> = {}): LeaderboardBoard {
+  return {
+    metric: "sessionsPerWeek",
+    label: "Sessions a week",
+    unit: "per_week",
+    note: "How often each lifter trained.",
+    entries: [],
+    ...overrides,
+  };
+}
+
+/** One lifter's place on a board. */
+export function testBoardEntry(
+  overrides: Partial<LeaderboardEntry> = {},
+): LeaderboardEntry {
+  return {
+    rank: 1,
+    lifter: testLifter(),
+    value: 3,
     ...overrides,
   };
 }

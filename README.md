@@ -207,6 +207,16 @@ feed of everybody would be that page again under another name. Which is also why
 one-lifter install never sees the card at all — there is nothing for it to hold, so
 home looks exactly as it always did.
 
+A **leaderboard** compares everyone over a week, month or year. It opens on how
+often each lifter trained and how well they kept their *own* schedule, because those
+are measures relative to the lifter — raw tonnage ranks people by bodyweight and
+training age as much as by effort, so it's the last board rather than the first, and
+the page says so where it's drawn. Every figure is read off the same Racked report
+that lifter sees on their own page; nothing is recomputed. A lifter appears on a
+board when the metric *means* something for them, which isn't the same as non-zero:
+somebody who trained nothing is listed at zero, but somebody whose program has no
+scheduled weekdays has no attendance to grade and is left off that board entirely.
+
 Every session carries **applause and conversation**: four reactions, and comments
 capped at a couple of sentences. You can't applaud your own workout — that's what the
 reaction is for — but you can comment on it, because answering somebody is the obvious

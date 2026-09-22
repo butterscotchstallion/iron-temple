@@ -198,6 +198,46 @@ type feedEntryDTO struct {
 	CommentCount  int64 `json:"commentCount"`
 }
 
+// leaderboardDTO is every board for one period.
+//
+// All of them in one response rather than one per request: a single pass of
+// buildRacked per lifter computes every figure, so a per-metric endpoint would
+// re-run the heaviest query in the app to read a different field off the same
+// result. See leaderboard.go.
+type leaderboardDTO struct {
+	Period rackedPeriodDTO       `json:"period"`
+	Boards []leaderboardBoardDTO `json:"boards"`
+}
+
+// leaderboardBoardDTO ranks the lifters by one metric.
+//
+// Generic rather than a named field per metric, so a surface renders one component
+// with a switcher instead of five. Unit is what lets it format a value without
+// parsing Metric, and Note is the board's own explanation of what it measures —
+// carried on the wire because an attendance board that silently omits the lifters
+// with no schedule needs to say so where it is drawn.
+type leaderboardBoardDTO struct {
+	Metric string `json:"metric"`
+	Label  string `json:"label"`
+	Unit   string `json:"unit"`
+	Note   string `json:"note"`
+	// Never nil, so a client branches on length rather than on null.
+	Entries []leaderboardEntryDTO `json:"entries"`
+}
+
+// leaderboardEntryDTO is one lifter's place on one board.
+type leaderboardEntryDTO struct {
+	// Rank shares a place between equal figures and skips the ones they used up
+	// (1, 2, 2, 4). Computed server-side so every surface agrees, and so a board
+	// never invents a difference between two identical numbers.
+	Rank   int32     `json:"rank"`
+	Lifter lifterDTO `json:"lifter"`
+	Value  float64   `json:"value"`
+	// Detail names the thing behind the figure where there is one — the lift on
+	// the most-improved board. Absent elsewhere.
+	Detail string `json:"detail,omitempty"`
+}
+
 // sessionReactionDTO is one emoji's worth of applause.
 type sessionReactionDTO struct {
 	Emoji string `json:"emoji"`

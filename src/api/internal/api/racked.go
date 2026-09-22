@@ -305,15 +305,22 @@ func rackedWorkToDTO(w racked.Work) rackedWorkDTO {
 	}
 }
 
+// rackedPeriodToDTO is the window a report covers. Extracted because the
+// leaderboard labels its page with the same block, and a second copy of this is a
+// second place for the date format to drift from dateLayout.
+func rackedPeriodToDTO(p racked.Period) rackedPeriodDTO {
+	return rackedPeriodDTO{
+		Kind:       string(p.Kind),
+		Start:      p.Start.Format(dateLayout),
+		End:        p.End.Format(dateLayout),
+		Label:      p.Label,
+		InProgress: p.InProgress,
+	}
+}
+
 func rackedReportToDTO(rep racked.Report) rackedReportDTO {
 	out := rackedReportDTO{
-		Period: rackedPeriodDTO{
-			Kind:       string(rep.Period.Kind),
-			Start:      rep.Period.Start.Format(dateLayout),
-			End:        rep.Period.End.Format(dateLayout),
-			Label:      rep.Period.Label,
-			InProgress: rep.Period.InProgress,
-		},
+		Period: rackedPeriodToDTO(rep.Period),
 		Totals: rackedTotalsDTO{
 			VolumeLb: rep.Totals.VolumeLb,
 			Sessions: rep.Totals.Sessions,

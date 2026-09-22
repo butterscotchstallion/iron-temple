@@ -99,6 +99,7 @@
     // nothing at all when there are none, which is what keeps a single-lifter
     // install looking untouched. See FeedCard.svelte.
     "/feed": wrap({ asyncComponent: () => import("./routes/Feed.svelte") }),
+    "/leaderboard": wrap({ asyncComponent: () => import("./routes/Leaderboard.svelte") }),
     // Another lifter's session recap. Its own route rather than a mode of
     // /sessions/:id/recap: that one is scoped to the caller and would 404 here,
     // and the two read different endpoints.
