@@ -16,32 +16,10 @@ import (
 // — it is the only way a second account can exist at all, which is the point of
 // the feature.
 
-// createAccount adds an ordinary account as the admin and returns the created
-// row. Registers a cleanup that removes it, because every test in this package
-// shares one database and a roster that grows with the suite is a roster no
-// test can make an exact assertion about.
-func createAccount(t *testing.T, username, password string) *httpexpect.Object {
-	t.Helper()
-	created := expect(t).POST("/admin/users").
-		WithJSON(map[string]any{"username": username, "password": password}).
-		Expect().Status(http.StatusCreated).
-		JSON().Object()
-
-	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(),
-			`DELETE FROM users WHERE lower(username) = lower($1)`, username)
-	})
-	return created
-}
-
-// signIn returns a session token for an existing account.
-func signIn(t *testing.T, username, password string) string {
-	t.Helper()
-	return expectAnon(t).POST("/auth/login").
-		WithJSON(map[string]any{"username": username, "password": password}).
-		Expect().Status(http.StatusOK).
-		Cookie(sessionCookie).Value().Raw()
-}
+// createAccount, signIn and secondLifter live in integration_test.go with the
+// rest of the harness: four suites now need a second account, and the helpers
+// that mint one are no longer specific to the admin area that happens to be the
+// only way of doing it.
 
 // ---- the gate ----
 

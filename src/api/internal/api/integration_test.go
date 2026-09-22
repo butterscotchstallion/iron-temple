@@ -181,6 +181,74 @@ func expectAs(t *testing.T, token string) *httpexpect.Expect {
 	})
 }
 
+// ---- second accounts ----
+//
+// The suite's primary account registered first, so it owns the install and is
+// the admin. Every other account is minted through /admin/users, which is not a
+// shortcut — self-registration closes behind the first account, so it is the
+// only way a second one can exist at all.
+
+// createAccount adds an ordinary account as the admin and returns the created
+// row. Registers a cleanup that removes it, because every test in this package
+// shares one database and a roster that grows with the suite is a roster no
+// test can make an exact assertion about.
+func createAccount(t *testing.T, username, password string) *httpexpect.Object {
+	t.Helper()
+	created := expect(t).POST("/admin/users").
+		WithJSON(map[string]any{"username": username, "password": password}).
+		Expect().Status(http.StatusCreated).
+		JSON().Object()
+
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(),
+			`DELETE FROM users WHERE lower(username) = lower($1)`, username)
+	})
+	return created
+}
+
+// signIn returns a session token for an existing account.
+func signIn(t *testing.T, username, password string) string {
+	t.Helper()
+	return expectAnon(t).POST("/auth/login").
+		WithJSON(map[string]any{"username": username, "password": password}).
+		Expect().Status(http.StatusOK).
+		Cookie(sessionCookie).Value().Raw()
+}
+
+// secondLifter creates an ordinary account and returns its id with a session
+// token that can actually reach the app.
+//
+// The password change is the part worth having a helper for. An account made
+// through /admin/users starts with must_change_password set, and while it is set
+// every endpoint but GET /me and PUT /me/password answers 403 — so a test that
+// merely created an account and signed in would get 403s from whatever it was
+// really trying to assert, and read them as a broken feature. Clearing it here
+// means a caller gets a session that behaves like an ordinary lifter's.
+//
+// Passwords are derived from the username rather than taken as arguments: they
+// are never the subject of a test that wants a second lifter, and two more
+// string literals per call site is two more chances to typo one and debug a 401.
+func secondLifter(t *testing.T, username string) (id int32, token string) {
+	t.Helper()
+	first := username + "-first-pw"
+	created := createAccount(t, username, first)
+	id = int32(created.Value("id").Number().Raw())
+
+	token = signIn(t, username, first)
+	expectAs(t, token).PUT("/me/password").
+		WithJSON(map[string]any{
+			"currentPassword": first,
+			"newPassword":     username + "-second-pw",
+		}).
+		Expect().Status(http.StatusNoContent)
+
+	// The change revoked every other session for the account, this one included
+	// — DeleteUserSessionsExcept keeps only the cookie that made the change, and
+	// that IS this token, so it survives. Signing in again would work too and
+	// would cost a second PBKDF2 hash per call.
+	return id, token
+}
+
 func TestHealth(t *testing.T) {
 	// Explicitly anonymous: /health is a Kubernetes probe target, and a probe
 	// has no cookie to present.

@@ -85,6 +85,15 @@
       asyncComponent: () => import("./routes/Admin.svelte"),
       conditions: [() => auth.me?.isAdmin === true],
     }),
+    // Other lifters on this install. Reached from the account menu, not the nav
+    // bar — see Lifters.svelte — and split for the same reason /racked is: the
+    // profile drags in the heatmap and two bar charts.
+    //
+    // No route condition, unlike /admin above: every account may read these, so
+    // there is nothing for the client to guard. The API is the boundary either
+    // way.
+    "/lifters": wrap({ asyncComponent: () => import("./routes/Lifters.svelte") }),
+    "/lifters/:id": wrap({ asyncComponent: () => import("./routes/LifterProfile.svelte") }),
     // Fallback: unknown paths go home.
     "*": Home,
   };

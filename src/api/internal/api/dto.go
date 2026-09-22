@@ -109,6 +109,60 @@ type adminUserDTO struct {
 	CreatedAt          string `json:"createdAt"`
 }
 
+// lifterDTO is one lifter as another sees them.
+//
+// The third account-shaped DTO, and the distinctions between the three are the
+// point rather than an accident of growth. userDTO is what you may know about
+// yourself and carries the whole gym; adminUserDTO is what the owner may know
+// about an account and carries the administrative flags; this is what one lifter
+// may know about another, and carries neither.
+//
+// The gym is left out because it is not somebody else's business in the literal
+// sense that it decides nothing for them: another lifter's bar and plates set
+// the grid *their* weights land on, and a reader's plate maths must never be
+// drawn from them. Leaving them off the type is what makes that mistake
+// impossible rather than merely unlikely.
+//
+// IsAdmin and MustChangePassword are absent for the reason given at length on
+// ListLifters: the first answers a question this screen never asked, and the
+// second describes a live credential.
+type lifterDTO struct {
+	ID          int32  `json:"id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"displayName"`
+	AvatarColor string `json:"avatarColor"`
+	// HasAvatar and AvatarEtag serve the same purpose as on userDTO: tell the UI
+	// whether to draw an <img> or the initials chip, and bust its cache when the
+	// image changes. Both come off the roster's LEFT JOIN rather than a lookup
+	// per row — see ListLifters.
+	HasAvatar  bool   `json:"hasAvatar"`
+	AvatarEtag string `json:"avatarEtag,omitempty"`
+	// LastTrainedOn is the most recent day this lifter logged a rep, omitted
+	// when they never have. Omitted rather than zeroed: "" and a date are easy
+	// for a client to tell apart, where 1970-01-01 is a date that would draw.
+	LastTrainedOn string `json:"lastTrainedOn,omitempty"`
+}
+
+// lifterProfileDTO is a lifter plus their two lifetime figures.
+//
+// It stops at two on purpose. Streaks, records, per-lift trends and muscle
+// splits are not restated here — they come from the Racked report, which is the
+// same function over the same rows that the lifter reads on their own page. A
+// profile that computed its own streak would be a second opinion about one
+// history, and the first time the two disagreed the app would have no way to say
+// which was right.
+type lifterProfileDTO struct {
+	lifterDTO
+	// CurrentProgramID is the program this lifter last opened, omitted until
+	// they have opened one — the same convention userDTO uses.
+	CurrentProgramID *int32 `json:"currentProgramId,omitempty"`
+	// SessionCount and LifetimeVolumeLb come from SessionTotals with no program
+	// filter, which is the same query and therefore the same definition of a
+	// started session that the history page's footer totals.
+	SessionCount     int64   `json:"sessionCount"`
+	LifetimeVolumeLb float64 `json:"lifetimeVolumeLb"`
+}
+
 type avatarDTO struct {
 	Etag string `json:"etag"`
 }
