@@ -1,5 +1,7 @@
 <script lang="ts">
   import { link } from "svelte-spa-router";
+  import Heart from "@lucide/svelte/icons/heart";
+  import MessageCircle from "@lucide/svelte/icons/message-circle";
   import Avatar from "./Avatar.svelte";
   import { formatLongDate } from "./date";
   import { formatVolume } from "./volume";
@@ -39,6 +41,32 @@
           <span class="truncate text-xs text-muted-foreground">
             {entry.programDayName} · {formatLongDate(entry.performedOn)}
           </span>
+          <!-- Counts only, and only when there are any. The row is a link to the
+               recap, and a reaction button nested inside a link is a click target
+               fighting its own parent — giving applause needs the session in front
+               of you, which is where the row goes. -->
+          {#if entry.reactionCount > 0 || entry.commentCount > 0}
+            <span class="mt-0.5 flex items-center gap-2.5 text-xs text-muted-foreground">
+              {#if entry.reactionCount > 0}
+                <span class="inline-flex items-center gap-1">
+                  <Heart class="size-3" aria-hidden="true" />
+                  <span>{entry.reactionCount}</span>
+                  <span class="sr-only">
+                    {entry.reactionCount === 1 ? "reaction" : "reactions"}
+                  </span>
+                </span>
+              {/if}
+              {#if entry.commentCount > 0}
+                <span class="inline-flex items-center gap-1">
+                  <MessageCircle class="size-3" aria-hidden="true" />
+                  <span>{entry.commentCount}</span>
+                  <span class="sr-only">
+                    {entry.commentCount === 1 ? "comment" : "comments"}
+                  </span>
+                </span>
+              {/if}
+            </span>
+          {/if}
         </span>
 
         <span class="flex shrink-0 flex-col items-end">

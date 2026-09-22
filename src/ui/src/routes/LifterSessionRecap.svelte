@@ -7,6 +7,7 @@
   import RecapHighlights from "../lib/RecapHighlights.svelte";
   import RecapLiftTable from "../lib/RecapLiftTable.svelte";
   import MuscleVolumeBars from "../lib/MuscleVolumeBars.svelte";
+  import SessionSocial from "../lib/SessionSocial.svelte";
   import { formatLongDate } from "../lib/date";
   import { formatVolume } from "../lib/volume";
   import type { RecapLiftRow, RecapPRRow } from "../lib/recap";
@@ -179,5 +180,10 @@
         </div>
       </Card>
     {/if}
+
+    <!-- Applaud it and say something. ownerId is the lifter in the URL, which is
+         somebody else by construction on this route — so the buttons are live
+         here, where on your own recap they stand down. -->
+    <SessionSocial sessionId={recap.session.sessionId} ownerId={lifterId} />
   </div>
 {/if}

@@ -48,6 +48,7 @@ tags:
   - name: users
   - name: admin
   - name: lifters
+  - name: recognition
   - name: exercises
   - name: programs
   - name: sessions
@@ -1290,6 +1291,195 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /sessions/{sessionId}/reactions:
+    parameters:
+      - $ref: "#/components/parameters/SessionId"
+    get:
+      tags: [recognition]
+      operationId: listSessionReactions
+      summary: The applause on a session
+      description: >
+        Grouped by emoji, strongest first, with `mine` set on the ones the caller
+        gave — which is what lets a surface draw their own taps as pressed.
+
+        Deliberately NOT part of the session recap. That response is built to
+        survive a dead network and is served from cache at the rack; applause is
+        live, arrives after the fact, and stapling it on would make a recap that
+        could no longer be answered from memory.
+
+        Readable for any session on the install, the caller's own included. Every
+        account can already read every other account's sessions, so a session id
+        is not a secret here.
+      responses:
+        "200":
+          description: The reactions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SessionReaction"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [recognition]
+      operationId: addSessionReaction
+      summary: Applaud a session
+      description: >
+        Idempotent: tapping the same emoji twice is one reaction, settled by the
+        primary key rather than by a check that would race. A repeat tap answers
+        204 like the first, because a double-tap is not a mistake to report.
+
+        **Refused on your own session** with `403 own_session`. A reaction is
+        applause, and applauding yourself is not a thing this app should let you
+        record. Comments are different — see the sibling endpoint — because a
+        comment is a contribution and you may need to reply on your own workout.
+
+        The emoji must be one this install offers; anything else is a 400. The set
+        is validated by the API rather than constrained by the schema, so adding
+        one is a constant and not a migration.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionReactionRequest"
+      responses:
+        "204":
+          description: Recorded, or already was
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          description: That session is the caller's own
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    delete:
+      tags: [recognition]
+      operationId: removeSessionReaction
+      summary: Withdraw applause
+      description: >
+        Takes the emoji as a query parameter rather than a body, because a DELETE
+        with one is awkward for clients and caches alike.
+
+        Answers 204 whether or not there was anything to remove: the caller asked
+        for a state, and that state is the same either way.
+      parameters:
+        - name: emoji
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/ReactionEmoji"
+      responses:
+        "204":
+          description: Withdrawn, or was never there
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /sessions/{sessionId}/comments:
+    parameters:
+      - $ref: "#/components/parameters/SessionId"
+    get:
+      tags: [recognition]
+      operationId: listSessionComments
+      summary: The conversation on a session
+      description: >
+        Oldest first, unlike every other list in this API. A conversation reads
+        downwards — a reply under the thing it replies to — where a history reads
+        newest first because the recent session is the one you want.
+
+        Each comment arrives with its author, which is the only way one is ever
+        rendered.
+      responses:
+        "200":
+          description: The comments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SessionComment"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [recognition]
+      operationId: addSessionComment
+      summary: Say something about a session
+      description: >
+        Allowed on your own session, unlike a reaction: a comment is a
+        contribution rather than applause, and you may need to answer somebody.
+
+        The body is trimmed, must not be blank, and is capped at 256 characters
+        counted in runes — so a comment of 200 emoji is accepted rather than
+        refused for being 800 bytes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionCommentRequest"
+      responses:
+        "201":
+          description: Posted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionComment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /sessions/{sessionId}/comments/{commentId}:
+    parameters:
+      - $ref: "#/components/parameters/SessionId"
+      - name: commentId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    delete:
+      tags: [recognition]
+      operationId: deleteSessionComment
+      summary: Remove a comment
+      description: >
+        The author may remove their own. The install's owner may remove any, which
+        is the only moderation this app has and the only one a household needs.
+
+        Anybody else gets `403 not_your_comment`. A comment id that belongs to a
+        different session than the URL names is a 404 — otherwise the session in
+        the path would be decorative and one comment could be deleted through
+        another's URL.
+      responses:
+        "204":
+          description: Removed
+        "403":
+          description: Not the author, and not the owner of the install
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /sessions/{sessionId}/sets:
     parameters:
       - $ref: "#/components/parameters/SessionId"
@@ -1613,6 +1803,80 @@ components:
           type: string
           format: date-time
 
+    SessionReaction:
+      type: object
+      required: [emoji, count, mine]
+      description: One emoji's worth of applause on a session.
+      properties:
+        emoji:
+          $ref: "#/components/schemas/ReactionEmoji"
+        count:
+          type: integer
+          description: How many lifters gave this one.
+        mine:
+          type: boolean
+          description: >
+            Whether the caller is among them, so a surface can draw their own tap
+            as pressed without a second request to find out.
+
+    SessionReactionRequest:
+      type: object
+      required: [emoji]
+      properties:
+        emoji:
+          $ref: "#/components/schemas/ReactionEmoji"
+
+    ReactionEmoji:
+      type: string
+      description: >
+        The reactions this install offers.
+
+        Enumerated here so the client generates its own list rather than keeping a
+        hand-written copy — the set belongs to the contract, and a surface that
+        offered a fifth emoji the server rejects would be a 400 the lifter cannot
+        explain.
+
+        The API validates against its own copy regardless (`allowedReactions` in
+        `internal/api`): a generated client is not a guarantee about what arrives
+        on the wire. Adding one means editing both, which is still a deploy rather
+        than the migration a database CHECK would have cost.
+      enum: ["💪", "🔥", "👏", "🎉"]
+      example: 💪
+
+    SessionComment:
+      type: object
+      required: [id, sessionId, author, body, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        sessionId:
+          type: integer
+          format: int64
+        author:
+          $ref: "#/components/schemas/Lifter"
+          description: >
+            Who said it. A `Lifter`, so it carries an avatar and nothing
+            administrative. `lastTrainedOn` is not populated — a comment is not a
+            report on its author's training.
+        body:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    SessionCommentRequest:
+      type: object
+      required: [body]
+      properties:
+        body:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: >
+            Trimmed before it is stored, and rejected if that leaves it blank. The
+            length is counted in runes, so 256 emoji is a valid comment.
+
     Feed:
       type: object
       required: [items, limit, offset]
@@ -1641,6 +1905,8 @@ components:
           completedSetCount,
           volumeLb,
           isOver,
+          reactionCount,
+          commentCount,
         ]
       description: >
         One session in the feed. A `SessionSummary` with the lifter attached and
@@ -1682,6 +1948,14 @@ components:
             of its target still counts what it lifted.
         isOver:
           type: boolean
+        reactionCount:
+          type: integer
+          description: >
+            How much applause the session drew, so a row can show that something
+            landed well. The feed itself is not interactive — giving a reaction
+            needs the session in front of you, which is the recap the row links to.
+        commentCount:
+          type: integer
 
     Lifter:
       type: object

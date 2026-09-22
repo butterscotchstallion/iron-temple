@@ -71,6 +71,8 @@ func (s *Server) getFeed(w http.ResponseWriter, r *http.Request) {
 			CompletedSetCount: row.CompletedSetCount,
 			VolumeLb:          numericToFloat(row.VolumeLb),
 			IsOver:            row.IsOver,
+			ReactionCount:     row.ReactionCount,
+			CommentCount:      row.CommentCount,
 		})
 	}
 
