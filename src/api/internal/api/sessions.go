@@ -22,29 +22,9 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	query := r.URL.Query()
 
-	limit := int32(defaultLimit)
-	if v := query.Get("limit"); v != "" {
-		// ParseInt with bitSize 32 rejects values that don't fit int32, so the
-		// int32(n) conversion below can't overflow (also clears gosec G109/G115).
-		n, err := strconv.ParseInt(v, 10, 32)
-		if err != nil || n < 1 || n > maxLimit {
-			badRequest(w, "limit must be between 1 and 100")
-			return
-		}
-		limit = int32(n)
-	}
-
-	offset := int32(0)
-	if v := query.Get("offset"); v != "" {
-		// ParseInt with bitSize 32 bounds n to int32 range — an out-of-range offset
-		// (e.g. 3000000000) is now a 400 instead of silently wrapping negative on the
-		// int32(n) conversion. Previously offset only checked the lower bound.
-		n, err := strconv.ParseInt(v, 10, 32)
-		if err != nil || n < 0 {
-			badRequest(w, "offset must be >= 0")
-			return
-		}
-		offset = int32(n)
+	limit, offset, ok := pageParams(w, r)
+	if !ok {
+		return
 	}
 
 	var programID *int64

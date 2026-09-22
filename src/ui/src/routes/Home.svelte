@@ -10,6 +10,7 @@
   import StreakCard from "../lib/StreakCard.svelte";
   import ErrorCard from "../lib/ErrorCard.svelte";
   import CalendarHeatmap from "../lib/CalendarHeatmap.svelte";
+  import FeedCard from "../lib/FeedCard.svelte";
 
   // The "normal flow" skips choosing a program: land on the one the user last
   // opened. First-time users (nothing saved, no history) get the picker instead.
@@ -102,4 +103,10 @@
   {:else}
     <Programs />
   {/if}
+
+  <!-- Last, below the workout, because the workout is why the page was opened.
+       Draws nothing at all unless another lifter on this install has logged
+       something, so the one-lifter install this app is built for sees Home
+       exactly as it was. It loads itself — see FeedCard.svelte. -->
+  <FeedCard />
 </div>

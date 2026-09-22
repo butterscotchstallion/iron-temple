@@ -199,7 +199,13 @@ The owner can add further accounts by hand, each starting with a one-time passwo
 it must replace before it can do anything else. Where an install has more than one,
 **Lifters** lists them, and opening one shows what they have been lifting: their
 lifetime tonnage, the month's volume, streak and muscle split, and a heatmap of the
-days they trained. Every figure there is the *same* report the lifter reads on their
+days they trained. **Around the gym** is the same information the other way up — a
+feed of everyone else's recent sessions, each opening onto the full recap of that
+workout. It shows up as a card at the foot of home once there is anything in it, and
+it holds *other* people's sessions only: your own already have a history page, so a
+feed of everybody would be that page again under another name. Which is also why a
+one-lifter install never sees the card at all — there is nothing for it to hold, so
+home looks exactly as it always did. Every figure there is the *same* report the lifter reads on their
 own Racked page, computed by the same code over the same rows — so the install can
 never hold two answers about one history. There is no visibility setting: accounts
 exist only because the owner created them, so admission is the consent. The gym

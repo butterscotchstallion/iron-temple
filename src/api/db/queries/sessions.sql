@@ -139,6 +139,88 @@ WHERE s.user_id = sqlc.arg('user_id')::int
     WHERE ls.session_id = s.id AND ls.actual_reps > 0
   );
 
+-- ListFeedSessions is what the OTHER lifters on this install have been doing,
+-- most recent first.
+--
+-- The one query in this file that is not scoped to a single user, and the
+-- exclusion is the scoping: viewer_id is the caller, and their own sessions are
+-- left out rather than included. That is not a filter a client could as easily
+-- apply itself.
+--
+-- Two reasons it belongs here. A lifter's own history already has a page — this
+-- would duplicate it, and on the install this app was built for (exactly one
+-- lifter) a feed of everybody would be that page a second time under a new name.
+-- And a client-side filter cannot page: asking for ten and discarding the six
+-- that are yours leaves four, so the surface either shows a short page it cannot
+-- explain or pages again to fill it. Excluded in SQL, ten means ten.
+--
+-- The happy consequence is that a single-lifter install gets an empty feed, so
+-- the surfaces that draw it stand down on their own and that install keeps the
+-- shape it always had. Nothing has to special-case "is anybody else here".
+--
+-- Everything else mirrors ListSessions deliberately — the same columns, the same
+-- volume_lb definition (actual_reps, every logged set rather than only the
+-- completed ones), the same is_over expression, and the same HAVING. A feed that
+-- counted a session the history page does not, or valued one differently, would
+-- be the app disagreeing with itself about the row a lifter can open and read.
+--
+-- Offset paging, also matching ListSessions. A feed is the one place keyset
+-- paging would genuinely be better — rows arrive at the top while somebody
+-- pages — but consistency with the endpoint this is a sibling of is worth more
+-- than correctness against a race that, on an install with a handful of lifters
+-- paging a list nobody is racing them through, does not happen.
+--
+-- No total, unlike ListSessions. "How many sessions have the others ever logged"
+-- is not a question this surface asks, and it would cost a second aggregate to
+-- answer: a caller pages until a short page tells them to stop.
+--
+-- JOIN users, not LEFT: a session with user_id IS NULL predates accounts existing
+-- and was adopted by the first registration (see AdoptOrphanSessions). An
+-- unadopted one is owned by nobody, so it belongs in no lifter's feed, and the
+-- inner join drops it without needing a predicate that says so.
+--
+-- avatar_etag is joined for the reason ListLifters joins it: the feed draws an
+-- avatar per row, and looking one up per row would be a query per entry. Bytes
+-- are never read, only the tag.
+--
+-- The LEFT JOIN on session_sets fans a session out per set, which is what the
+-- aggregates want; ua and the users join cannot fan, being keyed on the PK. Both
+-- ua.etag and the program columns are listed in GROUP BY rather than left to
+-- functional dependency: that inference works through the grouped table's own
+-- primary key, and Postgres will not carry it across a join even where user_id
+-- happens to be both sides' key.
+-- name: ListFeedSessions :many
+SELECT s.id,
+       s.user_id,
+       u.username,
+       u.display_name,
+       u.avatar_color,
+       COALESCE(ua.etag, '') AS avatar_etag,
+       s.program_day_id,
+       pd.name AS program_day_name,
+       p.id    AS program_id,
+       p.name  AS program_name,
+       s.performed_on,
+       COUNT(ss.id)                              AS set_count,
+       COUNT(ss.id) FILTER (WHERE ss.completed)  AS completed_set_count,
+       COALESCE(SUM(ss.actual_reps * ss.weight_lb), 0)::numeric AS volume_lb,
+       (s.finished_at IS NOT NULL
+        OR s.created_at < now() - INTERVAL '12 hours')::bool AS is_over
+FROM sessions s
+JOIN users u ON u.id = s.user_id
+LEFT JOIN user_avatars ua ON ua.user_id = u.id
+JOIN program_days pd ON pd.id = s.program_day_id
+JOIN programs p ON p.id = pd.program_id
+LEFT JOIN session_sets ss ON ss.session_id = s.id
+WHERE s.user_id <> sqlc.arg('viewer_id')::int
+GROUP BY s.id, u.id, u.username, u.display_name, u.avatar_color, ua.etag,
+         pd.name, p.id, p.name
+-- Only sessions with at least one logged rep count as "started", exactly as
+-- ListSessions has it.
+HAVING COUNT(ss.id) FILTER (WHERE ss.actual_reps > 0) > 0
+ORDER BY s.performed_on DESC, s.id DESC
+LIMIT sqlc.arg('lim') OFFSET sqlc.arg('off');
+
 -- UpdateSession patches metadata; NULL args leave a column unchanged.
 --
 -- bodyweight_lb cannot use that convention, because clearing a weigh-in and

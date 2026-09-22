@@ -12,7 +12,7 @@
  * can be read next to the assertions that depend on it.
  */
 
-import type { Lifter, RackedReport, User } from "./api";
+import type { FeedEntry, Lifter, RackedReport, SessionRecap, User } from "./api";
 
 /**
  * A signed-in lifter. An admin, because the first account to register claims the
@@ -55,6 +55,89 @@ export function testLifter(overrides: Partial<Lifter> = {}): Lifter {
     displayName: "Grace Hopper",
     avatarColor: "",
     hasAvatar: false,
+    ...overrides,
+  };
+}
+
+/**
+ * A session recap with every optional field absent — a first workout, which has
+ * no pace, no previous session and no lift with a delta.
+ *
+ * Shared for the reason `testRackedReport` is: two routes render this type now —
+ * your own recap and another lifter's — and it has too many required fields for
+ * each to keep its own hand-built copy honest.
+ *
+ * `earned` is null here. It is the one field a reader of somebody else's session
+ * is not shown at all (see LifterSessionRecap.svelte), so leaving it absent by
+ * default means a test has to ask for it before it can assert anything about it.
+ */
+export function testSessionRecap(overrides: Partial<SessionRecap> = {}): SessionRecap {
+  return {
+    session: {
+      sessionId: 42,
+      programId: 1,
+      programName: "StrongLifts 5x5",
+      programDayId: 7,
+      programDayName: "Workout A",
+      performedOn: "2026-09-13",
+      startedAt: "2026-09-13T18:00:00Z",
+      finishedAt: null,
+      isOver: false,
+    },
+    durationSeconds: null,
+    pace: null,
+    volume: {
+      totalLb: 0,
+      previousLb: null,
+      deltaPct: null,
+      comparison: { count: 0, label: "", unitLb: 0 },
+      setsLogged: 0,
+      setsPrescribed: 5,
+      repsLogged: 0,
+      repsTargeted: 25,
+    },
+    progress: {
+      previousSessionId: null,
+      previousPerformedOn: null,
+      weightDeltaPct: null,
+      liftsCompared: 0,
+      liftsNew: 0,
+    },
+    muscles: [],
+    split: {
+      main: { volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0 },
+      assistance: { volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0 },
+    },
+    bodyweightLb: null,
+    earned: null,
+    lifts: [],
+    prs: [],
+    milestones: [],
+    streak: { sessions: 0, weeks: 0 },
+    ...overrides,
+  };
+}
+
+/**
+ * One session in the feed, performed by somebody else.
+ *
+ * `lifter` defaults to `testLifter()`, so a test that only cares about the
+ * session need not build one — and a test that cares whose it is overrides the
+ * whole nested object rather than reaching into it.
+ */
+export function testFeedEntry(overrides: Partial<FeedEntry> = {}): FeedEntry {
+  return {
+    id: 90,
+    lifter: testLifter(),
+    programId: 1,
+    programName: "StrongLifts 5x5",
+    programDayId: 1,
+    programDayName: "Workout A",
+    performedOn: "2026-03-17",
+    setCount: 15,
+    completedSetCount: 15,
+    volumeLb: 9_000,
+    isOver: true,
     ...overrides,
   };
 }

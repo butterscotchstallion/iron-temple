@@ -94,6 +94,17 @@
     // way.
     "/lifters": wrap({ asyncComponent: () => import("./routes/Lifters.svelte") }),
     "/lifters/:id": wrap({ asyncComponent: () => import("./routes/LifterProfile.svelte") }),
+    // Reached from the card at the foot of Home, and from the account menu. Note
+    // the card is NOT this route in miniature — it loads four rows and renders
+    // nothing at all when there are none, which is what keeps a single-lifter
+    // install looking untouched. See FeedCard.svelte.
+    "/feed": wrap({ asyncComponent: () => import("./routes/Feed.svelte") }),
+    // Another lifter's session recap. Its own route rather than a mode of
+    // /sessions/:id/recap: that one is scoped to the caller and would 404 here,
+    // and the two read different endpoints.
+    "/lifters/:lifterId/sessions/:sessionId/recap": wrap({
+      asyncComponent: () => import("./routes/LifterSessionRecap.svelte"),
+    }),
     // Fallback: unknown paths go home.
     "*": Home,
   };
