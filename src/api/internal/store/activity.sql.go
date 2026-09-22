@@ -11,6 +11,51 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimActivityDay = `-- name: ClaimActivityDay :one
+INSERT INTO generated_activity_runs (day)
+VALUES ($1)
+ON CONFLICT (day) DO NOTHING
+RETURNING day, sessions, reactions, comments, generated_at
+`
+
+// ClaimActivityDay takes ownership of one day's generation, or reports that
+// somebody already has it.
+//
+// THE WHOLE CONCURRENCY STORY IS THIS ONE STATEMENT. day is the primary key, so
+// ON CONFLICT DO NOTHING means exactly one caller can insert a given day: the
+// winner gets a row back, the losers get none and do nothing. That is what makes
+// the scheduler safe to run in more than one replica without any counting of
+// processes, and it is report_runs' argument applied to a simpler problem.
+//
+// Claiming BEFORE generating rather than recording after is deliberate. Recording
+// afterwards would let two replicas both generate the same day and only then
+// discover the collision, by which point the duplicate sessions exist.
+//
+// CALLED INSIDE THE SAME TRANSACTION AS THE GENERATION, which is what makes that
+// safe: a failed day rolls the claim back with everything else, so an aborted day is
+// indistinguishable from one nobody has touched and the retry is clean rather than
+// additive. There is deliberately no release query — a rollback is the release.
+//
+// It also sharpens the race rather than blunting it. Two replicas attempting the same
+// day both reach this statement; the second blocks on the primary key until the first
+// commits or aborts, then either gets no row (already done) or takes the day itself.
+// No window exists in which a day is claimed but abandoned.
+//
+// The counts go in as zero and are filled in by FinishActivityDay once the work is
+// known, so a claim carries no figures it has not earned.
+func (q *Queries) ClaimActivityDay(ctx context.Context, day pgtype.Date) (GeneratedActivityRun, error) {
+	row := q.db.QueryRow(ctx, claimActivityDay, day)
+	var i GeneratedActivityRun
+	err := row.Scan(
+		&i.Day,
+		&i.Sessions,
+		&i.Reactions,
+		&i.Comments,
+		&i.GeneratedAt,
+	)
+	return i, err
+}
+
 const createLoggedSessionSet = `-- name: CreateLoggedSessionSet :exec
 INSERT INTO session_sets
     (session_id, exercise_id, set_number, target_reps, weight_lb, actual_reps, completed)
@@ -128,6 +173,81 @@ func (q *Queries) FindUserIDByUsername(ctx context.Context, username string) (in
 	return id, err
 }
 
+const finishActivityDay = `-- name: FinishActivityDay :exec
+UPDATE generated_activity_runs
+SET sessions     = $1::int,
+    reactions    = $2::int,
+    comments     = $3::int,
+    generated_at = now()
+WHERE day = $4
+`
+
+type FinishActivityDayParams struct {
+	Sessions  int32       `json:"sessions"`
+	Reactions int32       `json:"reactions"`
+	Comments  int32       `json:"comments"`
+	Day       pgtype.Date `json:"day"`
+}
+
+// FinishActivityDay records what a claimed day actually produced.
+func (q *Queries) FinishActivityDay(ctx context.Context, arg FinishActivityDayParams) error {
+	_, err := q.db.Exec(ctx, finishActivityDay,
+		arg.Sessions,
+		arg.Reactions,
+		arg.Comments,
+		arg.Day,
+	)
+	return err
+}
+
+const getActivitySchedule = `-- name: GetActivitySchedule :one
+
+SELECT id, enabled, lifters, updated_at FROM generated_activity_schedule WHERE id = 1
+`
+
+// ---- the daily schedule ----
+// GetActivitySchedule reads the singleton settings row.
+//
+// :one with no argument and no empty case to handle: 0025 seeds the row, and the
+// CHECK (id = 1) means there can never be a second. So every caller gets a
+// schedule rather than a "not configured yet" branch.
+func (q *Queries) GetActivitySchedule(ctx context.Context) (GeneratedActivitySchedule, error) {
+	row := q.db.QueryRow(ctx, getActivitySchedule)
+	var i GeneratedActivitySchedule
+	err := row.Scan(
+		&i.ID,
+		&i.Enabled,
+		&i.Lifters,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const lastActivityRun = `-- name: LastActivityRun :one
+SELECT day, sessions, reactions, comments, generated_at
+FROM generated_activity_runs
+ORDER BY day DESC
+LIMIT 1
+`
+
+// LastActivityRun is the most recent day that was generated, for the admin screen.
+//
+// Ordered by day rather than by generated_at: a catch-up writes several days in one
+// pass with nearly identical timestamps, and what an operator wants to know is how
+// far the activity reaches, not which row was written last.
+func (q *Queries) LastActivityRun(ctx context.Context) (GeneratedActivityRun, error) {
+	row := q.db.QueryRow(ctx, lastActivityRun)
+	var i GeneratedActivityRun
+	err := row.Scan(
+		&i.Day,
+		&i.Sessions,
+		&i.Reactions,
+		&i.Comments,
+		&i.GeneratedAt,
+	)
+	return i, err
+}
+
 const listGeneratedActivityCandidates = `-- name: ListGeneratedActivityCandidates :many
 SELECT id, username, password_hash
 FROM users
@@ -189,6 +309,76 @@ func (q *Queries) ListGeneratedActivityCandidates(ctx context.Context, usernames
 		return nil, err
 	}
 	return items, nil
+}
+
+const listSessionsCommentedOnBy = `-- name: ListSessionsCommentedOnBy :many
+SELECT DISTINCT session_id FROM session_comments WHERE user_id = $1::int
+`
+
+// ListSessionsCommentedOnBy is the sessions one lifter has already commented on.
+//
+// The generator's guard against saying something twice about the same workout. There
+// is deliberately NO uniqueness constraint on session_comments — a real lifter
+// replying to a thread on their own session is legitimate, and the app must allow it
+// — so "one comment per lifter per session" is a property of the GENERATOR rather
+// than of the schema, and this is how it enforces it.
+//
+// Without it, recognition running once per generated day meant a catch-up could stack
+// several comments from the same persona onto the same older session in a single tick.
+// The window on recent sessions bounds how many passes see a session; this bounds it
+// to one regardless.
+//
+// Read once per persona per pass rather than checked per candidate: a set in memory is
+// cheaper than a query per session, and the answer cannot change underneath a pass
+// that holds the only transaction writing it.
+func (q *Queries) ListSessionsCommentedOnBy(ctx context.Context, userID int32) ([]int32, error) {
+	rows, err := q.db.Query(ctx, listSessionsCommentedOnBy, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int32
+	for rows.Next() {
+		var session_id int32
+		if err := rows.Scan(&session_id); err != nil {
+			return nil, err
+		}
+		items = append(items, session_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const setActivitySchedule = `-- name: SetActivitySchedule :one
+UPDATE generated_activity_schedule
+SET enabled    = $1,
+    lifters    = $2::int,
+    updated_at = now()
+WHERE id = 1
+RETURNING id, enabled, lifters, updated_at
+`
+
+type SetActivityScheduleParams struct {
+	Enabled bool  `json:"enabled"`
+	Lifters int32 `json:"lifters"`
+}
+
+// SetActivitySchedule replaces it.
+//
+// An UPDATE rather than an upsert for the same reason: the row is guaranteed to
+// exist, so an ON CONFLICT clause would be dead code that implied otherwise.
+func (q *Queries) SetActivitySchedule(ctx context.Context, arg SetActivityScheduleParams) (GeneratedActivitySchedule, error) {
+	row := q.db.QueryRow(ctx, setActivitySchedule, arg.Enabled, arg.Lifters)
+	var i GeneratedActivitySchedule
+	err := row.Scan(
+		&i.ID,
+		&i.Enabled,
+		&i.Lifters,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const setProgramDayWeekdayIfUnset = `-- name: SetProgramDayWeekdayIfUnset :exec

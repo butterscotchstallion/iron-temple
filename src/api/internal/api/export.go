@@ -318,3 +318,13 @@ func setsFor(bySession map[int32][]exportSessionSetDTO, id int32) []exportSessio
 	}
 	return []exportSessionSetDTO{}
 }
+
+// GenerateDueActivityForTest runs one pass of the unattended daily generator.
+//
+// Exported for the integration suite, which drives the pass directly rather than
+// waiting on an hourly ticker — the thing worth testing is the per-day claim, not
+// the clock. Named ForTest so it is obvious at a glance that nothing in the app
+// calls it; the scheduler uses the unexported method.
+func (s *Server) GenerateDueActivityForTest(ctx context.Context) {
+	s.generateDueActivity(ctx)
+}

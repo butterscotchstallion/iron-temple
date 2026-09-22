@@ -721,3 +721,259 @@ func TestActivityBackfillPopulatesTheSocialSurfaces(t *testing.T) {
 	boards.NotEmpty()
 	boards.Value(0).Object().Value("entries").Array().Length().Ge(2)
 }
+
+// ---- the unattended daily run ----
+
+// resetActivitySchedule turns the daily run off and clears the record of which days
+// have been generated, so one test's schedule cannot leak into the next.
+func resetActivitySchedule(t *testing.T) {
+	t.Helper()
+	off := func() {
+		expect(t).PUT("/admin/activity/schedule").
+			WithJSON(map[string]any{"enabled": false, "lifters": 4}).
+			Expect().Status(http.StatusOK)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM generated_activity_runs`)
+	}
+	off()
+	t.Cleanup(off)
+}
+
+func TestActivityScheduleRoutesRejectNonAdmins(t *testing.T) {
+	_, token := secondLifter(t, "schedule-outsider")
+	e := expectAs(t, token)
+
+	e.GET("/admin/activity/schedule").Expect().
+		Status(http.StatusForbidden).JSON().Object().HasValue("code", "admin_required")
+	e.PUT("/admin/activity/schedule").
+		WithJSON(map[string]any{"enabled": true, "lifters": 2}).
+		Expect().Status(http.StatusForbidden).
+		JSON().Object().HasValue("code", "admin_required")
+}
+
+func TestActivityScheduleRejectsAnonymousCallers(t *testing.T) {
+	e := expectAnon(t)
+	e.GET("/admin/activity/schedule").Expect().Status(http.StatusUnauthorized)
+	e.PUT("/admin/activity/schedule").
+		WithJSON(map[string]any{"enabled": true, "lifters": 2}).
+		Expect().Status(http.StatusUnauthorized)
+}
+
+// Off by default, so an install that migrates to this version generates nothing
+// until its owner asks.
+func TestActivityScheduleIsOffUntilAskedFor(t *testing.T) {
+	resetActivitySchedule(t)
+	expect(t).GET("/admin/activity/schedule").Expect().Status(http.StatusOK).
+		JSON().Object().HasValue("enabled", false)
+}
+
+// Persisted rather than held in memory, which is the whole reason this exists
+// alongside the live loop: a flag on the process cannot run daily.
+func TestActivityScheduleSurvivesBeingReadBack(t *testing.T) {
+	resetActivitySchedule(t)
+	e := expect(t)
+
+	updated := e.PUT("/admin/activity/schedule").
+		WithJSON(map[string]any{"enabled": true, "lifters": 3}).
+		Expect().Status(http.StatusOK).JSON().Object()
+	updated.HasValue("enabled", true)
+	updated.HasValue("lifters", 3)
+
+	read := e.GET("/admin/activity/schedule").Expect().Status(http.StatusOK).JSON().Object()
+	read.HasValue("enabled", true)
+	read.HasValue("lifters", 3)
+}
+
+// Bounded exactly as the manual endpoints are, so a schedule cannot ask for a
+// roster the generator would refuse.
+func TestActivityScheduleValidatesItsRequest(t *testing.T) {
+	resetActivitySchedule(t)
+	e := expect(t)
+	for _, body := range []map[string]any{
+		{"enabled": true, "lifters": 0},
+		{"enabled": true, "lifters": 99},
+		{"enabled": true, "lifters": -1},
+	} {
+		e.PUT("/admin/activity/schedule").WithJSON(body).
+			Expect().Status(http.StatusBadRequest)
+	}
+}
+
+// THE PROPERTY THE WHOLE DESIGN RESTS ON: a day is generated at most once.
+//
+// Each day is claimed through a primary key before any work happens, so repeated
+// passes — a restart, an hourly tick, a second replica — find the day taken and do
+// nothing. Without that, every tick would add another day's training to the same
+// date and an install would inflate by the hour.
+func TestActivitySchedulerGeneratesEachDayOnce(t *testing.T) {
+	resetActivitySchedule(t)
+	tearDownActivity(t)
+	e := expect(t)
+
+	e.PUT("/admin/activity/schedule").
+		WithJSON(map[string]any{"enabled": true, "lifters": 3}).
+		Expect().Status(http.StatusOK)
+
+	// Driven directly rather than waited for: the scheduler's ticker is an hour, and
+	// what is under test is the claim rather than the clock.
+	testAPI.GenerateDueActivityForTest(context.Background())
+
+	var afterFirst int
+	countRuns := func() int {
+		var n int
+		if err := testPool.QueryRow(context.Background(),
+			`SELECT COUNT(*) FROM generated_activity_runs`).Scan(&n); err != nil {
+			t.Fatalf("count runs: %v", err)
+		}
+		return n
+	}
+	afterFirst = countRuns()
+	if afterFirst == 0 {
+		t.Fatal("the first pass recorded no days")
+	}
+
+	sessionsAfterFirst := generatedSessionCount(t)
+
+	// Three more passes. Every day is already claimed, so nothing should change.
+	for range 3 {
+		testAPI.GenerateDueActivityForTest(context.Background())
+	}
+
+	if got := countRuns(); got != afterFirst {
+		t.Errorf("runs went from %d to %d across repeated passes", afterFirst, got)
+	}
+	if got := generatedSessionCount(t); got != sessionsAfterFirst {
+		t.Errorf("generated sessions went from %d to %d across repeated passes",
+			sessionsAfterFirst, got)
+	}
+}
+
+// Nothing happens while the schedule is off, however many times the scheduler runs.
+func TestActivitySchedulerDoesNothingWhileDisabled(t *testing.T) {
+	resetActivitySchedule(t)
+	before := generatedSessionCount(t)
+
+	for range 3 {
+		testAPI.GenerateDueActivityForTest(context.Background())
+	}
+
+	var runs int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM generated_activity_runs`).Scan(&runs); err != nil {
+		t.Fatalf("count runs: %v", err)
+	}
+	if runs != 0 {
+		t.Errorf("a disabled schedule recorded %d days", runs)
+	}
+	if got := generatedSessionCount(t); got != before {
+		t.Errorf("a disabled schedule generated %d sessions", got-before)
+	}
+}
+
+// The last run is reported so the admin screen can say the thing is actually
+// working rather than merely switched on.
+func TestActivityScheduleReportsItsLastRun(t *testing.T) {
+	resetActivitySchedule(t)
+	tearDownActivity(t)
+	e := expect(t)
+
+	e.PUT("/admin/activity/schedule").
+		WithJSON(map[string]any{"enabled": true, "lifters": 3}).
+		Expect().Status(http.StatusOK)
+	testAPI.GenerateDueActivityForTest(context.Background())
+
+	schedule := e.GET("/admin/activity/schedule").Expect().Status(http.StatusOK).JSON().Object()
+	// Ordered by DAY, so this is how far the activity reaches — which after a
+	// catch-up is today rather than whichever row happened to be written last.
+	schedule.Value("lastRunOn").String().IsEqual(time.Now().UTC().Format("2006-01-02"))
+}
+
+// generatedSessionCount is how many sessions belong to non-admin accounts.
+func generatedSessionCount(t *testing.T) int {
+	t.Helper()
+	var n int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT COUNT(*) FROM sessions s
+		JOIN users u ON u.id = s.user_id
+		WHERE NOT u.is_admin`).Scan(&n); err != nil {
+		t.Fatalf("count sessions: %v", err)
+	}
+	return n
+}
+
+// A CATCH-UP MUST NOT PILE COMMENTS ONTO THE OLDEST SESSIONS.
+//
+// Recognition runs once per day generated, and a catch-up covers up to eight days in
+// a single pass. Unbounded, each of those walked the same sixty-session feed, so the
+// earliest sessions collected eight rounds of comments at once — reactions are
+// idempotent on their primary key, but comments are not and must not be, because a
+// lifter commenting twice on a session is legitimate in the real feature.
+//
+// Two bounds together. A window means only a couple of passes see a given session at
+// all, and a per-lifter guard means any one of them adds at most one comment — so the
+// assertion here is the strong one: no lifter says more than one thing about the same
+// workout, however long the catch-up runs.
+func TestActivityCatchUpDoesNotPileCommentsOnOneSession(t *testing.T) {
+	resetActivitySchedule(t)
+	tearDownActivity(t)
+	e := expect(t)
+
+	// History first, so the catch-up has older sessions available to pile onto — the
+	// failure mode needs something already there to be the victim.
+	e.POST("/admin/activity/backfill").
+		WithJSON(map[string]any{"lifters": 4, "weeks": 4}).
+		Expect().Status(http.StatusOK)
+
+	e.PUT("/admin/activity/schedule").
+		WithJSON(map[string]any{"enabled": true, "lifters": 4}).
+		Expect().Status(http.StatusOK)
+
+	// One pass covers the whole catch-up window at once, which is precisely the case
+	// that used to multiply.
+	testAPI.GenerateDueActivityForTest(context.Background())
+
+	rows, err := testPool.Query(context.Background(), `
+		SELECT c.session_id, c.user_id, COUNT(*) AS n
+		FROM session_comments c
+		JOIN users u ON u.id = c.user_id
+		WHERE NOT u.is_admin
+		GROUP BY c.session_id, c.user_id
+		HAVING COUNT(*) > 1`)
+	if err != nil {
+		t.Fatalf("query comments: %v", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var sessionID, userID, n int
+		if err := rows.Scan(&sessionID, &userID, &n); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		t.Errorf("lifter %d commented %d times on session %d", userID, n, sessionID)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows: %v", err)
+	}
+}
+
+// The catch-up still records every day in its window, so bounding recognition did not
+// quietly stop the thing from running.
+func TestActivityCatchUpRecordsEveryDayInTheWindow(t *testing.T) {
+	resetActivitySchedule(t)
+	tearDownActivity(t)
+	e := expect(t)
+
+	e.PUT("/admin/activity/schedule").
+		WithJSON(map[string]any{"enabled": true, "lifters": 3}).
+		Expect().Status(http.StatusOK)
+	testAPI.GenerateDueActivityForTest(context.Background())
+
+	var days int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM generated_activity_runs`).Scan(&days); err != nil {
+		t.Fatalf("count runs: %v", err)
+	}
+	// A week plus today, which is what DueDays yields for the default window.
+	if days != 8 {
+		t.Errorf("the catch-up recorded %d days, want 8", days)
+	}
+}

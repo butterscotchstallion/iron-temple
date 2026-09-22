@@ -227,6 +227,22 @@ type activityStatusDTO struct {
 	Roster []string `json:"roster"`
 }
 
+// activityScheduleDTO is the unattended daily run's settings and its last result.
+//
+// The last run's figures ride along rather than needing a second endpoint: the only
+// screen that reads the schedule is the one that wants to know whether it is
+// actually doing anything, and "enabled" alone does not answer that.
+type activityScheduleDTO struct {
+	Enabled bool `json:"enabled"`
+	Lifters int  `json:"lifters"`
+	// LastRunOn and its counts are absent until a day has been generated, which is
+	// the ordinary state of a schedule just switched on rather than an error.
+	LastRunOn     string `json:"lastRunOn,omitempty"`
+	LastSessions  int    `json:"lastSessions,omitempty"`
+	LastReactions int    `json:"lastReactions,omitempty"`
+	LastComments  int    `json:"lastComments,omitempty"`
+}
+
 // activitySummaryDTO is what one backfill did.
 //
 // Accounts counts the ones it CREATED, not the ones it used: a second backfill

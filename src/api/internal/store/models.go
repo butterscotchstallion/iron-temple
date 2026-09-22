@@ -19,6 +19,21 @@ type Exercise struct {
 	RestSeconds     int32              `json:"rest_seconds"`
 }
 
+type GeneratedActivityRun struct {
+	Day         pgtype.Date        `json:"day"`
+	Sessions    int32              `json:"sessions"`
+	Reactions   int32              `json:"reactions"`
+	Comments    int32              `json:"comments"`
+	GeneratedAt pgtype.Timestamptz `json:"generated_at"`
+}
+
+type GeneratedActivitySchedule struct {
+	ID        int32              `json:"id"`
+	Enabled   bool               `json:"enabled"`
+	Lifters   int32              `json:"lifters"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Program struct {
 	ID              int32              `json:"id"`
 	Name            string             `json:"name"`

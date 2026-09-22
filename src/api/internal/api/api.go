@@ -224,6 +224,8 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 					// makes them admin-only without anybody having to remember,
 					// exactly as the note above intends.
 					r.Get("/activity", s.getActivityStatus)
+					r.Get("/activity/schedule", s.getActivitySchedule)
+					r.Put("/activity/schedule", s.putActivitySchedule)
 					r.Post("/activity/backfill", s.postActivityBackfill)
 					r.Post("/activity/start", s.postActivityStart)
 					r.Post("/activity/stop", s.postActivityStop)
