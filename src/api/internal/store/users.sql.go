@@ -36,9 +36,15 @@ SELECT COUNT(*) AS total FROM users
 
 // Accounts, login sessions, and avatars.
 //
-// password_hash is selected by exactly one query (GetUserForLogin). Every other
-// query lists columns explicitly and omits it, so a hash cannot reach a DTO by
-// accident — the compiler stops it, because the row struct has no such field.
+// password_hash is selected by exactly one query IN THIS FILE (GetUserForLogin).
+// Every other query lists columns explicitly and omits it, so a hash cannot reach
+// a DTO by accident — the compiler stops it, because the row struct has no such
+// field.
+//
+// There is one other reader in the directory: ListGeneratedActivityCandidates in
+// activity.sql, which uses the hash as PROOF OF ORIGIN rather than as a
+// credential. It is named here so this note stays true, and its own comment
+// carries the reasoning.
 func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 	row := q.db.QueryRow(ctx, countUsers)
 	var total int64

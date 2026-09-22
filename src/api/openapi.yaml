@@ -614,15 +614,15 @@ paths:
         Stops the loop, then deletes the generated accounts and everything that
         cascades from them — sessions, sets, reactions, comments, gym, avatars.
 
-        The accounts carry no marker of any kind, so this works by re-deriving the
-        same fixed roster that named them. An account that administers the install
-        is never touched, whatever it is called.
+        The accounts carry no marker of any kind, so the roster supplies the
+        CANDIDATES — the non-admin accounts whose usernames it could have created —
+        and each one's stored password hash decides whether it actually goes. Every
+        generated account is made with one fixed password nothing signs in with, so
+        the hash is a proof of origin only the generator could have produced.
 
-        **It is name-scoped, not origin-scoped.** A non-admin account the owner
-        created by hand under one of the roster's names is indistinguishable from a
-        generated one here, and would be deleted with everything it ever logged.
-        Read `roster` from `GET /admin/activity` and show those names in a
-        confirmation before calling this.
+        A real lifter who happens to be named after a persona therefore survives:
+        they chose their own password, so their hash does not verify. An account that
+        administers the install is never even a candidate.
       responses:
         "200":
           description: What was removed
@@ -2030,15 +2030,14 @@ components:
           items:
             type: string
           description: >
-            Every username a backfill could create and a teardown would delete,
-            whether or not any of them exists yet.
+            Every username a backfill could create, whether or not any of them
+            exists yet. These are the accounts a teardown CONSIDERS; which of them
+            it removes is decided by each one's password hash, so a real lifter
+            sharing a name is kept.
 
-            **Load-bearing rather than informational.** Teardown matches on name
-            rather than on origin — the accounts carry no marker, so it cannot do
-            otherwise — which means an account the owner created by hand under one
-            of these names would be deleted along with everything it ever logged.
-            A client must show these names in its teardown confirmation; that is
-            the only safeguard against it.
+            Worth showing in a teardown confirmation regardless: it is the scope of
+            the operation, and an operator who recognises a name should be able to
+            see it listed and understand why that account is nonetheless safe.
 
     BackfillActivityRequest:
       type: object

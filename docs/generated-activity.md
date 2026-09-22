@@ -55,22 +55,30 @@ becomes unremovable from the panel.
 called. The delete refuses on `NOT is_admin`, so a roster name colliding with yours
 cannot cost you your training history.
 
-### Clean-up is name-scoped, not origin-scoped
+### How clean-up knows what it made
 
-This is the sharp edge of the markerless design, and it is worth reading twice.
+The roster gives clean-up its **candidates**; the password decides which of them
+actually go.
 
-Clean-up deletes **every non-admin account whose username is on the roster**. It
-cannot tell an account it created from one you made by hand that happens to share a
-name — that is exactly the distinction the missing marker throws away. So if you
-create an ordinary lifter called `otto.brandt`, a clean-up removes them and
-cascades away every session they ever logged.
+Every generated account is created with one fixed password that nothing ever signs
+in with. That makes the stored hash a proof of origin only the generator could have
+produced — already in the database, costing no column, appearing on no wire. So a
+clean-up lists the non-admin accounts whose usernames are on the roster, verifies
+each one's hash against that password, and deletes only the matches.
 
-The personas are deliberately ordinary household names, so this is a little more
-likely than it would be with obviously-synthetic ones. The mitigation is that the
-names are shown rather than described: `GET /admin/activity` publishes the roster,
-and the panel lists it both under the button and inside the confirmation, so you see
-the actual names before agreeing. Anything that calls the endpoint without showing
-them has removed the only safeguard there is.
+The consequence is the one that matters: **a real lifter who happens to be named
+after a persona survives.** They chose their own password, so their hash does not
+verify, and they keep every session they ever logged. Since the personas are
+deliberately ordinary household names, that collision is plausible rather than
+contrived, which is why it is worth closing properly rather than warning about.
+
+An account that administers the install is never a candidate in the first place —
+`NOT is_admin`, at both the lookup and the delete.
+
+This is the one sanctioned exception to the rule that `GetUserForLogin` is the only
+query reading `password_hash`. The hash here is evidence, not a credential: it is
+verified in process, used as a boolean and discarded, and nothing derived from it is
+returned. Both `db/queries/users.sql` and `db/queries/activity.sql` say so.
 
 ## Where it lives
 

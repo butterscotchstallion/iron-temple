@@ -99,40 +99,59 @@ SET weekday = sqlc.narg('weekday')
 WHERE id = sqlc.arg('id')
   AND weekday IS NULL;
 
--- DeleteGeneratedUsers removes accounts by name, refusing to touch an admin.
+-- ListGeneratedActivityCandidates finds the accounts a teardown MIGHT remove, and
+-- returns the one piece of evidence that decides whether it should.
 --
--- The teardown for a backfill. Generated accounts carry no marker — nothing in
--- the schema or on the wire says they were not typed in by hand — so the only
--- way to find them again is to re-derive the roster that named them and delete
--- those. That is why the roster has to be stable, and it is asserted in
--- internal/activity's tests for exactly this reason.
+-- THE SECOND READER OF password_hash IN THIS DIRECTORY, and the exception is
+-- deliberate. The rule at the top of users.sql exists so a hash cannot reach a
+-- DTO — the row struct having no such field is what enforces it. This query does
+-- not serve a DTO: the handler verifies each hash in process, uses the answer as a
+-- boolean and discards it. Nothing derived from it is returned, so the property
+-- that rule protects is intact.
 --
--- THIS IS NAME-SCOPED, NOT ORIGIN-SCOPED, and the difference is a real hazard
--- rather than a pedantic one. If the install's owner creates an ordinary account
--- that happens to be named after a persona — and the personas are deliberately
--- ordinary household names, precisely so they do not read as fixtures — then a
--- teardown deletes it and cascades away everything that lifter ever logged. The
--- markerless design is what makes that impossible to detect here: this query
--- cannot tell an account it created from an account that merely shares a name.
+-- WHY THE HASH IS THE RIGHT EVIDENCE
 --
--- Nothing in SQL can fix that, so it is mitigated where a human is: the status
--- endpoint publishes the roster and the admin screen lists those names in the
--- confirmation, so an operator sees exactly which accounts are in scope before
--- agreeing. Anyone adding a caller that skips the confirmation is removing the
--- only safeguard there is.
+-- Generated accounts carry no marker — nothing in the schema and nothing on the
+-- wire says they were not typed in by hand — which is a decision the install's
+-- owner made. Teardown therefore used to match on USERNAME alone, and that was a
+-- real hazard rather than a pedantic one: the personas are ordinary household
+-- names on purpose, so an account the owner created by hand as "mara.quinn" was
+-- indistinguishable from a generated one and would have been deleted along with
+-- everything that lifter ever logged.
 --
--- NOT is_admin is a guard against the one mistake with no undo. The install's
--- owner is an admin and everything they have ever lifted cascades from their row;
--- if a roster name ever collided with theirs, this predicate is what stands
--- between a teardown and somebody's training history. It costs nothing and it is
--- not removable.
+-- Every generated account is created with one fixed password that nothing ever
+-- signs in with (generatedPassword in internal/api). That makes the stored hash a
+-- proof of origin only the generator could have produced — already in the
+-- database, needing no column, and revealing nothing on the wire. A real lifter
+-- who happens to share a name chose their own password, so their hash does not
+-- verify and they survive.
+--
+-- Scoped to non-admins here as well as at the delete. The owner is an admin and
+-- everything they have lifted cascades from their row, so a name collision with
+-- theirs must not even become a candidate.
+-- name: ListGeneratedActivityCandidates :many
+SELECT id, username, password_hash
+FROM users
+WHERE lower(username) = ANY(sqlc.arg('usernames')::text[])
+  AND NOT is_admin;
+
+-- DeleteGeneratedActivityUsers removes the accounts that actually proved out.
+--
+-- By id rather than by name, because the decision has already been made: the
+-- caller verified each candidate's hash and this deletes exactly that set. Taking
+-- names again would reopen the collision the verification just closed.
+--
+-- NOT is_admin is repeated anyway. It is redundant against a caller that only ever
+-- passes ids from the query above, and it is the one predicate with no undo — an
+-- admin's row cascades their entire training history — so it is not removable on
+-- the grounds of being redundant.
 --
 -- Everything else about the account does cascade, by design: sessions, sets,
 -- reactions, comments, gym, avatars. That is the point of a teardown.
 --
--- :execrows so the caller can report what actually went, rather than what it
--- asked for.
--- name: DeleteGeneratedUsers :execrows
+-- :execrows so the caller can report what actually went rather than what it asked
+-- for.
+-- name: DeleteGeneratedActivityUsers :execrows
 DELETE FROM users
-WHERE lower(username) = ANY(sqlc.arg('usernames')::text[])
+WHERE id = ANY(sqlc.arg('ids')::int[])
   AND NOT is_admin;

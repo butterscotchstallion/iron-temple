@@ -272,16 +272,60 @@ func (s *Server) deleteActivity(w http.ResponseWriter, r *http.Request) {
 	// spend the next tick logging errors about rows that have gone.
 	s.activity.stop()
 
-	// The whole roster, not the count a previous backfill happened to use: the
-	// caller may not remember, and Roster is a prefix-stable list so asking for
-	// all of it is the superset of anything ever created.
-	removed, err := s.q.DeleteGeneratedUsers(r.Context(), activity.Usernames(activity.MaxRoster))
+	removed, err := s.removeGeneratedLifters(r.Context())
 	if err != nil {
 		log.Printf("activity teardown: %v", err)
 		internalError(w)
 		return
 	}
 	writeJSON(w, http.StatusOK, activityTeardownDTO{Removed: removed})
+}
+
+// removeGeneratedLifters deletes the generated accounts, and ONLY those.
+//
+// The roster gives candidates; the password hash decides. Both steps matter:
+//
+// The whole roster is offered as candidates, not the count some previous backfill
+// happened to use — the caller may not remember it, and Roster is prefix-stable so
+// asking for all of it is a superset of anything ever created.
+//
+// Then each candidate's hash is verified against the fixed password every generated
+// account is made with. That is what makes this ORIGIN-scoped rather than
+// name-scoped, and the difference is somebody's training history: the personas are
+// ordinary household names on purpose, so an account the owner created by hand as
+// "mara.quinn" used to be indistinguishable from a generated one and would have
+// been deleted with everything that lifter had logged. They chose their own
+// password, so their hash does not verify, so they survive.
+//
+// No marker was added to get here. The hash is evidence that was already in the
+// database, costs no column and appears on no wire — see
+// ListGeneratedActivityCandidates for why reading it is the one sanctioned
+// exception to the rule in users.sql.
+func (s *Server) removeGeneratedLifters(ctx context.Context) (int64, error) {
+	candidates, err := s.q.ListGeneratedActivityCandidates(ctx, activity.Usernames(activity.MaxRoster))
+	if err != nil {
+		return 0, err
+	}
+
+	ids := make([]int32, 0, len(candidates))
+	for _, candidate := range candidates {
+		// needsRehash is ignored deliberately: these accounts are never signed in
+		// to, so an out-of-date cost parameter on one is of no consequence — and
+		// rehashing something that is about to be deleted would be absurd.
+		ok, _ := s.hasher.Verify(generatedPassword, candidate.PasswordHash)
+		if !ok {
+			// A real lifter who happens to share the name. Logged rather than
+			// silently skipped: it is the one outcome here an operator would want
+			// to know about, because it means a roster name is in use for real.
+			log.Printf("activity teardown: keeping %q — not a generated account", candidate.Username)
+			continue
+		}
+		ids = append(ids, candidate.ID)
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	return s.q.DeleteGeneratedActivityUsers(ctx, ids)
 }
 
 // ---- the runner ----
@@ -431,9 +475,12 @@ func (s *Server) ensureGeneratedAccount(
 		Username:    persona.Username,
 		DisplayName: persona.DisplayName,
 		// Never an admin: users_single_admin_idx permits exactly one and the
-		// install's owner holds it. Also what keeps DeleteGeneratedUsers' NOT
-		// is_admin guard from ever having to refuse one of these.
-		IsAdmin:      false,
+		// install's owner holds it. Also what keeps the NOT is_admin guard on the
+		// teardown queries from ever having to refuse one of these.
+		IsAdmin: false,
+		// The fixed password. Nothing signs in with it — see generatedPassword —
+		// and its hash is what lets a teardown prove which accounts it made, so
+		// this line is load-bearing for more than the NOT NULL constraint.
 		PasswordHash: hash,
 		// False, unlike an account the admin area creates. That flag exists to
 		// force a lifter to replace a password somebody else chose, and there is

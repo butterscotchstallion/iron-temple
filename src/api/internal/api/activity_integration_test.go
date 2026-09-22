@@ -6,6 +6,10 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/gavv/httpexpect/v2"
+
+	"gitea.homelab/gitadmin/iron-temple/api/internal/activity"
 )
 
 // Generated training activity.
@@ -112,10 +116,10 @@ func TestActivityStatusReportsItsBoundsAndIsIdleByDefault(t *testing.T) {
 	status.Value("running").Boolean()
 }
 
-// The roster is published so a client can name the accounts a teardown would
-// delete. That matters because teardown matches on NAME rather than on origin, so
-// a hand-made account called after a persona would go too — and the names being
-// visible before confirming is the only safeguard against it.
+// The roster is published so a client can name the accounts a teardown considers.
+// They are candidates rather than casualties — the hash decides which actually go,
+// see TestActivityTeardownSparesARealLifterNamedAfterAPersona — but naming them is
+// still what lets an operator see the scope before agreeing to it.
 func TestActivityStatusPublishesTheRosterATeardownWouldMatch(t *testing.T) {
 	status := expect(t).GET("/admin/activity").Expect().
 		Status(http.StatusOK).JSON().Object()
@@ -414,6 +418,62 @@ func TestActivityTeardownRemovesWhatItMadeAndNothingElse(t *testing.T) {
 			t.Errorf("account %q survived teardown", name)
 		}
 	}
+}
+
+// THE FINDING THIS FEATURE'S TEARDOWN EXISTS TO NOT HAVE.
+//
+// A real lifter the owner created by hand, who happens to be named after a
+// persona, must survive a teardown with everything they have logged. The roster
+// names are ordinary household ones on purpose, so a collision is plausible rather
+// than contrived — and the accounts carry no marker, so the only thing that can
+// tell them apart is the password. A generated account has the fixed one the
+// generator uses; a real lifter chose their own.
+//
+// If teardown ever goes back to matching on username alone, this is the test that
+// fails, and what it is protecting is somebody's training history.
+func TestActivityTeardownSparesARealLifterNamedAfterAPersona(t *testing.T) {
+	// The first roster name, created the ordinary way with a password of its own.
+	persona := activity.Usernames(1)[0]
+	_, token := secondLifter(t, persona)
+	impostor := expectAs(t, token)
+
+	// Give them real history, so a wrongful delete would cost something the test
+	// can actually observe.
+	_, dayID := firstProgramAndDay(impostor)
+	session := startSession(t, impostor, dayID)
+	sessionID := int(session.Value("id").Number().Raw())
+	setID := int(session.Value("sets").Array().Value(0).Object().Value("id").Number().Raw())
+	logSet(impostor, sessionID, setID, 5, true)
+
+	// Generate alongside them, then tear down.
+	e := expect(t)
+	e.POST("/admin/activity/backfill").
+		WithJSON(map[string]any{"lifters": 3, "weeks": 2}).
+		Expect().Status(http.StatusOK)
+	e.DELETE("/admin/activity").Expect().Status(http.StatusOK)
+
+	// They still exist, still signed in, and still own their session.
+	impostor.GET("/me").Expect().Status(http.StatusOK).
+		JSON().Object().HasValue("username", persona)
+	impostor.GET(fmt.Sprintf("/sessions/%d", sessionID)).Expect().Status(http.StatusOK)
+
+	// And the generated ones are gone — the teardown was not simply a no-op that
+	// spared everybody.
+	for _, name := range activity.Usernames(3)[1:] {
+		if entryPresent(e, name) {
+			t.Errorf("generated account %q survived teardown", name)
+		}
+	}
+}
+
+// entryPresent reports whether a username appears on the roster endpoint.
+func entryPresent(e *httpexpect.Expect, username string) bool {
+	for _, entry := range e.GET("/lifters").Expect().Status(http.StatusOK).JSON().Array().Iter() {
+		if entry.Object().Value("username").String().Raw() == username {
+			return true
+		}
+	}
+	return false
 }
 
 // Nothing to remove is not an error: the caller asked for an install with no

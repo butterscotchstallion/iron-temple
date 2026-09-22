@@ -214,16 +214,17 @@
       Deletes the generated lifters and everything of theirs — sessions, reactions,
       comments. Your own account is never touched.
     </p>
-    <!-- Named rather than described. Clean-up matches on USERNAME, because these
-         accounts carry no marker and there is nothing else to match on — so an
-         account you made by hand under one of these names would go too, with
-         everything it ever logged. Listing them is the only safeguard there is,
-         which is why the server publishes the roster at all. -->
+    <!-- Named rather than described. These are the accounts clean-up CONSIDERS;
+         the server then checks each one's password against the fixed one the
+         generator uses, so a real lifter who happens to share a name is kept. The
+         list is still worth showing — it is the scope of the operation, and an
+         operator seeing their housemate's name on it should understand why they
+         will nonetheless survive. -->
     {#if roster.length > 0}
       <p class="mt-2 text-xs text-muted-foreground">
-        Matches on username, so it removes any non-admin account called
-        <span class="font-semibold text-foreground">{roster.join(", ")}</span> —
-        including one you made yourself under that name.
+        Considers any non-admin account called
+        <span class="font-semibold text-foreground">{roster.join(", ")}</span>, and
+        keeps the ones that aren't actually generated.
       </p>
     {/if}
     <Button
@@ -249,14 +250,14 @@
     <AlertDialog.Header>
       <AlertDialog.Title>Remove the generated lifters?</AlertDialog.Title>
       <AlertDialog.Description>
-        Every non-admin account called
-        <span class="font-semibold text-foreground">{roster.join(", ")}</span>
-        will be deleted, and so will everything of theirs — every session, set,
-        reaction and comment.
+        Every generated lifter goes, and so does everything of theirs — each
+        session, set, reaction and comment.
         <br /><br />
-        This matches on username, not on whether the account was generated: if you
-        made one of those yourself, it goes too. Your own account is safe. This
-        can't be undone, though you can generate more afterwards.
+        It looks at non-admin accounts called
+        <span class="font-semibold text-foreground">{roster.join(", ")}</span> and
+        removes only the ones it actually generated, so a real lifter who happens to
+        share one of those names is left alone. This can't be undone, though you can
+        generate more afterwards.
       </AlertDialog.Description>
     </AlertDialog.Header>
     <AlertDialog.Footer>

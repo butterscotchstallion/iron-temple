@@ -190,17 +190,16 @@ describe("ActivityPanel", () => {
     expect(getActivityStatus.mock.calls.length).toBeGreaterThan(1);
   });
 
-  // Clean-up matches on USERNAME, not on whether an account was generated, so an
-  // account the owner made by hand under one of these names would be deleted with
-  // all its history. Naming them is the only safeguard against that, which makes
-  // these two assertions load-bearing rather than cosmetic.
-  it("names the accounts clean-up would match, from the server's roster", async () => {
+  // The roster is the SCOPE of a clean-up, and it comes from the server rather
+  // than a hard-coded list. Which of those accounts actually go is decided by the
+  // password hash, so the copy must not claim a real lifter would be deleted.
+  it("names the accounts clean-up considers, from the server's roster", async () => {
     render(ActivityPanel);
 
     await waitFor(() => {
       expect(screen.getByText(/mara\.quinn, dev\.oyelaran/)).toBeInTheDocument();
     });
-    expect(screen.getByText(/including one you made yourself/)).toBeInTheDocument();
+    expect(screen.getByText(/keeps the ones that aren't actually generated/)).toBeInTheDocument();
   });
 
   it("repeats the names inside the confirmation", async () => {
@@ -217,7 +216,7 @@ describe("ActivityPanel", () => {
     expect(screen.getAllByText(/mara\.quinn, dev\.oyelaran/)).toHaveLength(2);
     // The dialog's own wording, which the panel's shorter note does not use.
     expect(
-      screen.getByText(/not on whether the account was generated/i),
+      screen.getByText(/a real lifter who happens to share one of those names/i),
     ).toBeInTheDocument();
   });
 
