@@ -69,6 +69,39 @@ async function mockCommon(page: import("@playwright/test").Page) {
   );
   await page.route("**/api/v1/exercises", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/racked**", (route) => route.fulfill({ json: emptyRacked }));
+
+  // AFTER the `**/api/v1/sessions**` wildcard above, which otherwise claims these
+  // and answers two array endpoints with a session-list object — see the longer
+  // note in app.spec.ts. Playwright's last matching route wins, so the order here
+  // is the fix.
+  await page.route("**/api/v1/sessions/*/reactions**", (route) =>
+    route.fulfill({ json: [] }),
+  );
+  await page.route("**/api/v1/sessions/*/comments**", (route) =>
+    route.fulfill({ json: [] }),
+  );
+
+  // The feed card on Home, and the roster the account menu links to.
+  await page.route("**/api/v1/feed**", (route) =>
+    route.fulfill({ json: { items: [], limit: 20, offset: 0 } }),
+  );
+  await page.route("**/api/v1/lifters", (route) => route.fulfill({ json: [] }));
+
+  // The generated-activity panel on the admin screen loads this on mount, so the
+  // owner's roster test reaches it. Idle, which is the state the panel's own
+  // assertions here assume.
+  await page.route("**/api/v1/admin/activity", (route) =>
+    route.fulfill({
+      json: {
+        running: false,
+        lifters: 0,
+        tickSeconds: 0,
+        actions: 0,
+        maxLifters: 8,
+        maxWeeks: 26,
+      },
+    }),
+  );
 }
 
 async function mockSignedOut(
