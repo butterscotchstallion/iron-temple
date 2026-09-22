@@ -13,6 +13,7 @@
   import Toaster from "./lib/Toaster.svelte";
   import { auth, loadMe } from "./lib/auth.svelte";
   import { loadHomeSessions } from "./lib/homeData";
+  import { startPolling as startNotificationPolling } from "./lib/notifications.svelte";
   import { startPolling } from "./lib/version.svelte";
   import { deferred } from "./lib/deferred.svelte";
   import { watchConnectivity } from "./lib/connectivity.svelte";
@@ -161,6 +162,21 @@
   // than by the header that displays the version, because what it feeds is the
   // update prompt — and the first poll also fills in the header's label.
   $effect(() => startPolling());
+
+  // Watch for applause and conversation arriving. Owned by the shell rather
+  // than by the bell that draws it, because HeaderBar is lazy-loaded: the bell
+  // does not exist for the first moments of a page load, and whether anybody is
+  // counting must not depend on which chunk has arrived yet.
+  //
+  // Reading auth.me inside the effect is what makes this restart on sign-in and
+  // tear down on sign-out — the teardown it returns runs before each re-run.
+  // The password-change gate matches HeaderBar's: an account in that state is
+  // refused by every endpoint except the two it needs to escape, so polling
+  // would be a 403 a minute for a panel it cannot act on.
+  $effect(() => {
+    if (!auth.me || auth.me.mustChangePassword) return;
+    return startNotificationPolling();
+  });
 </script>
 
 <!-- Outside <main> so the bar spans the viewport while the content below stays

@@ -17,6 +17,7 @@ import type {
   LeaderboardBoard,
   LeaderboardEntry,
   Lifter,
+  Notification,
   RackedReport,
   SessionRecap,
   User,
@@ -63,6 +64,28 @@ export function testLifter(overrides: Partial<Lifter> = {}): Lifter {
     displayName: "Grace Hopper",
     avatarColor: "",
     hasAvatar: false,
+    ...overrides,
+  };
+}
+
+/**
+ * One notification, defaulting to applause on the signed-in lifter's session.
+ *
+ * `sessionOwnerId` defaults to 1 — testUser's id — because that is the ordinary
+ * case: almost every notification is about your own training. A test covering
+ * the `reply` kind, the one that reaches somebody about a session that was
+ * never theirs, overrides it, and that override is the thing under test.
+ */
+export function testNotification(overrides: Partial<Notification> = {}): Notification {
+  return {
+    id: 1,
+    kind: "reaction",
+    actor: testLifter(),
+    sessionId: 7,
+    sessionOwnerId: 1,
+    programDayName: "Workout A",
+    emoji: "👏",
+    createdAt: "2026-03-17T10:00:00Z",
     ...overrides,
   };
 }

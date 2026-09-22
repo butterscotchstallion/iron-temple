@@ -87,6 +87,13 @@ async function mockCommon(page: import("@playwright/test").Page) {
   );
   await page.route("**/api/v1/lifters", (route) => route.fulfill({ json: [] }));
 
+  // The header bell. This file signs in partway through — see the login test —
+  // and the poll starts the moment /me comes back with an account, so it is
+  // reached here too even though nothing in this file looks at the bell.
+  await page.route("**/api/v1/notifications**", (route) =>
+    route.fulfill({ json: { items: [], limit: 20, offset: 0, unreadCount: 0 } }),
+  );
+
   // The two the Astroturfing screen reads on mount. Idle and switched off, which
   // is the state that screen's assertions here assume.
   //

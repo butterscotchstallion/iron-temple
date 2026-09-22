@@ -74,6 +74,53 @@ export function formatLongDate(iso: string): string {
   return `${name} ${day} ${year}`;
 }
 
+/**
+ * How long ago an RFC3339 timestamp was, e.g. "2h ago".
+ *
+ * The one relative formatter in the app, and deliberately narrow. Every other
+ * date this app shows is a training date — when a session was performed — and
+ * those are absolute on purpose: "March 17 2026" is a fact about a workout that
+ * stays true, where "5 days ago" decays the moment you look away. A
+ * notification is the opposite. It is about recency, it is read once, and
+ * "somebody applauded your squat day on March 17 2026" buries the only part
+ * that matters.
+ *
+ * Takes a full timestamp, NOT a date-only string. That distinction is the rule
+ * this file exists to enforce — see isoParts — and it is why `new Date()` is
+ * safe here and nowhere above it: a date-only string parses as UTC midnight and
+ * slips a day in western timezones, where an RFC3339 instant carries its
+ * offset.
+ *
+ * Rounds down at every step, so something 119 minutes old reads "1h ago".
+ * Under a minute is "just now": a count of seconds changes while it is on
+ * screen and reads as precision nobody asked for. Past a year it stops counting
+ * and gives the date, because by then the relative form has stopped being
+ * information.
+ */
+export function relativeTime(iso: string, now: Date = new Date()): string {
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return iso;
+
+  const seconds = Math.floor((now.getTime() - then.getTime()) / 1000);
+  // Also catches a clock that disagrees with the server's, which is ordinary —
+  // they are different machines. Reads as "just now" rather than as a negative.
+  if (seconds < 60) return "just now";
+
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+
+  const weeks = Math.floor(days / 7);
+  if (weeks < 52) return `${weeks}w ago`;
+
+  return `${MONTHS[then.getMonth()]} ${then.getDate()} ${then.getFullYear()}`;
+}
+
 /** Month name + day for a Date, e.g. "August 7". */
 export function formatMonthDay(date: Date): string {
   return `${MONTHS[date.getMonth()]} ${date.getDate()}`;

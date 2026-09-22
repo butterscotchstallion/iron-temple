@@ -351,6 +351,18 @@ test.beforeEach(async ({ page }) => {
     route.fulfill({ json: { items: [], limit: 20, offset: 0 } }),
   );
 
+  // The header bell, which polls for as long as any signed-in page is open —
+  // so this is the one stub here that a test does not have to visit anything in
+  // particular to reach. Empty and unread-zero, so the bell draws no badge and
+  // the header looks exactly as these tests were written against.
+  //
+  // Note the object shape: unreadCount rides on the list response rather than
+  // living at its own endpoint, and NotificationBell reads it directly. An
+  // array here would badge as undefined.
+  await page.route("**/api/v1/notifications**", (route) =>
+    route.fulfill({ json: { items: [], limit: 20, offset: 0, unreadCount: 0 } }),
+  );
+
   // Not reached by any test here, and stubbed anyway: the suite mocks the API to
   // stay self-contained, and an unstubbed route is a real request out to a Go API
   // this workflow never starts — an ECONNREFUSED in the log for every page load.
