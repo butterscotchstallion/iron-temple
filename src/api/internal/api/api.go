@@ -213,6 +213,10 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 					r.Post("/users", s.createUser)
 				})
 
+				// The install's recent activity. Not under /lifters because no id
+				// in its path names a person — see feed.go.
+				r.Get("/feed", s.getFeed)
+
 				// One lifter reading another. Every route is a GET, and that is
 				// load-bearing rather than incidental: the id in these paths
 				// names a person whose history is being read, so a write
@@ -494,4 +498,38 @@ func idParam(r *http.Request, key string) (int32, bool) {
 		return 0, false
 	}
 	return int32(v), true
+}
+
+// pageParams reads the `limit` and `offset` query parameters shared by every
+// paged list, writing the 400 itself when either is out of range. ok=false means
+// the caller should stop.
+//
+// ParseInt with bitSize 32 is what bounds these to int32, so the conversions
+// cannot overflow — an offset of 3000000000 is a 400 rather than a value that
+// wraps negative on the way into the query. (It also clears gosec G109/G115.)
+// That bound is the reason this is one function and not a convention: it was
+// originally missing from offset, and a second copy of the parsing is a second
+// place for it to go missing again.
+func pageParams(w http.ResponseWriter, r *http.Request) (limit, offset int32, ok bool) {
+	query := r.URL.Query()
+
+	limit = int32(defaultLimit)
+	if v := query.Get("limit"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 32)
+		if err != nil || n < 1 || n > maxLimit {
+			badRequest(w, "limit must be between 1 and 100")
+			return 0, 0, false
+		}
+		limit = int32(n)
+	}
+
+	if v := query.Get("offset"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 32)
+		if err != nil || n < 0 {
+			badRequest(w, "offset must be >= 0")
+			return 0, 0, false
+		}
+		offset = int32(n)
+	}
+	return limit, offset, true
 }

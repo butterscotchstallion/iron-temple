@@ -4,6 +4,7 @@ import SessionRecap from "./SessionRecap.svelte";
 import type { Session, SessionRecap as Recap, SessionSet } from "../lib/api";
 import { clearCache } from "../lib/cache.svelte";
 import { handOffSession } from "../lib/recapHandoff";
+import { testSessionRecap } from "../lib/testFixtures";
 
 // A render test for a route, which the suite otherwise leaves to Playwright —
 // earning its place for the same reason Racked.test.ts does, and more so.
@@ -47,50 +48,15 @@ vi.mock("../lib/writeQueue.svelte", async (importOriginal) => ({
 const props = { params: { id: "42" } };
 
 /** A recap with every optional field absent — a lifter's first workout. */
+/**
+ * A first workout: no pace, no previous session, no lift with a delta.
+ *
+ * The fixture lives in testFixtures.ts, because another lifter's recap renders
+ * this same type and it has too many required fields for two files to keep a copy
+ * of one in step. Kept as a local name so the call sites below read unchanged.
+ */
 function emptyRecap(): Recap {
-  return {
-    session: {
-      sessionId: 42,
-      programId: 1,
-      programName: "StrongLifts 5x5",
-      programDayId: 7,
-      programDayName: "Workout A",
-      performedOn: "2026-09-13",
-      startedAt: "2026-09-13T18:00:00Z",
-      finishedAt: null,
-      isOver: false,
-    },
-    durationSeconds: null,
-    pace: null,
-    volume: {
-      totalLb: 0,
-      previousLb: null,
-      deltaPct: null,
-      comparison: { count: 0, label: "", unitLb: 0 },
-      setsLogged: 0,
-      setsPrescribed: 5,
-      repsLogged: 0,
-      repsTargeted: 25,
-    },
-    progress: {
-      previousSessionId: null,
-      previousPerformedOn: null,
-      weightDeltaPct: null,
-      liftsCompared: 0,
-      liftsNew: 0,
-    },
-    muscles: [],
-    split: {
-      main: { volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0 },
-      assistance: { volumeLb: 0, sets: 0, reps: 0, lifts: 0, share: 0 },
-    },
-    bodyweightLb: null,
-    earned: null,
-    lifts: [],
-    prs: [],
-    milestones: [],
-    streak: { sessions: 0, weeks: 0 },
-  };
+  return testSessionRecap();
 }
 
 function fullRecap(): Recap {

@@ -5,6 +5,7 @@
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import LogIn from "@lucide/svelte/icons/log-in";
   import LogOut from "@lucide/svelte/icons/log-out";
+  import Rss from "@lucide/svelte/icons/rss";
   import Settings from "@lucide/svelte/icons/settings";
   import Users from "@lucide/svelte/icons/users";
   // Distinct from Users above, which marks "Manage accounts". Two entries that
@@ -66,6 +67,13 @@
         <DropdownMenu.Item class={itemClass} onSelect={() => go("/lifters")}>
           <UsersRound class="size-4" aria-hidden="true" />
           Lifters
+        </DropdownMenu.Item>
+        <!-- Kept even though Home carries a card for it: that card hides itself
+             when the feed is empty, so on a quiet install this is the only way
+             to reach the page and read that there is nobody else here yet. -->
+        <DropdownMenu.Item class={itemClass} onSelect={() => go("/feed")}>
+          <Rss class="size-4" aria-hidden="true" />
+          Around the gym
         </DropdownMenu.Item>
         <DropdownMenu.Item class={itemClass} onSelect={() => go("/profile")}>
           <Settings class="size-4" aria-hidden="true" />

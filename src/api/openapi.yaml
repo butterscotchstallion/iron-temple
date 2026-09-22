@@ -464,6 +464,61 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /feed:
+    get:
+      tags: [lifters]
+      operationId: getFeed
+      summary: What the other lifters have been doing
+      description: >
+        Recent sessions by everybody on this install EXCEPT the caller, most
+        recent first.
+
+        The exclusion is deliberate and is not something a client should undo.
+        A lifter's own history already has a page, so including them would
+        duplicate it — and on the install this app was built for, exactly one
+        lifter, a feed of everybody would be that page again under another name.
+        It also means a single-lifter install gets an empty feed and the surfaces
+        that draw it stand down on their own, with nothing having to ask whether
+        anybody else is here.
+
+        Each entry carries what a card needs and stops there: who, which workout,
+        when, and what it was worth. The lifts are not listed — follow
+        `GET /lifters/{lifterId}/sessions/{sessionId}/recap` for the detail,
+        which is the same recap its owner reads.
+
+        A session is included once it holds at least one logged rep, which is the
+        same definition of a started session that `GET /sessions` uses. One opened
+        and walked away from never appears.
+
+        There is no total. Page until a short page says to stop.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: The feed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Feed"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /lifters:
     get:
       tags: [lifters]
@@ -1557,6 +1612,76 @@ components:
         createdAt:
           type: string
           format: date-time
+
+    Feed:
+      type: object
+      required: [items, limit, offset]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/FeedEntry"
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    FeedEntry:
+      type: object
+      required:
+        [
+          id,
+          lifter,
+          programId,
+          programName,
+          programDayId,
+          programDayName,
+          performedOn,
+          setCount,
+          completedSetCount,
+          volumeLb,
+          isOver,
+        ]
+      description: >
+        One session in the feed. A `SessionSummary` with the lifter attached and
+        the per-exercise weights left off — a card does not draw them, and
+        fetching them would be a query per entry.
+      properties:
+        id:
+          type: integer
+          format: int64
+        lifter:
+          $ref: "#/components/schemas/Lifter"
+          description: >
+            Who performed it. Nested rather than flattened so a client can hand
+            it straight to whatever draws an avatar. `lastTrainedOn` is not
+            populated here — the feed is about one session, not about the lifter's
+            whole record.
+        programId:
+          type: integer
+          format: int64
+        programName:
+          type: string
+        programDayId:
+          type: integer
+          format: int64
+        programDayName:
+          type: string
+        performedOn:
+          type: string
+          format: date
+        setCount:
+          type: integer
+        completedSetCount:
+          type: integer
+        volumeLb:
+          type: number
+          description: >
+            Weight actually moved — `actualReps × weightLb` over the logged sets,
+            the same definition `SessionSummary.volumeLb` uses. A set logged short
+            of its target still counts what it lifted.
+        isOver:
+          type: boolean
 
     Lifter:
       type: object

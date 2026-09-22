@@ -163,6 +163,46 @@ type lifterProfileDTO struct {
 	LifetimeVolumeLb float64 `json:"lifetimeVolumeLb"`
 }
 
+// feedEntryDTO is one session in the feed.
+//
+// Deliberately not sessionSummaryDTO with a lifter bolted on. That type carries
+// Exercises, whose rows come from a second query keyed on a page of session ids
+// (see listSessions) — a feed card draws none of them, and the cheapest way to
+// keep it from costing a query per entry is for the type to have nowhere to put
+// them. Anything wanting the lifts follows the recap link.
+//
+// The lifter is nested rather than flattened so a client can pass it straight to
+// whatever draws an avatar, which is exactly what the roster gives it.
+type feedEntryDTO struct {
+	ID     int32     `json:"id"`
+	Lifter lifterDTO `json:"lifter"`
+
+	ProgramID      int32  `json:"programId"`
+	ProgramName    string `json:"programName"`
+	ProgramDayID   int32  `json:"programDayId"`
+	ProgramDayName string `json:"programDayName"`
+	PerformedOn    string `json:"performedOn"`
+
+	SetCount          int64 `json:"setCount"`
+	CompletedSetCount int64 `json:"completedSetCount"`
+	// VolumeLb is the weight actually moved, on sessionSummaryDTO's definition
+	// and from the same SQL expression: actual_reps rather than the target, over
+	// every logged set rather than only the completed ones.
+	VolumeLb float64 `json:"volumeLb"`
+	IsOver   bool    `json:"isOver"`
+}
+
+// feedDTO is a page of the feed.
+//
+// No total, unlike sessionListDTO. "How many sessions have the others ever
+// logged" is not a question this surface asks, and answering it would cost a
+// second aggregate on every page; a caller pages until a short page stops them.
+type feedDTO struct {
+	Items  []feedEntryDTO `json:"items"`
+	Limit  int32          `json:"limit"`
+	Offset int32          `json:"offset"`
+}
+
 type avatarDTO struct {
 	Etag string `json:"etag"`
 }
