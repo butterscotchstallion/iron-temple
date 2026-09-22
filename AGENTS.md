@@ -21,6 +21,28 @@ Conventions for agents (and humans) working in this repository.
   subject by a blank line. Explain intent, not just the mechanics of the diff.
 - **No line may exceed 100 characters** — subject or body. Wrap long prose.
 
+## Pull requests
+
+- **Opening the PR is not the end of the task.** Watch it until CI is green *and*
+  the AI reviewer is satisfied, then hand over the link. Don't hand over a red or
+  still-running PR, and **never merge** — the operator does that.
+- **Run `scripts/pr-watch.sh` rather than hand-rolling that loop.** It blocks until
+  the PR needs a decision, prints the failing job logs or the reviewer's findings,
+  and exits with a code saying which: `0` green+LGTM (hand over) · `3`/`4`
+  merged/closed (stop, and never push to its branch) · `5` no verdict is coming ·
+  `7` timed out · `10` CI failed · `11` findings · `12` the review errored. So:
+  run it, act on `10`/`11`, push, run it again. It fixes nothing itself.
+- **A review that never runs is not a pass.** `ai-pr-review.yml` skips draft PRs,
+  `renovate-bot`, `deploy`-titled PRs and anything outside its `paths` filter —
+  exit `5`. Say plainly that no review was expected; never report an unreviewed PR
+  as reviewed.
+- **Re-check a PR's state before calling it open**, including one you opened
+  minutes ago. The operator merges while you work, and nagging about already-merged
+  work trains them to skim.
+- The loop itself lives in `pr_watch.py` in the shared tooling repo
+  (`gitadmin/ai-pr-review`), alongside the review and apply scripts this repo
+  already consumes; `scripts/pr-watch.sh` only locates and runs it.
+
 ## Generated code
 
 - **`src/ui/src/lib/api/` is generated, not tracked.** `pnpm generate:api` builds the
