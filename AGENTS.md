@@ -24,7 +24,7 @@ Conventions for agents (and humans) working in this repository.
 ## Generated code
 
 - **`src/ui/src/lib/api/` is generated, not tracked.** `pnpm generate:api` builds the
-  typed hey-api client from `src/api/openapi.yaml`; `src/ui/.gitignore` keeps it out of
+  typed orval client from `src/api/openapi.yaml`; `src/ui/.gitignore` keeps it out of
   git. Never hand-edit it, and never commit it — change the spec instead.
 - **`src/api/openapi.yaml` is the contract.** Adding an endpoint or a response field is
   a spec edit first; the client and its types follow from regeneration.
