@@ -205,7 +205,15 @@ workout. It shows up as a card at the foot of home once there is anything in it,
 it holds *other* people's sessions only: your own already have a history page, so a
 feed of everybody would be that page again under another name. Which is also why a
 one-lifter install never sees the card at all — there is nothing for it to hold, so
-home looks exactly as it always did. Every figure there is the *same* report the lifter reads on their
+home looks exactly as it always did.
+
+Every session carries **applause and conversation**: four reactions, and comments
+capped at a couple of sentences. You can't applaud your own workout — that's what the
+reaction is for — but you can comment on it, because answering somebody is the obvious
+thing to want. The author can delete their own comment and the install's owner can
+delete any, which is the only moderation a household needs. None of it goes through
+the offline queue: a rep tapped at the rack has to survive a dead network, and a
+reaction given from the sofa does not. Every figure there is the *same* report the lifter reads on their
 own Racked page, computed by the same code over the same rows — so the install can
 never hold two answers about one history. There is no visibility setting: accounts
 exist only because the owner created them, so admission is the consent. The gym

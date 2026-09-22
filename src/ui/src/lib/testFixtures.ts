@@ -138,6 +138,10 @@ export function testFeedEntry(overrides: Partial<FeedEntry> = {}): FeedEntry {
     completedSetCount: 15,
     volumeLb: 9_000,
     isOver: true,
+    // No applause by default, which is the state of most sessions and the one a
+    // renderer is most likely to get wrong by drawing an empty badge.
+    reactionCount: 0,
+    commentCount: 0,
     ...overrides,
   };
 }

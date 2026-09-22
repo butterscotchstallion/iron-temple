@@ -32,6 +32,8 @@ sql:
       - "db/migrations/0020_dumbbell_step.up.sql"
       - "db/migrations/0021_must_change_password.up.sql"
       - "db/migrations/0022_assistance_weight_pin.up.sql"
+      # 0023 is seed DML plus a CHECK swap, neither of which types a query.
+      - "db/migrations/0024_session_recognition.up.sql"
     queries: "db/queries"
     gen:
       go:

@@ -90,6 +90,21 @@ type Session struct {
 	BodyweightLb pgtype.Numeric     `json:"bodyweight_lb"`
 }
 
+type SessionComment struct {
+	ID        int32              `json:"id"`
+	SessionID int32              `json:"session_id"`
+	UserID    int32              `json:"user_id"`
+	Body      string             `json:"body"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type SessionReaction struct {
+	SessionID int32              `json:"session_id"`
+	UserID    int32              `json:"user_id"`
+	Emoji     string             `json:"emoji"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type SessionSet struct {
 	ID         int32          `json:"id"`
 	SessionID  int32          `json:"session_id"`

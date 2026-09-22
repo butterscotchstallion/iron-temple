@@ -433,7 +433,21 @@ SELECT s.id,
        COUNT(ss.id) FILTER (WHERE ss.completed)  AS completed_set_count,
        COALESCE(SUM(ss.actual_reps * ss.weight_lb), 0)::numeric AS volume_lb,
        (s.finished_at IS NOT NULL
-        OR s.created_at < now() - INTERVAL '12 hours')::bool AS is_over
+        OR s.created_at < now() - INTERVAL '12 hours')::bool AS is_over,
+       -- How much applause and conversation the session drew, so a feed row can
+       -- show that something landed well without the feed itself becoming
+       -- interactive: tapping a reaction needs the session in front of you, which
+       -- is the recap the row links to.
+       --
+       -- Scalar subqueries rather than two more LEFT JOINs. The joins would
+       -- multiply against each other and against session_sets — a session with 15
+       -- sets, 3 reactions and 2 comments would fan to 90 rows — and every
+       -- aggregate above would then need DISTINCT to survive it. These are
+       -- counted independently, which is what they are.
+       (SELECT COUNT(*) FROM session_reactions sr WHERE sr.session_id = s.id)::bigint
+         AS reaction_count,
+       (SELECT COUNT(*) FROM session_comments sc WHERE sc.session_id = s.id)::bigint
+         AS comment_count
 FROM sessions s
 JOIN users u ON u.id = s.user_id
 LEFT JOIN user_avatars ua ON ua.user_id = u.id
@@ -470,6 +484,8 @@ type ListFeedSessionsRow struct {
 	CompletedSetCount int64          `json:"completed_set_count"`
 	VolumeLb          pgtype.Numeric `json:"volume_lb"`
 	IsOver            bool           `json:"is_over"`
+	ReactionCount     int64          `json:"reaction_count"`
+	CommentCount      int64          `json:"comment_count"`
 }
 
 // ListFeedSessions is what the OTHER lifters on this install have been doing,
@@ -549,6 +565,8 @@ func (q *Queries) ListFeedSessions(ctx context.Context, arg ListFeedSessionsPara
 			&i.CompletedSetCount,
 			&i.VolumeLb,
 			&i.IsOver,
+			&i.ReactionCount,
+			&i.CommentCount,
 		); err != nil {
 			return nil, err
 		}

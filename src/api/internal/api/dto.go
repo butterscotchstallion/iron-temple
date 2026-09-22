@@ -190,6 +190,35 @@ type feedEntryDTO struct {
 	// every logged set rather than only the completed ones.
 	VolumeLb float64 `json:"volumeLb"`
 	IsOver   bool    `json:"isOver"`
+
+	// ReactionCount and CommentCount let a row show that a session landed well.
+	// Counts only: the feed is not interactive, because giving a reaction needs
+	// the session in front of you and that is the recap the row links to.
+	ReactionCount int64 `json:"reactionCount"`
+	CommentCount  int64 `json:"commentCount"`
+}
+
+// sessionReactionDTO is one emoji's worth of applause.
+type sessionReactionDTO struct {
+	Emoji string `json:"emoji"`
+	Count int64  `json:"count"`
+	// Mine lets a surface draw the caller's own tap as pressed. Computed in the
+	// grouping query rather than by a second request whose answer would have to be
+	// joined back onto this one.
+	Mine bool `json:"mine"`
+}
+
+// sessionCommentDTO is one comment with its author.
+//
+// The author is a lifterDTO, which is the third place that type has earned its
+// keep: it carries an avatar and carries nothing administrative, and a comment is
+// rendered exactly the way a roster row and a feed row are.
+type sessionCommentDTO struct {
+	ID        int32     `json:"id"`
+	SessionID int32     `json:"sessionId"`
+	Author    lifterDTO `json:"author"`
+	Body      string    `json:"body"`
+	CreatedAt string    `json:"createdAt"`
 }
 
 // feedDTO is a page of the feed.

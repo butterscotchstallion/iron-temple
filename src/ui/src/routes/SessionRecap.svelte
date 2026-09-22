@@ -21,6 +21,7 @@
   import RecapLiftTable from "../lib/RecapLiftTable.svelte";
   import RecapEarned from "../lib/RecapEarned.svelte";
   import MuscleVolumeBars from "../lib/MuscleVolumeBars.svelte";
+  import SessionSocial from "../lib/SessionSocial.svelte";
   import { formatPercent, formatWeighIn } from "../lib/racked";
   import { takeHandedSession } from "../lib/recapHandoff";
   import { localRecap } from "../lib/localRecap";
@@ -289,6 +290,18 @@
       <p class="text-center text-xs tabular-nums text-muted-foreground">
         You weighed {formatWeighIn(recap.bodyweightLb)} lb
       </p>
+    {/if}
+
+    <!-- Who applauded, and what they said.
+         Gated on `recap` rather than shown unconditionally, which is the whole
+         point: when this page is rendering from `local` alone it is the screen a
+         lifter is standing in front of at a rack with no signal, and a comment box
+         that cannot reach the server is furniture. `recap` is non-null only once
+         the server has answered, now or into the cache.
+         ownerId is the reader: this route only ever shows their own session, so
+         the reaction buttons stand down and the counts show instead. -->
+    {#if recap}
+      <SessionSocial sessionId={recap.session.sessionId} ownerId={auth.me?.id ?? null} />
     {/if}
 
     <div class="flex flex-wrap gap-2">

@@ -261,6 +261,17 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 					r.Delete("/{sessionId}", s.deleteSession)
 					r.Post("/{sessionId}/finish", s.finishSession)
 					r.Get("/{sessionId}/recap", s.getSessionRecap)
+					// Applause and conversation. These DO write, unlike
+					// everything under /lifters, and it is safe for the reason
+					// recognition.go gives: the id in the path names a session,
+					// and the author is always the authenticated caller, so
+					// there is no path-supplied user id to get wrong.
+					r.Get("/{sessionId}/reactions", s.listSessionReactions)
+					r.Post("/{sessionId}/reactions", s.addSessionReaction)
+					r.Delete("/{sessionId}/reactions", s.removeSessionReaction)
+					r.Get("/{sessionId}/comments", s.listSessionComments)
+					r.Post("/{sessionId}/comments", s.addSessionComment)
+					r.Delete("/{sessionId}/comments/{commentId}", s.deleteSessionComment)
 					r.Post("/{sessionId}/assistance", s.addSessionAssistance)
 					r.Post("/{sessionId}/sets", s.addSessionSet)
 					r.Patch("/{sessionId}/sets/{setId}", s.updateSessionSet)
