@@ -927,6 +927,14 @@ func (s *Server) runActivity(
 }
 
 // generateRecognitionOnce responds to at most one session, for the live loop.
+//
+// Transactional for the same reason addSessionReaction is, and it is the one
+// recognition path where that had to be added rather than inherited: the bulk
+// generateRecognition is handed a transactional `q` by its caller, and the two
+// handlers open their own. This one ran on s.q, so its write and the
+// notification for it auto-committed separately — and the loop above only logs
+// and carries on, so a failed notification would have left applause nobody was
+// told about, silently, which is the state 0026 exists to abolish.
 func (s *Server) generateRecognitionOnce(
 	ctx context.Context, person *simulatedLifter, rng *rand.Rand,
 ) (reactions, comments int, err error) {
@@ -938,11 +946,23 @@ func (s *Server) generateRecognitionOnce(
 	}
 	row := seen[rng.Intn(len(seen))]
 
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := s.q.WithTx(tx)
+
+	// Counted into locals rather than the named returns, so a rolled-back tick
+	// cannot report activity the database does not have. The loop turns these
+	// into the "Mara reacted to a session" line it shows the owner.
+	var reacted, commented int
+
 	if person.persona.Reacts(rng) {
 		// One draw from the rng, reused by the notification — see the same
 		// local in generateRecognition.
 		chosen := activity.Emoji(allowedReactionList(), rng)
-		added, err := s.q.AddSessionReaction(ctx, store.AddSessionReactionParams{
+		added, err := q.AddSessionReaction(ctx, store.AddSessionReactionParams{
 			SessionID: row.ID,
 			UserID:    person.userID,
 			Emoji:     chosen,
@@ -951,7 +971,7 @@ func (s *Server) generateRecognitionOnce(
 			return 0, 0, err
 		}
 		if added > 0 {
-			if err := s.q.CreateReactionNotification(ctx, store.CreateReactionNotificationParams{
+			if err := q.CreateReactionNotification(ctx, store.CreateReactionNotificationParams{
 				ActorID:   person.userID,
 				SessionID: row.ID,
 				Emoji:     chosen,
@@ -959,28 +979,32 @@ func (s *Server) generateRecognitionOnce(
 				return 0, 0, err
 			}
 		}
-		reactions++
+		reacted++
 	}
 	if person.persona.Comments(rng) {
 		body := person.persona.Comment(rng)
 		if body != "" && len([]rune(body)) <= maxCommentBody {
-			posted, err := s.q.AddSessionComment(ctx, store.AddSessionCommentParams{
+			posted, err := q.AddSessionComment(ctx, store.AddSessionCommentParams{
 				SessionID: row.ID, UserID: person.userID, Body: body,
 			})
 			if err != nil {
-				return reactions, 0, err
+				return 0, 0, err
 			}
-			if err := s.q.CreateCommentNotifications(ctx, store.CreateCommentNotificationsParams{
+			if err := q.CreateCommentNotifications(ctx, store.CreateCommentNotificationsParams{
 				ActorID:   person.userID,
 				SessionID: row.ID,
 				CommentID: posted.ID,
 			}); err != nil {
-				return reactions, 0, err
+				return 0, 0, err
 			}
-			comments++
+			commented++
 		}
 	}
-	return reactions, comments, nil
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, 0, err
+	}
+	return reacted, commented, nil
 }
 
 // ---- the daily schedule ----
