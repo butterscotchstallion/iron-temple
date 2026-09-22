@@ -387,6 +387,60 @@ func TestActivityBackfillWritesAcceptableComments(t *testing.T) {
 	}
 }
 
+// Generated lifters must not echo each other. Asserted against the rows a real
+// backfill actually wrote, not just against the phrase sets — the unit tests prove
+// the sets do not overlap, and this proves the runner hands each persona its own.
+//
+// A shared pool used to mean two lifters could both say "nice one" on the same
+// session, which reads as one generator wearing several names.
+func TestActivityBackfillGivesEachLifterItsOwnVoice(t *testing.T) {
+	tearDownActivity(t)
+	// Six lifters over twelve weeks, so there are enough comments for an overlap to
+	// show up if one existed.
+	expect(t).POST("/admin/activity/backfill").
+		WithJSON(map[string]any{"lifters": 6, "weeks": 12}).
+		Expect().Status(http.StatusOK)
+
+	rows, err := testPool.Query(context.Background(), `
+		SELECT c.body, COUNT(DISTINCT c.user_id) AS authors
+		FROM session_comments c
+		JOIN users u ON u.id = c.user_id
+		WHERE NOT u.is_admin
+		GROUP BY c.body
+		HAVING COUNT(DISTINCT c.user_id) > 1`)
+	if err != nil {
+		t.Fatalf("query comments: %v", err)
+	}
+	defer rows.Close()
+
+	shared := 0
+	for rows.Next() {
+		var body string
+		var authors int
+		if err := rows.Scan(&body, &authors); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		t.Errorf("%q was said by %d different lifters", body, authors)
+		shared++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows: %v", err)
+	}
+
+	// And the run has to have actually produced comments, or the check above is
+	// vacuously true.
+	var total int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT COUNT(*) FROM session_comments c
+		JOIN users u ON u.id = c.user_id WHERE NOT u.is_admin`).Scan(&total); err != nil {
+		t.Fatalf("count comments: %v", err)
+	}
+	if total == 0 {
+		t.Fatal("the backfill wrote no comments, so nothing was tested")
+	}
+	t.Logf("%d comments across 6 lifters, %d shared phrases", total, shared)
+}
+
 // ---- teardown ----
 
 func TestActivityTeardownRemovesWhatItMadeAndNothingElse(t *testing.T) {

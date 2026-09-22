@@ -54,6 +54,11 @@ type Persona struct {
 	// than writing a sentence, and a feed where every session has three comments
 	// reads as generated.
 	Chattiness float64
+
+	// voice is the phrases this persona alone says. Unexported because it is not a
+	// knob — it is the persona's identity, assigned by Roster and fixed for the
+	// life of the account that carries the name. Read through Comment.
+	voice []string
 }
 
 // names is the roster personas are drawn from, in order.
@@ -131,6 +136,10 @@ func Roster(n int) []Persona {
 			Grit:        h.grit,
 			Sociability: h.sociability,
 			Chattiness:  h.chattiness,
+			// Slot N always gets voice N, which is what makes a persona's voice as
+			// persistent as its name: the account created at this slot says the same
+			// things across every run, and never says another persona's lines.
+			voice: voices[i%len(voices)],
 		})
 	}
 	return out
@@ -201,32 +210,165 @@ func (p Persona) SetReps(target int32, setNumber, totalSets int, wentWell bool, 
 	return 1
 }
 
-// phrases is what a simulated lifter says.
+// voices is one phrase set per roster slot, in the same order as names.
 //
-// Short, and about the training rather than about each other, because a comment
-// that named a lift or a number would have to agree with the session it hangs
-// off — and one that did not would be the most obvious tell in the whole
-// simulation. Vague approval is both more realistic and safer.
-var phrases = []string{
-	"strong work",
-	"that last set looked heavy",
-	"nice one",
-	"big session",
-	"beast mode",
-	"you make it look easy",
-	"solid",
-	"that's a PR surely",
-	"good grinding",
-	"impressive",
-	"keep it rolling",
-	"respect",
-	"how did that feel?",
-	"clean reps",
-	"tough day but you got it",
+// ONE VOICE PER PERSONA, AND NO PHRASE SHARED BETWEEN TWO. A single pooled list
+// meant four lifters drawing from the same fifteen sentences, so a busy week
+// collected "nice one" twice from different people — which reads as one generator
+// wearing several names rather than as several people. Partitioning it is what
+// makes a feed look like a conversation. The no-overlap rule is enforced by a test
+// rather than by care: the sets are long enough that an accidental repeat is easy
+// to introduce and hard to spot by eye.
+//
+// Each set is written in a recognisable register — terse, exuberant, dry, grim —
+// so the difference survives being read rather than merely being distinct as
+// strings. Register is matched to the persona's Chattiness: the ones who hardly
+// ever comment get the shortest lines, because somebody who speaks once a month
+// does not write paragraphs.
+//
+// NOTHING NAMES A LIFT OR A NUMBER. A comment saying "nice 225" would have to
+// agree with the session it hangs off, and one that did not would be the most
+// obvious tell in the whole simulation. Vague approval is both more realistic and
+// safer, and it is the one rule to keep when adding phrases here.
+var voices = [][]string{
+	// mara.quinn — reliable, says little. Understated to the point of curt.
+	{
+		"solid",
+		"good work",
+		"that'll do it",
+		"steady",
+		"no complaints there",
+		"looks about right",
+		"consistent as ever",
+		"well held",
+		"that's the way",
+		"quietly impressive",
+		"tidy",
+		"nothing wasted there",
+	},
+	// dev.oyelaran — the enthusiast. Loud, generous, exclamatory.
+	{
+		"absolutely flying!",
+		"look at you go",
+		"this is the best one yet surely",
+		"okay that's just showing off",
+		"enormous session",
+		"you're on another level lately",
+		"every single week, incredible",
+		"I'm genuinely impressed",
+		"that is a serious bit of work",
+		"unreal consistency",
+		"the grind is paying off big time",
+		"hats off, that looked brutal",
+	},
+	// tess.haraldsen — flaky, warm, a little self-deprecating about it.
+	{
+		"meanwhile I skipped mine",
+		"putting me to shame here",
+		"love to see it",
+		"wish I had your discipline",
+		"this is motivating, genuinely",
+		"right, I'm going tomorrow",
+		"you always show up",
+		"how do you keep it up?",
+		"making me feel guilty in the best way",
+		"respect for turning up",
+		"one of us is doing it properly",
+		"okay you've convinced me",
+	},
+	// otto.brandt — the grinder who fails often. Grim, technical, no warmth.
+	{
+		"that looked heavy",
+		"hard earned",
+		"the last one was a fight",
+		"no easy reps in there",
+		"grim work",
+		"that's where it gets difficult",
+		"held together well",
+		"bar speed dropped at the end",
+		"through the sticking point",
+		"that is the useful kind of hard",
+		"nothing pretty about it",
+		"earned every one",
+	},
+	// nell.ferreira — encouraging, coach-like.
+	{
+		"great to see the progress",
+		"you're building something here",
+		"trust the process, it's working",
+		"strong and controlled",
+		"that's how it's done",
+		"the consistency is the win",
+		"keep exactly this up",
+		"real progress this month",
+		"form held right to the end",
+		"proud of that one",
+		"this is what patience looks like",
+		"onwards",
+	},
+	// sunil.raghavan — dry, wry, understated humour.
+	{
+		"well, that happened",
+		"the bar lost that argument",
+		"not bad for a Tuesday",
+		"suspiciously easy looking",
+		"showing the rest of us up again",
+		"I'll pretend that's achievable",
+		"someone's been eating properly",
+		"rude, frankly",
+		"noted, and resented",
+		"the gym's least favourite visitor",
+		"you've done this before, haven't you",
+		"unnecessary but appreciated",
+	},
+	// ivy.kowalczyk — analytical, thinks in trends and process.
+	{
+		"the trend on this is excellent",
+		"nice clean progression",
+		"that's a proper jump from last time",
+		"consistent week over week",
+		"the volume is really adding up",
+		"good to see it moving again",
+		"that curve is going the right way",
+		"no stalling at all lately",
+		"steady climb, no drama",
+		"the numbers are doing what they should",
+		"disciplined pacing",
+		"exactly on schedule",
+	},
+	// bram.delacroix — barely comments at all. Telegraphic when he does.
+	{
+		"strong",
+		"good",
+		"yes",
+		"big",
+		"nice",
+		"heavy",
+		"clean",
+		"sharp",
+		"quality",
+		"proper",
+		"class",
+		"more of that",
+	},
 }
 
-// Comment picks something to say.
-func Comment(rng *rand.Rand) string { return phrases[rng.Intn(len(phrases))] }
+// Comment is something this persona would say.
+//
+// A method rather than a package function, because what gets said depends on who
+// is saying it: a persona carries its own phrases and never reaches for another's.
+// That binding is as persistent as the roster — slot N always gets voice N, so the
+// account named at slot N keeps one voice across every run and every backfill.
+//
+// A Persona built by hand rather than by Roster has no voice, which only ever
+// happens in a test. It gets a phrase anyway rather than an empty string, because
+// the API rejects a blank comment and a caller should not have to know that.
+func (p Persona) Comment(rng *rand.Rand) string {
+	if len(p.voice) == 0 {
+		return "good work"
+	}
+	return p.voice[rng.Intn(len(p.voice))]
+}
 
 // Emoji picks a reaction from the set the caller offers.
 //

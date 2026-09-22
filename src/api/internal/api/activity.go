@@ -661,9 +661,9 @@ func (s *Server) generateRecognition(
 				reactions++
 			}
 			if person.persona.Comments(rng) {
-				body := activity.Comment(rng)
+				body := person.persona.Comment(rng)
 				// The same two rules addSessionComment applies: trimmed, non-blank,
-				// within the cap. activity.Comment cannot produce a body that fails
+				// within the cap. Persona.Comment cannot produce a body that fails
 				// them and is tested not to, so this is a belt on a brace — but the
 				// rule lives in a handler this path does not go through, so it is
 				// stated rather than assumed.
@@ -797,7 +797,7 @@ func (s *Server) generateRecognitionOnce(
 		reactions++
 	}
 	if person.persona.Comments(rng) {
-		body := activity.Comment(rng)
+		body := person.persona.Comment(rng)
 		if body != "" && len([]rune(body)) <= maxCommentBody {
 			if _, err := s.q.AddSessionComment(ctx, store.AddSessionCommentParams{
 				SessionID: row.ID, UserID: person.userID, Body: body,

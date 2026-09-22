@@ -2,8 +2,27 @@ package activity
 
 import (
 	"math/rand"
+	"regexp"
+	"slices"
+	"strings"
 	"testing"
 )
+
+// samePersona compares two personas field by field.
+//
+// Needed because Persona carries its voice as a slice, so == does not compile. The
+// voice is included rather than skipped: it IS the identity being asserted as
+// stable, so a comparison that ignored it would pass while the thing under test
+// had changed.
+func samePersona(a, b Persona) bool {
+	return a.Username == b.Username &&
+		a.DisplayName == b.DisplayName &&
+		a.Consistency == b.Consistency &&
+		a.Grit == b.Grit &&
+		a.Sociability == b.Sociability &&
+		a.Chattiness == b.Chattiness &&
+		slices.Equal(a.voice, b.voice)
+}
 
 // A fixed source, so every assertion below is about the decision logic rather
 // than about luck. PCG with constant seeds is reproducible across runs and across
@@ -21,7 +40,7 @@ func TestRosterIsStableAcrossCalls(t *testing.T) {
 		t.Fatalf("Roster(4) returned %d personas", len(first))
 	}
 	for i := range first {
-		if first[i] != second[i] {
+		if !samePersona(first[i], second[i]) {
 			t.Errorf("persona %d differs between calls: %+v vs %+v", i, first[i], second[i])
 		}
 	}
@@ -32,7 +51,7 @@ func TestRosterIsStableAcrossCalls(t *testing.T) {
 func TestRosterGrowsByAppending(t *testing.T) {
 	small, large := Roster(3), Roster(6)
 	for i := range small {
-		if small[i] != large[i] {
+		if !samePersona(small[i], large[i]) {
 			t.Errorf("persona %d moved when the roster grew: %+v vs %+v", i, small[i], large[i])
 		}
 	}
@@ -235,23 +254,113 @@ func TestSetRepsHandlesATinyTarget(t *testing.T) {
 
 // ---- what they say ----
 
-func TestCommentIsAlwaysSomething(t *testing.T) {
+// Every persona always has something to say, and it is always acceptable to the
+// API — which rejects a blank body and caps the length.
+func TestEveryPersonaSaysSomethingAcceptable(t *testing.T) {
 	rng := fixed()
-	seen := map[string]bool{}
-	for range 200 {
-		got := Comment(rng)
-		if got == "" {
-			t.Fatal("Comment returned an empty string, which the API rejects as blank")
+	for _, p := range Roster(MaxRoster) {
+		for range 100 {
+			got := p.Comment(rng)
+			if got == "" {
+				t.Fatalf("%s returned an empty comment, which the API rejects as blank", p.Username)
+			}
+			// Counted in runes, the same way maxCommentBody counts.
+			if len([]rune(got)) > 256 {
+				t.Errorf("%s said something longer than the API accepts: %q", p.Username, got)
+			}
+			if got != strings.TrimSpace(got) {
+				t.Errorf("%s said %q, which is not trimmed and would be stored untidy", p.Username, got)
+			}
 		}
-		// The cap the API enforces on any comment, counted the same way.
-		if len([]rune(got)) > 256 {
-			t.Errorf("comment %q is longer than the API accepts", got)
-		}
-		seen[got] = true
 	}
-	// A feed where every comment is the same sentence is worse than no comments.
-	if len(seen) < 5 {
-		t.Errorf("only %d distinct phrases over 200 draws", len(seen))
+}
+
+// THE REASON VOICES ARE PARTITIONED AT ALL.
+//
+// With one pooled list, two lifters commenting on the same session could both say
+// "nice one" — which reads as one generator wearing several names rather than as
+// several people. No phrase may belong to two personas, and the sets are long
+// enough that an accidental duplicate is easy to introduce and hard to spot by eye,
+// so it is asserted rather than trusted.
+func TestNoTwoPersonasShareAPhrase(t *testing.T) {
+	owner := map[string]string{}
+	for _, p := range Roster(MaxRoster) {
+		for _, phrase := range p.voice {
+			if first, seen := owner[phrase]; seen {
+				t.Errorf("%q belongs to both %s and %s", phrase, first, p.Username)
+				continue
+			}
+			owner[phrase] = p.Username
+		}
+	}
+}
+
+// A persona draws only from its own set, never another's.
+func TestAPersonaOnlySaysItsOwnLines(t *testing.T) {
+	roster := Roster(MaxRoster)
+	rng := fixed()
+	for _, p := range roster {
+		own := map[string]bool{}
+		for _, phrase := range p.voice {
+			own[phrase] = true
+		}
+		for range 200 {
+			if got := p.Comment(rng); !own[got] {
+				t.Fatalf("%s said %q, which is not in its own voice", p.Username, got)
+			}
+		}
+	}
+}
+
+// Each voice needs enough in it that a persona is not visibly looping, and the
+// whole corpus needs to be big enough that a populated feed reads as varied.
+func TestVoicesAreLargeEnoughToNotRepeat(t *testing.T) {
+	total := 0
+	for _, p := range Roster(MaxRoster) {
+		if len(p.voice) < 8 {
+			t.Errorf("%s has only %d phrases, which will visibly loop", p.Username, len(p.voice))
+		}
+		// A duplicate inside one voice wastes a slot and makes a repeat likelier.
+		seen := map[string]bool{}
+		for _, phrase := range p.voice {
+			if seen[phrase] {
+				t.Errorf("%s lists %q twice", p.Username, phrase)
+			}
+			seen[phrase] = true
+		}
+		total += len(p.voice)
+	}
+	if total < 60 {
+		t.Errorf("the whole corpus is only %d phrases", total)
+	}
+}
+
+// Nothing may name a lift or a number. A comment saying "nice 225" would have to
+// agree with the session it hangs off, and one that did not would be the most
+// obvious tell in the simulation — so this is a rule about the DATA being
+// plausible, not about tidiness.
+func TestNoPhraseNamesALiftOrANumber(t *testing.T) {
+	// Word-boundary matched, not substring. A naive Contains flags "impressive"
+	// for "press" and "tomorrow" for "row", which would make this test reject
+	// perfectly good English.
+	lifts := regexp.MustCompile(`(?i)\b(squat|bench|deadlift|press|row|curl|lunge|chin|dip)\b`)
+	for _, p := range Roster(MaxRoster) {
+		for _, phrase := range p.voice {
+			if lifts.MatchString(phrase) {
+				t.Errorf("%s says %q, which names a lift", p.Username, phrase)
+			}
+			if strings.ContainsAny(phrase, "0123456789") {
+				t.Errorf("%s says %q, which contains a number", p.Username, phrase)
+			}
+		}
+	}
+}
+
+// A Persona built by hand has no voice, which only happens in a test. It must
+// still produce something, because the API rejects a blank comment.
+func TestAVoicelessPersonaStillSaysSomething(t *testing.T) {
+	if got := (Persona{}).Comment(fixed()); got == "" {
+		t.Error("a persona with no voice returned an empty comment")
 	}
 }
 

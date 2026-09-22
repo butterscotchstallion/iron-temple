@@ -39,6 +39,32 @@ from the same allowlist the API validates against. Comments are trimmed and with
 the same cap. No lifter reacts to their own session, because the generator reads
 through the feed query, which excludes the viewer's own.
 
+### Each lifter has their own voice
+
+Comments are **partitioned per persona** — no phrase belongs to two of them. With
+one shared list, two lifters commenting on the same session could both say "nice
+one", which reads as a single generator wearing several names rather than as several
+people.
+
+Each set is written in its own register, matched to how often that persona actually
+comments: the reliable one who speaks rarely is terse to the point of curt, the
+enthusiast is exclamatory, one is dryly sarcastic, another thinks in trends. The
+register is the point — the difference has to survive being *read*, not just be
+distinct as strings.
+
+The binding is as persistent as the roster. Slot N always gets voice N, so the
+account created at that slot keeps one voice across every run, every backfill and
+every teardown-and-regenerate.
+
+Two rules are enforced by tests rather than by care, because both are easy to break
+by eye:
+
+- **No phrase in two voices.** The sets are long enough that an accidental
+  duplicate would be hard to spot.
+- **No phrase names a lift or a number.** One saying "nice 225" would have to agree
+  with the session it hangs off, and one that did not would be the most obvious
+  tell in the whole simulation. Keep new phrases vague.
+
 ## What it does not do
 
 **Nothing marks these accounts.** There is no column in the schema and no field in
