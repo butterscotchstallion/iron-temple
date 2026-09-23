@@ -372,6 +372,45 @@ describe("ExerciseCard", () => {
       expect(screen.getByText("10 lb × 5 · 5 lb per hand")).toBeInTheDocument();
     });
 
+    // ...and says which weight the header is, because the two numbers sit a line
+    // apart in different units. A lifter reading "10 lb per hand" against a bare
+    // "40 lb" concludes their warm-up is 25% of the work weight, when it is the
+    // 50% rung of a 20 lb bell.
+    it("labels the work weight as the pair, since the rung under it is per hand", async () => {
+      const sets = workSets(40, 3);
+      const { rerender } = render(ExerciseCard, {
+        name: "Dumbbell Curl",
+        sets,
+        equipment: "dumbbell",
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+      });
+      expect(screen.getByText("40 lb pair", { exact: true })).toBeInTheDocument();
+      expect(screen.getByText("20 lb × 5 · 10 lb per hand")).toBeInTheDocument();
+
+      // The folded card is the same weight with the circles gone, so it carries
+      // the same label rather than reverting to the ambiguous one.
+      await rerender({
+        sets: sets.map((s) => set({ ...s, actualReps: 10, completed: true })),
+      });
+      await waitFor(() =>
+        expect(screen.getByText("3/3 sets · 40 lb pair")).toBeInTheDocument(),
+      );
+    });
+
+    it("leaves a barbell's weight unlabelled, where nothing is ambiguous", () => {
+      // Every weight on a barbell card is the whole load, so a suffix there is
+      // noise on every lift in the session to disambiguate nothing.
+      render(ExerciseCard, {
+        name: "Squat",
+        sets: workSets(200, 3),
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+      });
+      expect(screen.getByText("200 lb", { exact: true })).toBeInTheDocument();
+      expect(screen.queryByText(/lb pair/)).not.toBeInTheDocument();
+    });
+
     it("warms up without the empty bar", () => {
       const { container } = render(ExerciseCard, {
         name: "Dumbbell Curl",
