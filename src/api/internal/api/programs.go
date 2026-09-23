@@ -337,6 +337,13 @@ func (s *Server) prescribe(ctx context.Context, programID, dayID, userID int32, 
 			// Stored per bell, prescribed per pair: every weight in this app is
 			// the whole load, and a dumbbell lift is two bells. See 0020.
 			DumbbellLb: numericToFloat(steps.DumbbellStepLb) * 2,
+			// The three stacks are NOT doubled. A dumbbell lift is the only one
+			// where the lifter holds two of the thing the gym is described in;
+			// a pin goes in one stack and a band is one band, so what 0028
+			// stores is already the whole load.
+			MachineLb: numericToFloat(steps.MachineStepLb),
+			CableLb:   numericToFloat(steps.CableStepLb),
+			BandLb:    numericToFloat(steps.BandStepLb),
 		}
 	}
 

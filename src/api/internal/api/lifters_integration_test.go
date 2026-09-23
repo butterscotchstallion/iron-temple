@@ -102,6 +102,12 @@ func TestLifterRosterOmitsAdministrativeColumns(t *testing.T) {
 	row.NotContainsKey("plates")
 	row.NotContainsKey("barWeightLb")
 	row.NotContainsKey("dumbbellStepLb")
+	row.NotContainsKey("machineStepLb")
+	row.NotContainsKey("cableStepLb")
+	row.NotContainsKey("bandStepLb")
+	// Nor whether they have got round to checking it, which is nobody else's
+	// business and is not a fact about this lifter's training.
+	row.NotContainsKey("equipmentConfirmedAt")
 
 	row.Value("displayName").String().NotEmpty()
 	row.Value("hasAvatar").Boolean().IsFalse()

@@ -2123,6 +2123,48 @@ components:
             much the weight goes up when every set tops out. 5 until the setup
             screen says otherwise.
           example: 5
+        machineStepLb:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          description: >
+            The gap between two holes on this lifter's selectorized machines —
+            10 or 15 on most stacks, sometimes with a 2.5 add-on. Unlike the
+            bar's, this is the WHOLE load already: a pin goes in one stack. 5
+            until the equipment screen says otherwise.
+          example: 10
+        cableStepLb:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          description: >
+            The next plate up on this lifter's cable stack, commonly 5. The
+            whole load, like `machineStepLb`. 5 until the equipment screen says
+            otherwise.
+          example: 5
+        bandStepLb:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          description: >
+            The jump between two bands in this lifter's graded set, whatever the
+            manufacturer decided it is. The whole load. 5 until the equipment
+            screen says otherwise.
+          example: 5
+        equipmentConfirmedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: >
+            When this lifter last reviewed their equipment and said it was
+            right. Null means the gym on file was assembled by us and nobody has
+            checked it — the app seeds a standard rack at registration, and
+            until this is set there is no way to tell that guess from a fact.
+
+            Drives copy only: a banner on the profile, a nudge on home. It must
+            never reach the prescription. Two lifters with identical equipment
+            get identical weights whether or not either has clicked anything,
+            so an unconfirmed rack is still the best information available.
 
     AdminUser:
       type: object
@@ -2833,7 +2875,8 @@ components:
 
     ExportGym:
       type: object
-      required: [barWeightLb, dumbbellStepLb, plates]
+      required:
+        [barWeightLb, dumbbellStepLb, machineStepLb, cableStepLb, bandStepLb, plates]
       properties:
         barWeightLb:
           type: number
@@ -2844,6 +2887,30 @@ components:
           minimum: 0
           exclusiveMinimum: true
           description: Per bell; the pair steps twice this.
+        machineStepLb:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          description: The whole load, unlike the bell above.
+        cableStepLb:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          description: The whole load.
+        bandStepLb:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          description: The whole load.
+        equipmentConfirmedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: >
+            When the lifter last confirmed this gym, or null if these rows are
+            still the app's guess. Exported because an archive that cannot tell
+            a described gym from an assumed one has lost the more interesting
+            half of the fact.
         plates:
           type: array
           items:
@@ -3045,6 +3112,31 @@ components:
             a mistyped digit, and half-pound jumps on a pair of bells are the
             thing this field exists to stop the engine inventing.
           example: 2.5
+        machineStepLb:
+          type: number
+          minimum: 1
+          maximum: 50
+          description: >
+            The gap between two holes on a stack, as the WHOLE load — not
+            halved on the way in the way the rack above is, because a pin goes
+            in one stack. Same floor as the rack and for the same reason: under
+            a pound is a typo, not a machine.
+          example: 10
+        cableStepLb:
+          type: number
+          minimum: 1
+          maximum: 50
+          description: The next plate on a cable stack. Whole load.
+          example: 5
+        bandStepLb:
+          type: number
+          minimum: 1
+          maximum: 50
+          description: >
+            The jump between two bands in a graded set. Whole load. The ceiling
+            is the same 50 as the stacks, which a heavy band set can genuinely
+            approach.
+          example: 5
         plates:
           type: array
           maxItems: 20

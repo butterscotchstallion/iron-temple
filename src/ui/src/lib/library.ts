@@ -72,10 +72,29 @@ export type GymSteps = {
   barLb?: number;
   /** Twice the rack's per-bell step. */
   dumbbellLb?: number;
+  /**
+   * The gap between two holes on a stack. Already the whole load — a lifter
+   * holds two dumbbells and moves one pin, so unlike `dumbbellLb` this is not
+   * doubled on its way here.
+   */
+  machineLb?: number;
+  /** The next plate up on a cable stack. Whole load. */
+  cableLb?: number;
+  /** The jump between two bands in a graded set. Whole load. */
+  bandLb?: number;
 };
 
 /** The smallest change a pair of dumbbells admits when the rack is unknown. */
 export const DEFAULT_DUMBBELL_STEP_LB = 10;
+
+/**
+ * What a stack steps by when the lifter has not said.
+ *
+ * One constant for three kinds, mirroring `defaultEquipmentStepLb` on the API
+ * side and the three column defaults in 0028 — the fallback is a single fact,
+ * "we were not told", where the stored values are three separate ones.
+ */
+export const DEFAULT_EQUIPMENT_STEP_LB = 5;
 
 /**
  * The smallest weight change a kind of equipment admits, in lb.
@@ -89,20 +108,33 @@ export const DEFAULT_DUMBBELL_STEP_LB = 10;
  * `gymSteps` — and the constants are the fallback for a client that has not
  * loaded one yet.
  *
- * Anything the catalogue calls machine, cable, bodyweight, band or other is
- * loaded in units this app does not model, and the bar's is the only guess
- * available. A band never reaches this in practice: band work is prescribed at
- * 0 lb, and the zero guard in progression.NextPlan means nothing ever steps it.
+ * Machines, cables and bands have their own grids too, since 0028. They used to
+ * fall through to the bar's, which said that buying a pair of 1.25 lb plates
+ * made the leg press finer — it does not, because a stack is a stack and the
+ * pin drops into holes somebody else drilled.
  *
- * This mirrors progression.LadderFor on the API side, which is what actually
- * moves the weight. It exists here so the copy that promises a lifter a number
- * can promise the one they will get.
+ * Bodyweight and other still take the bar's, and so does any kind the catalogue
+ * grows later: their load, when they have one, is plates or bells, both of which
+ * are described already.
+ *
+ * This mirrors progression.stepFor on the API side, which is what actually moves
+ * the weight — the switch below and that one have to keep agreeing, because one
+ * draws the number and the other delivers it. It exists here so the copy that
+ * promises a lifter a number can promise the one they will get.
  */
 export function equipmentStepLb(equipment: string, steps: GymSteps = {}): number {
-  if (equipment === "dumbbell") {
-    return steps.dumbbellLb || DEFAULT_DUMBBELL_STEP_LB;
+  switch (equipment) {
+    case "dumbbell":
+      return steps.dumbbellLb || DEFAULT_DUMBBELL_STEP_LB;
+    case "machine":
+      return steps.machineLb || DEFAULT_EQUIPMENT_STEP_LB;
+    case "cable":
+      return steps.cableLb || DEFAULT_EQUIPMENT_STEP_LB;
+    case "band":
+      return steps.bandLb || DEFAULT_EQUIPMENT_STEP_LB;
+    default:
+      return steps.barLb || DEFAULT_BAR_STEP_LB;
   }
-  return steps.barLb || DEFAULT_BAR_STEP_LB;
 }
 
 /** Display name for an equipment kind; unknown values pass through unchanged. */

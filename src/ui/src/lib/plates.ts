@@ -6,14 +6,23 @@
  * bar was assumed to be 45 lb when the real one is 80, and the plate set was
  * treated as unlimited, so the loader would happily call for a fourth pair of
  * 45s that nobody owns. Both now come off the profile (`User.barWeightLb` and
- * `User.plates`) and these are only the fallback for a client that has not
- * loaded one yet.
+ * `User.plates`); these are what the functions below assume when a caller names
+ * no gym at all.
  */
 
-/** Bar weight in pounds, when the profile has not been loaded. */
+/** Bar weight in pounds, when a caller names no bar. */
 export const DEFAULT_BAR_LB = 45;
 
-/** The standard rack, when the profile has not been loaded. */
+/**
+ * The conventional rack, for a caller that names none.
+ *
+ * A default argument, and deliberately not an answer about anybody's gym:
+ * `gym.svelte.ts` no longer reaches for this when a profile is missing, because
+ * a rack assembled out of nothing is how a lifter ends up being offered a 35 lb
+ * plate they have never owned. What is left is the convention these functions
+ * assume when asked to load a bar without being told what is in the room —
+ * which is the tests, and callers whose own defaults chain here.
+ */
 export const DEFAULT_PLATES: PlateInventory = [
   { plateLb: 45, pairs: 2 },
   { plateLb: 35, pairs: 2 },

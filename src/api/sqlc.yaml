@@ -36,6 +36,7 @@ sql:
       - "db/migrations/0024_session_recognition.up.sql"
       - "db/migrations/0025_generated_activity_schedule.up.sql"
       - "db/migrations/0026_notifications.up.sql"
+      - "db/migrations/0028_equipment_setup.up.sql"
     queries: "db/queries"
     gen:
       go:

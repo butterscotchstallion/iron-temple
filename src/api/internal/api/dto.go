@@ -4,6 +4,8 @@ package api
 // scalar types), keeping the generated sqlc row structs — with their snake_case
 // tags and pgtype columns — out of the wire contract.
 
+import "time"
+
 type errorDTO struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
@@ -60,6 +62,22 @@ type userDTO struct {
 	// if it knows the same grid the engine used. Always present: GetGymSteps
 	// falls back to 5.
 	DumbbellStepLb float64 `json:"dumbbellStepLb"`
+	// The three stacks, sent for the same reason the rack is and carrying the
+	// whole load rather than half of it: the client has to be able to name the
+	// same weights the engine will. Always present; GetGymSteps falls back to 5
+	// for each. See 0028 for why a machine does not step by twice the lightest
+	// plate the lifter happens to own.
+	MachineStepLb float64 `json:"machineStepLb"`
+	CableStepLb   float64 `json:"cableStepLb"`
+	BandStepLb    float64 `json:"bandStepLb"`
+	// EquipmentConfirmedAt is when the lifter last said this gym was right, or
+	// nil if these rows are still the app's guess.
+	//
+	// Nil is not an error and not a reason to prescribe differently — it drives
+	// copy and nothing else (0028). It is a pointer rather than a zero time so
+	// that "never confirmed" serializes as null instead of as year 1, which the
+	// client would have to know to special-case.
+	EquipmentConfirmedAt *time.Time `json:"equipmentConfirmedAt"`
 }
 
 // plateDTO is a denomination and how many PAIRS of it are owned. Pairs rather

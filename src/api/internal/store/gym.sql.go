@@ -29,6 +29,26 @@ func (q *Queries) AddPlate(ctx context.Context, arg AddPlateParams) error {
 	return err
 }
 
+const confirmEquipment = `-- name: ConfirmEquipment :exec
+INSERT INTO user_gym (user_id, equipment_confirmed_at)
+VALUES ($1::int, now())
+ON CONFLICT (user_id) DO UPDATE
+SET equipment_confirmed_at = now(),
+    updated_at             = now()
+`
+
+// ConfirmEquipment marks the gym as described by its owner rather than guessed
+// by us. Called whenever a lifter saves the equipment screen — saving IS the
+// confirmation, so there is no separate button to forget to press.
+//
+// Idempotent by design: re-saving moves the timestamp forward, which is the
+// more useful reading anyway ("last told us on…") and spares the caller a
+// check it would otherwise have to make.
+func (q *Queries) ConfirmEquipment(ctx context.Context, userID int32) error {
+	_, err := q.db.Exec(ctx, confirmEquipment, userID)
+	return err
+}
+
 const deleteAllPlates = `-- name: DeleteAllPlates :exec
 DELETE FROM user_plates WHERE user_id = $1::int
 `
@@ -87,13 +107,35 @@ func (q *Queries) GetBarWeight(ctx context.Context, userID int32) (pgtype.Numeri
 	return bar_weight_lb, err
 }
 
+const getEquipmentConfirmed = `-- name: GetEquipmentConfirmed :one
+SELECT g.equipment_confirmed_at
+FROM users u
+LEFT JOIN user_gym g ON g.user_id = u.id
+WHERE u.id = $1::int
+`
+
+// GetEquipmentConfirmed answers whether this lifter has ever reviewed the gym
+// the app assembled for them, for the copy that asks them to. NULL means no.
+//
+// Its own query rather than a field on GetGymSteps, so the flag cannot reach
+// the progression engine by accident. See the note there.
+func (q *Queries) GetEquipmentConfirmed(ctx context.Context, userID int32) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, getEquipmentConfirmed, userID)
+	var equipment_confirmed_at pgtype.Timestamptz
+	err := row.Scan(&equipment_confirmed_at)
+	return equipment_confirmed_at, err
+}
+
 const getGymSteps = `-- name: GetGymSteps :one
 SELECT
     COALESCE(
         (SELECT MIN(p.plate_lb) * 2 FROM user_plates p WHERE p.user_id = u.id),
         5.0
     )::numeric AS bar_step_lb,
-    COALESCE(g.dumbbell_step_lb, 5.0)::numeric AS dumbbell_step_lb
+    COALESCE(g.dumbbell_step_lb, 5.0)::numeric AS dumbbell_step_lb,
+    COALESCE(g.machine_step_lb, 5.0)::numeric AS machine_step_lb,
+    COALESCE(g.cable_step_lb, 5.0)::numeric AS cable_step_lb,
+    COALESCE(g.band_step_lb, 5.0)::numeric AS band_step_lb
 FROM users u
 LEFT JOIN user_gym g ON g.user_id = u.id
 WHERE u.id = $1::int
@@ -102,6 +144,9 @@ WHERE u.id = $1::int
 type GetGymStepsRow struct {
 	BarStepLb      pgtype.Numeric `json:"bar_step_lb"`
 	DumbbellStepLb pgtype.Numeric `json:"dumbbell_step_lb"`
+	MachineStepLb  pgtype.Numeric `json:"machine_step_lb"`
+	CableStepLb    pgtype.Numeric `json:"cable_step_lb"`
+	BandStepLb     pgtype.Numeric `json:"band_step_lb"`
 }
 
 // GetGymSteps answers the one question the progression engine asks of the gym:
@@ -118,10 +163,28 @@ type GetGymStepsRow struct {
 //
 // The rack's step is per BELL, as 0020 stores it. Doubling it is left to Go,
 // beside the comment explaining why the pair is what gets prescribed.
+//
+// The machine, cable and band steps are stored rather than derived, because
+// unlike the bar there is nothing to derive them FROM: this app records no
+// inventory of pins or of graded bands, only what the lifter says the gaps are.
+// Before 0028 they were not stored either, and every one of them silently took
+// the bar's — see the argument in that migration.
+//
+// equipment_confirmed_at is deliberately NOT here. This row is what the
+// progression engine reads, and whether a lifter has reviewed their equipment
+// must never change what gets prescribed from it (0028 again). Keeping it off
+// the struct the engine consumes is a stronger guarantee of that than a comment
+// would be; the profile reads it separately, below.
 func (q *Queries) GetGymSteps(ctx context.Context, userID int32) (GetGymStepsRow, error) {
 	row := q.db.QueryRow(ctx, getGymSteps, userID)
 	var i GetGymStepsRow
-	err := row.Scan(&i.BarStepLb, &i.DumbbellStepLb)
+	err := row.Scan(
+		&i.BarStepLb,
+		&i.DumbbellStepLb,
+		&i.MachineStepLb,
+		&i.CableStepLb,
+		&i.BandStepLb,
+	)
 	return i, err
 }
 
@@ -283,5 +346,44 @@ type SetDumbbellStepParams struct {
 // anyway while the row was missing.
 func (q *Queries) SetDumbbellStep(ctx context.Context, arg SetDumbbellStepParams) error {
 	_, err := q.db.Exec(ctx, setDumbbellStep, arg.UserID, arg.DumbbellStepLb)
+	return err
+}
+
+const setEquipmentSteps = `-- name: SetEquipmentSteps :exec
+INSERT INTO user_gym (user_id, machine_step_lb, cable_step_lb, band_step_lb)
+VALUES (
+    $1::int,
+    $2,
+    $3,
+    $4
+)
+ON CONFLICT (user_id) DO UPDATE
+SET machine_step_lb = EXCLUDED.machine_step_lb,
+    cable_step_lb   = EXCLUDED.cable_step_lb,
+    band_step_lb    = EXCLUDED.band_step_lb,
+    updated_at      = now()
+`
+
+type SetEquipmentStepsParams struct {
+	UserID        int32          `json:"user_id"`
+	MachineStepLb pgtype.Numeric `json:"machine_step_lb"`
+	CableStepLb   pgtype.Numeric `json:"cable_step_lb"`
+	BandStepLb    pgtype.Numeric `json:"band_step_lb"`
+}
+
+// SetEquipmentSteps records the three stacks in one write. Upsert for the same
+// reason SetBarWeight is one: the row's absence is the normal state.
+//
+// All three together rather than one query each, because the screen that
+// collects them saves them together — and because a partial write would leave a
+// gym half-described by the lifter and half-assumed by us, which is precisely
+// the state 0028 exists to make visible.
+func (q *Queries) SetEquipmentSteps(ctx context.Context, arg SetEquipmentStepsParams) error {
+	_, err := q.db.Exec(ctx, setEquipmentSteps,
+		arg.UserID,
+		arg.MachineStepLb,
+		arg.CableStepLb,
+		arg.BandStepLb,
+	)
 	return err
 }
