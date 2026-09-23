@@ -114,6 +114,19 @@
   // is warming up for. This card is where the cap belongs because this is what
   // knows how many sets today prescribes — a 5x5 keeps the whole ramp, a 2x5
   // gets the two rungs closest to the work weight.
+  //
+  // The cap follows the prescription only until the warm-up is done, then it
+  // stops following it. Sets get added at the rack — an extra one, an AMRAP —
+  // and a lifter who is already through their ramp has warmed up for the lift
+  // they are in the middle of. Growing the ramp under them would put a fresh
+  // cyan circle on the card and ask them to go back and do it, and because the
+  // trim drops rungs from the light end, the new one lands at the front and
+  // shifts every rep they logged along with it. So `cappedAt` is null until the
+  // ramp is finished and the set count at that moment after — pinned rather
+  // than tracked as a high-water mark, so undoing the extra set doesn't bring
+  // the rung back either. The warm-up happened; nothing after it changes that.
+  let cappedAt = $state<number | null>(null);
+  const rampCap = $derived(cappedAt ?? sets.length);
   const warmups = $derived.by(() => {
     const out: { weightLb: number; reps: number }[] = [];
     if (ramping) return out;
@@ -122,7 +135,7 @@
       bar: barWeightLb(),
       plates: plateInventory(),
       steps: gymSteps(),
-      maxSets: sets.length,
+      maxSets: rampCap,
     })) {
       for (let k = 0; k < w.sets; k++) {
         out.push({ weightLb: w.weightLb, reps: w.reps });
@@ -144,6 +157,16 @@
     const r = warmupReps[i];
     return r != null && r >= warmups[i].reps;
   }
+
+  // Every rung tapped through to its target. A lift with no ramp is never
+  // "complete" — there is nothing to have finished, and a bar-weight lift that
+  // gets loaded up mid-session should still get the warm-up it now needs.
+  const warmupComplete = $derived(
+    warmups.length > 0 && warmups.every((_, i) => warmDone(i)),
+  );
+  $effect(() => {
+    if (warmupComplete && cappedAt === null) cappedAt = sets.length;
+  });
 
   function cycleWarmup(i: number) {
     if (readonly) return;
