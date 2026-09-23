@@ -15,13 +15,20 @@ import (
 // Assistance work: the exercises a lifter attaches to a program day for
 // themselves.
 //
-// The programs are shared and seeded, and these handlers never touch them. What
-// they write is an overlay keyed on (user_id, program_day_id), so two accounts
-// looking at the same Workout A see the same three barbell lifts and their own
-// assistance under it. That separation is what lets the plan be edited freely
-// without the progression engine or the Racked recap losing their footing: the
-// engine reads a prescription nobody can change, and the recap reads performed
-// sets, which are a fact either way.
+// These handlers never touch a program. What they write is an overlay keyed on
+// (user_id, program_day_id), so two accounts looking at the same Workout A see
+// the same three barbell lifts and their own assistance under it. That
+// separation is what lets the plan be edited freely without the progression
+// engine or the Racked recap losing their footing: the engine reads the
+// prescription, and the recap reads performed sets, which are a fact either way.
+//
+// Since 0029 a program can also be one a lifter built, which they CAN edit — so
+// the prescription is no longer beyond change for everybody, only beyond change
+// by anybody but its owner. That does not disturb anything here. The overlay is
+// still the only way to add work to somebody else's program, still the only way
+// to add work to a seeded one, and prescribe() already drops an assistance row
+// naming a lift the day prescribes, so an owner promoting curls into their
+// program does not leave a follower doing curls twice.
 //
 // Every handler here resolves the day through its program and scopes the row to
 // the caller. A row belonging to someone else 404s rather than 403s — the same
@@ -434,6 +441,12 @@ func (s *Server) removeAssistance(w http.ResponseWriter, r *http.Request) {
 // that does not hold, and honouring it would make the same row addressable under
 // every program id there is.
 //
+// It also confirms the caller may see the program at all. Since 0029 a program
+// can be one lifter's private one, and this helper is the gate for the whole
+// /programs/{programId}/days/{dayId} subtree — so putting the check here is what
+// makes assistance CRUD, the session preview and anything mounted here later
+// private by default rather than by each handler remembering.
+//
 // Writes the 404 itself and reports false, so callers can `if !ok { return }`.
 func (s *Server) programDay(w http.ResponseWriter, r *http.Request) (store.ProgramDay, bool) {
 	programID, ok := idParam(r, "programId")
@@ -447,7 +460,8 @@ func (s *Server) programDay(w http.ResponseWriter, r *http.Request) (store.Progr
 		return store.ProgramDay{}, false
 	}
 
-	day, err := s.q.GetProgramDay(r.Context(), dayID)
+	ctx := r.Context()
+	day, err := s.q.GetProgramDay(ctx, dayID)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && day.ProgramID != programID) {
 		notFound(w, "program day not found")
 		return store.ProgramDay{}, false
@@ -456,5 +470,32 @@ func (s *Server) programDay(w http.ResponseWriter, r *http.Request) (store.Progr
 		internalError(w)
 		return store.ProgramDay{}, false
 	}
+
+	if !s.canReadProgram(w, ctx, programID) {
+		return store.ProgramDay{}, false
+	}
 	return day, true
+}
+
+// canReadProgram reports whether the caller is entitled to the program, writing
+// the 404 itself when they are not.
+//
+// Seeded, theirs, shared — or they have trained it, which is the clause that
+// stops un-sharing a program locking out the lifter who has been running it.
+// Their sessions point at its days for ever either way, so revoking access
+// costs them their training and buys the owner nothing; un-sharing means "stop
+// new people finding it", and the picker is where that is enforced.
+func (s *Server) canReadProgram(w http.ResponseWriter, ctx context.Context, programID int32) bool {
+	ok, err := s.q.CanReadProgram(ctx, store.CanReadProgramParams{
+		ProgramID: programID, UserID: userFrom(ctx).ID,
+	})
+	if err != nil {
+		internalError(w)
+		return false
+	}
+	if !ok {
+		notFound(w, "program day not found")
+		return false
+	}
+	return true
 }

@@ -52,14 +52,18 @@ type Program struct {
 	Description     string             `json:"description"`
 	ProgressionKind string             `json:"progression_kind"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	CreatedByUserID *int32             `json:"created_by_user_id"`
+	IsShared        bool               `json:"is_shared"`
+	ArchivedAt      pgtype.Timestamptz `json:"archived_at"`
 }
 
 type ProgramDay struct {
-	ID        int32  `json:"id"`
-	ProgramID int32  `json:"program_id"`
-	Name      string `json:"name"`
-	Position  int32  `json:"position"`
-	Weekday   *int32 `json:"weekday"`
+	ID         int32              `json:"id"`
+	ProgramID  int32              `json:"program_id"`
+	Name       string             `json:"name"`
+	Position   int32              `json:"position"`
+	Weekday    *int32             `json:"weekday"`
+	ArchivedAt pgtype.Timestamptz `json:"archived_at"`
 }
 
 type ProgramDayAssistance struct {

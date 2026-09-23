@@ -177,7 +177,8 @@ func (s *Server) getLifterSessionRecap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rec, earned, err := s.buildSessionRecap(r.Context(), sessionID, lifterID)
+	ctx := r.Context()
+	rec, earned, err := s.buildSessionRecap(ctx, sessionID, lifterID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		notFound(w, "session not found")
 		return
@@ -186,5 +187,31 @@ func (s *Server) getLifterSessionRecap(w http.ResponseWriter, r *http.Request) {
 		internalError(w)
 		return
 	}
+
+	// The one field in this response that is a fact about a PROGRAM rather than
+	// about a performance.
+	//
+	// buildSessionRecap is scoped to the lifter whose session it is — that is
+	// what makes the id pair in the URL the authorization — so unlike every
+	// self-scoped caller of GetSession it can return the name of a program the
+	// VIEWER was never shown. Everything else here is what somebody lifted,
+	// which the feed exists to show; a private program's name is not.
+	//
+	// Masked here rather than in the query, because GetSession's nine other
+	// callers are all reading their own sessions and would have to pass the same
+	// id twice to satisfy a viewer parameter they do not need. ListFeed masks in
+	// SQL for the opposite reason: it returns a page of rows and would otherwise
+	// need a query each.
+	readable, err := s.q.CanReadProgram(ctx, store.CanReadProgramParams{
+		ProgramID: rec.Session.ProgramID, UserID: userFrom(ctx).ID,
+	})
+	if err != nil {
+		internalError(w)
+		return
+	}
+	if !readable {
+		rec.Session.ProgramName = maskedProgramName
+	}
+
 	writeJSON(w, http.StatusOK, sessionRecapToDTO(rec, earned))
 }

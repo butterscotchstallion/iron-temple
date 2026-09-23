@@ -151,6 +151,16 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Whether this lifter may train that day's program at all. This route takes a
+	// day id in the BODY rather than in the path, so it does not go through
+	// programDay() and does not inherit the check that helper makes — which makes
+	// it the one place a private program could be reached by guessing an id, and
+	// the worst one, because it would not merely leak a prescription but
+	// materialize a whole session against it.
+	if !s.canReadProgram(w, ctx, day.ProgramID) {
+		return
+	}
+
 	userID := userFrom(ctx).ID
 	// Measured now rather than trusted from the client: the preview that raised
 	// the prompt may be minutes or a reload old, and the length of the layoff

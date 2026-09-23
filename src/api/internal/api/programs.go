@@ -2,12 +2,12 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"math"
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"gitea.homelab/gitadmin/iron-temple/api/internal/progression"
 	"gitea.homelab/gitadmin/iron-temple/api/internal/store"
@@ -17,17 +17,52 @@ func (s *Server) getHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, healthDTO{Status: "ok", Version: s.version, Environment: s.environment})
 }
 
+// programSummary builds the wire shape from either of the two program reads.
+//
+// ListProgramsRow and GetProgramRow select the same columns and sqlc emits a
+// type per query, so this takes the fields rather than either row type — which
+// also keeps the one place that decides "is this mine" from being two places.
+func programSummary(
+	id int32, name, description, progressionKind string,
+	ownerID *int32, ownerName string, isShared bool, archivedAt pgtype.Timestamptz,
+	viewerID int32,
+) programSummaryDTO {
+	return programSummaryDTO{
+		ID:              id,
+		Name:            name,
+		Description:     description,
+		ProgressionKind: progressionKind,
+		OwnerID:         ownerID,
+		OwnerName:       ownerName,
+		// A seeded program has no owner, so this is false for everyone — which is
+		// the whole of "the install's programs are nobody's to edit".
+		IsMine:     ownerID != nil && *ownerID == viewerID,
+		IsShared:   isShared,
+		ArchivedAt: optionalTimestamptz(archivedAt),
+	}
+}
+
 func (s *Server) listPrograms(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.q.ListPrograms(r.Context())
+	ctx := r.Context()
+	userID := userFrom(ctx).ID
+
+	rows, err := s.q.ListPrograms(ctx, store.ListProgramsParams{
+		UserID: userID,
+		// The owner's own retired programs, behind a query flag so the common
+		// case stays the short list. It cannot widen past created_by = caller,
+		// so it can never surface somebody else's.
+		IncludeArchived: r.URL.Query().Get("includeArchived") == "true",
+	})
 	if err != nil {
 		internalError(w)
 		return
 	}
 	out := make([]programSummaryDTO, 0, len(rows))
 	for _, p := range rows {
-		out = append(out, programSummaryDTO{
-			ID: p.ID, Name: p.Name, Description: p.Description, ProgressionKind: p.ProgressionKind,
-		})
+		out = append(out, programSummary(
+			p.ID, p.Name, p.Description, p.ProgressionKind,
+			p.CreatedByUserID, p.OwnerName, p.IsShared, p.ArchivedAt, userID,
+		))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -38,9 +73,24 @@ func (s *Server) getProgram(w http.ResponseWriter, r *http.Request) {
 		notFound(w, "program not found")
 		return
 	}
-	ctx := r.Context()
+	s.writeProgram(w, r, id, http.StatusOK)
+}
 
-	p, err := s.q.GetProgram(ctx, id)
+// writeProgram serves one program with its days, prescriptions and the caller's
+// own assistance — the shape GET /programs/{id} returns.
+//
+// Shared with the editor's writes, which all answer with the whole program
+// rather than with the row they touched. That is worth a round trip: a client
+// that has just added a day needs the day's id, its position among the others
+// and the prescription it starts with, and reconstructing that from a partial
+// response is how two views of the same program start to disagree.
+func (s *Server) writeProgram(w http.ResponseWriter, r *http.Request, id int32, status int) {
+	ctx := r.Context()
+	userID := userFrom(ctx).ID
+
+	// Scoped, so a program the caller may not see comes back as no rows and
+	// falls into the 404 below — rather than 403, which would confirm the id.
+	p, err := s.q.GetProgram(ctx, store.GetProgramParams{ID: id, UserID: userID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		notFound(w, "program not found")
 		return
@@ -64,7 +114,7 @@ func (s *Server) getProgram(w http.ResponseWriter, r *http.Request) {
 	// alongside the shared prescription rather than per day: the response is one
 	// object, so it should cost one round trip.
 	assist, err := s.q.ListAssistanceByProgram(ctx, store.ListAssistanceByProgramParams{
-		ProgramID: id, UserID: userFrom(ctx).ID,
+		ProgramID: id, UserID: userID,
 	})
 	if err != nil {
 		internalError(w)
@@ -118,46 +168,13 @@ func (s *Server) getProgram(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	writeJSON(w, http.StatusOK, programDTO{
-		programSummaryDTO: programSummaryDTO{
-			ID: p.ID, Name: p.Name, Description: p.Description, ProgressionKind: p.ProgressionKind,
-		},
+	writeJSON(w, status, programDTO{
+		programSummaryDTO: programSummary(
+			p.ID, p.Name, p.Description, p.ProgressionKind,
+			p.CreatedByUserID, p.OwnerName, p.IsShared, p.ArchivedAt, userID,
+		),
 		Days: dayDTOs,
 	})
-}
-
-type updateProgramDayRequest struct {
-	Weekday *int32 `json:"weekday"`
-}
-
-func (s *Server) updateProgramDayWeekday(w http.ResponseWriter, r *http.Request) {
-	dayID, ok := idParam(r, "dayId")
-	if !ok {
-		notFound(w, "program day not found")
-		return
-	}
-
-	var req updateProgramDayRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		badRequest(w, "invalid JSON body")
-		return
-	}
-	if req.Weekday != nil && (*req.Weekday < 0 || *req.Weekday > 6) {
-		badRequest(w, "weekday must be between 0 and 6")
-		return
-	}
-
-	if _, err := s.q.UpdateProgramDayWeekday(r.Context(), store.UpdateProgramDayWeekdayParams{
-		ID: dayID, Weekday: req.Weekday,
-	}); errors.Is(err, pgx.ErrNoRows) {
-		notFound(w, "program day not found")
-		return
-	} else if err != nil {
-		internalError(w)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) previewNextSession(w http.ResponseWriter, r *http.Request) {
@@ -210,9 +227,14 @@ func (s *Server) previewNextSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Establishes that the program exists before the days come back empty, so a
-	// bad id is a 404 rather than a 200 with nothing in it.
-	if _, err := s.q.GetProgram(ctx, programID); errors.Is(err, pgx.ErrNoRows) {
+	userID := userFrom(ctx).ID
+
+	// Establishes that the program exists AND that this lifter may see it before
+	// the days come back empty, so a bad id and somebody else's private program
+	// are both a 404 rather than a 200 with nothing in it.
+	if _, err := s.q.GetProgram(ctx, store.GetProgramParams{
+		ID: programID, UserID: userID,
+	}); errors.Is(err, pgx.ErrNoRows) {
 		notFound(w, "program not found")
 		return
 	} else if err != nil {
@@ -226,7 +248,6 @@ func (s *Server) previewNextSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := userFrom(ctx).ID
 	lay, err := s.layoffFor(ctx, userID, r.URL.Query().Get("deload") == "true")
 	if err != nil {
 		internalError(w)

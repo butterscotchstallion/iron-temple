@@ -270,9 +270,33 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 				r.Route("/programs", func(r chi.Router) {
 					r.Get("/", s.listPrograms)
 					r.Get("/{programId}", s.getProgram)
+					// A program of the caller's own. Every write below scopes on
+					// created_by_user_id, which is NULL on the seeded programs —
+					// so the install's catalogue is uneditable by construction
+					// rather than by a rule each handler remembers.
+					r.Post("/", s.createProgram)
+					r.Patch("/{programId}", s.updateProgram)
+					// Archive is a sub-resource because this cannot delete:
+					// sessions reference a program's days and the key RESTRICTs,
+					// so retiring is the only removal on offer and a DELETE here
+					// would be a lie about what happened.
+					r.Post("/{programId}/archive", s.archiveProgram)
+					r.Delete("/{programId}/archive", s.unarchiveProgram)
 					r.Get("/{programId}/days/{dayId}/next-session", s.previewNextSession)
 					r.Get("/{programId}/next-sessions", s.previewNextSessions)
-					r.Patch("/{programId}/days/{dayId}", s.updateProgramDayWeekday)
+					// Days and the lifts on them. Owner-only, except the
+					// weekday — see updateProgramDay for why that one field
+					// stays editable on the seeded programs too.
+					r.Post("/{programId}/days", s.addProgramDay)
+					r.Patch("/{programId}/days/{dayId}", s.updateProgramDay)
+					r.Delete("/{programId}/days/{dayId}", s.removeProgramDay)
+					r.Put("/{programId}/days/order", s.reorderProgramDays)
+					r.Post("/{programId}/days/{dayId}/exercises", s.addPrescription)
+					r.Patch("/{programId}/days/{dayId}/exercises/{prescriptionId}",
+						s.updatePrescription)
+					r.Delete("/{programId}/days/{dayId}/exercises/{prescriptionId}",
+						s.removePrescription)
+					r.Put("/{programId}/days/{dayId}/exercises/order", s.reorderPrescriptions)
 					// Assistance is per-user state hanging off a shared program day,
 					// which is why it is a nested collection rather than a field on
 					// the day: it is created and deleted by the caller alone, and

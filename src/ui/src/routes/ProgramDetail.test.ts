@@ -7,6 +7,7 @@ import type {
   SessionSummary,
 } from "../lib/api";
 import { clearCache } from "../lib/cache.svelte";
+import { testProgramSummary } from "../lib/testFixtures";
 import { todayIso } from "../lib/calendar";
 import { todayWeekday } from "../lib/weekday";
 
@@ -52,10 +53,7 @@ function program(
   assistance: ProgramDayAssistance[] = [],
 ): Program {
   return {
-    id: 1,
-    name: "StrongLifts 5x5",
-    description: "",
-    progressionKind: "linear",
+    ...testProgramSummary(),
     days: [
       {
         id: 7,

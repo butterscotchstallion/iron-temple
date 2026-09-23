@@ -492,7 +492,33 @@ SELECT s.id,
        s.program_day_id,
        pd.name AS program_day_name,
        p.id    AS program_id,
-       p.name  AS program_name,
+       -- The program's name, unless it is one this viewer was never shown.
+       --
+       -- This is the one read in the app that hands a lifter a fact about a
+       -- program they have no access to. The feed is other people's sessions by
+       -- definition, so without this the moment somebody logs a session on a
+       -- private program its name reaches the whole install — a leak invisible
+       -- from inside the program code, since nothing there touches the feed.
+       --
+       -- The predicate is CanReadProgram's, inline rather than called: it is
+       -- evaluated per row over a page of at most a few dozen, and factoring it
+       -- out would mean a lateral join for one boolean.
+       --
+       -- pd.name is deliberately NOT masked. A feed card is about the day — "Ada
+       -- finished Workout A" — and "Custom program · " with nothing after it is a
+       -- card not worth drawing. A day name is a far weaker signal anyway: it
+       -- says what somebody trained, which is the point of a feed, rather than
+       -- what plan they are following.
+       CASE WHEN p.created_by_user_id IS NULL
+                 OR p.is_shared
+                 OR p.created_by_user_id = $1::int
+                 OR EXISTS (SELECT 1 FROM sessions vs
+                            JOIN program_days vpd ON vpd.id = vs.program_day_id
+                            WHERE vpd.program_id = p.id
+                              AND vs.user_id = $1::int)
+            THEN p.name
+            ELSE 'Custom program'
+       END AS program_name,
        s.performed_on,
        COUNT(ss.id)                              AS set_count,
        COUNT(ss.id) FILTER (WHERE ss.completed)  AS completed_set_count,

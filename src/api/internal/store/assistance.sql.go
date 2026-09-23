@@ -277,12 +277,17 @@ type ListAssistanceByDayRow struct {
 
 // Assistance work: the exercises a lifter bolts onto the end of a program day.
 //
-// This table is the reason programs never have to be edited. program_days and
-// program_day_exercises are shared and seeded, and stay that way; assistance is
-// a per-user overlay keyed on (user_id, program_day_id). So the same Workout A
-// is squat/bench/row for every account, the progression engine reads a
-// prescription nobody has touched, and what one lifter adds is invisible to the
-// next.
+// This table is the reason a SEEDED program never has to be edited. The seeded
+// program_days and program_day_exercises are shared, and stay exactly as they
+// were seeded; assistance is a per-user overlay keyed on (user_id,
+// program_day_id). So the same Workout A is squat/bench/row for every account,
+// the progression engine reads a prescription nobody has touched, and what one
+// lifter adds is invisible to the next.
+//
+// Since 0029 a lifter can also build a program of their own, whose prescription
+// they may edit directly. The overlay does not become redundant: it is still how
+// you add work to a seeded program, still how you add work to somebody else's
+// shared one, and still the only kind of addition that is private to you.
 //
 // Every query is scoped to one owner. That is not defence in depth here, it is
 // the whole isolation model: program days are shared, so an unscoped read would
@@ -350,6 +355,7 @@ FROM program_day_assistance pda
 JOIN exercises e ON e.id = pda.exercise_id
 JOIN program_days pd ON pd.id = pda.program_day_id
 WHERE pd.program_id = $1
+  AND pd.archived_at IS NULL
   AND pda.user_id = $2::int
 ORDER BY pd.position, pda.position, pda.id
 `

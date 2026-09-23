@@ -442,7 +442,12 @@ func (s *Server) backfillActivity(ctx context.Context, lifters, weeks int) (acti
 func (s *Server) ensureGeneratedLifters(
 	ctx context.Context, lifters int,
 ) ([]simulatedLifter, int, error) {
-	programs, err := s.q.ListPrograms(ctx)
+	// The install's own programs, not ListPrograms — which since 0029 takes a
+	// viewer, and there is no honest one to give it here. Generated lifters train
+	// the seeded catalogue because that is what a demo install is meant to look
+	// like; assigning them a real lifter's private program would put it on an
+	// account its owner never shared it with, and then in the feed.
+	programs, err := s.q.ListSeededPrograms(ctx)
 	if err != nil {
 		return nil, 0, err
 	}

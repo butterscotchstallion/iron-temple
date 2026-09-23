@@ -40,6 +40,9 @@ sql:
       # writes — sqlc cannot type any of them without the column declared.
       - "db/migrations/0027_session_set_bonus.up.sql"
       - "db/migrations/0028_equipment_setup.up.sql"
+      # 0029 is mixed like 0009 and 0015: the ALTERs and the partial indexes are
+      # schema, the is_shared backfill below them is DML sqlc ignores.
+      - "db/migrations/0029_custom_programs.up.sql"
     queries: "db/queries"
     gen:
       go:

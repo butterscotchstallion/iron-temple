@@ -1,29 +1,141 @@
+-- Programs, and who is allowed to see which.
+--
+-- Since 0029 a program is either the install's (created_by_user_id IS NULL:
+-- seeded, canonical, nobody's to edit) or one lifter's own. The reads below
+-- split into two kinds and it is worth being clear which is which, because they
+-- do NOT use the same rule:
+--
+--   DISCOVERY  — ListPrograms, the picker. Seeded, mine, or shared. This is the
+--                one is_shared governs.
+--   ACCESS     — GetProgram and CanReadProgram, reached with an id in hand.
+--                Seeded, mine, shared, OR I have trained it.
+--
+-- That last clause is grandfathering, and it is the difference between the two.
+-- Un-sharing a program means "stop new people finding it"; it cannot sensibly
+-- mean "lock out the lifter who has been running it for three months", whose
+-- sessions are bound to those program_day rows for ever regardless. Taking
+-- their access away costs them their training and buys the owner nothing.
+--
+-- Archival is the same distinction one turn further: an archived program leaves
+-- the picker and keeps resolving, so nobody is stranded mid-program and
+-- users.current_program_id can keep pointing at it.
+
+-- ListPrograms is the picker: what this lifter may choose from.
+--
+-- include_archived is the owner's own view. It never widens past created_by =
+-- caller, so one lifter asking for archived programs cannot surface another's —
+-- an archived shared program is retired, and retiring it is the owner saying
+-- "stop offering this to people".
 -- name: ListPrograms :many
+SELECT p.id,
+       p.name,
+       p.description,
+       p.progression_kind,
+       p.created_by_user_id,
+       p.is_shared,
+       p.archived_at,
+       COALESCE(u.display_name, '') AS owner_name
+FROM programs p
+LEFT JOIN users u ON u.id = p.created_by_user_id
+WHERE (p.created_by_user_id IS NULL
+       OR p.created_by_user_id = sqlc.arg('user_id')::int
+       OR p.is_shared)
+  AND (p.archived_at IS NULL
+       OR (sqlc.arg('include_archived')::bool
+           AND p.created_by_user_id = sqlc.arg('user_id')::int))
+ORDER BY p.id;
+
+-- ListSeededPrograms is the install's own catalogue, for callers that need a
+-- program without a lifter to scope it to.
+--
+-- Exists for ensureGeneratedLifters, which assigns each generated account a
+-- current_program_id by walking this list. It cannot use ListPrograms: that now
+-- takes a viewer, and there is no honest one to pass — handing it the admin's id
+-- would have fake lifters training a real lifter's private programs, and handing
+-- it the generated account's own id returns only the seeded rows anyway, by a
+-- coincidence that would break the day generated accounts could own programs.
+-- name: ListSeededPrograms :many
 SELECT id, name, description, progression_kind
 FROM programs
+WHERE created_by_user_id IS NULL
 ORDER BY id;
 
+-- GetProgram resolves one program for a caller entitled to see it, and returns
+-- no rows otherwise — so a handler's existing pgx.ErrNoRows branch turns a
+-- program belonging to somebody else into a 404 with no new code.
+--
+-- 404 and not 403 is the rule assistance.go states and sessions.sql applies:
+-- learning that an id is valid is already a leak.
 -- name: GetProgram :one
-SELECT id, name, description, progression_kind
-FROM programs
-WHERE id = $1;
+SELECT p.id,
+       p.name,
+       p.description,
+       p.progression_kind,
+       p.created_by_user_id,
+       p.is_shared,
+       p.archived_at,
+       COALESCE(u.display_name, '') AS owner_name
+FROM programs p
+LEFT JOIN users u ON u.id = p.created_by_user_id
+WHERE p.id = sqlc.arg('id')
+  AND (p.created_by_user_id IS NULL
+       OR p.created_by_user_id = sqlc.arg('user_id')::int
+       OR p.is_shared
+       OR EXISTS (
+           SELECT 1
+           FROM sessions s
+           JOIN program_days pd ON pd.id = s.program_day_id
+           WHERE pd.program_id = p.id
+             AND s.user_id = sqlc.arg('user_id')::int
+       ));
 
+-- CanReadProgram is GetProgram's predicate on its own, for the paths that hold a
+-- day rather than a program and only need the yes/no.
+--
+-- One query rather than the same EXISTS smeared through five SELECTs: the rule
+-- is subtle enough that having it written once is worth a round trip. It rides
+-- sessions_user_idx, so the expensive-looking clause is not.
+-- name: CanReadProgram :one
+SELECT EXISTS (
+    SELECT 1
+    FROM programs p
+    WHERE p.id = sqlc.arg('program_id')
+      AND (p.created_by_user_id IS NULL
+           OR p.created_by_user_id = sqlc.arg('user_id')::int
+           OR p.is_shared
+           OR EXISTS (
+               SELECT 1
+               FROM sessions s
+               JOIN program_days pd ON pd.id = s.program_day_id
+               WHERE pd.program_id = p.id
+                 AND s.user_id = sqlc.arg('user_id')::int
+           ))
+)::bool;
+
+-- GetProgramDay is unscoped on purpose: it answers "what day is this", and every
+-- caller resolves the program's readability separately (programDay() and
+-- createSession both call CanReadProgram with day.ProgramID). Folding the check
+-- in here would mean joining programs and threading a user through the two
+-- callers that legitimately have no viewer — the activity generator among them.
 -- name: GetProgramDay :one
-SELECT id, program_id, name, position, weekday
+SELECT id, program_id, name, position, weekday, archived_at
 FROM program_days
 WHERE id = $1;
 
+-- ListProgramDays returns a program's live days. Archived ones are gone from
+-- every read in the app: they exist so that a day somebody has trained can leave
+-- the program without taking the session with it, not so that they can be
+-- listed.
+--
+-- archived_at is selected even though this query filters it to NULL, so that
+-- both day reads return the same row shape and the handlers that pass a day
+-- around need one type rather than two identical ones.
 -- name: ListProgramDays :many
-SELECT id, program_id, name, position, weekday
+SELECT id, program_id, name, position, weekday, archived_at
 FROM program_days
 WHERE program_id = $1
+  AND archived_at IS NULL
 ORDER BY position;
-
--- name: UpdateProgramDayWeekday :one
-UPDATE program_days
-SET weekday = sqlc.narg('weekday')
-WHERE id = sqlc.arg('id')
-RETURNING id, program_id, name, position, weekday;
 
 -- ListPrescriptionsByProgram returns every prescribed exercise across all of a
 -- program's days, joined to the exercise name, ordered for assembly in Go.
@@ -45,6 +157,7 @@ FROM program_day_exercises pde
 JOIN program_days pd ON pd.id = pde.program_day_id
 JOIN exercises e ON e.id = pde.exercise_id
 WHERE pd.program_id = $1
+  AND pd.archived_at IS NULL
 ORDER BY pd.position, pde.position;
 
 -- ListPrescriptionsByDay returns the prescribed exercises for a single day.
@@ -133,6 +246,7 @@ FROM program_day_exercise_sets s
 JOIN program_day_exercises pde ON pde.id = s.program_day_exercise_id
 JOIN program_days pd ON pd.id = pde.program_day_id
 WHERE pd.program_id = sqlc.arg('program_id')
+  AND pd.archived_at IS NULL
 ORDER BY pde.program_day_id, pde.exercise_id, s.set_number;
 
 -- ListLiftHistoryForDay is ListLiftHistory narrowed to one program day, for the
@@ -160,3 +274,286 @@ WHERE ss.exercise_id = sqlc.arg('exercise_id')
 GROUP BY s.id, s.performed_on
 HAVING COUNT(ss.id) FILTER (WHERE ss.actual_reps > 0) > 0
 ORDER BY s.performed_on, s.id;
+
+-- ---------------------------------------------------------------------------
+-- Writes: the programs a lifter builds for themselves.
+-- ---------------------------------------------------------------------------
+--
+-- Every one of these scopes on created_by_user_id = the caller. That predicate
+-- is doing two jobs, exactly as DeleteExercise's does: it keeps one lifter out
+-- of another's program, and it makes the SEEDED catalogue untouchable by
+-- anybody, since those rows have NULL there and NULL = anything is never true.
+-- There is no is_seeded check anywhere and there must never need to be.
+
+-- CountProgramNameConflicts reports whether a name is taken for this owner:
+-- either by a seeded program, or by one of their own.
+--
+-- The two partial indexes in 0029 would reject the insert anyway; this exists to
+-- turn that into a 409 with something to say rather than a 500, which is the
+-- same two-layer arrangement CountExerciseNameConflicts has. Case-insensitive,
+-- matching those indexes.
+--
+-- Another lifter's program is deliberately NOT a conflict, shared or not. Two
+-- people may each have a "Push Pull Legs"; the picker tells them apart by owner.
+-- name: CountProgramNameConflicts :one
+SELECT count(*)
+FROM programs
+WHERE lower(name) = lower(sqlc.arg('name'))
+  AND (created_by_user_id IS NULL OR created_by_user_id = sqlc.arg('user_id')::int)
+  AND id <> sqlc.arg('excluding_id')::int;
+
+-- name: CreateProgram :one
+INSERT INTO programs (name, description, created_by_user_id, is_shared)
+VALUES (sqlc.arg('name'), sqlc.arg('description'), sqlc.arg('user_id')::int,
+        sqlc.arg('is_shared'))
+RETURNING id;
+
+-- UpdateProgram patches the metadata a lifter can change about their own
+-- program. NULL leaves a column alone, the convention UpdateSession uses.
+--
+-- progression_kind is absent on purpose: v1 builds linear programs only, and
+-- flipping the kind would reinterpret every prescription the program holds
+-- without touching a single row of it.
+-- name: UpdateProgram :execrows
+UPDATE programs
+SET name        = COALESCE(sqlc.narg('name'), name),
+    description = COALESCE(sqlc.narg('description'), description),
+    is_shared   = COALESCE(sqlc.narg('is_shared'), is_shared)
+WHERE id = sqlc.arg('id')
+  AND created_by_user_id = sqlc.arg('user_id')::int;
+
+-- SetProgramArchived retires a program, or brings it back.
+--
+-- Not a DELETE, and not because deleting is undesirable: it is unavailable.
+-- sessions.program_day_id RESTRICTs, so a program whose days have been trained
+-- cannot be removed, and making that key cascade would trade a tidy catalogue
+-- for silently destroyed history — the tonnage, the PRs and every Racked figure
+-- computed from those sets.
+--
+-- Nothing here touches users.current_program_id, for the owner or for anybody
+-- following a shared program. It does not need to: an archived program still
+-- resolves, so a stale pointer is a program that has left the picker rather than
+-- a home screen that cannot load. Clearing a follower's pointer would also mean
+-- one lifter's request writing to another lifter's row, which is the thing
+-- lifters.sql exists to refuse.
+-- name: SetProgramArchived :execrows
+UPDATE programs
+SET archived_at = CASE WHEN sqlc.arg('archived')::bool THEN now() ELSE NULL END
+WHERE id = sqlc.arg('id')
+  AND created_by_user_id = sqlc.arg('user_id')::int;
+
+-- CloneProgramDays copies a source program's live days onto a new program.
+--
+-- weekday is NOT copied, and that is a judgement rather than an oversight: a
+-- schedule is a decision about your own week, and a clone that arrives with
+-- three evenings already booked has made it for you.
+-- name: CloneProgramDays :exec
+INSERT INTO program_days (program_id, name, position)
+SELECT sqlc.arg('target_program_id')::int, pd.name, pd.position
+FROM program_days pd
+WHERE pd.program_id = sqlc.arg('source_program_id')::int
+  AND pd.archived_at IS NULL;
+
+-- ClonePrescriptions copies the source's prescribed lifts onto the days
+-- CloneProgramDays has just made.
+--
+-- Days are matched by NAME, which is safe in both directions: the live days of
+-- one program are unique by name (program_days_name_live_idx), and the statement
+-- above copied those names verbatim a moment ago inside the same transaction.
+--
+-- program_day_exercise_sets is not copied. It is empty for every linear program,
+-- which is all this can clone — but saying so here is what stops a future Madcow
+-- clone quietly producing a program with half a ramp in it.
+-- name: ClonePrescriptions :exec
+INSERT INTO program_day_exercises
+    (program_day_id, exercise_id, position, sets, reps, starting_weight_lb)
+SELECT tgt.id, pde.exercise_id, pde.position, pde.sets, pde.reps, pde.starting_weight_lb
+FROM program_day_exercises pde
+JOIN program_days src ON src.id = pde.program_day_id
+JOIN program_days tgt ON tgt.program_id = sqlc.arg('target_program_id')::int
+                     AND tgt.name = src.name
+WHERE src.program_id = sqlc.arg('source_program_id')::int
+  AND src.archived_at IS NULL;
+
+-- ---------------------------------------------------------------------------
+-- Days
+-- ---------------------------------------------------------------------------
+
+-- CreateProgramDay appends a day to a program.
+--
+-- position is max+1 computed inside the INSERT, copying CreateAssistance — and
+-- inheriting its caveat, that two concurrent adds can both read "3". Here the
+-- partial unique index makes that a lost race rather than two rows at the same
+-- position, so the second one fails and the handler answers 409 instead of
+-- quietly corrupting the order. One lifter editing one program from one phone
+-- will never see it.
+-- name: CreateProgramDay :one
+INSERT INTO program_days (program_id, name, position)
+VALUES (
+    sqlc.arg('program_id'),
+    sqlc.arg('name'),
+    (SELECT COALESCE(MAX(position), 0) + 1 FROM program_days
+     WHERE program_id = sqlc.arg('program_id') AND archived_at IS NULL)
+)
+RETURNING id;
+
+-- UpdateProgramDay patches a day's name and weekday.
+--
+-- weekday is a narg and name is not, which looks inconsistent and is not: a
+-- weekday of NULL MEANS something — unscheduled — so absent and null have to be
+-- told apart by the handler before this is called, and it always passes an
+-- explicit value. A name has no such null.
+-- name: UpdateProgramDay :execrows
+UPDATE program_days
+SET name    = COALESCE(sqlc.narg('name'), name),
+    weekday = sqlc.narg('weekday')
+WHERE id = sqlc.arg('id')
+  AND archived_at IS NULL;
+
+-- CountDayUses reports what would be lost if a day were removed, which decides
+-- whether it can be deleted outright or has to be archived.
+--
+-- sessions is the one that forces the issue: sessions.program_day_id RESTRICTs,
+-- so a day anybody has trained cannot be deleted at all — not by this lifter,
+-- and not on behalf of the follower whose session it is.
+-- name: CountDayUses :one
+SELECT (SELECT count(*) FROM sessions s
+        WHERE s.program_day_id = sqlc.arg('day_id'))::bigint AS sessions;
+
+-- DeleteProgramDay removes a day nobody has trained, taking its prescriptions
+-- with it (ON DELETE CASCADE) and any assistance anybody hung on it.
+--
+-- The assistance cascade is worth naming: it can delete a row belonging to a
+-- DIFFERENT lifter, on a shared program. That is correct — the day is gone, so a
+-- plan attached to it has nothing left to attach to — and it costs them no
+-- history, because a session that would have proved otherwise is exactly what
+-- makes this path unreachable.
+-- name: DeleteProgramDay :execrows
+DELETE FROM program_days
+WHERE id = sqlc.arg('id');
+
+-- ArchiveProgramDay retires a day that has been trained.
+--
+-- It leaves program_days.id resolvable, which is the point: every session ever
+-- logged against it references that row, and the history page, the recap and
+-- every Racked figure read the day's name through it.
+-- name: ArchiveProgramDay :execrows
+UPDATE program_days
+SET archived_at = now()
+WHERE id = sqlc.arg('id')
+  AND archived_at IS NULL;
+
+-- ---------------------------------------------------------------------------
+-- Prescriptions
+-- ---------------------------------------------------------------------------
+
+-- name: GetPrescription :one
+SELECT id, program_day_id, exercise_id, position, sets, reps, starting_weight_lb
+FROM program_day_exercises
+WHERE id = sqlc.arg('id');
+
+-- name: CreatePrescription :one
+INSERT INTO program_day_exercises
+    (program_day_id, exercise_id, position, sets, reps, starting_weight_lb)
+VALUES (
+    sqlc.arg('program_day_id'),
+    sqlc.arg('exercise_id'),
+    (SELECT COALESCE(MAX(position), 0) + 1 FROM program_day_exercises
+     WHERE program_day_id = sqlc.arg('program_day_id')),
+    sqlc.arg('sets'),
+    sqlc.arg('reps'),
+    sqlc.arg('starting_weight_lb')
+)
+RETURNING id;
+
+-- name: UpdatePrescription :execrows
+UPDATE program_day_exercises
+SET sets               = sqlc.arg('sets'),
+    reps               = sqlc.arg('reps'),
+    starting_weight_lb = sqlc.arg('starting_weight_lb')
+WHERE id = sqlc.arg('id');
+
+-- DeletePrescription takes a lift off a day.
+--
+-- A plain DELETE, and it cannot lose a performance: session_sets references the
+-- EXERCISE, never the prescription, so every set ever logged for the movement
+-- stays where it is and keeps counting toward volume, records and Racked. That
+-- is the same property removeAssistance relies on, and the reason this table
+-- needs no archived_at while program_days does.
+--
+-- The gap it leaves in position is fine. Every read is ORDER BY position and
+-- nothing assumes the numbers are contiguous.
+-- name: DeletePrescription :execrows
+DELETE FROM program_day_exercises
+WHERE id = sqlc.arg('id');
+
+-- ---------------------------------------------------------------------------
+-- Reordering
+-- ---------------------------------------------------------------------------
+--
+-- UNIQUE (program_day_id, position) is not deferrable and is checked per row, so
+-- a rotation like 1,2,3 -> 2,3,1 fails part-way through a single UPDATE. Worse,
+-- WHICH shuffles fail depends on the physical order the rows are visited in, so
+-- the naive version passes every test somebody thinks to write and breaks on a
+-- shuffle nobody did.
+--
+-- So it takes two statements in one transaction: park everything out of the way,
+-- then write the final positions. The classic trick is to negate, which
+-- CHECK (position > 0) rules out here — hence parking UP.
+--
+-- Why not make the constraint DEFERRABLE: a deferrable unique constraint cannot
+-- be an ON CONFLICT arbiter, and the seed migrations use ON CONFLICT on these
+-- tables. 0009's down migration already documents at length how painful a
+-- non-inferrable constraint is; choosing one deliberately, to avoid writing two
+-- statements, is not a good trade.
+
+-- ParkPrescriptionPositions shifts every position on a day into
+-- [max+1, 2*max] — provably disjoint from [1, max], so no row can collide with
+-- one that has not moved yet, for any input, in any physical row order.
+-- name: ParkPrescriptionPositions :exec
+UPDATE program_day_exercises pde
+SET position = pde.position + (
+        SELECT COALESCE(MAX(m.position), 0) FROM program_day_exercises m
+        WHERE m.program_day_id = sqlc.arg('program_day_id')::int)
+WHERE pde.program_day_id = sqlc.arg('program_day_id')::int;
+
+-- ReorderPrescriptions assigns final positions from the order of the ids given.
+--
+-- Returns the number of rows it moved. The handler compares that against the
+-- day's live count and rolls back on a mismatch: a request naming only some of
+-- the day's lifts would otherwise leave the rest parked at max+n for ever, which
+-- is silent corruption rather than an error anybody sees.
+-- name: ReorderPrescriptions :execrows
+UPDATE program_day_exercises pde
+SET position = ord.position
+FROM (
+    SELECT id, ordinality::int AS position
+    FROM unnest(sqlc.arg('ids')::int[]) WITH ORDINALITY AS t(id, ordinality)
+) ord
+WHERE pde.id = ord.id
+  AND pde.program_day_id = sqlc.arg('program_day_id');
+
+-- ParkProgramDayPositions and ReorderProgramDays are the same pair for the days
+-- of a program.
+--
+-- Both exclude archived rows, because the partial index is what constrains them:
+-- an archived day is outside it, so parking one would renumber a row nothing can
+-- collide with and then strand it.
+-- name: ParkProgramDayPositions :exec
+UPDATE program_days pd
+SET position = pd.position + (
+        SELECT COALESCE(MAX(m.position), 0) FROM program_days m
+        WHERE m.program_id = sqlc.arg('program_id')::int AND m.archived_at IS NULL)
+WHERE pd.program_id = sqlc.arg('program_id')::int
+  AND pd.archived_at IS NULL;
+
+-- name: ReorderProgramDays :execrows
+UPDATE program_days pd
+SET position = ord.position
+FROM (
+    SELECT id, ordinality::int AS position
+    FROM unnest(sqlc.arg('ids')::int[]) WITH ORDINALITY AS t(id, ordinality)
+) ord
+WHERE pd.id = ord.id
+  AND pd.program_id = sqlc.arg('program_id')
+  AND pd.archived_at IS NULL;

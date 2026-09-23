@@ -18,6 +18,7 @@ import type {
   LeaderboardEntry,
   Lifter,
   Notification,
+  ProgramSummary,
   RackedReport,
   SessionRecap,
   User,
@@ -64,6 +65,37 @@ export function testLifter(overrides: Partial<Lifter> = {}): Lifter {
     displayName: "Grace Hopper",
     avatarColor: "",
     hasAvatar: false,
+    ...overrides,
+  };
+}
+
+/**
+ * A program card, defaulting to a seeded one: no owner, shared with the whole
+ * install, live, and therefore nobody's to edit.
+ *
+ * That default is the app's ordinary case — eight of the nine programs a fresh
+ * install can see are seeded — and it is also the safe one to forget to
+ * override. A test that meant "somebody's private program" and got a seeded one
+ * asserts against a visible, uneditable card and fails loudly; the other way
+ * round, a test that meant "seeded" and got an owned one would quietly render an
+ * Edit link nobody checked for.
+ *
+ * `isMine` is a field rather than something derived from `ownerId` here for the
+ * same reason the API sends it: ownership is the server's decision, and a
+ * fixture that recomputed it would be testing the recomputation.
+ */
+export function testProgramSummary(
+  overrides: Partial<ProgramSummary> = {},
+): ProgramSummary {
+  return {
+    id: 1,
+    name: "StrongLifts 5x5",
+    description: "",
+    progressionKind: "linear",
+    ownerId: null,
+    isMine: false,
+    isShared: true,
+    archivedAt: null,
     ...overrides,
   };
 }

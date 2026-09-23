@@ -1,29 +1,23 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import { listExercises, type Exercise, type MuscleGroup } from "./api";
-  import {
-    MUSCLE_GROUPS,
-    countByGroup,
-    equipmentStepLb,
-    exerciseSubtitle,
-    groupExercises,
-    muscleGroupLabel,
-    recentExercises,
-  } from "./library";
+  import { type Exercise } from "./api";
+  import { equipmentStepLb } from "./library";
   import { DEFAULT_BAR_STEP_LB } from "./plates";
   import { gymSteps } from "./gym.svelte";
   import { exerciseEmoji } from "./exerciseIcon";
   import { formatVolume } from "./volume";
   import { Button } from "$lib/components/ui/button";
-  import ErrorBanner from "./ErrorBanner.svelte";
+  import ExercisePicker from "./ExercisePicker.svelte";
   import Plus from "@lucide/svelte/icons/plus";
-  import SearchX from "@lucide/svelte/icons/search-x";
 
-  // Picking an exercise from the library and prescribing it, in one panel.
+  // Prescribing an accessory: ExercisePicker chooses the movement, and this
+  // adds the numbers that make it a plan.
   //
-  // Deliberately not an AlertDialog: choosing assistance means scrolling a long
-  // list against the day you are adding it to, and a modal that covers the day
-  // takes that context away. It expands in place instead.
+  // The picker half used to live here. It moved out when the program editor
+  // needed the same list — and only the list, because a program's own
+  // prescription asks where a lift STARTS (a number read only until there is
+  // history) while this asks what it carries FORWARD, and the rep range below
+  // has no counterpart there at all. Two step-twos with no field in common is
+  // an extraction rather than a flag.
   let {
     exclude = [],
     onAdd,
@@ -57,12 +51,6 @@
     footnote?: string;
   } = $props();
 
-  let exercises = $state<Exercise[]>([]);
-  let loading = $state(true);
-  let failed = $state(false);
-
-  let query = $state("");
-  let group = $state<MuscleGroup | null>(null);
   let selected = $state<Exercise | null>(null);
 
   // Three sets of ten at bodyweight: the default nearly every accessory starts
@@ -103,39 +91,6 @@
   const stepLb = $derived(
     selected ? equipmentStepLb(selected.equipment, gymSteps()) : DEFAULT_BAR_STEP_LB,
   );
-
-  const available = $derived(exercises.filter((e) => !exclude.includes(e.id)));
-  const counts = $derived(countByGroup(available));
-  const groups = $derived(groupExercises(available, { query, group }));
-  const matchCount = $derived(
-    groups.reduce((total, g) => total + g.exercises.length, 0),
-  );
-
-  // The accessories this lifter actually trains, so the six they always add sit
-  // above the catalogue instead of behind a search for the same names every
-  // time. Derived from `available`, so everything already on this day is out of
-  // it for free.
-  //
-  // Only while the list is unfiltered. Once a search or a group chip is on, the
-  // list below is already short and the section is no longer a shortcut to it —
-  // it is a duplicate sitting between a lifter and the match they typed for.
-  const recent = $derived(recentExercises(available));
-  const showRecent = $derived(
-    recent.length > 0 && query.trim() === "" && group === null,
-  );
-
-  async function load() {
-    loading = true;
-    failed = false;
-    const result = await listExercises();
-    if (result.status !== 200) {
-      failed = true;
-      loading = false;
-      return;
-    }
-    exercises = result.data;
-    loading = false;
-  }
 
   /**
    * Pick a movement, and start its weight where the lifter left it.
@@ -181,15 +136,10 @@
     if (ok) selected = null;
   }
 
-  onMount(load);
 </script>
 
 <div class="mt-3 flex flex-col gap-3 rounded-md border border-border/60 p-3">
-  {#if loading}
-    <div class="h-24 animate-pulse rounded-md bg-muted/40" aria-hidden="true"></div>
-  {:else if failed}
-    <ErrorBanner message="Couldn't load the exercise library." onRetry={load} />
-  {:else if selected}
+  {#if selected}
     <!-- Step two: prescribe it. -->
     <div class="flex items-center gap-2">
       <span class="text-xl" aria-hidden="true">{exerciseEmoji(selected.name)}</span>
@@ -293,93 +243,10 @@
       <Button size="sm" variant="ghost" onclick={onCancel}>Cancel</Button>
     </div>
   {:else}
-    <!-- Step one: choose the movement. -->
-    <label class="flex flex-col gap-1">
-      <span class="sr-only">Search exercises</span>
-      <input
-        type="search"
-        bind:value={query}
-        placeholder="Search exercises…"
-        class="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm outline-none transition focus:border-primary"
-      />
-    </label>
-
-    <div class="flex flex-wrap gap-1.5">
-      {#each MUSCLE_GROUPS as g (g)}
-        {#if counts[g] > 0}
-          <button
-            type="button"
-            aria-pressed={group === g}
-            class="rounded-full border px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider transition {group ===
-            g
-              ? 'border-primary bg-primary text-primary-foreground'
-              : 'border-border/60 text-muted-foreground hover:text-foreground'}"
-            onclick={() => (group = group === g ? null : g)}
-          >
-            {muscleGroupLabel(g)}
-          </button>
-        {/if}
-      {/each}
-    </div>
-
-    <div class="max-h-64 overflow-y-auto rounded-md border border-border/40">
-      {#if matchCount === 0}
-        <div class="flex flex-col items-center p-4 text-center">
-          <SearchX class="size-6 text-muted-foreground/60" aria-hidden="true" />
-          <p class="mt-2 text-sm text-muted-foreground">
-            No exercises match that search.
-          </p>
-        </div>
-      {/if}
-      {#if showRecent}
-        <!-- Recent lifts stay listed under their muscle group below as well.
-             Removing them from it would make a movement go missing from the
-             one place a lifter scrolls to expecting it. -->
-        {@render sectionHeading("Recent")}
-        {#each recent as exercise (exercise.id)}
-          {@render exerciseRow(exercise)}
-        {/each}
-      {/if}
-      {#each groups as section (section.group)}
-        {@render sectionHeading(section.label)}
-        {#each section.exercises as exercise (exercise.id)}
-          {@render exerciseRow(exercise)}
-        {/each}
-      {/each}
-    </div>
-
-    <Button size="sm" variant="ghost" class="self-start" onclick={onCancel}>
-      Cancel
-    </Button>
+    <ExercisePicker
+      {exclude}
+      onPick={choose}
+      {onCancel}
+    />
   {/if}
 </div>
-
-<!-- One row and one heading, rendered by both the Recent section and the muscle
-     groups, so the two cannot drift apart. -->
-{#snippet sectionHeading(label: string)}
-  <p
-    class="sticky top-0 bg-card px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground"
-  >
-    {label}
-  </p>
-{/snippet}
-
-{#snippet exerciseRow(exercise: Exercise)}
-  <button
-    type="button"
-    class="flex w-full items-center gap-2 px-3 py-2 text-left transition hover:bg-foreground/5"
-    onclick={() => choose(exercise)}
-  >
-    <span class="text-base" aria-hidden="true">
-      {exerciseEmoji(exercise.name)}
-    </span>
-    <span class="flex-1 leading-tight">
-      <span class="block text-sm font-medium text-card-foreground">
-        {exercise.name}
-      </span>
-      <span class="block text-[11px] text-muted-foreground">
-        {exerciseSubtitle(exercise)}
-      </span>
-    </span>
-  </button>
-{/snippet}

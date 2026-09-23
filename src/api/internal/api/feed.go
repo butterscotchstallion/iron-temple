@@ -21,6 +21,21 @@ import (
 // be deciding it differently from the history page, which decides it in the
 // query.
 
+// maskedProgramName stands in for a program the viewer was never shown.
+//
+// Two reads cross accounts and carry a program's name with them: this feed, and
+// a lifter's session recap. On both, the session is somebody else's and the
+// program behind it may be private — so the name is replaced rather than the row
+// withheld, because what the lifter DID is exactly what these screens are for
+// and only the plan behind it is private.
+//
+// Literal rather than something like "Private program", which would announce
+// that there is something to be curious about. This reads as a category.
+//
+// Kept in step with the same string in ListFeedSessions by the integration test
+// that asserts both paths; the query cannot reference a Go constant.
+const maskedProgramName = "Custom program"
+
 // getFeed serves a page of other lifters' recent sessions, newest first.
 func (s *Server) getFeed(w http.ResponseWriter, r *http.Request) {
 	limit, offset, ok := pageParams(w, r)
