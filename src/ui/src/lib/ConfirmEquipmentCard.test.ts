@@ -37,11 +37,15 @@ describe("ConfirmEquipmentCard", () => {
 
   // Home renders this above the workout, so it has to be possible to clear it
   // and read the screen you came for.
+  //
+  // "Later", not "Not now": the update prompt owns that name and can be on Home
+  // at the same time, and two same-named buttons on one screen is ambiguous to
+  // anyone reading by name rather than position.
   it("can be dismissed", async () => {
     signIn(null);
     render(ConfirmEquipmentCard);
 
-    await fireEvent.click(screen.getByRole("button", { name: /not now/i }));
+    await fireEvent.click(screen.getByRole("button", { name: /later/i }));
 
     expect(screen.queryByText(NUDGE)).not.toBeInTheDocument();
   });

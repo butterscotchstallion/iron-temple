@@ -18,7 +18,7 @@
   // this is a standing fact about the account. It sits above the workout for
   // the one screen it appears on and then never again.
 
-  // Dismissal is deliberately per-load rather than remembered. "Not now" should
+  // Dismissal is deliberately per-load rather than remembered. "Later" should
   // clear the screen a lifter came here to read, but it is not an answer — the
   // prescriptions are still running off numbers nobody has confirmed, and a
   // permanent dismissal would leave that true and silent forever. Confirming
@@ -56,12 +56,19 @@
       >
         Set up my gym
       </a>
+      <!--
+        "Later" rather than "Not now", which is what this said first and what
+        the update prompt already says. Both can be on Home at once, and two
+        buttons with the same name on one screen is ambiguous to anybody
+        reading it by name rather than by position — a screen reader, or a
+        Playwright selector, which is how the collision surfaced.
+      -->
       <button
         type="button"
         onclick={() => (dismissed = true)}
         class="text-sm text-muted-foreground transition hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
       >
-        Not now
+        Later
       </button>
     </div>
   </Card>
