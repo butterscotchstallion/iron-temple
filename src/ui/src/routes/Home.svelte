@@ -11,6 +11,7 @@
   import ErrorCard from "../lib/ErrorCard.svelte";
   import CalendarHeatmap from "../lib/CalendarHeatmap.svelte";
   import FeedCard from "../lib/FeedCard.svelte";
+  import ConfirmEquipmentCard from "../lib/ConfirmEquipmentCard.svelte";
 
   // The "normal flow" skips choosing a program: land on the one the user last
   // opened. First-time users (nothing saved, no history) get the picker instead.
@@ -77,6 +78,11 @@
 </script>
 
 <div class="flex flex-col gap-6">
+  <!-- Above the workout, and above the streak, because it is a claim that the
+       numbers below it might be wrong. Draws nothing once the gym has been
+       confirmed, which for most lifters is after one visit to the profile. -->
+  <ConfirmEquipmentCard />
+
   {#if sessions.length > 0}
     <div class="flex flex-col gap-4">
       <StreakCard {streak} />

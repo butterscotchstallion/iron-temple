@@ -166,10 +166,14 @@ type UserAvatar struct {
 }
 
 type UserGym struct {
-	UserID         int32              `json:"user_id"`
-	BarWeightLb    pgtype.Numeric     `json:"bar_weight_lb"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	DumbbellStepLb pgtype.Numeric     `json:"dumbbell_step_lb"`
+	UserID               int32              `json:"user_id"`
+	BarWeightLb          pgtype.Numeric     `json:"bar_weight_lb"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	DumbbellStepLb       pgtype.Numeric     `json:"dumbbell_step_lb"`
+	MachineStepLb        pgtype.Numeric     `json:"machine_step_lb"`
+	CableStepLb          pgtype.Numeric     `json:"cable_step_lb"`
+	BandStepLb           pgtype.Numeric     `json:"band_step_lb"`
+	EquipmentConfirmedAt pgtype.Timestamptz `json:"equipment_confirmed_at"`
 }
 
 type UserLiftBaseline struct {
