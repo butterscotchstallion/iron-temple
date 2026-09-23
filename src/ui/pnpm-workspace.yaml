@@ -24,6 +24,26 @@ overrides:
   # fixable HIGH/CRITICAL. The scanner caught one of the two by luck of CVE
   # coverage; the override going dead was the actual defect.
   nanoid: ^6.0.0
+  # undici@7: four HIGH CVEs — CVE-2026-12151 (WebSocket memory-growth DoS),
+  # CVE-2026-13697 (Cache-Control parsing), CVE-2026-6734 and CVE-2026-9697
+  # (both Socks5ProxyAgent: TLS options ignored / MitM). 7.29.0 is the floor
+  # that clears all four; ^7.29.1 takes the current patch.
+  #
+  # The KEY IS SCOPED to the 7.x line on purpose, and a bare `undici:` here
+  # would be a bug, not a simplification. Two undici majors coexist in this
+  # tree: jsdom 30 pulls 8.x, and 8.9.0+ is already past all four CVEs. An
+  # unscoped override would drag jsdom's copy DOWN to 7.x, where
+  # `worker_threads.markAsUncloneable` is missing — which does not fail the
+  # install, it makes every Vitest worker die at import and the suite report
+  # "no tests".
+  #
+  # This cannot be fixed by bumping the dependent, which is why it is here
+  # rather than left to Renovate. orval (devDependency, API codegen) reaches
+  # undici via @scalar/json-magic, and that package pins `"undici": "7.24.4"`
+  # EXACTLY — no caret. Checked against the registry: 0.13.5, 0.14.0 and
+  # latest 0.15.0 all carry the same exact pin, so no upgrade path upstream
+  # resolves this and every future orval bump would re-introduce it.
+  undici@7: ^7.29.1
 
 # Dependencies permitted to run install scripts. pnpm 10+ blocks them by
 # default — arbitrary code execution on `install` is the npm ecosystem's widest
