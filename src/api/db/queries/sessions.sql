@@ -387,9 +387,29 @@ WHERE ss.id = sqlc.arg('id')
 -- The rule is "everything else in the session was already done". Two details of
 -- how that is spelled are deliberate:
 --
---   NOT prior.completed  — the whole session, not just this lift. An extra set
---   of squats while the bench work is still pending is a mid-workout
---   adjustment, not bonus work, and the lifter reads it as one.
+--   actual_reps IS NULL  — outstanding means NOT YET WORKED THROUGH, not "missed
+--   its target". Those are different questions and this column answers the
+--   first; `completed` answers the second. ActiveSession sets completed only
+--   when the reps meet or beat the target ("Every set hit its target reps — a
+--   clean session"), so a 4-of-5 grind is a set the lifter is finished with but
+--   which completed still calls false. Testing NOT prior.completed here — as
+--   this query did when the column shipped — therefore let ONE missed rep
+--   anywhere in the session silently disqualify every later append from ever
+--   being bonus work.
+--
+--   That was backwards in the worst way, because a miss is exactly when bonus
+--   work happens. The same screen only auto-finishes a session when every set
+--   hit its target ("A miss anywhere leaves it running until the lifter says
+--   so"), so the session that is still open — the one with extra sets being
+--   added to it — is disproportionately the session that contains a miss.
+--
+--   It is the whole session and not just this lift, either way: an extra set of
+--   squats while the bench work is still untouched is a mid-workout adjustment,
+--   not bonus work, and the lifter reads it as one.
+--
+--   A set the lifter skipped outright is indistinguishable from one they have
+--   not reached yet — both are NULL — so both block. That is the conservative
+--   reading: bailing on rows to do extra squats is a substitution, not a bonus.
 --
 --   NOT prior.is_bonus   — an earlier bonus set that is not yet logged does not
 --   stop the next one counting. Without this, tapping "add set" twice before
@@ -408,7 +428,7 @@ SELECT last.session_id,
            SELECT 1
            FROM session_sets prior
            WHERE prior.session_id = last.session_id
-             AND NOT prior.completed
+             AND prior.actual_reps IS NULL
              AND NOT prior.is_bonus
        )
 FROM (
