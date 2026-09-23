@@ -26,7 +26,11 @@
     cachedValue,
     invalidateTraining,
   } from "../lib/cache.svelte";
-  import { loadHomeSessions, type HomeSessions } from "../lib/homeData";
+  import {
+    loadHomeSessions,
+    watchHomeSessions,
+    type HomeSessions,
+  } from "../lib/homeData";
   import { nextDueOn, todayStatus } from "../lib/trainedToday";
   import { Card } from "$lib/components/ui/card";
   import { Button, buttonVariants } from "$lib/components/ui/button";
@@ -552,6 +556,18 @@
   }
 
   onMount(load);
+
+  // Re-read the session list while this screen is up, so a workout finished
+  // somewhere else stops being offered here. A day card is the one thing on the
+  // screen that makes a claim about right now — "In progress", Resume, the ring
+  // marking it due — and a tab left open used to go on making it long after the
+  // workout had been finished on a phone at the rack.
+  //
+  // `recent` is the only thing to set: orderedDays is derived over it and
+  // todayStatus is read inline per card, so the badge, the button, the ring and
+  // the order all follow. Deliberately not through load(), which would blank
+  // the program to a skeleton and re-run every day's preview to correct a badge.
+  $effect(() => watchHomeSessions((data) => (recent = data.items)));
 </script>
 
 <div class="flex flex-col gap-6">

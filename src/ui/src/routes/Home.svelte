@@ -2,7 +2,11 @@
   import { onMount } from "svelte";
   import { auth } from "../lib/auth.svelte";
   import { CACHE_KEYS, cachedValue, fetchThrough } from "../lib/cache.svelte";
-  import { loadHomeSessions, type HomeSessions } from "../lib/homeData";
+  import {
+    loadHomeSessions,
+    watchHomeSessions,
+    type HomeSessions,
+  } from "../lib/homeData";
   import { currentStreak } from "../lib/streak";
   import ProgramDetail from "./ProgramDetail.svelte";
   import Programs from "./Programs.svelte";
@@ -75,6 +79,13 @@
   }
 
   onMount(load);
+
+  // Keep it current while the tab sits here. The streak and the heatmap are
+  // statements about training that may be happening on another device — finish
+  // the workout on a phone at the rack and this screen should not still be
+  // counting yesterday. apply() is reused verbatim: a polled list is the same
+  // list, whatever asked for it. See watchHomeSessions.
+  $effect(() => watchHomeSessions(apply));
 </script>
 
 <div class="flex flex-col gap-6">
