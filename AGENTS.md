@@ -36,6 +36,12 @@ Conventions for agents (and humans) working in this repository.
   `renovate-bot`, `deploy`-titled PRs and anything outside its `paths` filter —
   exit `5`. Say plainly that no review was expected; never report an unreviewed PR
   as reviewed.
+- **Disagreeing with a finding is fine; dropping it silently is not.** If you are
+  deliberately not acting on one, say so on the PR:
+  `scripts/pr-reply.sh <pr> S3 "<why>"` posts the rationale threaded under that
+  finding's line. Once every outstanding finding carries one, `pr-watch.sh` exits
+  `13` instead of reporting them forever — that is **not** an LGTM, so name them in
+  the handover too and let the operator decide.
 - **Re-check a PR's state before calling it open**, including one you opened
   minutes ago. The operator merges while you work, and nagging about already-merged
   work trains them to skim.

@@ -83,6 +83,15 @@ resolve_shared_dir() {
 
 SHARED="$(resolve_shared_dir)"
 
+# `pr-watch.sh --shared-dir` prints where the tooling was found and stops. That is
+# how scripts/pr-reply.sh bootstraps without a second copy of the resolver above:
+# finding the shared checkout is this file's whole job, so it may as well answer
+# the question directly.
+if [ "${1:-}" = "--shared-dir" ]; then
+  printf '%s\n' "$SHARED"
+  exit 0
+fi
+
 # Run from the CURRENT directory, not the shared checkout: pr_watch.py reads the
 # git remote to work out which repo to poll, so a `cd` into the tooling would make
 # it watch the tooling repo. Only the module path comes from $SHARED.
