@@ -3,8 +3,9 @@
   import { link } from "svelte-spa-router";
   import { listPrograms, listSessions, type ProgramSummary } from "../lib/api";
   import { auth } from "../lib/auth.svelte";
-  import { programSubtitle } from "../lib/programs";
+  import { programSubtitle, programAttribution } from "../lib/programs";
   import { Card } from "$lib/components/ui/card";
+  import { Badge } from "$lib/components/ui/badge";
   import ClipboardList from "@lucide/svelte/icons/clipboard-list";
   import ErrorCard from "../lib/ErrorCard.svelte";
 
@@ -69,10 +70,26 @@
               ? 'ring-2 ring-primary'
               : ''}"
           >
-            <h2 class="text-lg font-bold text-card-foreground">{program.name}</h2>
+            <div class="flex items-start justify-between gap-2">
+              <h2 class="text-lg font-bold text-card-foreground">{program.name}</h2>
+              {#if program.isMine}
+                <Badge variant="secondary" class="shrink-0">Yours</Badge>
+              {/if}
+            </div>
             <p class="mt-1 text-sm text-muted-foreground">
               {programSubtitle(program)}
             </p>
+            <!--
+              Who a program came from, on the ones that came from somebody. The
+              seeded programs say nothing here: they are the install's, and
+              attributing them to nobody would be a line of blank space on eight
+              of the nine cards a fresh install draws.
+            -->
+            {#if programAttribution(program)}
+              <p class="mt-1 text-xs text-muted-foreground/80">
+                {programAttribution(program)}
+              </p>
+            {/if}
           </Card>
         </a>
       {/each}

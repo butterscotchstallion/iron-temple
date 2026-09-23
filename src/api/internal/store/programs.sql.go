@@ -11,37 +11,115 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const getProgram = `-- name: GetProgram :one
-SELECT id, name, description, progression_kind
-FROM programs
-WHERE id = $1
+const canReadProgram = `-- name: CanReadProgram :one
+SELECT EXISTS (
+    SELECT 1
+    FROM programs p
+    WHERE p.id = $1
+      AND (p.created_by_user_id IS NULL
+           OR p.created_by_user_id = $2::int
+           OR p.is_shared
+           OR EXISTS (
+               SELECT 1
+               FROM sessions s
+               JOIN program_days pd ON pd.id = s.program_day_id
+               WHERE pd.program_id = p.id
+                 AND s.user_id = $2::int
+           ))
+)::bool
 `
 
-type GetProgramRow struct {
-	ID              int32  `json:"id"`
-	Name            string `json:"name"`
-	Description     string `json:"description"`
-	ProgressionKind string `json:"progression_kind"`
+type CanReadProgramParams struct {
+	ProgramID int32 `json:"program_id"`
+	UserID    int32 `json:"user_id"`
 }
 
-func (q *Queries) GetProgram(ctx context.Context, id int32) (GetProgramRow, error) {
-	row := q.db.QueryRow(ctx, getProgram, id)
+// CanReadProgram is GetProgram's predicate on its own, for the paths that hold a
+// day rather than a program and only need the yes/no.
+//
+// One query rather than the same EXISTS smeared through five SELECTs: the rule
+// is subtle enough that having it written once is worth a round trip. It rides
+// sessions_user_idx, so the expensive-looking clause is not.
+func (q *Queries) CanReadProgram(ctx context.Context, arg CanReadProgramParams) (bool, error) {
+	row := q.db.QueryRow(ctx, canReadProgram, arg.ProgramID, arg.UserID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const getProgram = `-- name: GetProgram :one
+SELECT p.id,
+       p.name,
+       p.description,
+       p.progression_kind,
+       p.created_by_user_id,
+       p.is_shared,
+       p.archived_at,
+       COALESCE(u.display_name, '') AS owner_name
+FROM programs p
+LEFT JOIN users u ON u.id = p.created_by_user_id
+WHERE p.id = $1
+  AND (p.created_by_user_id IS NULL
+       OR p.created_by_user_id = $2::int
+       OR p.is_shared
+       OR EXISTS (
+           SELECT 1
+           FROM sessions s
+           JOIN program_days pd ON pd.id = s.program_day_id
+           WHERE pd.program_id = p.id
+             AND s.user_id = $2::int
+       ))
+`
+
+type GetProgramParams struct {
+	ID     int32 `json:"id"`
+	UserID int32 `json:"user_id"`
+}
+
+type GetProgramRow struct {
+	ID              int32              `json:"id"`
+	Name            string             `json:"name"`
+	Description     string             `json:"description"`
+	ProgressionKind string             `json:"progression_kind"`
+	CreatedByUserID *int32             `json:"created_by_user_id"`
+	IsShared        bool               `json:"is_shared"`
+	ArchivedAt      pgtype.Timestamptz `json:"archived_at"`
+	OwnerName       string             `json:"owner_name"`
+}
+
+// GetProgram resolves one program for a caller entitled to see it, and returns
+// no rows otherwise — so a handler's existing pgx.ErrNoRows branch turns a
+// program belonging to somebody else into a 404 with no new code.
+//
+// 404 and not 403 is the rule assistance.go states and sessions.sql applies:
+// learning that an id is valid is already a leak.
+func (q *Queries) GetProgram(ctx context.Context, arg GetProgramParams) (GetProgramRow, error) {
+	row := q.db.QueryRow(ctx, getProgram, arg.ID, arg.UserID)
 	var i GetProgramRow
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
 		&i.Description,
 		&i.ProgressionKind,
+		&i.CreatedByUserID,
+		&i.IsShared,
+		&i.ArchivedAt,
+		&i.OwnerName,
 	)
 	return i, err
 }
 
 const getProgramDay = `-- name: GetProgramDay :one
-SELECT id, program_id, name, position, weekday
+SELECT id, program_id, name, position, weekday, archived_at
 FROM program_days
 WHERE id = $1
 `
 
+// GetProgramDay is unscoped on purpose: it answers "what day is this", and every
+// caller resolves the program's readability separately (programDay() and
+// createSession both call CanReadProgram with day.ProgramID). Folding the check
+// in here would mean joining programs and threading a user through the two
+// callers that legitimately have no viewer — the activity generator among them.
 func (q *Queries) GetProgramDay(ctx context.Context, id int32) (ProgramDay, error) {
 	row := q.db.QueryRow(ctx, getProgramDay, id)
 	var i ProgramDay
@@ -51,6 +129,7 @@ func (q *Queries) GetProgramDay(ctx context.Context, id int32) (ProgramDay, erro
 		&i.Name,
 		&i.Position,
 		&i.Weekday,
+		&i.ArchivedAt,
 	)
 	return i, err
 }
@@ -271,6 +350,7 @@ FROM program_day_exercises pde
 JOIN program_days pd ON pd.id = pde.program_day_id
 JOIN exercises e ON e.id = pde.exercise_id
 WHERE pd.program_id = $1
+  AND pd.archived_at IS NULL
 ORDER BY pd.position, pde.position
 `
 
@@ -323,12 +403,21 @@ func (q *Queries) ListPrescriptionsByProgram(ctx context.Context, programID int3
 }
 
 const listProgramDays = `-- name: ListProgramDays :many
-SELECT id, program_id, name, position, weekday
+SELECT id, program_id, name, position, weekday, archived_at
 FROM program_days
 WHERE program_id = $1
+  AND archived_at IS NULL
 ORDER BY position
 `
 
+// ListProgramDays returns a program's live days. Archived ones are gone from
+// every read in the app: they exist so that a day somebody has trained can leave
+// the program without taking the session with it, not so that they can be
+// listed.
+//
+// archived_at is selected even though this query filters it to NULL, so that
+// both day reads return the same row shape and the handlers that pass a day
+// around need one type rather than two identical ones.
 func (q *Queries) ListProgramDays(ctx context.Context, programID int32) ([]ProgramDay, error) {
 	rows, err := q.db.Query(ctx, listProgramDays, programID)
 	if err != nil {
@@ -344,6 +433,7 @@ func (q *Queries) ListProgramDays(ctx context.Context, programID int32) ([]Progr
 			&i.Name,
 			&i.Position,
 			&i.Weekday,
+			&i.ArchivedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -356,20 +446,71 @@ func (q *Queries) ListProgramDays(ctx context.Context, programID int32) ([]Progr
 }
 
 const listPrograms = `-- name: ListPrograms :many
-SELECT id, name, description, progression_kind
-FROM programs
-ORDER BY id
+
+SELECT p.id,
+       p.name,
+       p.description,
+       p.progression_kind,
+       p.created_by_user_id,
+       p.is_shared,
+       p.archived_at,
+       COALESCE(u.display_name, '') AS owner_name
+FROM programs p
+LEFT JOIN users u ON u.id = p.created_by_user_id
+WHERE (p.created_by_user_id IS NULL
+       OR p.created_by_user_id = $1::int
+       OR p.is_shared)
+  AND (p.archived_at IS NULL
+       OR ($2::bool
+           AND p.created_by_user_id = $1::int))
+ORDER BY p.id
 `
 
-type ListProgramsRow struct {
-	ID              int32  `json:"id"`
-	Name            string `json:"name"`
-	Description     string `json:"description"`
-	ProgressionKind string `json:"progression_kind"`
+type ListProgramsParams struct {
+	UserID          int32 `json:"user_id"`
+	IncludeArchived bool  `json:"include_archived"`
 }
 
-func (q *Queries) ListPrograms(ctx context.Context) ([]ListProgramsRow, error) {
-	rows, err := q.db.Query(ctx, listPrograms)
+type ListProgramsRow struct {
+	ID              int32              `json:"id"`
+	Name            string             `json:"name"`
+	Description     string             `json:"description"`
+	ProgressionKind string             `json:"progression_kind"`
+	CreatedByUserID *int32             `json:"created_by_user_id"`
+	IsShared        bool               `json:"is_shared"`
+	ArchivedAt      pgtype.Timestamptz `json:"archived_at"`
+	OwnerName       string             `json:"owner_name"`
+}
+
+// Programs, and who is allowed to see which.
+//
+// Since 0029 a program is either the install's (created_by_user_id IS NULL:
+// seeded, canonical, nobody's to edit) or one lifter's own. The reads below
+// split into two kinds and it is worth being clear which is which, because they
+// do NOT use the same rule:
+//
+//	DISCOVERY  — ListPrograms, the picker. Seeded, mine, or shared. This is the
+//	             one is_shared governs.
+//	ACCESS     — GetProgram and CanReadProgram, reached with an id in hand.
+//	             Seeded, mine, shared, OR I have trained it.
+//
+// That last clause is grandfathering, and it is the difference between the two.
+// Un-sharing a program means "stop new people finding it"; it cannot sensibly
+// mean "lock out the lifter who has been running it for three months", whose
+// sessions are bound to those program_day rows for ever regardless. Taking
+// their access away costs them their training and buys the owner nothing.
+//
+// Archival is the same distinction one turn further: an archived program leaves
+// the picker and keeps resolving, so nobody is stranded mid-program and
+// users.current_program_id can keep pointing at it.
+// ListPrograms is the picker: what this lifter may choose from.
+//
+// include_archived is the owner's own view. It never widens past created_by =
+// caller, so one lifter asking for archived programs cannot surface another's —
+// an archived shared program is retired, and retiring it is the owner saying
+// "stop offering this to people".
+func (q *Queries) ListPrograms(ctx context.Context, arg ListProgramsParams) ([]ListProgramsRow, error) {
+	rows, err := q.db.Query(ctx, listPrograms, arg.UserID, arg.IncludeArchived)
 	if err != nil {
 		return nil, err
 	}
@@ -377,6 +518,58 @@ func (q *Queries) ListPrograms(ctx context.Context) ([]ListProgramsRow, error) {
 	var items []ListProgramsRow
 	for rows.Next() {
 		var i ListProgramsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.ProgressionKind,
+			&i.CreatedByUserID,
+			&i.IsShared,
+			&i.ArchivedAt,
+			&i.OwnerName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSeededPrograms = `-- name: ListSeededPrograms :many
+SELECT id, name, description, progression_kind
+FROM programs
+WHERE created_by_user_id IS NULL
+ORDER BY id
+`
+
+type ListSeededProgramsRow struct {
+	ID              int32  `json:"id"`
+	Name            string `json:"name"`
+	Description     string `json:"description"`
+	ProgressionKind string `json:"progression_kind"`
+}
+
+// ListSeededPrograms is the install's own catalogue, for callers that need a
+// program without a lifter to scope it to.
+//
+// Exists for ensureGeneratedLifters, which assigns each generated account a
+// current_program_id by walking this list. It cannot use ListPrograms: that now
+// takes a viewer, and there is no honest one to pass — handing it the admin's id
+// would have fake lifters training a real lifter's private programs, and handing
+// it the generated account's own id returns only the seeded rows anyway, by a
+// coincidence that would break the day generated accounts could own programs.
+func (q *Queries) ListSeededPrograms(ctx context.Context) ([]ListSeededProgramsRow, error) {
+	rows, err := q.db.Query(ctx, listSeededPrograms)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSeededProgramsRow
+	for rows.Next() {
+		var i ListSeededProgramsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
@@ -403,6 +596,7 @@ FROM program_day_exercise_sets s
 JOIN program_day_exercises pde ON pde.id = s.program_day_exercise_id
 JOIN program_days pd ON pd.id = pde.program_day_id
 WHERE pd.program_id = $1
+  AND pd.archived_at IS NULL
 ORDER BY pde.program_day_id, pde.exercise_id, s.set_number
 `
 
@@ -462,9 +656,17 @@ type UpdateProgramDayWeekdayParams struct {
 	ID      int32  `json:"id"`
 }
 
-func (q *Queries) UpdateProgramDayWeekday(ctx context.Context, arg UpdateProgramDayWeekdayParams) (ProgramDay, error) {
+type UpdateProgramDayWeekdayRow struct {
+	ID        int32  `json:"id"`
+	ProgramID int32  `json:"program_id"`
+	Name      string `json:"name"`
+	Position  int32  `json:"position"`
+	Weekday   *int32 `json:"weekday"`
+}
+
+func (q *Queries) UpdateProgramDayWeekday(ctx context.Context, arg UpdateProgramDayWeekdayParams) (UpdateProgramDayWeekdayRow, error) {
 	row := q.db.QueryRow(ctx, updateProgramDayWeekday, arg.Weekday, arg.ID)
-	var i ProgramDay
+	var i UpdateProgramDayWeekdayRow
 	err := row.Scan(
 		&i.ID,
 		&i.ProgramID,

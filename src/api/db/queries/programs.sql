@@ -1,22 +1,140 @@
+-- Programs, and who is allowed to see which.
+--
+-- Since 0029 a program is either the install's (created_by_user_id IS NULL:
+-- seeded, canonical, nobody's to edit) or one lifter's own. The reads below
+-- split into two kinds and it is worth being clear which is which, because they
+-- do NOT use the same rule:
+--
+--   DISCOVERY  — ListPrograms, the picker. Seeded, mine, or shared. This is the
+--                one is_shared governs.
+--   ACCESS     — GetProgram and CanReadProgram, reached with an id in hand.
+--                Seeded, mine, shared, OR I have trained it.
+--
+-- That last clause is grandfathering, and it is the difference between the two.
+-- Un-sharing a program means "stop new people finding it"; it cannot sensibly
+-- mean "lock out the lifter who has been running it for three months", whose
+-- sessions are bound to those program_day rows for ever regardless. Taking
+-- their access away costs them their training and buys the owner nothing.
+--
+-- Archival is the same distinction one turn further: an archived program leaves
+-- the picker and keeps resolving, so nobody is stranded mid-program and
+-- users.current_program_id can keep pointing at it.
+
+-- ListPrograms is the picker: what this lifter may choose from.
+--
+-- include_archived is the owner's own view. It never widens past created_by =
+-- caller, so one lifter asking for archived programs cannot surface another's —
+-- an archived shared program is retired, and retiring it is the owner saying
+-- "stop offering this to people".
 -- name: ListPrograms :many
+SELECT p.id,
+       p.name,
+       p.description,
+       p.progression_kind,
+       p.created_by_user_id,
+       p.is_shared,
+       p.archived_at,
+       COALESCE(u.display_name, '') AS owner_name
+FROM programs p
+LEFT JOIN users u ON u.id = p.created_by_user_id
+WHERE (p.created_by_user_id IS NULL
+       OR p.created_by_user_id = sqlc.arg('user_id')::int
+       OR p.is_shared)
+  AND (p.archived_at IS NULL
+       OR (sqlc.arg('include_archived')::bool
+           AND p.created_by_user_id = sqlc.arg('user_id')::int))
+ORDER BY p.id;
+
+-- ListSeededPrograms is the install's own catalogue, for callers that need a
+-- program without a lifter to scope it to.
+--
+-- Exists for ensureGeneratedLifters, which assigns each generated account a
+-- current_program_id by walking this list. It cannot use ListPrograms: that now
+-- takes a viewer, and there is no honest one to pass — handing it the admin's id
+-- would have fake lifters training a real lifter's private programs, and handing
+-- it the generated account's own id returns only the seeded rows anyway, by a
+-- coincidence that would break the day generated accounts could own programs.
+-- name: ListSeededPrograms :many
 SELECT id, name, description, progression_kind
 FROM programs
+WHERE created_by_user_id IS NULL
 ORDER BY id;
 
+-- GetProgram resolves one program for a caller entitled to see it, and returns
+-- no rows otherwise — so a handler's existing pgx.ErrNoRows branch turns a
+-- program belonging to somebody else into a 404 with no new code.
+--
+-- 404 and not 403 is the rule assistance.go states and sessions.sql applies:
+-- learning that an id is valid is already a leak.
 -- name: GetProgram :one
-SELECT id, name, description, progression_kind
-FROM programs
-WHERE id = $1;
+SELECT p.id,
+       p.name,
+       p.description,
+       p.progression_kind,
+       p.created_by_user_id,
+       p.is_shared,
+       p.archived_at,
+       COALESCE(u.display_name, '') AS owner_name
+FROM programs p
+LEFT JOIN users u ON u.id = p.created_by_user_id
+WHERE p.id = sqlc.arg('id')
+  AND (p.created_by_user_id IS NULL
+       OR p.created_by_user_id = sqlc.arg('user_id')::int
+       OR p.is_shared
+       OR EXISTS (
+           SELECT 1
+           FROM sessions s
+           JOIN program_days pd ON pd.id = s.program_day_id
+           WHERE pd.program_id = p.id
+             AND s.user_id = sqlc.arg('user_id')::int
+       ));
 
+-- CanReadProgram is GetProgram's predicate on its own, for the paths that hold a
+-- day rather than a program and only need the yes/no.
+--
+-- One query rather than the same EXISTS smeared through five SELECTs: the rule
+-- is subtle enough that having it written once is worth a round trip. It rides
+-- sessions_user_idx, so the expensive-looking clause is not.
+-- name: CanReadProgram :one
+SELECT EXISTS (
+    SELECT 1
+    FROM programs p
+    WHERE p.id = sqlc.arg('program_id')
+      AND (p.created_by_user_id IS NULL
+           OR p.created_by_user_id = sqlc.arg('user_id')::int
+           OR p.is_shared
+           OR EXISTS (
+               SELECT 1
+               FROM sessions s
+               JOIN program_days pd ON pd.id = s.program_day_id
+               WHERE pd.program_id = p.id
+                 AND s.user_id = sqlc.arg('user_id')::int
+           ))
+)::bool;
+
+-- GetProgramDay is unscoped on purpose: it answers "what day is this", and every
+-- caller resolves the program's readability separately (programDay() and
+-- createSession both call CanReadProgram with day.ProgramID). Folding the check
+-- in here would mean joining programs and threading a user through the two
+-- callers that legitimately have no viewer — the activity generator among them.
 -- name: GetProgramDay :one
-SELECT id, program_id, name, position, weekday
+SELECT id, program_id, name, position, weekday, archived_at
 FROM program_days
 WHERE id = $1;
 
+-- ListProgramDays returns a program's live days. Archived ones are gone from
+-- every read in the app: they exist so that a day somebody has trained can leave
+-- the program without taking the session with it, not so that they can be
+-- listed.
+--
+-- archived_at is selected even though this query filters it to NULL, so that
+-- both day reads return the same row shape and the handlers that pass a day
+-- around need one type rather than two identical ones.
 -- name: ListProgramDays :many
-SELECT id, program_id, name, position, weekday
+SELECT id, program_id, name, position, weekday, archived_at
 FROM program_days
 WHERE program_id = $1
+  AND archived_at IS NULL
 ORDER BY position;
 
 -- name: UpdateProgramDayWeekday :one
@@ -45,6 +163,7 @@ FROM program_day_exercises pde
 JOIN program_days pd ON pd.id = pde.program_day_id
 JOIN exercises e ON e.id = pde.exercise_id
 WHERE pd.program_id = $1
+  AND pd.archived_at IS NULL
 ORDER BY pd.position, pde.position;
 
 -- ListPrescriptionsByDay returns the prescribed exercises for a single day.
@@ -133,6 +252,7 @@ FROM program_day_exercise_sets s
 JOIN program_day_exercises pde ON pde.id = s.program_day_exercise_id
 JOIN program_days pd ON pd.id = pde.program_day_id
 WHERE pd.program_id = sqlc.arg('program_id')
+  AND pd.archived_at IS NULL
 ORDER BY pde.program_day_id, pde.exercise_id, s.set_number;
 
 -- ListLiftHistoryForDay is ListLiftHistory narrowed to one program day, for the

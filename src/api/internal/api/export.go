@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"gitea.homelab/gitadmin/iron-temple/api/internal/store"
 )
 
 // exportFormatVersion is the shape of the document, not the app's version.
@@ -161,8 +163,16 @@ func (s *Server) exportAccount(w http.ResponseWriter, r *http.Request) {
 	// id that no longer resolves is left as null rather than failing the
 	// export: it says the lifter has no current program, which is true enough
 	// and infinitely better than refusing to hand over the training history.
+	//
+	// Scoped to the exporting lifter, which costs nothing here: this is their own
+	// current program, so it resolves for them by definition. It matters only as
+	// the belt-and-braces version of the same rule — an export is a file that
+	// leaves the install, and it should not be the one read in the app that can
+	// name a program its reader was never shown.
 	if user.CurrentProgramID != nil {
-		if program, err := s.q.GetProgram(ctx, *user.CurrentProgramID); err == nil {
+		if program, err := s.q.GetProgram(ctx, store.GetProgramParams{
+			ID: *user.CurrentProgramID, UserID: u.ID,
+		}); err == nil {
 			name := program.Name
 			doc.Profile.CurrentProgram = &name
 		}

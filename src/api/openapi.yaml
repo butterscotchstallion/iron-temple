@@ -1146,6 +1146,23 @@ paths:
       tags: [programs]
       operationId: listPrograms
       summary: List available programs
+      description: >
+        The programs this lifter may choose from: the install's seeded ones,
+        their own, and any another lifter has shared. Somebody else's private
+        program is absent, and a program of theirs that they have archived is
+        absent until asked for.
+      parameters:
+        - name: includeArchived
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: >
+            Include the caller's own archived programs. It never widens past
+            their own: a shared program that has been archived is one its owner
+            retired, and retiring it is precisely the decision to stop offering
+            it to other people.
       responses:
         "200":
           description: Programs
@@ -3356,7 +3373,8 @@ components:
 
     ProgramSummary:
       type: object
-      required: [id, name, description, progressionKind]
+      required:
+        [id, name, description, progressionKind, ownerId, isMine, isShared, archivedAt]
       properties:
         id:
           type: integer
@@ -3368,6 +3386,45 @@ components:
           type: string
         progressionKind:
           $ref: "#/components/schemas/ProgressionKind"
+        ownerId:
+          type: integer
+          format: int64
+          nullable: true
+          description: >
+            The lifter who built this program, or null for the seeded ones, which
+            belong to the install rather than to anybody. A null owner is also
+            what makes them uneditable: every write scopes on the owner, and null
+            matches nobody.
+        ownerName:
+          type: string
+          description: >
+            The owner's display name, so a program shared with the install can be
+            attributed on the picker. Absent for the seeded programs.
+          example: Ada
+        isMine:
+          type: boolean
+          description: >
+            Whether the calling lifter owns this program, and therefore whether
+            they may edit or archive it. Read this rather than comparing ownerId
+            against the current user: ownership is the server's definition and
+            this is it.
+        isShared:
+          type: boolean
+          description: >
+            Whether the rest of the install can FIND this program. Not whether
+            they can read it — a lifter who has already trained it keeps access
+            when it is un-shared, because their sessions are bound to its days
+            either way. Un-sharing means "stop offering this to new people".
+        archivedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: >
+            When the owner retired it, or null while it is live. Like isShared
+            this governs discovery and not access: an archived program leaves the
+            picker but still resolves, still previews and can still be trained,
+            so nobody part-way through one is stranded. It cannot be deleted
+            outright — sessions reference its days.
 
     Program:
       allOf:
@@ -3402,8 +3459,11 @@ components:
         exercises:
           type: array
           description: >-
-            The program's own prescription, shared by every lifter and never
-            edited.
+            The program's own prescription — the same for everybody training
+            this program, and editable only by whoever owns it. On the seeded
+            programs that is nobody, so they are as fixed as they have always
+            been; on one a lifter built, its author. Contrast `assistance`
+            below, which is per-lifter on any program.
           items:
             $ref: "#/components/schemas/ProgramDayExercise"
         assistance:

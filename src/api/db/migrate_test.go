@@ -134,6 +134,23 @@ func TestMigrateAppliesSchemaAndSeed(t *testing.T) {
 	// Nothing seeded belongs to a user; every seeded row is shared.
 	assertCount(t, sqlDB, "SELECT count(*) FROM exercises WHERE created_by_user_id IS NOT NULL", 0)
 
+	// 0029 says the same of programs, and it is the assertion that pins the whole
+	// custom-program design: a seeded program has NO OWNER, which is what makes
+	// it uneditable — every write scopes on created_by_user_id = caller, and NULL
+	// matches nobody. If a migration ever gave a seeded program an owner, the
+	// install's catalogue would silently become one lifter's to rewrite.
+	//
+	// Asserted as all three columns at once rather than as a count of NULLs,
+	// because the visible-and-live half matters too: is_shared false would hide
+	// StrongLifts from the picker, and an archived_at would retire it.
+	assertCount(t, sqlDB,
+		"SELECT count(*) FROM programs "+
+			"WHERE created_by_user_id IS NULL AND is_shared AND archived_at IS NULL", 8)
+	// And no day arrives archived — the column exists so a day somebody has
+	// trained can leave a program without taking the session with it, not as a
+	// state anything ships in.
+	assertCount(t, sqlDB, "SELECT count(*) FROM program_days WHERE archived_at IS NULL", 18)
+
 	// 0011's rest tiers, as 0017's three-minute cap leaves them: two, not three.
 	// Asserted as a partition — the counts sum to the 58 above — because the
 	// tiers are applied as successive UPDATEs that narrow one another, and the

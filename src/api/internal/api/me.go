@@ -136,7 +136,15 @@ func (s *Server) updateMe(w http.ResponseWriter, r *http.Request) {
 		// Checked here rather than left to the foreign key: an unknown id is the
 		// caller's mistake, and a constraint violation surfacing from the UPDATE
 		// would be indistinguishable from a real failure and served as a 500.
-		if _, err := s.q.GetProgram(ctx, *req.CurrentProgramID); err != nil {
+		//
+		// Scoped to what this lifter may see, so a program belonging to somebody
+		// else is rejected on the same branch as one that does not exist. The
+		// foreign key alone would accept it, and home would then render a program
+		// the API refuses to return — a permanent "couldn't load this program"
+		// with a retry that can never succeed.
+		if _, err := s.q.GetProgram(ctx, store.GetProgramParams{
+			ID: *req.CurrentProgramID, UserID: u.ID,
+		}); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				badRequest(w, "currentProgramId must be an existing program")
 				return

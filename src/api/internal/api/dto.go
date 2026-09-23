@@ -470,6 +470,27 @@ type programSummaryDTO struct {
 	Name            string `json:"name"`
 	Description     string `json:"description"`
 	ProgressionKind string `json:"progressionKind"`
+	// OwnerID is nil for the seeded programs, which belong to the install rather
+	// than to anybody — and which is why nobody can edit them: every write scopes
+	// on created_by_user_id = caller, and NULL = anything is never true. The same
+	// trick deleteExercise uses to make the seeded catalogue undeletable.
+	OwnerID *int32 `json:"ownerId"`
+	// OwnerName attributes a shared program on the picker without a lookup per
+	// card. Empty for the seeded ones, which have nobody to attribute.
+	OwnerName string `json:"ownerName,omitempty"`
+	// IsMine is editability, and the client should read it as exactly that rather
+	// than comparing OwnerID against /me. Derived server-side so there is one
+	// definition of ownership and it is the one the write handlers enforce.
+	IsMine bool `json:"isMine"`
+	// IsShared is whether the rest of the install can FIND this program. It is
+	// not whether they can read it: somebody who has trained it keeps access when
+	// it is un-shared, because their sessions are bound to its days either way.
+	IsShared bool `json:"isShared"`
+	// ArchivedAt is nil for a live program. Like IsShared this governs discovery
+	// and not access — an archived program is gone from the picker but still
+	// resolves, still previews and can still be trained, so a lifter part-way
+	// through one is never stranded.
+	ArchivedAt *string `json:"archivedAt"`
 }
 
 // programDTO embeds the summary so its fields marshal inline (OpenAPI allOf).
@@ -483,8 +504,10 @@ type programDayDTO struct {
 	Name     string `json:"name"`
 	Position int32  `json:"position"`
 	Weekday  *int32 `json:"weekday"`
-	// Exercises is the program's own prescription: shared by every account and
-	// never edited. Assistance is the calling lifter's overlay on top of it.
+	// Exercises is the program's own prescription — the same for every account
+	// training this program, and writable only by whoever owns it: nobody, on the
+	// seeded ones. Assistance is the calling lifter's overlay on top of it, on
+	// any program.
 	Exercises  []programDayExerciseDTO   `json:"exercises"`
 	Assistance []programDayAssistanceDTO `json:"assistance"`
 }
