@@ -54,14 +54,39 @@ const (
 	// asking for a bell that is not on the rack — unless the rack goes in 2.5s,
 	// in which case 5 is exactly right and GymSteps is what says so.
 	DumbbellIncrementLb = 10.0
+	// MachineIncrementLb, CableIncrementLb and BandIncrementLb are the
+	// smallest change those admit when the lifter has not said otherwise.
+	//
+	// Written out separately rather than aliased to BarIncrementLb or to each
+	// other, even though all four are 5. They are not the same fact: the bar's
+	// is twice the lightest plate on a standard rack, a machine's is the gap
+	// between two holes somebody drilled, a cable's is the next plate in the
+	// stack, and a band's is however the manufacturer graded the set. Landing
+	// on 5 is a coincidence of American gyms, not a reason to make one of them
+	// the other — and each of these mirrors a column default in 0028, which is
+	// where a lifter overrides it.
+	MachineIncrementLb = 5.0
+	CableIncrementLb   = 5.0
+	BandIncrementLb    = 5.0
 )
 
 // deadliftName is the seeded exercise name that progresses at the faster rate.
 const deadliftName = "Deadlift"
 
-// equipmentDumbbell is the exercises.equipment value for a dumbbell lift, as
-// 0009 constrained it.
-const equipmentDumbbell = "dumbbell"
+// The exercises.equipment values that get a grid of their own, out of the seven
+// 0009 constrained and 0023 extended ('barbell', 'dumbbell', 'machine',
+// 'cable', 'bodyweight', 'band', 'other').
+//
+// Only the four that stepFor branches on are named. 'barbell', 'bodyweight' and
+// 'other' have no constant because nothing compares against them — they are
+// what the default arm is for, and a constant no branch reads is a claim that
+// some code depends on the spelling when none does.
+const (
+	equipmentDumbbell = "dumbbell"
+	equipmentMachine  = "machine"
+	equipmentCable    = "cable"
+	equipmentBand     = "band"
+)
 
 // Ladder is the set of jumps a lift's equipment can make: how much it goes up
 // after a good session, and the smallest change it admits at all.
@@ -113,20 +138,59 @@ type GymSteps struct {
 	// DumbbellLb is the smallest change a PAIR of dumbbells admits: twice the
 	// rack's per-bell step. Zero when unknown.
 	DumbbellLb float64
+	// MachineLb is the gap between two holes on a selectorized stack — 10 or
+	// 15 on most, sometimes with a 2.5 add-on. Zero when unknown.
+	MachineLb float64
+	// CableLb is the next plate up on a cable stack, commonly 5. Zero when
+	// unknown.
+	CableLb float64
+	// BandLb is the jump between two bands in a graded set, whatever the
+	// manufacturer decided it is. Zero when unknown.
+	BandLb float64
+	// Bodyweight has no field. The load on a weighted dip is a plate on a belt
+	// or a bell between the feet, so it is already described by BarLb and
+	// DumbbellLb; there is no third inventory to record. It takes the bar's,
+	// as it always has.
+}
+
+// orDefault is the "zero means not configured" rule of GymSteps, written once.
+//
+// Guarding on > 0 rather than != 0 on purpose: a negative step would be as
+// unusable as a zero one, and the database's CHECK (> 0) is the same sentence
+// said in the same direction. The engine is pure and does not get to assume its
+// caller validated anything.
+func orDefault(configured, fallback float64) float64 {
+	if configured > 0 {
+		return configured
+	}
+	return fallback
 }
 
 // stepFor picks the grid a lift is loaded on, falling back to the constants.
+//
+// A switch over the catalogue rather than the two-way if this used to be. The
+// if was not choosing between dumbbells and barbells — it was choosing between
+// dumbbells and EVERYTHING, and so a machine, a cable and a band were all being
+// told they moved in twice the lightest plate the lifter owns. That is a
+// sentence about a barbell, and it is false about a pin in a stack: see 0028.
+//
+// The default arm is deliberately wide. 'bodyweight' and 'other' take the bar's
+// because their load, when they have one, is plates or bells — and any kind the
+// catalogue grows later lands here too, prescribing what it would have
+// prescribed before the kind existed rather than zero.
 func (g GymSteps) stepFor(equipment string) float64 {
-	if equipment == equipmentDumbbell {
-		if g.DumbbellLb > 0 {
-			return g.DumbbellLb
-		}
-		return DumbbellIncrementLb
+	switch equipment {
+	case equipmentDumbbell:
+		return orDefault(g.DumbbellLb, DumbbellIncrementLb)
+	case equipmentMachine:
+		return orDefault(g.MachineLb, MachineIncrementLb)
+	case equipmentCable:
+		return orDefault(g.CableLb, CableIncrementLb)
+	case equipmentBand:
+		return orDefault(g.BandLb, BandIncrementLb)
+	default:
+		return orDefault(g.BarLb, BarIncrementLb)
 	}
-	if g.BarLb > 0 {
-		return g.BarLb
-	}
-	return BarIncrementLb
 }
 
 // LadderFor returns the jumps a lift can make, from its (seeded) exercise name,

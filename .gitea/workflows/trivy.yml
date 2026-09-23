@@ -12,6 +12,12 @@ on:
     paths:
       - "src/ui/pnpm-lock.yaml"
       - "src/ui/package.json"
+      # pnpm-workspace.yaml is where `overrides` live, and an override is how a CVE
+      # in a transitively-pinned package gets fixed at all (see the undici@7 entry).
+      # Weakening one is a security change, so it has to be able to start this scan.
+      # It almost always moves the lockfile too, which is why the gap never bit —
+      # but "usually co-changes with a watched file" is not a trigger.
+      - "src/ui/pnpm-workspace.yaml"
       - ".trivyignore.yaml"
       - ".gitea/workflows/trivy.yml"
   # Weekly sweep so a CVE disclosed against UNCHANGED deps is caught here instead of

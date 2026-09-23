@@ -7,10 +7,11 @@
   import { updateMe, type User } from "../api";
   import { fieldClass, labelClass } from "./fieldStyles";
 
-  // The gym: what the bar weighs and what is in the rack. Both used to be
-  // constants in the bundle, and both were wrong — the bar was assumed to be
-  // 45 lb, and the plate set was treated as unlimited. Every weight the app
-  // draws is loaded onto them, so they belong to the lifter, not to the build.
+  // The gym: what the bar weighs, what is in the rack, and what each stack
+  // steps by. All of it used to be constants in the bundle, and all of it was
+  // wrong — the bar was assumed to be 45 lb, the plate set was treated as
+  // unlimited, and a pin took the bar's grid. Every weight the app draws is
+  // built out of these, so they belong to the lifter, not to the build.
   let { me }: { me: User } = $props();
 
   // Local copies, untracked so they capture the gym as it stood when the
@@ -25,9 +26,23 @@
   // moves twice this, so a rack of 5s has nothing between 10 lb and a rack of
   // 2.5s has nothing between 5.
   let dumbbellStep = $state(untrack(() => me.dumbbellStepLb) ?? 5);
+  // The three stacks, as whole load. Not halved on the way in the way the rack
+  // above is: a lifter holds two bells and moves one pin. Everything that is
+  // not a barbell, a dumbbell or one of these keeps taking the bar's grid.
+  let machineStep = $state(untrack(() => me.machineStepLb) ?? 5);
+  let cableStep = $state(untrack(() => me.cableStepLb) ?? 5);
+  let bandStep = $state(untrack(() => me.bandStepLb) ?? 5);
   let gymSaving = $state(false);
   let gymError = $state<string | null>(null);
   let gymSaved = $state(false);
+
+  // Whether this gym was described by its owner or assembled by us.
+  //
+  // Read once into a local rather than through `auth.me`, so that saving flips
+  // the banner off and it stays off — `setMe` refreshes `auth.me`, and a
+  // derived value would be correct but would also flicker back on for any
+  // future path that clears the profile while this screen is mounted.
+  let confirmed = $state(untrack(() => me.equipmentConfirmedAt) != null);
 
   // The denominations a rack is built from. Owning none of one is normal, so
   // this is the menu rather than a claim about what is there.
@@ -62,6 +77,9 @@
     const saved = await updateMe({
       barWeightLb: barWeight,
       dumbbellStepLb: dumbbellStep,
+      machineStepLb: machineStep,
+      cableStepLb: cableStep,
+      bandStepLb: bandStep,
       plates,
     });
     if (saved.status !== 200) {
@@ -69,6 +87,10 @@
     } else {
       setMe(saved.data);
       gymSaved = true;
+      // Saving IS the confirmation — a lifter who just edited this has
+      // reviewed it. There is no separate "yes, this is right" button, because
+      // a button like that is one more thing to not press.
+      confirmed = true;
     }
     gymSaving = false;
   }
@@ -77,9 +99,27 @@
 <Card class="p-6">
   <h3 class="text-lg font-bold text-card-foreground">Equipment</h3>
   <p class="mt-1 text-sm text-muted-foreground">
-    Every weight the app shows gets loaded onto this bar with these plates. If
-    they're wrong, the plate maths and the warm-ups are wrong with them.
+    Every weight the app shows is built out of what's here. If any of it is
+    wrong, the plate maths, the warm-ups and the jumps between sessions are
+    wrong with it.
   </p>
+
+  <!-- Shown until a lifter saves this screen once. The app seeds a standard
+       home-gym set at registration, and until then there has been no way to
+       tell that guess from a fact — which is how somebody ended up being
+       offered a 35 lb plate they have never owned. It is a prompt, not a
+       gate: the prescriptions are running off these numbers either way. -->
+  {#if !confirmed}
+    <p
+      class="mt-3 rounded-md border border-primary/40 bg-primary/10 px-3 py-2 text-sm text-card-foreground"
+      role="status"
+    >
+      We've never checked this with you. These are the defaults we set up when
+      you joined, not what you told us — have a look and hit Save, even if it's
+      all already right.
+    </p>
+  {/if}
+
   <form class="mt-4 flex flex-col gap-4" onsubmit={saveGym}>
     {#if gymError}
       <ErrorBanner message={gymError} onDismiss={() => (gymError = null)} />
@@ -122,6 +162,86 @@
         {dumbbellStep * 2} lb at a time.
       </span>
     </label>
+
+    <!-- The stacks. Three fields and not one, because they are three
+         different facts that only look alike at the default: a
+         selectorized stack usually steps 10 or 15, a cable stack is often
+         5, and a band set jumps by whatever the manufacturer graded it.
+         Before this screen existed they all silently took the bar's step,
+         which is a sentence about plates and false about a pin. -->
+    <fieldset class="flex flex-col gap-2">
+      <legend class={labelClass}>Machines, cables and bands (lb)</legend>
+      <p class="text-xs text-muted-foreground">
+        The smallest jump each one makes. These are the whole weight, not per
+        side — a pin goes in one stack. If you don't use something, the number
+        costs you nothing.
+      </p>
+      <div class="mt-1 flex flex-col gap-2">
+        <div class="flex items-center gap-3">
+          <span
+            class="w-24 text-sm font-bold text-card-foreground"
+            id="machine-step-label"
+          >
+            Machines
+          </span>
+          <input
+            bind:value={machineStep}
+            type="number"
+            min="1"
+            max="50"
+            step="0.5"
+            required
+            aria-labelledby="machine-step-label"
+            class="{fieldClass} w-20"
+          />
+          <span class="text-xs text-muted-foreground">
+            The gap between two holes. Usually 10 or 15.
+          </span>
+        </div>
+        <div class="flex items-center gap-3">
+          <span
+            class="w-24 text-sm font-bold text-card-foreground"
+            id="cable-step-label"
+          >
+            Cables
+          </span>
+          <input
+            bind:value={cableStep}
+            type="number"
+            min="1"
+            max="50"
+            step="0.5"
+            required
+            aria-labelledby="cable-step-label"
+            class="{fieldClass} w-20"
+          />
+          <span class="text-xs text-muted-foreground">
+            The next plate up the stack. Usually 5.
+          </span>
+        </div>
+        <div class="flex items-center gap-3">
+          <span
+            class="w-24 text-sm font-bold text-card-foreground"
+            id="band-step-label"
+          >
+            Bands
+          </span>
+          <input
+            bind:value={bandStep}
+            type="number"
+            min="1"
+            max="50"
+            step="0.5"
+            required
+            aria-labelledby="band-step-label"
+            class="{fieldClass} w-20"
+          />
+          <span class="text-xs text-muted-foreground">
+            The jump between one band and the next.
+          </span>
+        </div>
+      </div>
+    </fieldset>
 
     <fieldset class="flex flex-col gap-2">
       <legend class={labelClass}>Plates you own (pairs)</legend>

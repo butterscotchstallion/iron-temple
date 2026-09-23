@@ -50,8 +50,16 @@ type exportGymDTO struct {
 	// it. Carried because it is part of what the lifter configured, and an
 	// export that omitted it would restore a gym that prescribes different
 	// weights from the one it came from.
-	DumbbellStepLb float64    `json:"dumbbellStepLb"`
-	Plates         []plateDTO `json:"plates"`
+	DumbbellStepLb float64 `json:"dumbbellStepLb"`
+	// The three stacks, carried for the same reason and as the whole load.
+	MachineStepLb float64 `json:"machineStepLb"`
+	CableStepLb   float64 `json:"cableStepLb"`
+	BandStepLb    float64 `json:"bandStepLb"`
+	// Null when this gym is still the app's guess. Exported because an archive
+	// that cannot tell a described gym from an assumed one has lost the more
+	// interesting half of the fact.
+	EquipmentConfirmedAt *time.Time `json:"equipmentConfirmedAt"`
+	Plates               []plateDTO `json:"plates"`
 }
 
 type exportBaselineDTO struct {
@@ -250,10 +258,20 @@ func (s *Server) exportGym(ctx context.Context, userID int32) (exportGymDTO, err
 	gym := exportGymDTO{
 		BarWeightLb:    numericToFloat(bar),
 		DumbbellStepLb: defaultDumbbellStepLb,
+		MachineStepLb:  defaultEquipmentStepLb,
+		CableStepLb:    defaultEquipmentStepLb,
+		BandStepLb:     defaultEquipmentStepLb,
 		Plates:         []plateDTO{},
 	}
 	if steps, err := s.q.GetGymSteps(ctx, userID); err == nil {
 		gym.DumbbellStepLb = numericToFloat(steps.DumbbellStepLb)
+		gym.MachineStepLb = numericToFloat(steps.MachineStepLb)
+		gym.CableStepLb = numericToFloat(steps.CableStepLb)
+		gym.BandStepLb = numericToFloat(steps.BandStepLb)
+	}
+	if at, err := s.q.GetEquipmentConfirmed(ctx, userID); err == nil && at.Valid {
+		confirmed := at.Time
+		gym.EquipmentConfirmedAt = &confirmed
 	}
 	for _, p := range plates {
 		gym.Plates = append(gym.Plates, plateDTO{

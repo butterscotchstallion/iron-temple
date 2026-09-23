@@ -66,6 +66,11 @@ type updateProfileRequest struct {
 	// DumbbellStepLb is per bell, as user_gym stores it and as a rack is
 	// labelled. The pair the app prescribes steps twice it.
 	DumbbellStepLb *float64 `json:"dumbbellStepLb"`
+	// The three stacks, as WHOLE load — not halved on the way in the way the
+	// rack above is. A lifter holds two dumbbells and moves one pin.
+	MachineStepLb *float64 `json:"machineStepLb"`
+	CableStepLb   *float64 `json:"cableStepLb"`
+	BandStepLb    *float64 `json:"bandStepLb"`
 	// Plates replaces the inventory whole. A pointer to a slice so that an
 	// omitted field ("leave my rack alone") stays distinguishable from an empty
 	// array ("I own no plates"), which is a thing a lifter is allowed to say.
@@ -89,6 +94,14 @@ const (
 	// no rack steps further than that between bells.
 	minDumbbellStepLb = 1
 	maxDumbbellStepLb = 25
+	// The three stacks share one pair of bounds because they fail the same way.
+	// A pound is the floor for the rack's reason — under it is a typo, not a
+	// machine — and 50 is the ceiling because no pin drops further than that
+	// between two holes, and a band set that graded itself in bigger jumps than
+	// that has stopped being a graded set. Wider than the rack's 25 because
+	// these are the whole load rather than half of it.
+	minEquipmentStepLb = 1
+	maxEquipmentStepLb = 50
 )
 
 func (s *Server) updateMe(w http.ResponseWriter, r *http.Request) {
@@ -149,6 +162,22 @@ func (s *Server) updateMe(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	for _, f := range []struct {
+		name  string
+		value *float64
+	}{
+		{"machineStepLb", req.MachineStepLb},
+		{"cableStepLb", req.CableStepLb},
+		{"bandStepLb", req.BandStepLb},
+	} {
+		if f.value == nil {
+			continue
+		}
+		if *f.value < minEquipmentStepLb || *f.value > maxEquipmentStepLb {
+			badRequest(w, f.name+" must be between 1 and 50")
+			return
+		}
+	}
 	if req.Plates != nil {
 		if len(*req.Plates) > maxPlateKinds {
 			badRequest(w, "plates may name at most 20 denominations")
@@ -202,14 +231,22 @@ func (s *Server) updateMe(w http.ResponseWriter, r *http.Request) {
 	}))
 }
 
-// writeGymSetup applies the bar and the rack, if the request named them.
+// writeGymSetup applies the bar, the rack and the stacks, if the request named
+// any of them.
 //
 // The plate inventory is replaced rather than patched, in one transaction: the
 // client edits a rack, not a row. Without the transaction a failure between the
 // delete and the last insert would leave the lifter owning some of their plates,
 // and the next prescription would round to a weight they cannot build.
+//
+// Reaching here at all is what confirms the gym. There is no separate "yes this
+// is right" field to send, because a lifter who has just edited their equipment
+// has reviewed it by definition, and a confirmation the client has to remember
+// to attach is one it can forget — leaving the app unable to tell a described
+// gym from the one it invented, which is the whole failure 0028 exists to end.
 func (s *Server) writeGymSetup(ctx context.Context, userID int32, req updateProfileRequest) error {
-	if req.BarWeightLb == nil && req.Plates == nil && req.DumbbellStepLb == nil {
+	if req.BarWeightLb == nil && req.Plates == nil && req.DumbbellStepLb == nil &&
+		req.MachineStepLb == nil && req.CableStepLb == nil && req.BandStepLb == nil {
 		return nil
 	}
 
@@ -234,6 +271,35 @@ func (s *Server) writeGymSetup(ctx context.Context, userID int32, req updateProf
 			return err
 		}
 	}
+	// The three stacks go in one write, because a gym half-described by its
+	// owner and half-assumed by us is the state 0028 exists to make visible.
+	// A request that names only one of them is still answered, though: the
+	// current row supplies the other two, so a partial PATCH means "change this
+	// stack" rather than "reset the two you did not mention to the default".
+	if req.MachineStepLb != nil || req.CableStepLb != nil || req.BandStepLb != nil {
+		steps, err := qtx.GetGymSteps(ctx, userID)
+		if err != nil {
+			return err
+		}
+		params := store.SetEquipmentStepsParams{
+			UserID:        userID,
+			MachineStepLb: steps.MachineStepLb,
+			CableStepLb:   steps.CableStepLb,
+			BandStepLb:    steps.BandStepLb,
+		}
+		if req.MachineStepLb != nil {
+			params.MachineStepLb = floatToNumeric(*req.MachineStepLb)
+		}
+		if req.CableStepLb != nil {
+			params.CableStepLb = floatToNumeric(*req.CableStepLb)
+		}
+		if req.BandStepLb != nil {
+			params.BandStepLb = floatToNumeric(*req.BandStepLb)
+		}
+		if err := qtx.SetEquipmentSteps(ctx, params); err != nil {
+			return err
+		}
+	}
 	if req.Plates != nil {
 		if err := qtx.DeleteAllPlates(ctx, userID); err != nil {
 			return err
@@ -245,6 +311,11 @@ func (s *Server) writeGymSetup(ctx context.Context, userID int32, req updateProf
 				return err
 			}
 		}
+	}
+	// Last, and inside the same transaction: a gym is only confirmed if the
+	// edit that confirmed it actually landed.
+	if err := qtx.ConfirmEquipment(ctx, userID); err != nil {
+		return err
 	}
 	return tx.Commit(ctx)
 }
@@ -563,8 +634,22 @@ func (s *Server) userDTO(ctx context.Context, u store.GetUserRow) userDTO {
 		dto.BarWeightLb = defaultBarWeightLb
 	}
 	dto.DumbbellStepLb = defaultDumbbellStepLb
+	dto.MachineStepLb = defaultEquipmentStepLb
+	dto.CableStepLb = defaultEquipmentStepLb
+	dto.BandStepLb = defaultEquipmentStepLb
 	if steps, err := s.q.GetGymSteps(ctx, u.ID); err == nil {
 		dto.DumbbellStepLb = numericToFloat(steps.DumbbellStepLb)
+		dto.MachineStepLb = numericToFloat(steps.MachineStepLb)
+		dto.CableStepLb = numericToFloat(steps.CableStepLb)
+		dto.BandStepLb = numericToFloat(steps.BandStepLb)
+	}
+	// Its own read, deliberately: the flag is kept off the row the progression
+	// engine consumes so it cannot reach a prescription by accident (0028).
+	// Unreadable means unconfirmed, which asks a lifter to check a gym that may
+	// already be right — the harmless direction to be wrong in.
+	if at, err := s.q.GetEquipmentConfirmed(ctx, u.ID); err == nil && at.Valid {
+		confirmed := at.Time
+		dto.EquipmentConfirmedAt = &confirmed
 	}
 	dto.Plates = []plateDTO{}
 	if plates, err := s.q.ListPlates(ctx, u.ID); err == nil {
@@ -586,6 +671,13 @@ const defaultBarWeightLb = 45
 // so is half of progression.DumbbellIncrementLb — this one is per bell, that
 // one is the pair. Only reached when the rack cannot be read at all.
 const defaultDumbbellStepLb = 5
+
+// defaultEquipmentStepLb mirrors the three column defaults in
+// 0028_equipment_setup, and the three engine constants they were chosen to
+// match. One constant for all three because the fallback is one fact — "we were
+// not told" — where the columns are three. Only reached when the row cannot be
+// read at all; the query itself already COALESCEs.
+const defaultEquipmentStepLb = 5
 
 // compile-time guard: auth.Hasher must keep satisfying what the handlers use.
 var _ interface {

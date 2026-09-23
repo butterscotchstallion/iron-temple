@@ -131,12 +131,112 @@ func TestGymSetupValidation(t *testing.T) {
 		{"zero dumbbell step", map[string]any{"dumbbellStepLb": 0}},
 		{"sub-pound dumbbell step", map[string]any{"dumbbellStepLb": 0.25}},
 		{"absurd dumbbell step", map[string]any{"dumbbellStepLb": 100}},
+		// The stacks share one pair of bounds, and each is checked on its own
+		// so a typo in one is not smuggled in by the other two being fine.
+		{"zero machine step", map[string]any{"machineStepLb": 0}},
+		{"sub-pound machine step", map[string]any{"machineStepLb": 0.5}},
+		{"absurd machine step", map[string]any{"machineStepLb": 100}},
+		{"zero cable step", map[string]any{"cableStepLb": 0}},
+		{"absurd cable step", map[string]any{"cableStepLb": 51}},
+		{"zero band step", map[string]any{"bandStepLb": 0}},
+		{"absurd band step", map[string]any{"bandStepLb": 51}},
+		{"one bad stack among three good ones", map[string]any{
+			"machineStepLb": 10, "cableStepLb": 5, "bandStepLb": 0,
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			e.PATCH("/me").WithJSON(tc.body).Expect().Status(http.StatusBadRequest)
 		})
 	}
+}
+
+// The three stacks a lifter cannot derive from anything else. Before 0028 every
+// one of them silently took the bar's step — twice the lightest plate owned —
+// which is a sentence about plates and false about a pin in a stack.
+func TestEquipmentStepsRoundTrip(t *testing.T) {
+	e := expect(t)
+	t.Cleanup(func() {
+		e.PATCH("/me").WithJSON(map[string]any{
+			"machineStepLb": 5, "cableStepLb": 5, "bandStepLb": 5,
+		}).Expect().Status(http.StatusOK)
+	})
+
+	// The defaults mirror 0028's columns, and are the 5 the engine already
+	// behaved like — so the migration changed nobody's prescription.
+	me := e.GET("/me").Expect().Status(http.StatusOK).JSON().Object()
+	me.Value("machineStepLb").Number().IsEqual(5)
+	me.Value("cableStepLb").Number().IsEqual(5)
+	me.Value("bandStepLb").Number().IsEqual(5)
+
+	updated := e.PATCH("/me").
+		WithJSON(map[string]any{
+			"machineStepLb": 15, "cableStepLb": 10, "bandStepLb": 20,
+		}).
+		Expect().Status(http.StatusOK).JSON().Object()
+	updated.Value("machineStepLb").Number().IsEqual(15)
+	updated.Value("cableStepLb").Number().IsEqual(10)
+	updated.Value("bandStepLb").Number().IsEqual(20)
+
+	// Stored rather than echoed.
+	reread := e.GET("/me").Expect().Status(http.StatusOK).JSON().Object()
+	reread.Value("machineStepLb").Number().IsEqual(15)
+	reread.Value("cableStepLb").Number().IsEqual(10)
+	reread.Value("bandStepLb").Number().IsEqual(20)
+
+	// A request naming one stack changes that one and leaves the others where
+	// they are. The screen sends all three, but a partial PATCH must not read
+	// as "reset the two you did not mention".
+	partial := e.PATCH("/me").
+		WithJSON(map[string]any{"cableStepLb": 2.5}).
+		Expect().Status(http.StatusOK).JSON().Object()
+	partial.Value("cableStepLb").Number().IsEqual(2.5)
+	partial.Value("machineStepLb").Number().IsEqual(15)
+	partial.Value("bandStepLb").Number().IsEqual(20)
+}
+
+// equipment_confirmed_at is the difference between a gym its owner described
+// and one the app assembled. Nothing recorded that before 0028, which is how a
+// seeded 35 lb plate passed for a fact.
+func TestSavingTheGymConfirmsTheEquipment(t *testing.T) {
+	// Its own account, deliberately. Confirmation is one-way and there is no
+	// API that undoes it, so this cannot run on the shared primary user: any
+	// earlier test that PATCHed a gym field would have confirmed it, and the
+	// first assertion below would pass or fail on test ordering.
+	e := expectAs(t, createUser(t, "unconfirmed", "Un Confirmed", "correct horse battery"))
+
+	// A fresh account is unconfirmed: every row describing its gym was written
+	// by us. Null rather than absent, so the client has one thing to test.
+	me := e.GET("/me").Expect().Status(http.StatusOK).JSON().Object()
+	me.Value("equipmentConfirmedAt").IsNull()
+
+	// An edit that names nothing about the gym is not a confirmation. A lifter
+	// changing their display name has not reviewed their plates.
+	afterName := e.PATCH("/me").
+		WithJSON(map[string]any{"displayName": "Still Unconfirmed"}).
+		Expect().Status(http.StatusOK).JSON().Object()
+	afterName.Value("equipmentConfirmedAt").IsNull()
+
+	// Saving the equipment is the confirmation — there is no separate field to
+	// send, because a confirmation the client has to remember to attach is one
+	// it can forget.
+	afterGym := e.PATCH("/me").
+		WithJSON(map[string]any{"machineStepLb": 15}).
+		Expect().Status(http.StatusOK).JSON().Object()
+	afterGym.Value("equipmentConfirmedAt").NotNull()
+
+	// It survives a re-read, and it stays confirmed through an unrelated edit.
+	e.GET("/me").Expect().Status(http.StatusOK).JSON().Object().
+		Value("equipmentConfirmedAt").NotNull()
+	e.PATCH("/me").WithJSON(map[string]any{"displayName": "Confirmed Now"}).
+		Expect().Status(http.StatusOK).JSON().Object().
+		Value("equipmentConfirmedAt").NotNull()
+
+	// Saving only the bar confirms too: the whole screen is one gym, and a
+	// lifter who reviewed the bar reviewed what was next to it.
+	e.PATCH("/me").WithJSON(map[string]any{"barWeightLb": 45}).
+		Expect().Status(http.StatusOK).JSON().Object().
+		Value("equipmentConfirmedAt").NotNull()
 }
 
 // A baseline decides where a lift starts and nothing after it: it displaces the

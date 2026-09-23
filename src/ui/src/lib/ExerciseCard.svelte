@@ -128,6 +128,19 @@
       : (sets[0]?.weightLb ?? 0),
   );
   const targetReps = $derived(sets[0]?.targetReps ?? 0);
+  // The unit the work weight is in, said out loud where it isn't obvious.
+  //
+  // Every weight in this app is the whole load, and on a pair of dumbbells that
+  // is twice the number stamped on the bell in the lifter's hand. That is fine
+  // on its own, but this card also shows the active rung per hand a line below
+  // — and a lifter reading "10 lb per hand" against a bare "40 lb" concludes
+  // their warm-up is 25% of the work weight, when it is the 50% rung of a 20 lb
+  // bell. Two units ten pixels apart, only one of them labelled.
+  //
+  // Only dumbbells get the suffix: a barbell's weight is the whole load and
+  // nothing near it says otherwise, so "lb pair" there would be noise on every
+  // card in the session to disambiguate something that is never ambiguous.
+  const weightUnit = $derived(equipment === "dumbbell" ? "lb pair" : "lb");
   // The rest this lift asks for, shown alongside the rep target because it is
   // half of the prescription and the countdown that enforces it lives in a
   // corner of the screen with no name on it.
@@ -316,7 +329,7 @@
         {#if allComplete}
           <Check class="size-4 text-primary" aria-hidden="true" />
         {/if}
-        {doneCount}/{sets.length} sets · {workWeight} lb
+        {doneCount}/{sets.length} sets · {workWeight} {weightUnit}
       </span>
     {:else}
       <div class="flex items-center gap-3">
@@ -345,7 +358,7 @@
           <span
             class="min-w-16 text-center text-sm font-bold tabular-nums text-card-foreground"
           >
-            {workWeight} lb
+            {workWeight} {weightUnit}
           </span>
           <Button
             variant="outline"

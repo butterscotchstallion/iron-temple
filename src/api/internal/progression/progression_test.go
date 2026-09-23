@@ -42,10 +42,16 @@ func TestLadderFor(t *testing.T) {
 		// the assertion that matters is the Step, which differs.
 		{"equipment wins over the name", "Deadlift", "dumbbell", GymSteps{},
 			Ladder{Increment: DumbbellIncrementLb, Step: DumbbellIncrementLb}},
-		// Anything the catalogue calls machine, cable, bodyweight or other is
-		// loaded in whatever units it is loaded in; the bar's is the only guess
-		// available and the one every lift used before ladders existed.
-		{"machine work falls back to the bar", "Leg Press", "machine", GymSteps{}, BarLadder},
+		// The stacks have their own grids since 0028, but an undescribed gym
+		// still lands on 5 for all three — which is what these prescribed back
+		// when they fell through to the bar. That equality is the point: the
+		// migration changed nobody's prescription on the day it landed.
+		{"machine work steps 5 undescribed", "Leg Press", "machine", GymSteps{}, BarLadder},
+		{"cable work steps 5 undescribed", "Cable Row", "cable", GymSteps{}, BarLadder},
+		{"band work steps 5 undescribed", "Band Pull-Apart", "band", GymSteps{}, BarLadder},
+		// Bodyweight and 'other' genuinely do take the bar's, because their
+		// load is plates or bells when they have one at all.
+		{"bodyweight takes the bar's", "Weighted Dip", "bodyweight", GymSteps{}, BarLadder},
 		{"unknown equipment falls back to the bar", "Something New", "", GymSteps{}, BarLadder},
 
 		// A described gym changes the grid but not the pace. Owning 1.25s does
@@ -71,6 +77,33 @@ func TestLadderFor(t *testing.T) {
 		// always done; it is only now expressible for a bar too.
 		{"a coarse bar advances to what it can build", "Squat", "barbell",
 			GymSteps{BarLb: 20}, Ladder{Increment: 20, Step: 20}},
+
+		// The bug 0028 was written for. A lifter who buys 1.25 lb plates has a
+		// bar that steps 2.5 — and before the stacks had grids of their own,
+		// that made the leg press step 2.5 too, which no pin can make. Now the
+		// fine bar and the coarse stack coexist.
+		{"fine plates do not make a machine finer", "Leg Press", "machine",
+			GymSteps{BarLb: 2.5, MachineLb: 15}, Ladder{Increment: 15, Step: 15}},
+		{"a described cable stack is its own grid", "Cable Row", "cable",
+			GymSteps{BarLb: 2.5, CableLb: 10}, Ladder{Increment: 10, Step: 10}},
+		{"a described band set is its own grid", "Band Pull-Apart", "band",
+			GymSteps{BarLb: 2.5, BandLb: 20}, Ladder{Increment: 20, Step: 20}},
+		// And it does not run the other way either: describing a stack leaves
+		// the barbell alone.
+		{"a described machine leaves the bar alone", "Squat", "barbell",
+			GymSteps{BarLb: 2.5, MachineLb: 15},
+			Ladder{Increment: IncrementDefault, Step: 2.5}},
+		// Each stack falls back on its own, exactly as the bar and the rack do.
+		{"an unconfigured cable still steps 5", "Cable Row", "cable",
+			GymSteps{MachineLb: 15}, BarLadder},
+		// A stack finer than the pace keeps the pace, the way a fine bar does.
+		{"a fine machine keeps the pace", "Leg Press", "machine",
+			GymSteps{MachineLb: 2.5}, Ladder{Increment: IncrementDefault, Step: 2.5}},
+		// Bodyweight is deliberately NOT given a field, so a described gym
+		// cannot accidentally give it one: it keeps taking the bar's.
+		{"bodyweight follows the bar, not the stacks", "Weighted Dip", "bodyweight",
+			GymSteps{BarLb: 2.5, MachineLb: 15},
+			Ladder{Increment: IncrementDefault, Step: 2.5}},
 	}
 
 	for _, tt := range tests {

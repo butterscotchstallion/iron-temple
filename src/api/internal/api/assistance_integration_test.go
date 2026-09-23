@@ -786,6 +786,64 @@ func TestAssistanceOnAnUndescribedRackIsUnchanged(t *testing.T) {
 		Value("weightLb").Number().IsEqual(40)
 }
 
+// The same argument for a machine, which is the lift 0028 was written for.
+//
+// A leg press does not move in twice the lightest plate the lifter owns — it
+// moves in whatever gap somebody drilled in the stack — but that is exactly
+// what the engine prescribed for it, because every kind that was not a dumbbell
+// fell through to the bar's grid. Described, it advances by what the pin can
+// actually reach.
+//
+// The fine plate rack is the half that makes the point. It drags the bar's step
+// down to 2.5, and before this the machine went with it: buying small plates
+// made the leg press finer, which is false about a stack.
+func TestAssistanceAdvancesByWhatTheStackCanBuild(t *testing.T) {
+	e := expect(t)
+	programID, dayID := firstProgramAndDay(e)
+	pressID := exerciseIDByName(t, e, "Leg Press")
+
+	e.PATCH("/me").WithJSON(map[string]any{
+		"machineStepLb": 15,
+		// Plates fine enough that the bar steps 2.5, so a machine still taking
+		// the bar's grid would advance by 5 rather than 15.
+		"plates": []map[string]any{{"plateLb": 45, "pairs": 2}, {"plateLb": 1.25, "pairs": 2}},
+	}).Expect().Status(http.StatusOK)
+	t.Cleanup(func() {
+		e.PATCH("/me").WithJSON(map[string]any{
+			"machineStepLb": 5,
+			"plates": []map[string]any{
+				{"plateLb": 45, "pairs": 2}, {"plateLb": 35, "pairs": 2},
+				{"plateLb": 25, "pairs": 2}, {"plateLb": 10, "pairs": 2},
+				{"plateLb": 5, "pairs": 2}, {"plateLb": 2.5, "pairs": 2},
+			},
+		}).Expect()
+	})
+
+	created := e.POST(fmt.Sprintf("/programs/%d/days/%d/assistance", programID, dayID)).
+		WithJSON(map[string]any{
+			"exerciseId": pressID, "sets": 3, "reps": 8, "weightLb": 90,
+			"repMin": 8, "repMax": 12,
+		}).
+		Expect().Status(http.StatusCreated).JSON().Object()
+	assistanceID := int(created.Value("id").Number().Raw())
+	t.Cleanup(func() {
+		e.DELETE(fmt.Sprintf("/programs/%d/days/%d/assistance/%d",
+			programID, dayID, assistanceID)).Expect()
+	})
+	created.Value("equipment").String().IsEqual("machine")
+
+	session := startSession(t, e, dayID)
+	sessionID := int(session.Value("id").Number().Raw())
+	for _, set := range sessionSetsFor(session, pressID) {
+		logSetAt(e, sessionID, int(set.Value("id").Number().Raw()), 12, 90, true)
+	}
+
+	// 105, not 92.5 and not 95: the next hole up, which is the only weight
+	// this machine has.
+	assistancePreview(e, programID, dayID, pressID).
+		Value("weightLb").Number().IsEqual(105)
+}
+
 // A lift added from inside a workout joins the program day, so it has to be
 // able to carry a rep range — without one the row is created with NULLs and
 // nothing will ever move its weight. That was true of every accessory a lifter

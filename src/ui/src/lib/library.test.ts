@@ -249,10 +249,39 @@ describe("equipmentStepLb", () => {
     expect(equipmentStepLb("barbell")).toBe(5);
   });
 
-  it("falls back to the bar for equipment this app does not model", () => {
+  // The stacks have grids of their own since 0028, but an undescribed gym
+  // still answers 5 for every one of them — which is what they answered back
+  // when they fell through to the bar. That equality is deliberate: the change
+  // moved nobody's numbers on the day it landed.
+  it("answers 5 for every kind in an undescribed gym", () => {
     for (const kind of ["machine", "cable", "bodyweight", "band", "other", "kettlebell", ""]) {
       expect(equipmentStepLb(kind)).toBe(5);
     }
+  });
+
+  // The bug this exists for. A lifter who owns 1.25s has a bar that steps 2.5,
+  // and that used to drag the leg press down with it — buying small plates
+  // does not make a pin drop into holes that are not there.
+  it("does not let fine plates make a stack finer", () => {
+    const fineBarCoarseStacks = {
+      barLb: 2.5,
+      machineLb: 15,
+      cableLb: 10,
+      bandLb: 20,
+    };
+    expect(equipmentStepLb("machine", fineBarCoarseStacks)).toBe(15);
+    expect(equipmentStepLb("cable", fineBarCoarseStacks)).toBe(10);
+    expect(equipmentStepLb("band", fineBarCoarseStacks)).toBe(20);
+    // ...and the bar keeps its own, which is the other direction of the same
+    // claim.
+    expect(equipmentStepLb("barbell", fineBarCoarseStacks)).toBe(2.5);
+  });
+
+  // Bodyweight is deliberately given no field of its own: its load is a plate
+  // on a belt or a bell between the feet, both already described.
+  it("keeps bodyweight on the bar's grid", () => {
+    expect(equipmentStepLb("bodyweight", { barLb: 2.5, machineLb: 15 })).toBe(2.5);
+    expect(equipmentStepLb("other", { barLb: 2.5, machineLb: 15 })).toBe(2.5);
   });
 
   // A described gym overrides both. This is the case the whole change exists
@@ -263,10 +292,13 @@ describe("equipmentStepLb", () => {
     expect(equipmentStepLb("barbell", { barLb: 2.5 })).toBe(2.5);
   });
 
-  // Each half falls back on its own, so knowing one does not imply the other.
+  // Each kind falls back on its own, so knowing one does not imply the others.
   it("falls back per kind, not all or nothing", () => {
     expect(equipmentStepLb("dumbbell", { barLb: 2.5 })).toBe(10);
     expect(equipmentStepLb("barbell", { dumbbellLb: 5 })).toBe(5);
+    expect(equipmentStepLb("cable", { machineLb: 15 })).toBe(5);
+    expect(equipmentStepLb("machine", { cableLb: 10 })).toBe(5);
+    expect(equipmentStepLb("band", { machineLb: 15, cableLb: 10 })).toBe(5);
   });
 
   // Zero is "not configured", not "moves by nothing" — a step of 0 downstream
@@ -274,5 +306,8 @@ describe("equipmentStepLb", () => {
   it("treats a zero step as unconfigured", () => {
     expect(equipmentStepLb("dumbbell", { dumbbellLb: 0 })).toBe(10);
     expect(equipmentStepLb("barbell", { barLb: 0 })).toBe(5);
+    expect(equipmentStepLb("machine", { machineLb: 0 })).toBe(5);
+    expect(equipmentStepLb("cable", { cableLb: 0 })).toBe(5);
+    expect(equipmentStepLb("band", { bandLb: 0 })).toBe(5);
   });
 });
