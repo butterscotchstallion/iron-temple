@@ -2,6 +2,8 @@
   import { onMount } from "svelte";
   import { Card } from "$lib/components/ui/card";
   import ErrorCard from "../lib/ErrorCard.svelte";
+  import Loading from "../lib/skeleton/Loading.svelte";
+  import SkeletonRecap from "../lib/skeleton/SkeletonRecap.svelte";
   import RecapHeroTiles from "../lib/RecapHeroTiles.svelte";
   import RecapComparisons from "../lib/RecapComparisons.svelte";
   import RecapHighlights from "../lib/RecapHighlights.svelte";
@@ -131,10 +133,9 @@
 {:else if failed}
   <ErrorCard message="Couldn't load this session." onRetry={load} />
 {:else if loading || !recap || !tiles}
-  <div class="flex flex-col gap-4">
-    <Card class="h-24 animate-pulse" aria-hidden="true"></Card>
-    <Card class="h-40 animate-pulse" aria-hidden="true"></Card>
-  </div>
+  <Loading label="Loading this session" class="flex flex-col gap-4">
+    <SkeletonRecap centered />
+  </Loading>
 {:else}
   <div class="flex flex-col gap-4">
     <div class="text-center">

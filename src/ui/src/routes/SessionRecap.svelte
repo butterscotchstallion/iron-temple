@@ -14,6 +14,8 @@
   import Share2 from "@lucide/svelte/icons/share-2";
   import CloudOff from "@lucide/svelte/icons/cloud-off";
   import ErrorCard from "../lib/ErrorCard.svelte";
+  import Loading from "../lib/skeleton/Loading.svelte";
+  import SkeletonRecap from "../lib/skeleton/SkeletonRecap.svelte";
   import ShareCardDialog from "../lib/ShareCardDialog.svelte";
   import RecapHeroTiles from "../lib/RecapHeroTiles.svelte";
   import RecapComparisons from "../lib/RecapComparisons.svelte";
@@ -204,9 +206,9 @@
 
 <div class="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4">
   {#if loading}
-    <Card class="h-24 animate-pulse" aria-hidden="true"></Card>
-    <Card class="h-28 animate-pulse" aria-hidden="true"></Card>
-    <Card class="h-56 animate-pulse" aria-hidden="true"></Card>
+    <Loading label="Loading your recap" class="flex flex-col gap-4">
+      <SkeletonRecap />
+    </Loading>
   {:else if failed || !tiles}
     <ErrorCard message="Couldn't load the recap." onRetry={load} />
   {:else}

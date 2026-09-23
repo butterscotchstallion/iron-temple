@@ -16,6 +16,9 @@
   import CalendarHeatmap from "../lib/CalendarHeatmap.svelte";
   import FeedCard from "../lib/FeedCard.svelte";
   import ConfirmEquipmentCard from "../lib/ConfirmEquipmentCard.svelte";
+  import Loading from "../lib/skeleton/Loading.svelte";
+  import Skeleton from "../lib/skeleton/Skeleton.svelte";
+  import SkeletonProgram from "../lib/skeleton/SkeletonProgram.svelte";
 
   // The "normal flow" skips choosing a program: land on the one the user last
   // opened. First-time users (nothing saved, no history) get the picker instead.
@@ -94,7 +97,28 @@
        confirmed, which for most lifters is after one visit to the profile. -->
   <ConfirmEquipmentCard />
 
-  {#if sessions.length > 0}
+  <!-- The heatmap is the reason this branch exists rather than sitting outside
+       the loading check. It is drawn from the session list, so it used to render
+       nothing until that landed and then appear ABOVE the workout — shoving the
+       whole screen down by its own height at the moment the lifter had started
+       reading it. Holding its space bets that they have trained before, which is
+       true of everyone but a brand-new account.
+
+       The streak card above it is NOT reserved, and that is the same reasoning
+       pointing the other way: it draws nothing below a three-session streak, so
+       a lifter coming back from a layoff would get a hole where it never
+       appears. A card that might not exist is not worth holding space for. -->
+  {#if loading}
+    <Loading label="Loading your training" class="flex flex-col gap-4">
+      <Card class="p-4">
+        <Skeleton text="xs" class="mb-0.5 w-28" />
+        <!-- The grid's own height is its rows, which depend on which weekdays
+             this lifter trains — it collapses to the ones they use. Seventy-two
+             pixels is the four-row case, which is the common one. -->
+        <Skeleton class="h-[72px] w-full" />
+      </Card>
+    </Loading>
+  {:else if sessions.length > 0}
     <div class="flex flex-col gap-4">
       <StreakCard {streak} />
       <Card class="p-4">
@@ -109,7 +133,13 @@
   {/if}
 
   {#if loading}
-    <Card class="h-40 animate-pulse"></Card>
+    <!-- The same placeholder ProgramDetail draws for itself, which is what keeps
+         the handover still: this route's request finishes, ProgramDetail mounts
+         and starts its own, and the screen holds rather than flickering between
+         two different guesses at the same layout. -->
+    <Loading label="Loading your workout" class="flex flex-col gap-6">
+      <SkeletonProgram />
+    </Loading>
   {:else if failed}
     <ErrorCard message="Couldn't load your workout." onRetry={load} />
   {:else if currentProgramId != null}

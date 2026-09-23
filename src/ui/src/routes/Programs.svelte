@@ -11,6 +11,8 @@
   import Plus from "@lucide/svelte/icons/plus";
   import Archive from "@lucide/svelte/icons/archive";
   import ErrorCard from "../lib/ErrorCard.svelte";
+  import Loading from "../lib/skeleton/Loading.svelte";
+  import Skeleton from "../lib/skeleton/Skeleton.svelte";
 
   let programs = $state<ProgramSummary[]>([]);
   // The caller's own retired programs, fetched only when asked for. Hidden is
@@ -26,7 +28,9 @@
   let loading = $state(true);
   let failed = $state(false);
 
-  // Placeholder cards shown while the request is in flight.
+  // Placeholder cards shown while the request is in flight. Three fills the
+  // grid's first row exactly, which is the point: a count short of a row leaves
+  // the "build your own" card to jump columns as the real ones land.
   const skeletons = [0, 1, 2];
 
   async function load() {
@@ -60,9 +64,22 @@
 
   <section class="grid gap-4 sm:grid-cols-3">
     {#if loading}
-      {#each skeletons as n (n)}
-        <Card class="h-24 animate-pulse" aria-hidden="true"></Card>
-      {/each}
+      <!-- The region needs an element to hang `role="status"` on, and that
+           element would otherwise be one grid cell holding all three cards. So
+           it spans the row and repeats the grid, which lays the placeholders out
+           exactly where the real cards will land. -->
+      <Loading label="Loading programs" class="col-span-full grid gap-4 sm:grid-cols-3">
+        {#each skeletons as n (n)}
+          <!-- Mirrors the real card below: same p-5, a lg heading and an sm
+               subtitle with the same mt-1 between them. The attribution line
+               under those is not reserved — the seeded programs carry none, so
+               it is absent on most cards a fresh install draws. -->
+          <Card class="p-5">
+            <Skeleton text="lg" class="w-2/3" />
+            <Skeleton text="sm" class="mt-1 w-5/6" />
+          </Card>
+        {/each}
+      </Loading>
     {:else if failed}
       <ErrorCard
         class="col-span-full"

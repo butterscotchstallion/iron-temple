@@ -22,6 +22,19 @@
   // A failure is silence for the same reason. The workout is why the page was
   // opened; an error card about other people's sessions underneath it would be
   // louder than the thing it failed to fetch.
+  //
+  // WHICH IS ALSO WHY THIS IS THE ONE API CALL IN THE APP WITH NO LOADING
+  // INDICATOR, and that is a decision rather than an oversight. A skeleton has
+  // to reserve space for something that will arrive; here the likeliest outcome
+  // is that nothing does — a lone lifter's feed is empty by construction — so
+  // the placeholder would be a heading and four grey rows that appear on Home,
+  // announce "Around the gym" to a screen reader, and then vanish. It would
+  // also be the only skeleton here that CAUSES the reflow it exists to prevent,
+  // since the space it held would collapse rather than fill.
+  //
+  // It costs a small shift at the FOOT of Home on an install that has other
+  // lifters, below the workout and usually below the fold. That is the cheapest
+  // place in the app to pay it.
   let items = $state<FeedEntry[]>([]);
 
   // Four rows: enough to read as recent activity, short enough not to push the

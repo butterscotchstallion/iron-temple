@@ -4,6 +4,8 @@
   import { Button } from "$lib/components/ui/button";
   import ErrorCard from "../lib/ErrorCard.svelte";
   import FeedList from "../lib/FeedList.svelte";
+  import Loading from "../lib/skeleton/Loading.svelte";
+  import SkeletonRows from "../lib/skeleton/SkeletonRows.svelte";
   import { getFeed, type FeedEntry } from "../lib/api";
 
   // Everything the other lifters have logged, newest first.
@@ -63,7 +65,13 @@
   </div>
 
   {#if loading}
-    <Card class="h-40 animate-pulse" aria-hidden="true"></Card>
+    <!-- The same Card wrapping the same rows FeedList draws, at the same 36px
+         avatar, so the first page arrives into the space already held for it. -->
+    <Loading label="Loading the feed">
+      <Card class="p-4">
+        <SkeletonRows rows={6} />
+      </Card>
+    </Loading>
   {:else if failed}
     <ErrorCard message="Couldn't load the feed." onRetry={load} />
   {:else if items.length === 0}

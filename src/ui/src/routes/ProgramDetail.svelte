@@ -38,6 +38,8 @@
   import { Badge } from "$lib/components/ui/badge";
   import ErrorCard from "../lib/ErrorCard.svelte";
   import ErrorBanner from "../lib/ErrorBanner.svelte";
+  import Loading from "../lib/skeleton/Loading.svelte";
+  import SkeletonProgram from "../lib/skeleton/SkeletonProgram.svelte";
   import AssistancePicker from "../lib/AssistancePicker.svelte";
   import { equipmentStepLb } from "../lib/library";
   import { gymSteps } from "../lib/gym.svelte";
@@ -573,7 +575,9 @@
 
 <div class="flex flex-col gap-6">
   {#if loading}
-    <Card class="h-40 animate-pulse"></Card>
+    <Loading label="Loading your workout" class="flex flex-col gap-6">
+      <SkeletonProgram />
+    </Loading>
   {:else if failed}
     <ErrorCard message="Couldn't load this program." onRetry={load} />
   {:else if program}

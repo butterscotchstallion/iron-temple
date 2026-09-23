@@ -3,6 +3,9 @@
   import { Card } from "$lib/components/ui/card";
   import Avatar from "../lib/Avatar.svelte";
   import ErrorCard from "../lib/ErrorCard.svelte";
+  import Loading from "../lib/skeleton/Loading.svelte";
+  import Skeleton from "../lib/skeleton/Skeleton.svelte";
+  import SkeletonRows from "../lib/skeleton/SkeletonRows.svelte";
   import { auth } from "../lib/auth.svelte";
   import { formatPercent } from "../lib/racked";
   import { formatVolume } from "../lib/volume";
@@ -32,6 +35,10 @@
   let loading = $state(true);
   let failed = $state(false);
   let selected = $state(0);
+
+  // One chip per board. Five, because buildBoards returns exactly five —
+  // getting this wrong is a row of chips that wraps or unwraps as they land.
+  const SKELETON_BOARDS = [0, 1, 2, 3, 4];
 
   async function load() {
     failed = false;
@@ -127,7 +134,23 @@
   </div>
 
   {#if loading}
-    <Card class="h-56 animate-pulse" aria-hidden="true"></Card>
+    <!-- The metric chips go too, and they matter: they sit between the period
+         switcher and the board, so leaving them out let the whole board slide
+         up a row and back down again on every period change. -->
+    <Loading label="Loading the leaderboard">
+      <div class="flex flex-wrap justify-center gap-1.5">
+        {#each SKELETON_BOARDS as board (board)}
+          <Skeleton class="h-[26px] w-24 rounded-full" />
+        {/each}
+      </div>
+      <Card class="p-4">
+        <SkeletonRows rows={3} avatar="size-8" rowClass="py-2.5" trailing />
+        <!-- The board's own footnote, which every board carries. -->
+        <div class="mt-3 border-t border-border/60 pt-3">
+          <Skeleton text="xs" class="w-3/4" />
+        </div>
+      </Card>
+    </Loading>
   {:else if failed}
     <ErrorCard message="Couldn't load the leaderboard." onRetry={load} />
   {:else if alone}

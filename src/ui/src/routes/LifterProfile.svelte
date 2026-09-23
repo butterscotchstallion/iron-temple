@@ -4,6 +4,9 @@
   import Avatar from "../lib/Avatar.svelte";
   import CalendarHeatmap from "../lib/CalendarHeatmap.svelte";
   import ErrorCard from "../lib/ErrorCard.svelte";
+  import Loading from "../lib/skeleton/Loading.svelte";
+  import Skeleton from "../lib/skeleton/Skeleton.svelte";
+  import SkeletonTiles from "../lib/skeleton/SkeletonTiles.svelte";
   import LiftVolumeBars from "../lib/LiftVolumeBars.svelte";
   import MuscleVolumeBars from "../lib/MuscleVolumeBars.svelte";
   import { formatLongDate } from "../lib/date";
@@ -114,10 +117,21 @@
 {:else if failed}
   <ErrorCard message="Couldn't load this lifter." onRetry={load} />
 {:else if loading || !profile}
-  <div class="flex flex-col gap-4">
-    <Card class="h-28 animate-pulse" aria-hidden="true"></Card>
-    <Card class="h-40 animate-pulse" aria-hidden="true"></Card>
-  </div>
+  <!-- The identity card and the two lifetime figures, which are the part of
+       this page that always draws. The month's statistics below them are
+       skipped: they come from a second request that is allowed to fail on its
+       own, and a lifter who has logged nothing this month has no section there
+       to hold space for. -->
+  <Loading label="Loading this lifter" class="flex flex-col gap-4">
+    <Card class="flex items-center gap-4 p-6">
+      <Skeleton class="size-14 shrink-0 rounded-full" />
+      <div class="min-w-0 flex-1">
+        <Skeleton text="2xl" class="w-44" />
+        <Skeleton text="sm" class="mt-1 w-60" />
+      </div>
+    </Card>
+    <SkeletonTiles count={2} value="xl" class="grid-cols-2 sm:grid-cols-2" />
+  </Loading>
 {:else}
   <div class="flex flex-col gap-4">
     <!-- Who -->

@@ -9,6 +9,9 @@
   import Trophy from "@lucide/svelte/icons/trophy";
   import { auth } from "../lib/auth.svelte";
   import ErrorCard from "../lib/ErrorCard.svelte";
+  import Loading from "../lib/skeleton/Loading.svelte";
+  import Skeleton from "../lib/skeleton/Skeleton.svelte";
+  import SkeletonTiles from "../lib/skeleton/SkeletonTiles.svelte";
   import ShareCardDialog from "../lib/ShareCardDialog.svelte";
   import { shareCardContent } from "../lib/shareCard";
   import { shareCardFilename } from "../lib/shareImage";
@@ -46,6 +49,10 @@
   let loading = $state(true);
   let failed = $state(false);
   let sharing = $state(false);
+
+  // Most improved, heaviest set, fastest session — the three hero cards the
+  // placeholder below holds space for.
+  const SKELETON_HEROES = [0, 1, 2];
 
   async function load() {
     failed = false;
@@ -234,8 +241,33 @@
   {/if}
 
   {#if loading}
-    <Card class="h-40 animate-pulse" aria-hidden="true"></Card>
-    <Card class="h-56 animate-pulse" aria-hidden="true"></Card>
+    <!-- The page's opening three: the tonnage headline, the four totals, and the
+         row of hero moments. The first two always draw; the heroes are nullable
+         server-side but a period with any training in it usually has all three,
+         so they are the last thing worth holding space for.
+
+         Everything below them is a chart the period may not have the data for —
+         a lift trend needs two sessions of the same movement, a bodyweight line
+         needs two weigh-ins — so reserving there would guess long on exactly the
+         periods that are quickest to load. -->
+    <Loading label="Loading your stats" class="flex flex-col gap-4">
+      <Card class="flex flex-col items-center p-6 text-center">
+        <Skeleton text="xs" class="w-28" />
+        <Skeleton text="5xl" class="mt-1 w-48" />
+        <Skeleton text="sm" class="mt-2 w-64" />
+      </Card>
+      <SkeletonTiles count={4} />
+      <section class="grid gap-4 sm:grid-cols-3">
+        {#each SKELETON_HEROES as hero (hero)}
+          <Card class="p-4">
+            <Skeleton text="xs" class="w-24" />
+            <Skeleton text="sm" class="mt-1 w-32" />
+            <Skeleton text="2xl" class="w-28" />
+            <Skeleton text="xs" class="w-20" />
+          </Card>
+        {/each}
+      </section>
+    </Loading>
   {:else if failed || !report}
     <ErrorCard message="Couldn't load your stats." onRetry={load} />
   {:else if !hasSessions}

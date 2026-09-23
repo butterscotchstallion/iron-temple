@@ -38,10 +38,16 @@
   import * as AlertDialog from "$lib/components/ui/alert-dialog";
   import ErrorCard from "../lib/ErrorCard.svelte";
   import ErrorBanner from "../lib/ErrorBanner.svelte";
+  import Loading from "../lib/skeleton/Loading.svelte";
+  import Skeleton from "../lib/skeleton/Skeleton.svelte";
   import { track } from "../lib/pendingWrites.svelte";
 
   let { params }: { params?: { id?: string } } = $props();
   let sessionId = $derived(Number(params?.id));
+
+  // Lifts in the loading placeholder. Every program day shipped here prescribes
+  // three or four movements before any assistance is bolted on.
+  const SKELETON_LIFTS = [0, 1, 2];
 
   let session = $state<Session | null>(null);
   let loading = $state(true);
@@ -568,7 +574,37 @@
   {/if}
 
   {#if loading}
-    <Card class="h-40 animate-pulse"></Card>
+    <!-- The session header, the weigh-in box and a card per lift. Sized against
+         ExerciseCard rather than against a round number: this screen is opened
+         standing at a rack, and a layout that settles a beat after the first tap
+         is how a rep gets logged against the wrong set. -->
+    <Loading label="Loading this workout" class="flex flex-col gap-6">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <Skeleton text="2xl" class="w-52" />
+          <Skeleton text="sm" class="mt-1 w-64" />
+          <Skeleton text="xs" class="mt-1 w-32" />
+        </div>
+        <Skeleton class="h-8 w-36 shrink-0 rounded-md" />
+      </div>
+      <Card class="p-5">
+        <Skeleton text="lg" class="w-28" />
+        <Skeleton class="mt-3 h-11 w-40 rounded-md" />
+      </Card>
+      {#each SKELETON_LIFTS as lift (lift)}
+        <Card class="p-5">
+          <div class="flex items-center justify-between gap-3">
+            <Skeleton text="lg" class="w-40" />
+            <Skeleton text="sm" class="w-16" />
+          </div>
+          <div class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3">
+            <Skeleton class="h-12 w-12 rounded-full" />
+            <Skeleton class="h-12 w-12 rounded-full" />
+            <Skeleton class="h-12 w-12 rounded-full" />
+          </div>
+        </Card>
+      {/each}
+    </Loading>
   {:else if failed}
     <ErrorCard message="Couldn't load this session." onRetry={load} />
   {:else if session}

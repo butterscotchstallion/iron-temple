@@ -29,6 +29,8 @@
   import * as AlertDialog from "$lib/components/ui/alert-dialog";
   import ErrorCard from "../lib/ErrorCard.svelte";
   import ErrorBanner from "../lib/ErrorBanner.svelte";
+  import Loading from "../lib/skeleton/Loading.svelte";
+  import Skeleton from "../lib/skeleton/Skeleton.svelte";
   import PrescriptionPicker from "../lib/PrescriptionPicker.svelte";
   import OrderControls from "../lib/OrderControls.svelte";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
@@ -50,6 +52,14 @@
   let { params }: { params?: { id?: string } } = $props();
   let programId = $derived(Number(params?.id));
 
+  // The loading placeholder: name, description and the share tickbox, then a
+  // card per workout day carrying its lifts. Counts matched to a program built
+  // here — the editor is reached from a program you own, and the ones lifters
+  // build run to three or four days.
+  const SKELETON_FIELDS = [0, 1, 2];
+  const SKELETON_DAYS = [0, 1, 2];
+  const SKELETON_LIFTS = [0, 1, 2, 3];
+
   let program = $state<Program | null>(null);
   let loading = $state(true);
   let failed = $state(false);
@@ -62,6 +72,8 @@
   let isShared = $state(false);
   let savingMeta = $state(false);
   let metaSaved = $state(false);
+  // Any write on this screen is in flight. See write() for why it is one flag.
+  let writing = $state(false);
 
   let newDayName = $state("");
   let addingDayTo = $state<number | null>(null);
@@ -72,7 +84,14 @@
     "rounded-md border border-input bg-transparent px-3 py-2 text-sm outline-none transition focus:border-primary";
 
   async function load() {
-    loading = true;
+    // Only blank the screen when there is nothing on it yet. This also runs as a
+    // REFRESH — renaming a day and removing one both answer 204, so the program
+    // has to be re-read — and an unconditional `true` meant those replaced the
+    // whole editor with its placeholder and put it back a moment later. That was
+    // survivable while the placeholder was one small card; against a
+    // full-height one it would flash the page out from under the rename that
+    // caused it.
+    loading = program === null;
     failed = false;
     const result = await getProgram(programId);
     loading = false;
@@ -113,7 +132,14 @@
     expected: number[] = [200, 201],
   ): Promise<boolean> {
     error = null;
+    // One flag for every write on this screen, set here rather than at the six
+    // call sites. Each of them redraws the whole program from the response, so
+    // any second write started before the first lands is aimed at positions and
+    // ids that are about to be replaced — and every one of these controls was
+    // live throughout, with nothing on screen to say a request was out.
+    writing = true;
     const result = await call();
+    writing = false;
     if (!expected.includes(result.status)) {
       // The server's message names the actual reason — a taken name, a lift
       // already on the day — which is more use than a generic failure.
@@ -248,7 +274,37 @@
   </a>
 
   {#if loading}
-    <Card class="h-40 animate-pulse"></Card>
+    <!-- The heading, the details form and a card per day. A single h-40 box used
+         to stand in for the lot, so opening the editor moved everything below it
+         by most of a screen once the program arrived. -->
+    <Loading label="Loading this program" class="flex flex-col gap-4">
+      <Skeleton text="2xl" class="w-56" />
+      <Card class="p-5">
+        <div class="flex flex-col gap-3">
+          {#each SKELETON_FIELDS as field (field)}
+            <div class="flex flex-col gap-1">
+              <Skeleton text="sm" class="w-20" />
+              <Skeleton class="h-[38px] w-full" />
+            </div>
+          {/each}
+          <Skeleton class="h-8 w-16 rounded-md" />
+        </div>
+      </Card>
+      <Skeleton text="lg" class="w-16" />
+      {#each SKELETON_DAYS as day (day)}
+        <Card class="p-5">
+          <Skeleton class="h-[38px] w-full" />
+          <ul class="mt-3 flex flex-col gap-1.5">
+            {#each SKELETON_LIFTS as lift (lift)}
+              <li class="flex flex-col">
+                <Skeleton class="h-[18px] w-40" />
+                <Skeleton class="h-[15px] w-28" />
+              </li>
+            {/each}
+          </ul>
+        </Card>
+      {/each}
+    </Loading>
   {:else if failed || !program}
     <ErrorCard message="Couldn't load this program." onRetry={load} />
   {:else}
@@ -305,13 +361,15 @@
             label={day.name}
             isFirst={dayIndex === 0}
             isLast={dayIndex === program.days.length - 1}
+            busy={writing}
             onUp={() => moveDay(day, "up")}
             onDown={() => moveDay(day, "down")}
           />
           <button
             type="button"
             aria-label="Remove {day.name}"
-            class="rounded-md p-1.5 text-muted-foreground transition hover:text-destructive"
+            class="rounded-md p-1.5 text-muted-foreground transition hover:text-destructive disabled:opacity-40"
+            disabled={writing}
             onclick={() => (confirmRemoveDay = day)}
           >
             <Trash2 class="size-4" aria-hidden="true" />
@@ -334,13 +392,15 @@
                   label={lift.exerciseName}
                   isFirst={liftIndex === 0}
                   isLast={liftIndex === day.exercises.length - 1}
+                  busy={writing}
                   onUp={() => moveLift(day, lift.id, "up")}
                   onDown={() => moveLift(day, lift.id, "down")}
                 />
                 <button
                   type="button"
                   aria-label="Remove {lift.exerciseName}"
-                  class="rounded-md p-1.5 text-muted-foreground transition hover:text-destructive"
+                  class="rounded-md p-1.5 text-muted-foreground transition hover:text-destructive disabled:opacity-40"
+                  disabled={writing}
                   onclick={() => removeLift(day, lift.id)}
                 >
                   <Trash2 class="size-4" aria-hidden="true" />

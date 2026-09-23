@@ -11,8 +11,17 @@
   import Dumbbell from "@lucide/svelte/icons/dumbbell";
   import ErrorCard from "../lib/ErrorCard.svelte";
   import ErrorBanner from "../lib/ErrorBanner.svelte";
+  import Loading from "../lib/skeleton/Loading.svelte";
+  import Skeleton from "../lib/skeleton/Skeleton.svelte";
 
   const pageSize = 20;
+
+  // Placeholders for the first paint. Four cards rather than a page's twenty:
+  // that is roughly a phone screen, and reserving space for sixteen rows nobody
+  // can see would stretch the scrollbar and then snap it back.
+  const SKELETON_SESSIONS = [0, 1, 2, 3];
+  // Three lifts a card, which is what a program day runs to here.
+  const SKELETON_LIFTS = [0, 1, 2];
 
   let sessions = $state<SessionSummary[]>([]);
   let total = $state(0);
@@ -73,7 +82,12 @@
 <div class="flex flex-col gap-6">
   <div>
     <h2 class="text-2xl font-black text-foreground">History</h2>
-    {#if !loading && !failed && sessions.length > 0}
+    {#if loading}
+      <!-- The lifetime total is a line under the heading whether it has arrived
+           or not. Left out while loading, it used to appear a beat later and
+           push the whole list down by its own height. -->
+      <Skeleton text="sm" class="mt-0.5 w-64" />
+    {:else if !failed && sessions.length > 0}
       <p class="mt-0.5 text-sm tabular-nums text-muted-foreground">
         {formatVolume(totalVolumeLb)} lb lifted across {total}
         {total === 1 ? "session" : "sessions"}
@@ -82,7 +96,27 @@
   </div>
 
   {#if loading}
-    <Card class="h-40 animate-pulse"></Card>
+    <Loading label="Loading your history" class="flex flex-col gap-3">
+      <!-- One card per session, shaped like the real one: the program and day
+           lines, the sets count opposite them, and the three-lift table that
+           almost every session card carries. -->
+      {#each SKELETON_SESSIONS as n (n)}
+        <Card class="p-4">
+          <div class="flex items-start justify-between gap-4">
+            <div class="flex flex-col gap-0.5">
+              <Skeleton text="sm" class="w-36" />
+              <Skeleton text="sm" class="w-52" />
+            </div>
+            <Skeleton text="sm" class="w-16 shrink-0" />
+          </div>
+          <div class="mt-3 flex flex-col gap-1">
+            {#each SKELETON_LIFTS as lift (lift)}
+              <Skeleton text="sm" class="w-full" />
+            {/each}
+          </div>
+        </Card>
+      {/each}
+    </Loading>
   {:else if failed}
     <ErrorCard message="Couldn't load your history." onRetry={loadInitial} />
   {:else if sessions.length === 0}
