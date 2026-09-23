@@ -342,6 +342,84 @@ func TestAddSetIsBonusOnceEverythingElseIsDone(t *testing.T) {
 	}
 }
 
+// A missed rep does not cost the lifter their bonus sets.
+//
+// This is the regression. The rule first shipped as `NOT prior.completed`, but
+// completed means "hit its target" — ActiveSession only sets it when the reps
+// meet or beat the prescription — so a single 4-of-5 grind anywhere in the
+// session disqualified every later append from ever being bonus work.
+//
+// Backwards in the worst way: the same screen only auto-finishes a session when
+// every set hit its target, so a session carrying a miss is the one still open,
+// and the one extra sets get added to. The lifter who most obviously did bonus
+// work was the one guaranteed not to be credited with it.
+func TestAddSetIsBonusAfterAMissedTarget(t *testing.T) {
+	e := expect(t)
+	_, dayID := firstProgramAndDay(e)
+
+	created := startSession(t, e, dayID)
+	sessionID := int(created.Value("id").Number().Raw())
+	exerciseID := int(created.Value("sets").Array().Value(0).Object().
+		Value("exerciseId").Number().Raw())
+
+	// Work through every set, but grind the first one out below its target —
+	// logged, dealt with, and completed=false.
+	sets := e.GET(fmt.Sprintf("/sessions/%d", sessionID)).
+		Expect().Status(http.StatusOK).JSON().Object().Value("sets").Array()
+	for i := 0; i < int(sets.Length().Raw()); i++ {
+		set := sets.Value(i).Object()
+		setID := int(set.Value("id").Number().Raw())
+		target := int(set.Value("targetReps").Number().Raw())
+		reps, completed := target, true
+		if i == 0 {
+			reps, completed = target-1, false
+		}
+		e.PATCH(fmt.Sprintf("/sessions/%d/sets/%d", sessionID, setID)).
+			WithJSON(map[string]any{"actualReps": reps, "completed": completed}).
+			Expect().Status(http.StatusOK)
+	}
+
+	// The session is not "clean", but there is nothing left outstanding in it.
+	e.POST(fmt.Sprintf("/sessions/%d/sets", sessionID)).
+		WithJSON(map[string]any{"exerciseId": exerciseID}).
+		Expect().Status(http.StatusCreated).JSON().Object().
+		Value("isBonus").Boolean().IsTrue()
+}
+
+// A set with no reps against it still blocks, whether the lifter skipped it or
+// simply has not reached it. The two are indistinguishable — session_sets
+// records only the absence — so the conservative reading wins: bailing on the
+// last lift to do more of an earlier one is a substitution, not bonus work.
+func TestAddSetIsNotBonusWhileASetIsUnlogged(t *testing.T) {
+	e := expect(t)
+	_, dayID := firstProgramAndDay(e)
+
+	created := startSession(t, e, dayID)
+	sessionID := int(created.Value("id").Number().Raw())
+	exerciseID := int(created.Value("sets").Array().Value(0).Object().
+		Value("exerciseId").Number().Raw())
+
+	// Everything logged except the last set, which is left untouched.
+	sets := e.GET(fmt.Sprintf("/sessions/%d", sessionID)).
+		Expect().Status(http.StatusOK).JSON().Object().Value("sets").Array()
+	last := int(sets.Length().Raw()) - 1
+	for i := 0; i < last; i++ {
+		set := sets.Value(i).Object()
+		e.PATCH(fmt.Sprintf("/sessions/%d/sets/%d", sessionID,
+			int(set.Value("id").Number().Raw()))).
+			WithJSON(map[string]any{
+				"actualReps": int(set.Value("targetReps").Number().Raw()),
+				"completed":  true,
+			}).
+			Expect().Status(http.StatusOK)
+	}
+
+	e.POST(fmt.Sprintf("/sessions/%d/sets", sessionID)).
+		WithJSON(map[string]any{"exerciseId": exerciseID}).
+		Expect().Status(http.StatusCreated).JSON().Object().
+		Value("isBonus").Boolean().IsFalse()
+}
+
 // The sets a session opens with are never bonus sets, however the lifter works
 // through them. Only an append can produce one.
 func TestSessionStartsWithNoBonusSets(t *testing.T) {

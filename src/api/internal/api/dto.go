@@ -628,8 +628,13 @@ type sessionSetDTO struct {
 	ActualReps   *int32  `json:"actualReps"`
 	WeightLb     float64 `json:"weightLb"`
 	Completed    bool    `json:"completed"`
-	// IsBonus marks a set the lifter added after finishing everything else in
-	// the session — extra work, rather than the workout as it was planned.
+	// IsBonus marks a set the lifter added after working through everything else
+	// in the session — extra work, rather than the workout as it was planned.
+	//
+	// "Worked through" is not "hit every target": a set logged below its target
+	// is one the lifter is done with, and does not hold back the bonus flag. See
+	// AppendSessionSet, which reads actual_reps rather than completed for
+	// exactly that reason.
 	//
 	// Recorded when the set is appended and never recomputed; see 0027 for why
 	// it cannot be. Always false for sets a session opened with, and for every

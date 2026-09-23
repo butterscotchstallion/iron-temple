@@ -4030,8 +4030,16 @@ components:
             append and never recalculated: the thing it describes, what was
             still outstanding just then, leaves no trace to reconstruct it from.
 
+            "Already done" means every other set has been worked through — it
+            has reps against it — NOT that every other set hit its target. A set
+            the lifter ground out below target is one they are finished with,
+            and it does not stop later work counting as bonus. A set with no
+            reps logged at all does, whether it was skipped or simply not
+            reached yet; the two are indistinguishable and the conservative
+            reading wins.
+
             Always false for the sets a session opens with, for sets added while
-            other work was still pending, and for every set logged before the
+            other work was still unlogged, and for every set logged before the
             field existed — so a recap of an older session reports no bonus sets
             rather than guessing at them.
           example: false

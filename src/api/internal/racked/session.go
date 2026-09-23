@@ -76,10 +76,15 @@ type Prescribed struct {
 	Completed    bool
 	IsAssistance bool
 	// IsBonus is true for a set the lifter added after everything else in the
-	// session was already done — extra work, rather than the workout as it was
-	// planned. Recorded when the set is appended rather than worked out later,
-	// because what was outstanding at that moment leaves no trace afterwards;
-	// see migration 0027.
+	// session had been worked through — extra work, rather than the workout as
+	// it was planned. Recorded when the set is appended rather than worked out
+	// later, because what was outstanding at that moment leaves no trace
+	// afterwards; see migration 0027.
+	//
+	// Note that this is a weaker condition than Completed, which is per-set and
+	// means "hit its target". A session carrying a missed rep can still earn
+	// bonus sets — and AppendSessionSet is careful about that, because a missed
+	// rep is exactly what keeps a session open long enough to add work to.
 	//
 	// It lives here and NOT on Set, though a bonus set is obviously also a set.
 	// Set is shared with the monthly recap, which loads its rows through
