@@ -2,6 +2,8 @@
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
   import * as AlertDialog from "$lib/components/ui/alert-dialog";
+  import Check from "@lucide/svelte/icons/check";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import Minus from "@lucide/svelte/icons/minus";
   import Plus from "@lucide/svelte/icons/plus";
   import PlateBar from "./PlateBar.svelte";
@@ -76,6 +78,37 @@
   // The last set is the one a "remove a set" control should target: sets are
   // numbered in order and the tail is what an extra one was appended to.
   const lastSet = $derived(sets[sets.length - 1]);
+
+  // How much of this lift is behind the lifter. `doneCount` is the summary a
+  // folded card carries; `allComplete` is what folds it.
+  const doneCount = $derived(sets.filter((s) => s.completed).length);
+  const allComplete = $derived(sets.length > 0 && sets.every((s) => s.completed));
+
+  // A card whose sets are all done folds up. A session is a stack of these and
+  // a lifter is in the middle of one lift at a time: the squat finished twenty
+  // minutes ago is a result rather than a control, and leaving it open at full
+  // height pushes the lift actually being done off the bottom of the screen.
+  //
+  // Folded, not gone — the header still says what it was and what it weighed,
+  // and tapping the name brings the circles back. "Done" is not "finished
+  // with": a lifter checks what they pressed, or clears a set they mis-tapped.
+  let collapsed = $state(false);
+  // The completion the fold last reacted to, deliberately NOT $state: this
+  // follows the EDGE of being complete rather than holding the card shut. A
+  // lifter who opens a finished lift keeps it open (nothing re-folds it), and a
+  // lift that stops being complete — a set cleared, another one added — opens
+  // itself again, because it has something to tap.
+  let foldedAt = false;
+  $effect(() => {
+    if (allComplete === foldedAt) return;
+    foldedAt = allComplete;
+    // An over session is a record to read, and this card is the set-by-set
+    // version of it: every lift in it is complete, so folding on load would
+    // leave a screen of headings. Folding is for a workout in progress; the
+    // toggle still works here for anyone who wants the quiet version.
+    if (readonly) return;
+    collapsed = allComplete;
+  });
 
   // A ramping lift gives every set its own weight and reps — Madcow climbs
   // 50/62.5/75/87.5/100% of a top set, and its intensity day finishes with a
@@ -252,133 +285,199 @@
 
 <Card class="p-5">
   <div class="flex items-center justify-between gap-3">
-    <h3 class="text-lg font-bold text-card-foreground">{name}</h3>
-    <div class="flex items-center gap-3">
-      <span class="text-sm tabular-nums text-muted-foreground">
-        <!-- A ramp has no single rep target, so it says what it is instead:
-             how many sets are coming, up to the top set beside it. -->
-        {#if ramping}
-          {sets.length} sets, ramping
-        {:else}
-          {targetReps} reps
+    <!-- The heading is the fold's handle: the one part of the card that is
+         always on screen, and a target big enough to hit between sets. The
+         button goes inside the h3 rather than round it — a heading is not
+         phrasing content, so it cannot live in a button. -->
+    <h3 class="text-lg font-bold text-card-foreground">
+      <button
+        type="button"
+        class="-m-1 flex cursor-pointer items-center gap-1.5 rounded-lg p-1 text-left transition hover:text-primary"
+        onclick={() => (collapsed = !collapsed)}
+        aria-expanded={!collapsed}
+      >
+        <ChevronDown
+          class="size-4 shrink-0 text-muted-foreground transition-transform {collapsed
+            ? '-rotate-90'
+            : ''}"
+          aria-hidden="true"
+        />
+        {name}
+      </button>
+    </h3>
+    {#if collapsed}
+      <!-- What the card would have said, in one line: how far through the lift
+           got and what it was carrying. The tick is the part worth seeing from
+           across the room, so it only appears when the lift is actually done —
+           a card folded by hand mid-workout says 2/5 and nothing more. -->
+      <span
+        class="flex items-center gap-1.5 text-sm tabular-nums text-muted-foreground"
+      >
+        {#if allComplete}
+          <Check class="size-4 text-primary" aria-hidden="true" />
         {/if}
-        {#if restSeconds > 0}
-          · {formatTime(restSeconds)} rest
-        {/if}
+        {doneCount}/{sets.length} sets · {workWeight} lb
       </span>
-      <div class="flex items-center gap-1.5">
-        <Button
-          variant="outline"
-          size="icon-sm"
-          onclick={() => stepWeight(-stepLb)}
-          disabled={readonly}
-          aria-label="Decrease weight by {stepLb} lb"
-        >
-          <Minus />
-        </Button>
-        <span
-          class="min-w-16 text-center text-sm font-bold tabular-nums text-card-foreground"
-        >
-          {workWeight} lb
+    {:else}
+      <div class="flex items-center gap-3">
+        <span class="text-sm tabular-nums text-muted-foreground">
+          <!-- A ramp has no single rep target, so it says what it is instead:
+               how many sets are coming, up to the top set beside it. -->
+          {#if ramping}
+            {sets.length} sets, ramping
+          {:else}
+            {targetReps} reps
+          {/if}
+          {#if restSeconds > 0}
+            · {formatTime(restSeconds)} rest
+          {/if}
         </span>
-        <Button
-          variant="outline"
-          size="icon-sm"
-          onclick={() => stepWeight(stepLb)}
-          disabled={readonly}
-          aria-label="Increase weight by {stepLb} lb"
-        >
-          <Plus />
-        </Button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Loading guide for the active step (warm-up rung or work weight). The bar
-       diagram is drawn only where there is a bar; off the barbell the weight and
-       reps carry the step on their own, plus whatever `loadNote` has to add. -->
-  <div class="mt-4 flex flex-col items-center gap-2">
-    {#if barbell}
-      <PlateBar weightLb={activeWeight} />
-    {/if}
-    <p class="text-xs tabular-nums text-muted-foreground">
-      {activeWeight} lb × {activeReps}{loadNote ? ` · ${loadNote}` : ""}
-    </p>
-  </div>
-
-  <!-- Warm-up circles (cyan) then work-set circles (neon), in sequence. -->
-  <div class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3">
-    {#if warmups.length > 0}
-      <div class="flex flex-wrap items-center gap-2">
-        {#each warmups as w, i (i)}
-          <button
-            type="button"
-            class="flex size-11 items-center justify-center rounded-full border text-sm font-bold tabular-nums transition {readonly
-              ? 'cursor-default'
-              : 'cursor-pointer'} {warmClass(i)}"
-            onclick={() => cycleWarmup(i)}
-            disabled={readonly}
-            aria-label={`Warm-up ${w.weightLb} lb × ${w.reps}: ${
-              warmupReps[i] ?? 0
-            } reps`}
-          >
-            {warmupReps[i] ?? 0}
-          </button>
-        {/each}
-      </div>
-    {/if}
-    <div class="flex flex-wrap items-center gap-3">
-      {#each sets as set, i (set.id)}
-        <button
-          type="button"
-          class="flex size-12 items-center justify-center rounded-full border text-base font-bold tabular-nums transition {readonly
-            ? 'cursor-default'
-            : 'cursor-pointer'} {workClass(set, i)}"
-          onclick={() => cycleSet(set)}
-          disabled={readonly}
-          title={ramping ? `${set.weightLb} lb x ${set.targetReps}` : undefined}
-          aria-label={ramping
-            ? `Set ${set.setNumber}, ${set.weightLb} lb for ${set.targetReps}: ${
-                set.actualReps == null ? "not logged" : `${set.actualReps} reps`
-              }`
-            : `Set ${set.setNumber}: ${
-                set.actualReps == null ? "not logged" : `${set.actualReps} reps`
-              }`}
-        >
-          {set.actualReps ?? 0}
-        </button>
-      {/each}
-
-      <!-- Add and drop a set. The prescription is a plan, not a cage: an extra
-           set, an AMRAP or a set skipped all happen, and until these existed the
-           closest a lifter could get was a ghost row logged at zero reps. -->
-      {#if !readonly && (onAddSet || onRemoveSet)}
         <div class="flex items-center gap-1.5">
-          {#if onRemoveSet && lastSet}
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onclick={() => requestRemove(lastSet)}
-              aria-label={`Remove set ${lastSet.setNumber} of ${name}`}
+          <Button
+            variant="outline"
+            size="icon-sm"
+            onclick={() => stepWeight(-stepLb)}
+            disabled={readonly}
+            aria-label="Decrease weight by {stepLb} lb"
+          >
+            <Minus />
+          </Button>
+          <span
+            class="min-w-16 text-center text-sm font-bold tabular-nums text-card-foreground"
+          >
+            {workWeight} lb
+          </span>
+          <Button
+            variant="outline"
+            size="icon-sm"
+            onclick={() => stepWeight(stepLb)}
+            disabled={readonly}
+            aria-label="Increase weight by {stepLb} lb"
+          >
+            <Plus />
+          </Button>
+        </div>
+      </div>
+    {/if}
+  </div>
+
+  <!-- Everything below the header is the working surface, and a folded card is
+       one that has no work left on it. -->
+  {#if !collapsed}
+    <!-- Loading guide for the active step (warm-up rung or work weight). The bar
+         diagram is drawn only where there is a bar; off the barbell the weight and
+         reps carry the step on their own, plus whatever `loadNote` has to add. -->
+    <div class="mt-4 flex flex-col items-center gap-2">
+      {#if barbell}
+        <PlateBar weightLb={activeWeight} />
+      {/if}
+      <p class="text-xs tabular-nums text-muted-foreground">
+        {activeWeight} lb × {activeReps}{loadNote ? ` · ${loadNote}` : ""}
+      </p>
+    </div>
+
+    <!-- Warm-up circles (cyan) then work-set circles (neon), in sequence. -->
+    <div class="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3">
+      {#if warmups.length > 0}
+        <div class="flex flex-wrap items-center gap-2">
+          {#each warmups as w, i (i)}
+            <button
+              type="button"
+              class="flex size-11 items-center justify-center rounded-full border text-sm font-bold tabular-nums transition {readonly
+                ? 'cursor-default'
+                : 'cursor-pointer'} {warmClass(i)}"
+              onclick={() => cycleWarmup(i)}
+              disabled={readonly}
+              aria-label={`Warm-up ${w.weightLb} lb × ${w.reps}: ${
+                warmupReps[i] ?? 0
+              } reps`}
             >
-              <Minus />
-            </Button>
-          {/if}
-          {#if onAddSet}
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onclick={onAddSet}
-              aria-label={`Add a set of ${name}`}
-            >
-              <Plus />
-            </Button>
-          {/if}
+              {warmupReps[i] ?? 0}
+            </button>
+          {/each}
         </div>
       {/if}
-    </div>
-  </div>
+      <div class="flex flex-wrap items-center gap-3">
+        {#each sets as set, i (set.id)}
+          <button
+            type="button"
+            class="flex size-12 items-center justify-center rounded-full border text-base font-bold tabular-nums transition {readonly
+              ? 'cursor-default'
+              : 'cursor-pointer'} {workClass(set, i)}"
+            onclick={() => cycleSet(set)}
+            disabled={readonly}
+            title={ramping ? `${set.weightLb} lb x ${set.targetReps}` : undefined}
+            aria-label={ramping
+              ? `Set ${set.setNumber}, ${set.weightLb} lb for ${set.targetReps}: ${
+                  set.actualReps == null ? "not logged" : `${set.actualReps} reps`
+                }`
+              : `Set ${set.setNumber}: ${
+                  set.actualReps == null ? "not logged" : `${set.actualReps} reps`
+                }`}
+          >
+            {set.actualReps ?? 0}
+          </button>
+        {/each}
 
+        <!-- Add and drop a set. The prescription is a plan, not a cage: an extra
+             set, an AMRAP or a set skipped all happen, and until these existed the
+             closest a lifter could get was a ghost row logged at zero reps. -->
+        {#if !readonly && (onAddSet || onRemoveSet)}
+          <div class="flex items-center gap-1.5">
+            {#if onRemoveSet && lastSet}
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onclick={() => requestRemove(lastSet)}
+                aria-label={`Remove set ${lastSet.setNumber} of ${name}`}
+              >
+                <Minus />
+              </Button>
+            {/if}
+            {#if onAddSet}
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onclick={onAddSet}
+                aria-label={`Add a set of ${name}`}
+              >
+                <Plus />
+              </Button>
+            {/if}
+          </div>
+        {/if}
+      </div>
+    </div>
+
+    {#if ramping}
+      <!-- The ramp written out. Each circle above is one of these, but a lifter
+           setting up the bar wants to see the whole climb at once. -->
+      <ol
+        class="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs tabular-nums text-muted-foreground"
+      >
+        {#each sets as set (set.id)}
+          <li class={active === warmups.length + sets.indexOf(set) ? "text-primary" : ""}>
+            {set.weightLb}×{set.targetReps}
+          </li>
+        {/each}
+      </ol>
+    {/if}
+
+    <p class="mt-3 text-xs text-muted-foreground">
+      {#if readonly}
+        This workout is finished — sets are locked.
+      {:else}
+        {#if warmups.length > 0}Cyan sets are warm-ups. {/if}{#if ramping}The ramp
+          is the warm-up — work up through it. {/if}Tap a set to add a rep; it
+        clears after the target.{#if allComplete} Every set is in — tap the name
+          to fold this away.{/if}
+      {/if}
+    </p>
+  {/if}
+
+  <!-- Outside the fold: removing the last logged set of a lift can leave the
+       rest of it complete, which folds the card — and a dialog unmounted
+       mid-answer takes its own confirmation with it. -->
   <AlertDialog.Root
     open={pendingRemoval !== null}
     onOpenChange={(open) => {
@@ -400,26 +499,4 @@
       </AlertDialog.Footer>
     </AlertDialog.Content>
   </AlertDialog.Root>
-
-  {#if ramping}
-    <!-- The ramp written out. Each circle above is one of these, but a lifter
-         setting up the bar wants to see the whole climb at once. -->
-    <ol class="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs tabular-nums text-muted-foreground">
-      {#each sets as set (set.id)}
-        <li class={active === warmups.length + sets.indexOf(set) ? "text-primary" : ""}>
-          {set.weightLb}×{set.targetReps}
-        </li>
-      {/each}
-    </ol>
-  {/if}
-
-  <p class="mt-3 text-xs text-muted-foreground">
-    {#if readonly}
-      This workout is finished — sets are locked.
-    {:else}
-      {#if warmups.length > 0}Cyan sets are warm-ups. {/if}{#if ramping}The ramp
-        is the warm-up — work up through it. {/if}Tap a set to add a rep; it
-      clears after the target.
-    {/if}
-  </p>
 </Card>
