@@ -31,6 +31,31 @@ export function programSubtitle(
  * after it, which is what an account with an empty display name would otherwise
  * produce.
  */
+/**
+ * The programs a new one can be started from.
+ *
+ * Two exclusions, for different reasons:
+ *
+ * - **Ramping programs.** Madcow prescribes percentages of a top set, and the
+ *   editor has no way to express or change one — so a copy would be a program
+ *   whose ramps its owner could see the effects of and never edit. The API
+ *   refuses it with `unsupported_progression`; this keeps it out of the list so
+ *   nobody picks it and reads a 409 as a bug.
+ * - **Archived programs.** One its owner has retired is not a starting point
+ *   they are offering. It still appears in the picker for the owner behind
+ *   `includeArchived`, which is a different question — "where was that program
+ *   I stopped using" rather than "what should I build on".
+ *
+ * Somebody else's shared program is deliberately INCLUDED. Being able to take a
+ * copy and make it yours is most of the point of sharing one, and it costs the
+ * owner nothing: a clone copies rows rather than moving them.
+ */
+export function cloneSources(programs: ProgramSummary[]): ProgramSummary[] {
+  return programs.filter(
+    (p) => p.progressionKind === "linear" && p.archivedAt === null,
+  );
+}
+
 export function programAttribution(
   program: Pick<ProgramSummary, "ownerId" | "ownerName" | "isMine">,
 ): string {

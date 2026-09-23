@@ -411,6 +411,15 @@ const (
 	exerciseKindAssistance = "assistance"
 )
 
+// How a program decides next session's weights, mirroring programs
+// .progression_kind and the ProgressionKind enum in the spec.
+//
+// Only linear is named, because it is the only one anything BRANCHES on: a
+// program a lifter builds is always linear, and the check that enforces it needs
+// a constant to compare against. Madcow is read from the database and passed
+// straight to the wire, so naming it here would add a constant nothing reads.
+const progressionKindLinear = "linear"
+
 type exerciseDTO struct {
 	ID          int32  `json:"id"`
 	Name        string `json:"name"`

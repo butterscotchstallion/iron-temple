@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { programSubtitle, programAttribution } from "./programs";
+import { programSubtitle, programAttribution, cloneSources } from "./programs";
+import { testProgramSummary } from "./testFixtures";
 
 describe("programSubtitle", () => {
   it("uses the description when present", () => {
@@ -48,5 +49,50 @@ describe("programAttribution", () => {
     expect(
       programAttribution({ ownerId: 2, ownerName: "   ", isMine: false }),
     ).toBe("Shared by another lifter");
+  });
+});
+
+describe("cloneSources", () => {
+  it("offers a seeded linear program", () => {
+    const strongLifts = testProgramSummary({ id: 1, name: "StrongLifts 5x5" });
+    expect(cloneSources([strongLifts])).toEqual([strongLifts]);
+  });
+
+  it("leaves out a ramping program", () => {
+    // Madcow prescribes percentages of a top set, which the editor cannot
+    // express — the API refuses it, and offering it would turn a deliberate
+    // refusal into what looks like a bug.
+    const madcow = testProgramSummary({
+      id: 6,
+      name: "Madcow 5x5",
+      progressionKind: "madcow",
+    });
+    expect(cloneSources([madcow])).toEqual([]);
+  });
+
+  it("leaves out an archived program", () => {
+    // Retiring a program is its owner saying "stop offering this".
+    const retired = testProgramSummary({
+      id: 9,
+      ownerId: 1,
+      isMine: true,
+      archivedAt: "2026-09-01T00:00:00Z",
+    });
+    expect(cloneSources([retired])).toEqual([]);
+  });
+
+  it("offers another lifter's shared program", () => {
+    // Taking a copy and making it yours is most of the point of sharing one,
+    // and it costs the owner nothing: a clone copies rows, it does not move
+    // them.
+    const theirs = testProgramSummary({
+      id: 4,
+      name: "Grace's Block",
+      ownerId: 2,
+      ownerName: "Grace Hopper",
+      isMine: false,
+      isShared: true,
+    });
+    expect(cloneSources([theirs])).toEqual([theirs]);
   });
 });

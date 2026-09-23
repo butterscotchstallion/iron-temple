@@ -47,6 +47,128 @@ func (q *Queries) CanReadProgram(ctx context.Context, arg CanReadProgramParams) 
 	return column_1, err
 }
 
+const clonePrescriptions = `-- name: ClonePrescriptions :exec
+INSERT INTO program_day_exercises
+    (program_day_id, exercise_id, position, sets, reps, starting_weight_lb)
+SELECT tgt.id, pde.exercise_id, pde.position, pde.sets, pde.reps, pde.starting_weight_lb
+FROM program_day_exercises pde
+JOIN program_days src ON src.id = pde.program_day_id
+JOIN program_days tgt ON tgt.program_id = $1::int
+                     AND tgt.name = src.name
+WHERE src.program_id = $2::int
+  AND src.archived_at IS NULL
+`
+
+type ClonePrescriptionsParams struct {
+	TargetProgramID int32 `json:"target_program_id"`
+	SourceProgramID int32 `json:"source_program_id"`
+}
+
+// ClonePrescriptions copies the source's prescribed lifts onto the days
+// CloneProgramDays has just made.
+//
+// Days are matched by NAME, which is safe in both directions: the live days of
+// one program are unique by name (program_days_name_live_idx), and the statement
+// above copied those names verbatim a moment ago inside the same transaction.
+//
+// program_day_exercise_sets is not copied. It is empty for every linear program,
+// which is all this can clone — but saying so here is what stops a future Madcow
+// clone quietly producing a program with half a ramp in it.
+func (q *Queries) ClonePrescriptions(ctx context.Context, arg ClonePrescriptionsParams) error {
+	_, err := q.db.Exec(ctx, clonePrescriptions, arg.TargetProgramID, arg.SourceProgramID)
+	return err
+}
+
+const cloneProgramDays = `-- name: CloneProgramDays :exec
+INSERT INTO program_days (program_id, name, position)
+SELECT $1::int, pd.name, pd.position
+FROM program_days pd
+WHERE pd.program_id = $2::int
+  AND pd.archived_at IS NULL
+`
+
+type CloneProgramDaysParams struct {
+	TargetProgramID int32 `json:"target_program_id"`
+	SourceProgramID int32 `json:"source_program_id"`
+}
+
+// CloneProgramDays copies a source program's live days onto a new program.
+//
+// weekday is NOT copied, and that is a judgement rather than an oversight: a
+// schedule is a decision about your own week, and a clone that arrives with
+// three evenings already booked has made it for you.
+func (q *Queries) CloneProgramDays(ctx context.Context, arg CloneProgramDaysParams) error {
+	_, err := q.db.Exec(ctx, cloneProgramDays, arg.TargetProgramID, arg.SourceProgramID)
+	return err
+}
+
+const countProgramNameConflicts = `-- name: CountProgramNameConflicts :one
+
+SELECT count(*)
+FROM programs
+WHERE lower(name) = lower($1)
+  AND (created_by_user_id IS NULL OR created_by_user_id = $2::int)
+  AND id <> $3::int
+`
+
+type CountProgramNameConflictsParams struct {
+	Name        string `json:"name"`
+	UserID      int32  `json:"user_id"`
+	ExcludingID int32  `json:"excluding_id"`
+}
+
+// ---------------------------------------------------------------------------
+// Writes: the programs a lifter builds for themselves.
+// ---------------------------------------------------------------------------
+//
+// Every one of these scopes on created_by_user_id = the caller. That predicate
+// is doing two jobs, exactly as DeleteExercise's does: it keeps one lifter out
+// of another's program, and it makes the SEEDED catalogue untouchable by
+// anybody, since those rows have NULL there and NULL = anything is never true.
+// There is no is_seeded check anywhere and there must never need to be.
+// CountProgramNameConflicts reports whether a name is taken for this owner:
+// either by a seeded program, or by one of their own.
+//
+// The two partial indexes in 0029 would reject the insert anyway; this exists to
+// turn that into a 409 with something to say rather than a 500, which is the
+// same two-layer arrangement CountExerciseNameConflicts has. Case-insensitive,
+// matching those indexes.
+//
+// Another lifter's program is deliberately NOT a conflict, shared or not. Two
+// people may each have a "Push Pull Legs"; the picker tells them apart by owner.
+func (q *Queries) CountProgramNameConflicts(ctx context.Context, arg CountProgramNameConflictsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countProgramNameConflicts, arg.Name, arg.UserID, arg.ExcludingID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const createProgram = `-- name: CreateProgram :one
+INSERT INTO programs (name, description, created_by_user_id, is_shared)
+VALUES ($1, $2, $3::int,
+        $4)
+RETURNING id
+`
+
+type CreateProgramParams struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	UserID      int32  `json:"user_id"`
+	IsShared    bool   `json:"is_shared"`
+}
+
+func (q *Queries) CreateProgram(ctx context.Context, arg CreateProgramParams) (int32, error) {
+	row := q.db.QueryRow(ctx, createProgram,
+		arg.Name,
+		arg.Description,
+		arg.UserID,
+		arg.IsShared,
+	)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getProgram = `-- name: GetProgram :one
 SELECT p.id,
        p.name,
@@ -642,6 +764,78 @@ func (q *Queries) ListSetPlansByProgram(ctx context.Context, programID int32) ([
 		return nil, err
 	}
 	return items, nil
+}
+
+const setProgramArchived = `-- name: SetProgramArchived :execrows
+UPDATE programs
+SET archived_at = CASE WHEN $1::bool THEN now() ELSE NULL END
+WHERE id = $2
+  AND created_by_user_id = $3::int
+`
+
+type SetProgramArchivedParams struct {
+	Archived bool  `json:"archived"`
+	ID       int32 `json:"id"`
+	UserID   int32 `json:"user_id"`
+}
+
+// SetProgramArchived retires a program, or brings it back.
+//
+// Not a DELETE, and not because deleting is undesirable: it is unavailable.
+// sessions.program_day_id RESTRICTs, so a program whose days have been trained
+// cannot be removed, and making that key cascade would trade a tidy catalogue
+// for silently destroyed history — the tonnage, the PRs and every Racked figure
+// computed from those sets.
+//
+// Nothing here touches users.current_program_id, for the owner or for anybody
+// following a shared program. It does not need to: an archived program still
+// resolves, so a stale pointer is a program that has left the picker rather than
+// a home screen that cannot load. Clearing a follower's pointer would also mean
+// one lifter's request writing to another lifter's row, which is the thing
+// lifters.sql exists to refuse.
+func (q *Queries) SetProgramArchived(ctx context.Context, arg SetProgramArchivedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setProgramArchived, arg.Archived, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const updateProgram = `-- name: UpdateProgram :execrows
+UPDATE programs
+SET name        = COALESCE($1, name),
+    description = COALESCE($2, description),
+    is_shared   = COALESCE($3, is_shared)
+WHERE id = $4
+  AND created_by_user_id = $5::int
+`
+
+type UpdateProgramParams struct {
+	Name        *string `json:"name"`
+	Description *string `json:"description"`
+	IsShared    *bool   `json:"is_shared"`
+	ID          int32   `json:"id"`
+	UserID      int32   `json:"user_id"`
+}
+
+// UpdateProgram patches the metadata a lifter can change about their own
+// program. NULL leaves a column alone, the convention UpdateSession uses.
+//
+// progression_kind is absent on purpose: v1 builds linear programs only, and
+// flipping the kind would reinterpret every prescription the program holds
+// without touching a single row of it.
+func (q *Queries) UpdateProgram(ctx context.Context, arg UpdateProgramParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateProgram,
+		arg.Name,
+		arg.Description,
+		arg.IsShared,
+		arg.ID,
+		arg.UserID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateProgramDayWeekday = `-- name: UpdateProgramDayWeekday :one

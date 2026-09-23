@@ -33,6 +33,7 @@
   } from "../lib/homeData";
   import { nextDueOn, todayStatus } from "../lib/trainedToday";
   import { Card } from "$lib/components/ui/card";
+  import { programAttribution } from "../lib/programs";
   import { Button, buttonVariants } from "$lib/components/ui/button";
   import { Badge } from "$lib/components/ui/badge";
   import ErrorCard from "../lib/ErrorCard.svelte";
@@ -579,7 +580,33 @@
     <div>
       <h2 class="text-3xl font-black text-foreground">{program.name}</h2>
       <p class="mt-1 text-sm text-muted-foreground">{program.description}</p>
+      {#if programAttribution(program)}
+        <p class="mt-1 text-xs text-muted-foreground/80">
+          {programAttribution(program)}
+        </p>
+      {/if}
     </div>
+
+    <!--
+      An archived program still works — it is off the picker, not withdrawn —
+      and saying so is the point. Somebody can land here from a bookmark, from
+      history, or because it is still their current program and home opens on
+      it; without this the screen looks identical to a live one and the
+      disappearance from the picker reads as a bug.
+    -->
+    {#if program.archivedAt !== null}
+      <Card class="border-dashed p-4">
+        <p class="text-sm text-muted-foreground">
+          {#if program.isMine}
+            You've archived this program. It's off your picker, but you can still
+            train it — and you can bring it back from the programs list.
+          {:else}
+            This program has been archived by whoever built it. It's off the
+            picker, but you can still train it.
+          {/if}
+        </p>
+      </Card>
+    {/if}
 
     {#if startFailed}
       <ErrorBanner
@@ -853,8 +880,9 @@
         </ul>
 
         <!-- Assistance sits below the program's own work, visibly separate,
-             because that is exactly what it is: the prescription above is the
-             program's and is never edited, and this part is yours. -->
+             because that is exactly what it is: the prescription above belongs
+             to the program — the install's, or whoever built it — and this part
+             is yours, on any program and whoever owns it. -->
         <div class="mt-4 border-t border-border/60 pt-3">
           <h4
             class="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground"

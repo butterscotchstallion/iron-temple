@@ -17,15 +17,17 @@ import (
 // every write scopes on that column and NULL matches nobody, and a private
 // program is invisible because every read scopes on it too.
 //
-// The tests below are mostly about the SECOND half, because it is the one with a
-// hole to fall into. A missed check on a read path is not a cosmetic bug: the
-// prescription of a program is what it prescribes, and POST /sessions would
-// materialize a whole workout against one this lifter was never shown.
+// The visibility half is the one with a hole to fall into, so it has most of the
+// tests. A missed check on a read path is not a cosmetic bug: a prescription is
+// what a program prescribes, and POST /sessions would materialize a whole workout
+// against one this lifter was never shown.
 //
-// There is no create endpoint yet — that is the next phase — so custom programs
-// are inserted directly. That is deliberate rather than a stopgap: these are
-// assertions about the READ path, and building the rows by hand keeps them from
-// passing merely because a create handler happened to write what they expected.
+// The first half of this file builds its programs by direct INSERT rather than
+// through POST /programs, and keeps doing so now that the endpoint exists. That
+// is deliberate: those are assertions about the READ path, and going through the
+// writer would let them pass merely because the writer happened to produce what
+// they expected. The create/clone/archive tests further down do the opposite, and
+// exercise the endpoint.
 
 // makeProgram inserts a program owned by a lifter, with one day and one
 // prescribed lift, and returns the program and day ids.
@@ -478,4 +480,312 @@ func TestSharedProgramSurvivesAFollowersAssistanceCollision(t *testing.T) {
 	follower.POST("/sessions").
 		WithJSON(map[string]any{"programDayId": dayID}).
 		Expect().Status(http.StatusCreated)
+}
+
+// ---------------------------------------------------------------------------
+// Creating, cloning and archiving — POST /programs and friends.
+// ---------------------------------------------------------------------------
+
+// createProgram posts a new program and returns the created object.
+func createProgram(e *httpexpect.Expect, body map[string]any) *httpexpect.Object {
+	return e.POST("/programs").WithJSON(body).
+		Expect().Status(http.StatusCreated).JSON().Object()
+}
+
+// dropProgram registers the cleanup makeProgram does, for programs created
+// through the API rather than inserted.
+func dropProgram(t *testing.T, programID int) {
+	t.Helper()
+	t.Cleanup(func() {
+		ctx := context.Background()
+		if _, err := testPool.Exec(ctx,
+			`DELETE FROM sessions s USING program_days pd
+			 WHERE pd.id = s.program_day_id AND pd.program_id = $1`, programID); err != nil {
+			t.Errorf("clean up sessions for program %d: %v", programID, err)
+		}
+		if _, err := testPool.Exec(ctx,
+			"DELETE FROM programs WHERE id = $1", programID); err != nil {
+			t.Errorf("clean up program %d: %v", programID, err)
+		}
+	})
+}
+
+// seededProgram returns one seeded program's summary by name.
+func seededProgram(t *testing.T, e *httpexpect.Expect, name string) *httpexpect.Object {
+	t.Helper()
+	for _, v := range e.GET("/programs").Expect().Status(http.StatusOK).JSON().Array().Iter() {
+		if v.Object().Value("name").String().Raw() == name {
+			return v.Object()
+		}
+	}
+	t.Fatalf("seeded program %q not found", name)
+	return nil
+}
+
+func TestCreateBlankProgram(t *testing.T) {
+	_, e := ownLifter(t, "blank-builder")
+
+	created := createProgram(e, map[string]any{
+		"name": "Blank Test Program", "description": "  Built from nothing  ",
+	})
+	dropProgram(t, int(created.Value("id").Number().Raw()))
+
+	created.HasValue("isMine", true)
+	created.HasValue("isShared", false) // private by default
+	created.Value("archivedAt").IsNull()
+	// Trimmed, not stored with the spaces the form sent.
+	created.HasValue("description", "Built from nothing")
+	// A program with no days is a legitimate state: it is what the editor opens
+	// on, and the response has to say so rather than omit the key.
+	created.Value("days").Array().IsEmpty()
+}
+
+// TestCloneCopiesThePrescriptionAndLeavesTheSourceAlone is the one that would
+// catch a clone written as an UPDATE, or one that reparented the source's rows
+// instead of copying them — which would silently rewrite StrongLifts for every
+// account on the install.
+func TestCloneCopiesThePrescriptionAndLeavesTheSourceAlone(t *testing.T) {
+	_, e := ownLifter(t, "cloning-lifter")
+
+	sourceID := int(seededProgram(t, e, "StrongLifts 5x5").Value("id").Number().Raw())
+	before := e.GET(fmt.Sprintf("/programs/%d", sourceID)).
+		Expect().Status(http.StatusOK).JSON().Object().Raw()
+
+	clone := createProgram(e, map[string]any{
+		"name": "My StrongLifts", "cloneFromProgramId": sourceID,
+	})
+	dropProgram(t, int(clone.Value("id").Number().Raw()))
+
+	sourceDays := e.GET(fmt.Sprintf("/programs/%d", sourceID)).
+		Expect().Status(http.StatusOK).JSON().Object().Value("days").Array()
+	cloneDays := clone.Value("days").Array()
+	cloneDays.Length().IsEqual(len(sourceDays.Raw()))
+
+	for i, v := range sourceDays.Iter() {
+		src := v.Object()
+		dst := cloneDays.Value(i).Object()
+		dst.HasValue("name", src.Value("name").String().Raw())
+		dst.HasValue("position", src.Value("position").Number().Raw())
+
+		// The weekday is deliberately NOT copied: a schedule is a decision about
+		// your own week, and a clone that arrives pre-booked has made it for you.
+		dst.Value("weekday").IsNull()
+
+		srcLifts := src.Value("exercises").Array()
+		dstLifts := dst.Value("exercises").Array()
+		dstLifts.Length().IsEqual(len(srcLifts.Raw()))
+		for j, lift := range srcLifts.Iter() {
+			from := lift.Object()
+			to := dstLifts.Value(j).Object()
+			to.HasValue("exerciseId", from.Value("exerciseId").Number().Raw())
+			to.HasValue("sets", from.Value("sets").Number().Raw())
+			to.HasValue("reps", from.Value("reps").Number().Raw())
+			to.HasValue("startingWeightLb", from.Value("startingWeightLb").Number().Raw())
+		}
+	}
+
+	// And the source is byte-identical to what it was. This is the assertion the
+	// whole feature has to keep earning: the install's catalogue is canonical,
+	// and a clone is a copy rather than a move.
+	e.GET(fmt.Sprintf("/programs/%d", sourceID)).
+		Expect().Status(http.StatusOK).JSON().Object().IsEqual(before)
+}
+
+// TestCloningMadcowIsRefused: Madcow prescribes percentages of a top set in
+// program_day_exercise_sets, and the editor has no way to express or change one.
+// A clone would be a program whose ramps its owner can see the effects of and
+// never edit — and one bad day-delete away from a lift with no 100% set at all,
+// which leaves the engine with no reference day and silently reading every day's
+// history as one series.
+func TestCloningMadcowIsRefused(t *testing.T) {
+	_, e := ownLifter(t, "madcow-cloner")
+
+	madcowID := int(seededProgram(t, e, "Madcow 5x5").Value("id").Number().Raw())
+	e.POST("/programs").
+		WithJSON(map[string]any{"name": "My Madcow", "cloneFromProgramId": madcowID}).
+		Expect().Status(http.StatusConflict).
+		JSON().Object().HasValue("code", "unsupported_progression")
+}
+
+func TestCloningSomebodyElsesPrivateProgramIs404(t *testing.T) {
+	owner := primaryID(t)
+	programID, _ := makeProgram(t, owner, "Uncloneable Test Program", false)
+
+	_, e := ownLifter(t, "clone-thief")
+	// 404 and not 403: cloning must not become the one path that confirms an id
+	// is a real program.
+	e.POST("/programs").
+		WithJSON(map[string]any{"name": "Stolen", "cloneFromProgramId": programID}).
+		Expect().Status(http.StatusNotFound)
+}
+
+// TestProgramNamesAreUniquePerOwner pins the property the two partial indexes in
+// 0029 exist for, in both directions.
+func TestProgramNamesAreUniquePerOwner(t *testing.T) {
+	_, first := ownLifter(t, "name-owner")
+	_, second := ownLifter(t, "name-neighbour")
+
+	created := createProgram(first, map[string]any{"name": "Push Pull Legs"})
+	dropProgram(t, int(created.Value("id").Number().Raw()))
+
+	// The same lifter cannot have two...
+	first.POST("/programs").WithJSON(map[string]any{"name": "push pull legs"}).
+		Expect().Status(http.StatusConflict).
+		JSON().Object().HasValue("code", "duplicate_name")
+
+	// ...nor may anybody shadow a seeded name, which belongs to the install.
+	first.POST("/programs").WithJSON(map[string]any{"name": "StrongLifts 5x5"}).
+		Expect().Status(http.StatusConflict).
+		JSON().Object().HasValue("code", "duplicate_name")
+
+	// ...but a DIFFERENT lifter may use the same name, which is the whole point
+	// of per-owner uniqueness: the picker tells them apart by owner.
+	mine := createProgram(second, map[string]any{"name": "Push Pull Legs"})
+	dropProgram(t, int(mine.Value("id").Number().Raw()))
+}
+
+func TestUpdateProgramRenamesAndShares(t *testing.T) {
+	_, e := ownLifter(t, "renaming-lifter")
+	created := createProgram(e, map[string]any{"name": "Before Rename"})
+	programID := int(created.Value("id").Number().Raw())
+	dropProgram(t, programID)
+
+	updated := e.PATCH(fmt.Sprintf("/programs/%d", programID)).
+		WithJSON(map[string]any{"name": "After Rename", "isShared": true}).
+		Expect().Status(http.StatusOK).JSON().Object()
+	updated.HasValue("name", "After Rename")
+	updated.HasValue("isShared", true)
+
+	// Omitted fields are left alone, and re-saving the same name is not a
+	// conflict with itself.
+	e.PATCH(fmt.Sprintf("/programs/%d", programID)).
+		WithJSON(map[string]any{"name": "After Rename"}).
+		Expect().Status(http.StatusOK).
+		JSON().Object().HasValue("isShared", true)
+}
+
+// TestSeededProgramsRefuseEveryWrite is the assertion that the narrowing held.
+//
+// Nothing about these handlers says "if seeded, refuse". They scope on
+// created_by_user_id = caller, and a seeded program has NULL there — so this
+// passes because of how the queries are written rather than because of a check
+// somebody remembered.
+func TestSeededProgramsRefuseEveryWrite(t *testing.T) {
+	_, e := ownLifter(t, "seed-vandal")
+	seededID := int(seededProgram(t, e, "StrongLifts 5x5").Value("id").Number().Raw())
+
+	e.PATCH(fmt.Sprintf("/programs/%d", seededID)).
+		WithJSON(map[string]any{"name": "Mine Now"}).
+		Expect().Status(http.StatusNotFound)
+	e.POST(fmt.Sprintf("/programs/%d/archive", seededID)).
+		Expect().Status(http.StatusNotFound)
+	e.DELETE(fmt.Sprintf("/programs/%d/archive", seededID)).
+		Expect().Status(http.StatusNotFound)
+}
+
+func TestAnotherLiftersSharedProgramRefusesEveryWrite(t *testing.T) {
+	owner := primaryID(t)
+	programID, _ := makeProgram(t, owner, "Read Only Test Program", true)
+
+	_, e := ownLifter(t, "shared-meddler")
+	// Readable...
+	e.GET(fmt.Sprintf("/programs/%d", programID)).Expect().Status(http.StatusOK)
+	// ...and not writable, as a 404 rather than a 403.
+	e.PATCH(fmt.Sprintf("/programs/%d", programID)).
+		WithJSON(map[string]any{"name": "Meddled"}).
+		Expect().Status(http.StatusNotFound)
+	e.POST(fmt.Sprintf("/programs/%d/archive", programID)).
+		Expect().Status(http.StatusNotFound)
+}
+
+// TestArchiveRoundTripKeepsASession is the RESTRICT case, end to end: the reason
+// this archives rather than deletes.
+func TestArchiveRoundTripKeepsASession(t *testing.T) {
+	owner, e := ownLifter(t, "archive-round-tripper")
+	programID, dayID := makeProgram(t, owner, "Round Trip Test Program", false)
+
+	session := e.POST("/sessions").WithJSON(map[string]any{"programDayId": dayID}).
+		Expect().Status(http.StatusCreated).JSON().Object()
+	sessionID := int(session.Value("id").Number().Raw())
+
+	e.POST(fmt.Sprintf("/programs/%d/archive", programID)).
+		Expect().Status(http.StatusNoContent)
+
+	// The session is untouched — which is the whole reason a program cannot be
+	// deleted, and therefore the reason this endpoint exists at all.
+	e.GET(fmt.Sprintf("/sessions/%d", sessionID)).Expect().Status(http.StatusOK)
+
+	e.DELETE(fmt.Sprintf("/programs/%d/archive", programID)).
+		Expect().Status(http.StatusNoContent)
+	card := findProgram(
+		e.GET("/programs").Expect().Status(http.StatusOK).JSON().Array(), programID,
+	)
+	if card == nil {
+		t.Fatalf("program %d did not come back from the archive", programID)
+	}
+	card.Value("archivedAt").IsNull()
+}
+
+// TestFeedMasksAPrivateProgramName covers the leak that is invisible from inside
+// this feature: nothing in the program code touches the feed, so a private
+// program's name would reach every lifter on the install the moment its owner
+// logged a session.
+func TestFeedMasksAPrivateProgramName(t *testing.T) {
+	owner, ownerClient := ownLifter(t, "feed-private-owner")
+	programID, dayID := makeProgram(t, owner, "Secret Squat Cycle", false)
+	logCleanSession(t, ownerClient, dayID)
+
+	_, viewer := ownLifter(t, "feed-onlooker")
+	entry := findFeedEntry(t, viewer, dayID)
+	entry.HasValue("programName", "Custom program")
+	// The DAY name is deliberately not masked: a feed card is about what somebody
+	// trained, which is the point of a feed, and "Custom program · " with nothing
+	// after it is a card not worth drawing.
+	entry.HasValue("programDayName", "Day One")
+
+	// Sharing it makes the name public, because that is what sharing means.
+	ownerClient.PATCH(fmt.Sprintf("/programs/%d", programID)).
+		WithJSON(map[string]any{"isShared": true}).
+		Expect().Status(http.StatusOK)
+	findFeedEntry(t, viewer, dayID).HasValue("programName", "Secret Squat Cycle")
+}
+
+// findFeedEntry returns the feed row for a session on the given day.
+func findFeedEntry(t *testing.T, e *httpexpect.Expect, dayID int) *httpexpect.Object {
+	t.Helper()
+	items := e.GET("/feed").Expect().Status(http.StatusOK).
+		JSON().Object().Value("items").Array()
+	for _, v := range items.Iter() {
+		if int(v.Object().Value("programDayId").Number().Raw()) == dayID {
+			return v.Object()
+		}
+	}
+	t.Fatalf("no feed entry for day %d", dayID)
+	return nil
+}
+
+// TestLifterRecapMasksAPrivateProgramName is the second leak, and the subtler
+// one: buildSessionRecap is scoped to the lifter whose session it is, so unlike
+// every self-scoped caller of GetSession it can hand the VIEWER a program name
+// they were never shown.
+func TestLifterRecapMasksAPrivateProgramName(t *testing.T) {
+	owner, ownerClient := ownLifter(t, "recap-private-owner")
+	_, dayID := makeProgram(t, owner, "Secret Bench Cycle", false)
+	logCleanSession(t, ownerClient, dayID)
+
+	sessionID := int(ownerClient.GET("/sessions").Expect().Status(http.StatusOK).
+		JSON().Object().Value("items").Array().Value(0).Object().
+		Value("id").Number().Raw())
+
+	_, viewer := ownLifter(t, "recap-onlooker")
+	viewer.GET(fmt.Sprintf("/lifters/%d/sessions/%d/recap", owner, sessionID)).
+		Expect().Status(http.StatusOK).
+		JSON().Object().Value("session").Object().
+		HasValue("programName", "Custom program")
+
+	// The owner reading their own recap sees the real name.
+	ownerClient.GET(fmt.Sprintf("/sessions/%d/recap", sessionID)).
+		Expect().Status(http.StatusOK).
+		JSON().Object().Value("session").Object().
+		HasValue("programName", "Secret Bench Cycle")
 }

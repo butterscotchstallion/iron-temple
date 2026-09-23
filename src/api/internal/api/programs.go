@@ -74,6 +74,18 @@ func (s *Server) getProgram(w http.ResponseWriter, r *http.Request) {
 		notFound(w, "program not found")
 		return
 	}
+	s.writeProgram(w, r, id, http.StatusOK)
+}
+
+// writeProgram serves one program with its days, prescriptions and the caller's
+// own assistance — the shape GET /programs/{id} returns.
+//
+// Shared with the editor's writes, which all answer with the whole program
+// rather than with the row they touched. That is worth a round trip: a client
+// that has just added a day needs the day's id, its position among the others
+// and the prescription it starts with, and reconstructing that from a partial
+// response is how two views of the same program start to disagree.
+func (s *Server) writeProgram(w http.ResponseWriter, r *http.Request, id int32, status int) {
 	ctx := r.Context()
 	userID := userFrom(ctx).ID
 
@@ -157,7 +169,7 @@ func (s *Server) getProgram(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	writeJSON(w, http.StatusOK, programDTO{
+	writeJSON(w, status, programDTO{
 		programSummaryDTO: programSummary(
 			p.ID, p.Name, p.Description, p.ProgressionKind,
 			p.CreatedByUserID, p.OwnerName, p.IsShared, p.ArchivedAt, userID,

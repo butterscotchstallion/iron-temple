@@ -57,6 +57,12 @@
   const routes = {
     "/": Home,
     "/programs": Programs,
+    // Declared BEFORE "/programs/:id", because svelte-spa-router matches in
+    // insertion order. Below it, "new" would match as an id, ProgramDetail would
+    // compute Number("new") = NaN, and the screen would fetch /programs/NaN.
+    "/programs/new": wrap({
+      asyncComponent: () => import("./routes/ProgramCreate.svelte"),
+    }),
     "/programs/:id": ProgramDetail,
     "/sessions/:id": wrap({ asyncComponent: () => import("./routes/ActiveSession.svelte") }),
     // Where finishing a workout lands, and reachable afterwards by its own URL.

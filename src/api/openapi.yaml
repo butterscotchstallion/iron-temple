@@ -1174,6 +1174,61 @@ paths:
                   $ref: "#/components/schemas/ProgramSummary"
         "401":
           $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [programs]
+      operationId: createProgram
+      summary: Build a program of your own
+      description: >
+        Creates a program owned by the calling lifter, either empty or as a copy
+        of one they can already see.
+
+
+        The seeded programs are unaffected and stay that way: they have no owner,
+        and every write scopes on the owner, so nothing here can reach them.
+
+
+        One thing worth telling the lifter on the way in: attendance in Racked is
+        graded from the date a program was created, so a brand-new program has no
+        earlier periods to grade. Their lift history is untouched — it follows the
+        movement, not the program, so a squat in a program built this morning
+        picks up exactly where it was left.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProgramRequest"
+      responses:
+        "201":
+          description: The program as created, with its days and prescriptions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Program"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: cloneFromProgramId names no program this lifter can see
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: >
+            `duplicate_name` — this lifter already has a program with that name,
+            or it is the name of a seeded one. Another lifter's program is not a
+            conflict: two people may each have a "Push Pull Legs".
+
+
+            `unsupported_progression` — the source prescribes per-set ramps
+            (Madcow), which the editor cannot express, so copying it would
+            produce a program whose ramps its owner could never change.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /programs/{programId}:
     parameters:
@@ -1189,6 +1244,82 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Program"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    patch:
+      tags: [programs]
+      operationId: updateProgram
+      summary: Rename a program of your own, or change who can find it
+      description: >
+        Owner only; anybody else's program — and every seeded one — answers 404.
+        Omitted fields are left alone.
+
+
+        Turning `isShared` off removes the program from other lifters' pickers.
+        It does not lock out anybody already training it: their sessions are bound
+        to its days either way, so revoking access would cost them their training
+        and achieve nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProgramRequest"
+      responses:
+        "200":
+          description: The program as updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Program"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /programs/{programId}/archive:
+    parameters:
+      - $ref: "#/components/parameters/ProgramId"
+    post:
+      tags: [programs]
+      operationId: archiveProgram
+      summary: Retire a program of your own
+      description: >
+        Takes the program off every picker, including its owner's, while leaving
+        every row it owns intact.
+
+
+        This is a sub-resource rather than `DELETE /programs/{programId}` because
+        deletion is not available: sessions reference a program's days and that
+        key restricts, so a program anybody has trained cannot be removed — and
+        cascading through to logged sets would destroy the tonnage, records and
+        Racked figures computed from them.
+
+
+        An archived program still resolves, still previews and can still be
+        trained. That is what stops a lifter part-way through one — their own, or
+        a shared one somebody else retired — finding their home screen unable to
+        load a program the app is still pointing them at.
+      responses:
+        "204":
+          description: Archived
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    delete:
+      tags: [programs]
+      operationId: unarchiveProgram
+      summary: Bring a retired program back
+      responses:
+        "204":
+          description: No longer archived
         "404":
           $ref: "#/components/responses/NotFound"
         "401":
@@ -3425,6 +3556,61 @@ components:
             picker but still resolves, still previews and can still be trained,
             so nobody part-way through one is stranded. It cannot be deleted
             outright — sessions reference its days.
+
+    CreateProgramRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+          example: Push Pull Legs
+        description:
+          type: string
+          maxLength: 500
+          default: ""
+        isShared:
+          type: boolean
+          default: false
+          description: >
+            Whether the rest of the install can find it. Defaults to private,
+            which is the answer that can be changed later without having already
+            shown somebody something.
+        cloneFromProgramId:
+          type: integer
+          format: int64
+          nullable: true
+          description: >
+            Start as a copy of this program rather than empty. It must be one the
+            caller can already see — another lifter's private program answers 404,
+            exactly as fetching it would — and it must be linear.
+
+
+            The copy takes the days and their prescribed lifts. It does NOT take
+            the weekdays: a schedule is a decision about your own week, and a
+            clone that arrives with three evenings booked has made it for you. It
+            does not take assistance either, on any account — the point of
+            building your own program is that accessories can become prescribed
+            lifts with a progression behind them.
+
+    UpdateProgramRequest:
+      type: object
+      description: >
+        A partial update; omitted fields are left as they are. Note that
+        `progressionKind` cannot be changed — every program built here is linear,
+        and switching the kind would reinterpret every prescription it holds
+        without touching one of them.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        description:
+          type: string
+          maxLength: 500
+        isShared:
+          type: boolean
 
     Program:
       allOf:
