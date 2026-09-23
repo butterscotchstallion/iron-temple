@@ -15,6 +15,7 @@
     setsPrescribed,
     repsLogged,
     repsTargeted,
+    setsBonus,
   }: {
     /** Null when the session was never finished, or ran past the 12-hour cap. */
     durationSeconds: number | null;
@@ -23,6 +24,11 @@
     setsPrescribed: number;
     repsLogged: number;
     repsTargeted: number;
+    /**
+     * Sets added after the rest of the session was already done. Counted inside
+     * setsLogged, so this qualifies the Sets tile rather than adding to it.
+     */
+    setsBonus: number;
   } = $props();
 </script>
 
@@ -44,6 +50,15 @@
     <p class="text-2xl font-black tabular-nums text-foreground">
       {formatOutOf(setsLogged, setsPrescribed)}
     </p>
+    <!-- Work the lifter added once the session was otherwise done. It qualifies
+         the number above rather than adding to it — the bonus sets are already
+         in that count — so it sits under the tile instead of beside it, and is
+         absent rather than "0 bonus" on an ordinary session. -->
+    {#if setsBonus > 0}
+      <p class="text-xs tabular-nums text-primary" data-testid="stat-sets-bonus">
+        {setsBonus} bonus
+      </p>
+    {/if}
   </Card>
   <Card class="p-4 text-center" data-testid="stat-reps">
     <h3 class="text-xs uppercase tracking-[0.2em] text-muted-foreground">Reps</h3>

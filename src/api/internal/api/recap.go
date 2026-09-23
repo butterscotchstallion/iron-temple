@@ -207,6 +207,7 @@ func (s *Server) recapSessionSets(
 			Reps:         reps,
 			Completed:    row.Completed,
 			IsAssistance: row.IsAssistance,
+			IsBonus:      row.IsBonus,
 		})
 		if reps <= 0 {
 			continue
@@ -379,6 +380,7 @@ func sessionRecapToDTO(rec racked.SessionRecap, earned *earnedNext) sessionRecap
 			SetsPrescribed: rec.Volume.SetsPrescribed,
 			RepsLogged:     rec.Volume.RepsLogged,
 			RepsTargeted:   rec.Volume.RepsTargeted,
+			SetsBonus:      rec.Volume.SetsBonus,
 		},
 		Progress: sessionRecapProgressDTO{
 			PreviousSessionID: rec.Progress.PreviousSessionID,
@@ -454,6 +456,7 @@ func sessionRecapToDTO(rec racked.SessionRecap, earned *earnedNext) sessionRecap
 			SetsPrescribed: l.SetsPrescribed,
 			RepsLogged:     l.RepsLogged,
 			RepsTargeted:   l.RepsTargeted,
+			SetsBonus:      l.SetsBonus,
 			VolumeLb:       l.VolumeLb,
 			HitEveryTarget: l.HitEveryTarget,
 			WeightDeltaLb:  l.WeightDeltaLb,

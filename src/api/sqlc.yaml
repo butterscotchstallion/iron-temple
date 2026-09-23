@@ -36,6 +36,9 @@ sql:
       - "db/migrations/0024_session_recognition.up.sql"
       - "db/migrations/0025_generated_activity_schedule.up.sql"
       - "db/migrations/0026_notifications.up.sql"
+      # 0027 adds session_sets.is_bonus, which six queries select and one
+      # writes — sqlc cannot type any of them without the column declared.
+      - "db/migrations/0027_session_set_bonus.up.sql"
     queries: "db/queries"
     gen:
       go:

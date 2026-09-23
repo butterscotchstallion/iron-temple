@@ -26,6 +26,15 @@ export type RecapLiftRow = {
   setsPrescribed: number;
   repsLogged: number;
   repsTargeted: number;
+  /**
+   * Logged sets the lifter added after the rest of the session was done.
+   *
+   * Counted INSIDE setsLogged rather than alongside it, so "12 of 12 sets · 2
+   * bonus" means twelve sets were done and two of them were extra — not
+   * fourteen. Both sources agree on this; it is one of the few recap figures
+   * the offline reconstruction knows as exactly as the server does.
+   */
+  setsBonus: number;
   hitEveryTarget: boolean;
   /** Null when the lift is new to this day, and null offline. */
   previousTopWeightLb: number | null;
