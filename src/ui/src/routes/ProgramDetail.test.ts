@@ -39,9 +39,11 @@ vi.mock("../lib/api", async (importOriginal) => ({
 }));
 
 const loadHomeSessions = vi.hoisted(() => vi.fn());
+const watchHomeSessions = vi.hoisted(() => vi.fn());
 vi.mock("../lib/homeData", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/homeData")>()),
   loadHomeSessions,
+  watchHomeSessions,
 }));
 
 /** A one-day program, since every case here turns on a single card. */
@@ -124,6 +126,12 @@ beforeEach(() => {
   clearCache();
   getProgram.mockReset();
   loadHomeSessions.mockReset();
+  // Mocked rather than driven through its own timer: a call from inside
+  // homeData.ts does not go through vi.mock, so the real watcher here would
+  // reach the real client. Its mechanics are pinned in homeData.test.ts; what
+  // this file is for is what the card does with the list it is handed.
+  watchHomeSessions.mockReset();
+  watchHomeSessions.mockReturnValue(() => {});
   // The prescription is beside the point here — no exercises keeps the cards to
   // the header row these assertions are about.
   previewNextSessions.mockReset();
@@ -188,6 +196,28 @@ describe("ProgramDetail day card", () => {
     expect(screen.queryByRole("button", { name: /^Start/ })).not
       .toBeInTheDocument();
     expect(screen.queryByText(/^Next /)).not.toBeInTheDocument();
+  });
+
+  // The whole point of watching the list: this screen used to go on offering
+  // Resume for a workout finished at the rack on a phone, for as long as the tab
+  // stayed open. Nothing here re-mounts or reloads the program — one fresh list
+  // arrives and every claim the card makes about today corrects itself.
+  it("stops offering Resume once the workout is finished elsewhere", async () => {
+    await show(todayWeekday(), [today({ completedSetCount: 2, isOver: false })]);
+    expect(screen.getByRole("link", { name: "Resume" })).toBeInTheDocument();
+
+    const [[onFresh]] = watchHomeSessions.mock.calls;
+    onFresh({ items: [today()] });
+
+    await waitFor(() =>
+      expect(screen.queryByRole("link", { name: "Resume" })).not
+        .toBeInTheDocument(),
+    );
+    expect(screen.queryByText("In progress")).not.toBeInTheDocument();
+    // Finished, so nextDueOn has moved the card to next week — where it says
+    // nothing about the session just completed and offers its own next one.
+    expect(screen.getByText(/^Next /)).toBeInTheDocument();
+    expect(action("Start")).toBeInTheDocument();
   });
 
   it("leads with a filled Start on a day not yet trained", async () => {
