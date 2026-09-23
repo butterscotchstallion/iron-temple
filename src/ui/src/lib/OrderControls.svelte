@@ -18,12 +18,23 @@
     label,
     isFirst,
     isLast,
+    busy = false,
     onUp,
     onDown,
   }: {
     label: string;
     isFirst: boolean;
     isLast: boolean;
+    /**
+     * A reorder is already in flight.
+     *
+     * Moving a row is a round trip whose response redraws the whole list, so a
+     * second tap before the first lands is a move against positions that are
+     * about to change underneath it. Separate from isFirst/isLast because those
+     * say "this row cannot go that way" and this says "not yet" — and because
+     * aria-busy has to go on the buttons that are actually working.
+     */
+    busy?: boolean;
     onUp: () => void;
     onDown: () => void;
   } = $props();
@@ -32,12 +43,12 @@
     "rounded-md p-1 text-muted-foreground transition hover:text-foreground disabled:opacity-30 disabled:hover:text-muted-foreground";
 </script>
 
-<div class="flex shrink-0 flex-col">
+<div class="flex shrink-0 flex-col" aria-busy={busy}>
   <button
     type="button"
     class={buttonClass}
     aria-label="Move {label} up"
-    disabled={isFirst}
+    disabled={isFirst || busy}
     onclick={onUp}
   >
     <ChevronUp class="size-4" aria-hidden="true" />
@@ -46,7 +57,7 @@
     type="button"
     class={buttonClass}
     aria-label="Move {label} down"
-    disabled={isLast}
+    disabled={isLast || busy}
     onclick={onDown}
   >
     <ChevronDown class="size-4" aria-hidden="true" />

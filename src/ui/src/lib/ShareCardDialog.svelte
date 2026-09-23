@@ -2,6 +2,8 @@
   import { onDestroy } from "svelte";
   import * as AlertDialog from "$lib/components/ui/alert-dialog";
   import { Button } from "$lib/components/ui/button";
+  import Loading from "./skeleton/Loading.svelte";
+  import Skeleton from "./skeleton/Skeleton.svelte";
   import { SHARE_CARD, type ShareCardContent } from "./shareCard";
   import { canShareFile, renderShareCard, shareCardFile, shareOrDownload } from "./shareImage";
 
@@ -134,13 +136,15 @@
     </AlertDialog.Header>
 
     {#if status === "rendering"}
-      <div
-        class="mx-auto w-full max-w-[280px] animate-pulse rounded-lg bg-muted"
-        style="aspect-ratio: {SHARE_CARD.width} / {SHARE_CARD.height}"
-        role="status"
-      >
-        <span class="sr-only">Drawing your card…</span>
-      </div>
+      <!-- The card's own aspect ratio, so the dialog does not resize around the
+           image when it lands. An inline style rather than a class because the
+           ratio comes from SHARE_CARD, which Tailwind cannot read. -->
+      <Loading label="Drawing your card" class="mx-auto w-full max-w-[280px]">
+        <Skeleton
+          class="w-full rounded-lg"
+          style="aspect-ratio: {SHARE_CARD.width} / {SHARE_CARD.height}"
+        />
+      </Loading>
     {:else if status === "failed"}
       <p class="text-center text-sm text-muted-foreground" role="alert">
         Couldn't draw the card.

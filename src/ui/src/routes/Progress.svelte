@@ -8,6 +8,8 @@
   import { Card } from "$lib/components/ui/card";
   import TrendingUp from "@lucide/svelte/icons/trending-up";
   import ErrorCard from "../lib/ErrorCard.svelte";
+  import Loading from "../lib/skeleton/Loading.svelte";
+  import Skeleton from "../lib/skeleton/Skeleton.svelte";
 
   type ExerciseCard = {
     id: number;
@@ -65,9 +67,24 @@
 
   <section class="grid gap-4 sm:grid-cols-3">
     {#if loading}
-      {#each skeletons as n (n)}
-        <Card class="h-40 animate-pulse" aria-hidden="true"></Card>
-      {/each}
+      <!-- Spans the row and repeats the grid, so each placeholder lands in the
+           cell its card will occupy. See Programs.svelte for the same shape. -->
+      <Loading
+        label="Loading your lifts"
+        class="col-span-full grid gap-4 sm:grid-cols-3"
+      >
+        {#each skeletons as n (n)}
+          <!-- Four stacked lines to match the real card exactly: the emoji
+               (text-4xl), the lift's name, its top set (text-2xl) and the date,
+               with the same gap-1 between them. -->
+          <Card class="flex flex-col items-center gap-1 p-5">
+            <Skeleton text="4xl" class="w-10" />
+            <Skeleton text="sm" class="w-28" />
+            <Skeleton text="2xl" class="w-20" />
+            <Skeleton text="xs" class="w-24" />
+          </Card>
+        {/each}
+      </Loading>
     {:else if failed}
       <ErrorCard
         class="col-span-full"

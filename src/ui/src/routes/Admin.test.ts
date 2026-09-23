@@ -256,6 +256,21 @@ describe("Admin", () => {
     expect(field.value).toBe(before);
   });
 
+  // The heading counts the roster, so drawing it before the roster arrives put
+  // "0 accounts" on the one screen whose job is to be right about who exists.
+  it("holds the roster count back until the roster is in", async () => {
+    let answer!: (result: unknown) => void;
+    listUsers.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+
+    render(Admin);
+
+    expect(screen.queryByText("0 accounts")).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("Loading the accounts…");
+
+    answer({ status: 200, data: [adminUser()] });
+    expect(await screen.findByText("1 account")).toBeInTheDocument();
+  });
+
   it("says so when the roster cannot be loaded", async () => {
     listUsers.mockResolvedValue({ status: 500, data: { code: "internal", message: "" } });
 

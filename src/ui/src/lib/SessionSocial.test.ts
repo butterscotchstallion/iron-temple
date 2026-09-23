@@ -73,7 +73,13 @@ describe("SessionSocial on somebody else's session", () => {
 
   it("applauds, then refetches rather than guessing the new count", async () => {
     render(SessionSocial, props);
-    await waitFor(() => expect(listSessionReactions).toHaveBeenCalledTimes(1));
+    // Waiting for the button rather than for the call: the card holds its
+    // skeleton until both requests have ANSWERED, and "was called" is a promise
+    // that has not necessarily settled.
+    await waitFor(() => {
+      expect(screen.getByLabelText("React with 💪")).toBeInTheDocument();
+    });
+    expect(listSessionReactions).toHaveBeenCalledTimes(1);
 
     listSessionReactions.mockResolvedValue({
       status: 200,
@@ -114,7 +120,9 @@ describe("SessionSocial on somebody else's session", () => {
     addSessionReaction.mockResolvedValue({ status: 500, data: undefined });
     render(SessionSocial, props);
 
-    await waitFor(() => expect(listSessionReactions).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(screen.getByLabelText("React with 🔥")).toBeInTheDocument();
+    });
     await fireEvent.click(screen.getByLabelText("React with 🔥"));
 
     await waitFor(() => {
@@ -318,5 +326,126 @@ describe("SessionSocial comments", () => {
       expect(screen.getByText("Couldn't remove that.")).toBeInTheDocument();
     });
     expect(screen.getByText("still here")).toBeInTheDocument();
+  });
+});
+
+describe("SessionSocial while it loads", () => {
+  const props = { sessionId: 42, ownerId: THEM };
+
+  // The card used to draw immediately with both lists empty and then grow as
+  // each landed, pushing the comment box down the page a beat after the lifter
+  // had reached for it.
+  it("holds the card's height until both requests have answered", async () => {
+    let answerReactions!: (result: unknown) => void;
+    listSessionReactions.mockReturnValue(
+      new Promise((resolve) => (answerReactions = resolve)),
+    );
+    render(SessionSocial, props);
+
+    // The comments call has already resolved; the card waits for the other one.
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "Loading applause and comments…",
+      );
+    });
+    expect(screen.queryByLabelText("React with 💪")).toBeNull();
+
+    answerReactions({ status: 200, data: [] });
+    await waitFor(() => {
+      expect(screen.getByLabelText("React with 💪")).toBeInTheDocument();
+    });
+  });
+
+  // A shimmer that never resolves would be a worse lie than a zero.
+  it("gives up the placeholder when the requests fail", async () => {
+    listSessionReactions.mockResolvedValue({ status: 500, data: undefined });
+    listSessionComments.mockResolvedValue({ status: 500, data: undefined });
+    render(SessionSocial, props);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("React with 💪")).toBeInTheDocument();
+    });
+  });
+
+  // Posting needs nothing either request returns, so withholding the box would
+  // only mean it moved when they landed.
+  it("leaves the comment box usable throughout", () => {
+    listSessionReactions.mockReturnValue(new Promise(() => {}));
+    listSessionComments.mockReturnValue(new Promise(() => {}));
+    render(SessionSocial, props);
+
+    expect(screen.getByPlaceholderText("Say something")).toBeInTheDocument();
+  });
+});
+
+describe("SessionSocial while a write is in flight", () => {
+  const props = { sessionId: 42, ownerId: THEM };
+
+  // Applauding costs two round trips — the write, then the refetch that owns the
+  // count — so on anything slower than a LAN the button used to look dead, and
+  // the second tap withdrew the first.
+  it("holds the reaction buttons until the refetched count lands", async () => {
+    let finishWrite!: (result: unknown) => void;
+    addSessionReaction.mockReturnValue(new Promise((resolve) => (finishWrite = resolve)));
+    render(SessionSocial, props);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("React with 💪")).toBeInTheDocument();
+    });
+    await fireEvent.click(screen.getByLabelText("React with 💪"));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Saving 💪")).toHaveAttribute("aria-busy", "true");
+    });
+    // Every button, not just the pressed one: they all read from a count that is
+    // about to be replaced wholesale.
+    expect(screen.getByLabelText("React with 🔥")).toBeDisabled();
+
+    finishWrite({ status: 204, data: undefined });
+    await waitFor(() => {
+      expect(screen.getByLabelText("React with 💪")).toBeEnabled();
+    });
+    expect(addSessionReaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases the buttons when the write fails", async () => {
+    addSessionReaction.mockResolvedValue({ status: 500, data: undefined });
+    render(SessionSocial, props);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("React with 💪")).toBeInTheDocument();
+    });
+    await fireEvent.click(screen.getByLabelText("React with 💪"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Couldn't save that.")).toBeInTheDocument();
+    });
+    expect(screen.getByLabelText("React with 💪")).toBeEnabled();
+  });
+
+  it("does not send a second delete for a comment already going", async () => {
+    let finishDelete!: (result: unknown) => void;
+    deleteSessionComment.mockReturnValue(
+      new Promise((resolve) => (finishDelete = resolve)),
+    );
+    listSessionComments.mockResolvedValue({
+      status: 200,
+      data: [comment({ id: 7, author: testLifter({ id: ME }), body: "regrettable" })],
+    });
+    render(SessionSocial, props);
+
+    await waitFor(() => {
+      expect(screen.getByText("regrettable")).toBeInTheDocument();
+    });
+    const trash = screen.getByLabelText("Remove this comment");
+    await fireEvent.click(trash);
+    await waitFor(() => expect(trash).toHaveAttribute("aria-busy", "true"));
+    await fireEvent.click(trash);
+
+    finishDelete({ status: 204, data: undefined });
+    await waitFor(() => {
+      expect(screen.queryByText("regrettable")).not.toBeInTheDocument();
+    });
+    expect(deleteSessionComment).toHaveBeenCalledTimes(1);
   });
 });

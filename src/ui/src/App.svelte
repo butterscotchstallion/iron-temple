@@ -256,8 +256,18 @@
        with no way to recover. -->
   <ErrorBoundary>
     {#if !auth.loaded}
-      <!-- Render nothing rather than a spinner: /me is one local request, and a
-           flash of loading state is worse than a beat of empty space. -->
+      <!-- Nothing to LOOK at, still. /me is one local request, and a flash of
+           loading state is worse than a beat of empty space — but the deeper
+           reason no skeleton goes here is that there is no one shape to hold:
+           what follows is either the sign-in form or a whole routed app, and a
+           placeholder would have to pick one and be wrong the other half of the
+           time. Every route behind this draws its own, shaped to itself.
+
+           What was missing was the other half of an indicator. The bars
+           elsewhere are aria-hidden, so a screen reader arriving here found an
+           empty document and nothing to wait for; this is the announcement
+           without the shimmer. -->
+      <p class="sr-only" role="status" aria-busy="true">Signing you in…</p>
     {:else if !auth.me}
       <!-- Signed out, the sign-in form replaces the router entirely, so no route
            is reachable by typing its hash. The API enforces this independently —

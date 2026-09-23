@@ -128,8 +128,23 @@
 
       <label class="flex flex-col gap-1 text-sm">
         <span class="text-muted-foreground">Start from</span>
-        <select bind:value={cloneFrom} class={fieldClass} disabled={loading}>
-          <option value={BLANK}>Nothing — an empty program</option>
+        <!-- No skeleton here, and that is the shape of the screen rather than an
+             omission: the form is the same height before and after the list
+             lands, because all that arrives is <option>s inside a control that
+             is already drawn. What WAS missing is any sign the control is
+             temporarily inert — `disabled` alone reads as "you can't do this"
+             rather than "not yet", and says nothing at all to a screen reader.
+             So the first option says what it is waiting for, and aria-busy says
+             the same thing to anything listening. -->
+        <select
+          bind:value={cloneFrom}
+          class={fieldClass}
+          disabled={loading}
+          aria-busy={loading}
+        >
+          <option value={BLANK}>
+            {loading ? "Loading programs…" : "Nothing — an empty program"}
+          </option>
           {#each sources as source (source.id)}
             <option value={source.id}>{source.name}</option>
           {/each}

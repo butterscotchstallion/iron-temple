@@ -10,6 +10,8 @@
   import { passphrase } from "../lib/passphrase";
   import { randomPunName } from "../lib/punNames";
   import { createUser, listUsers, type AdminUser } from "../lib/api";
+  import Loading from "../lib/skeleton/Loading.svelte";
+  import Skeleton from "../lib/skeleton/Skeleton.svelte";
 
   // Who has an account on this install, and how to add one.
   //
@@ -26,6 +28,10 @@
   let users = $state<AdminUser[]>([]);
   let loading = $state(true);
   let failed = $state(false);
+
+  // Two placeholder rows: this install's roster is the owner plus whoever they
+  // have added, which in practice is one or two people.
+  const SKELETON_ACCOUNTS = [0, 1];
 
   // The username starts filled in with a lifting pun, and the dice beside the
   // field rolls another. Naming an account is the one part of this form that
@@ -243,13 +249,32 @@
   </Card>
 
   <Card class="p-6">
-    <h3 class="text-lg font-bold text-card-foreground">
-      {users.length === 1 ? "1 account" : `${users.length} accounts`}
-    </h3>
+    {#if loading}
+      <!-- The heading is a placeholder too, and that is not tidiness: it counts
+           the roster, so drawing it now would say "0 accounts" on a screen whose
+           whole job is to be right about who exists. -->
+      <Skeleton text="lg" class="w-32" />
+    {:else}
+      <h3 class="text-lg font-bold text-card-foreground">
+        {users.length === 1 ? "1 account" : `${users.length} accounts`}
+      </h3>
+    {/if}
 
     {#if loading}
-      <!-- Nothing, for the beat it takes: one local request, and a flash of
-           skeleton for a short table is worse than the space it will fill. -->
+      <!-- This used to render nothing, which left the card collapsed onto its
+           own padding until the roster landed and then grew it by a row per
+           account. Not SkeletonRows: these rows are one line — a name, a
+           username and a date on one baseline — not the two-line person rows the
+           feed and the lifter list draw. -->
+      <Loading label="Loading the accounts" class="mt-3 flex flex-col divide-y divide-border/60">
+        {#each SKELETON_ACCOUNTS as n (n)}
+          <div class="flex items-baseline gap-3 py-3">
+            <Skeleton text="sm" class="w-28" />
+            <Skeleton text="sm" class="w-20" />
+            <Skeleton text="sm" class="ml-auto w-24" />
+          </div>
+        {/each}
+      </Loading>
     {:else if failed}
       <p class="mt-3 text-sm text-muted-foreground">
         Couldn't load the accounts. Reload to try again.

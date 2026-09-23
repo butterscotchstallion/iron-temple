@@ -3,6 +3,8 @@
   import { push } from "svelte-spa-router";
   import Bell from "@lucide/svelte/icons/bell";
   import Avatar from "./Avatar.svelte";
+  import Loading from "./skeleton/Loading.svelte";
+  import SkeletonRows from "./skeleton/SkeletonRows.svelte";
   import { auth } from "./auth.svelte";
   import { relativeTime } from "./date";
   import {
@@ -203,8 +205,15 @@
         {:else}
           <!-- Only before the first poll has ever landed. After that the list
                is drawn from what is already held, so opening the panel never
-               flashes this. -->
-          <div class="h-20 animate-pulse" aria-hidden="true"></div>
+               flashes this. Rows rather than one grey block, because that is
+               what lands here — and because the shimmer now announces itself to
+               a screen reader instead of leaving the panel silently empty. -->
+          <!-- Two rows, which is also about the height of the "nothing yet"
+               message that replaces them on an install where nobody has
+               applauded anything. -->
+          <Loading label="Loading your notifications" class="p-1">
+            <SkeletonRows rows={2} avatar="size-7" rowClass="py-2" />
+          </Loading>
         {/if}
       </div>
     </DropdownMenu.Content>

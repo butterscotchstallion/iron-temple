@@ -98,4 +98,21 @@ describe("Lifters", () => {
       expect(screen.getByText(/Couldn't load the lifters/)).toBeInTheDocument();
     });
   });
+
+  // This screen used to render nothing while the roster was in flight, which
+  // left the card collapsed onto its own padding and a screen reader with an
+  // empty page.
+  it("says it is loading, and stops once the roster lands", async () => {
+    let answer!: (result: unknown) => void;
+    listLifters.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    render(Lifters);
+
+    expect(screen.getByRole("status")).toHaveTextContent("Loading the lifters…");
+
+    answer({ status: 200, data: [me, trained, untrained] });
+    await waitFor(() => {
+      expect(screen.getByText("Ada Lovelace")).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("status")).toBeNull();
+  });
 });

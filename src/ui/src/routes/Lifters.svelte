@@ -6,6 +6,8 @@
   import { auth } from "../lib/auth.svelte";
   import { formatLongDate } from "../lib/date";
   import { listLifters, type Lifter } from "../lib/api";
+  import Loading from "../lib/skeleton/Loading.svelte";
+  import SkeletonRows from "../lib/skeleton/SkeletonRows.svelte";
 
   // Everyone who trains on this install.
   //
@@ -55,8 +57,16 @@
 
   <Card class="p-6">
     {#if loading}
-      <!-- Nothing for the beat it takes: one local request, and a skeleton for a
-           short list is worse than the space it will fill. Same call Admin makes. -->
+      <!-- This used to render nothing on the grounds that one local request is
+           a short beat. It is — but "nothing" is a card that collapses to its
+           own padding and then grows by a row per lifter, and it also leaves a
+           screen reader with an empty page rather than a "loading" to wait on.
+           Two rows at the roster's own 40px avatar, so the list fills in rather
+           than unfolding. Two rather than more because this install may well
+           hold one lifter, and over-reserving is the same jump upside down. -->
+      <Loading label="Loading the lifters">
+        <SkeletonRows rows={2} avatar="size-10" />
+      </Loading>
     {:else if failed}
       <p class="text-sm text-muted-foreground">
         Couldn't load the lifters. Reload to try again.

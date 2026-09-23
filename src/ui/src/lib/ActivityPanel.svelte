@@ -4,6 +4,8 @@
   import { Button } from "$lib/components/ui/button";
   import * as AlertDialog from "$lib/components/ui/alert-dialog";
   import ErrorBanner from "./ErrorBanner.svelte";
+  import Loading from "./skeleton/Loading.svelte";
+  import Skeleton from "./skeleton/Skeleton.svelte";
   import {
     backfillActivity,
     deleteActivity,
@@ -44,6 +46,17 @@
   let error = $state<string | null>(null);
   let confirmingTeardown = $state(false);
   let schedule = $state<ActivitySchedule | null>(null);
+
+  // Whether the first load has answered.
+  //
+  // Distinct from `schedule !== null`, which is what the Daily section used to
+  // guard on: that is false while the request is in flight AND false if it
+  // fails, so the section drew nothing and then grew its controls in from
+  // nowhere — or never appeared at all, with nothing said about why. The flag
+  // separates "not yet" from "asked and got nothing", and only the first gets a
+  // placeholder. Set even on failure: a shimmer that never resolves is worse
+  // than an empty section.
+  let loaded = $state(false);
 
   // Defaults chosen to be immediately useful rather than minimal: four lifters over
   // twelve weeks is enough for a monthly leaderboard to rank, a heatmap to have
@@ -88,6 +101,7 @@
     if (daily.status === 200) {
       schedule = daily.data;
     }
+    loaded = true;
   }
 
   // What the generator has already been seen doing, so a poll can tell new work
@@ -320,7 +334,13 @@
       scheduled weekdays. Unlike Live above, this survives a restart.
     </p>
 
-    {#if schedule}
+    {#if !loaded}
+      <!-- The switch and the sentence beside it, at the size they will be. -->
+      <Loading label="Loading the schedule" class="mt-3 flex flex-row items-center gap-3">
+        <Skeleton class="h-9 w-28 rounded-md" />
+        <Skeleton text="sm" class="w-44" />
+      </Loading>
+    {:else if schedule}
       <!-- Captured so the click handler has a non-null reference: the {#if} narrows
            the render pass, not a closure that runs later. -->
       {@const daily = schedule}

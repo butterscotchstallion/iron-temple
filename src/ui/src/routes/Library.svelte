@@ -27,10 +27,19 @@
   import Plus from "@lucide/svelte/icons/plus";
   import SearchX from "@lucide/svelte/icons/search-x";
   import Trash2 from "@lucide/svelte/icons/trash-2";
+  import Loading from "../lib/skeleton/Loading.svelte";
+  import Skeleton from "../lib/skeleton/Skeleton.svelte";
 
   let exercises = $state<Exercise[]>([]);
   let loading = $state(true);
   let failed = $state(false);
+
+  // Placeholder counts for the first paint. The seeded library is 53 movements
+  // across nine groups, so two sections of five rows is about a phone screen —
+  // enough to hold the fold still without reserving a page of empty scroll.
+  const SKELETON_CHIPS = [0, 1, 2, 3, 4, 5];
+  const SKELETON_SECTIONS = [0, 1];
+  const SKELETON_ROWS = [0, 1, 2, 3, 4];
 
   // Search text and the muscle-group chip, if one is selected.
   let query = $state("");
@@ -43,6 +52,13 @@
   let newGroup = $state<MuscleGroup>("other");
   let newEquipment = $state<Equipment>("other");
   let saving = $state(false);
+  // Which custom exercise is being deleted, if any.
+  //
+  // The delete was the one action on this page that ran silently: the trash
+  // icon stayed live through the round trip, so a second tap sent a second
+  // request for a row the first had already removed — and on a slow link the
+  // first tap looked like it had done nothing at all.
+  let removingId = $state<number | null>(null);
   // Message from a failed create or delete. A string rather than a boolean
   // because the API distinguishes a duplicate name from an exercise in use, and
   // that distinction is the whole value of the message.
@@ -98,8 +114,11 @@
   }
 
   async function remove(exercise: Exercise) {
+    if (removingId !== null) return;
     actionError = null;
+    removingId = exercise.id;
     const deleted = await deleteExercise(exercise.id);
+    removingId = null;
     if (deleted.status !== 204) {
       // The server's message names the reason — logged sets, or still on a
       // program — which is more use than "couldn't delete".
@@ -126,7 +145,38 @@
   {/if}
 
   {#if loading}
-    <Card class="h-64 animate-pulse" aria-hidden="true"></Card>
+    <!-- Three things go missing at once here, and the search box is the one
+         worth naming: it is drawn from nothing the server sends, but it lives
+         inside the loaded branch, so it used to appear with the catalogue and
+         shove the whole list down a row. The chip row does the same. -->
+    <Loading label="Loading the exercise library" class="flex flex-col gap-4">
+      <Skeleton class="h-[38px] w-full" />
+      <div class="flex flex-wrap gap-1.5">
+        {#each SKELETON_CHIPS as chip (chip)}
+          <Skeleton class="h-[26px] w-20 rounded-full" />
+        {/each}
+      </div>
+      {#each SKELETON_SECTIONS as section (section)}
+        <section class="flex flex-col gap-2">
+          <Skeleton text="xs" class="w-24" />
+          <Card class="divide-y divide-border/60 p-0">
+            {#each SKELETON_ROWS as row (row)}
+              <div class="flex items-center gap-3 px-4 py-2.5">
+                <Skeleton text="xl" class="w-6 shrink-0" />
+                <!-- Explicit heights rather than the `text` prop: the real name
+                     and subtitle sit inside a `leading-tight` anchor, so their
+                     line boxes are 1.25em rather than the type scale's default,
+                     and the scale would overshoot the row by 8px. -->
+                <div class="flex flex-1 flex-col">
+                  <Skeleton class="h-[18px] w-40" />
+                  <Skeleton class="h-[15px] w-28" />
+                </div>
+              </div>
+            {/each}
+          </Card>
+        </section>
+      {/each}
+    </Loading>
   {:else if failed}
     <ErrorCard message="Couldn't load the exercise library." onRetry={load} />
   {:else}
@@ -212,13 +262,25 @@
                 </span>
               </a>
               {#if exercise.isCustom}
+                {@const removing = removingId === exercise.id}
+                <!-- Disabled while ANY delete is in flight, not just this row's:
+                     two of them racing is two requests against a list that is
+                     about to be spliced twice. aria-busy carries the same fact
+                     to a screen reader, which cannot see the icon dim. -->
                 <button
                   type="button"
-                  class="shrink-0 rounded-md p-1.5 text-muted-foreground transition hover:text-destructive"
-                  aria-label="Delete {exercise.name}"
+                  class="shrink-0 rounded-md p-1.5 text-muted-foreground transition hover:text-destructive disabled:opacity-40"
+                  aria-label={removing
+                    ? `Deleting ${exercise.name}`
+                    : `Delete ${exercise.name}`}
+                  aria-busy={removing}
+                  disabled={removingId !== null}
                   onclick={() => remove(exercise)}
                 >
-                  <Trash2 class="size-4" aria-hidden="true" />
+                  <Trash2
+                    class="size-4 {removing ? 'animate-pulse motion-reduce:animate-none' : ''}"
+                    aria-hidden="true"
+                  />
                 </button>
               {/if}
             </div>

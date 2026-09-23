@@ -12,6 +12,8 @@
   import { exerciseEmoji } from "./exerciseIcon";
   import { Button } from "$lib/components/ui/button";
   import ErrorBanner from "./ErrorBanner.svelte";
+  import Loading from "./skeleton/Loading.svelte";
+  import Skeleton from "./skeleton/Skeleton.svelte";
   import SearchX from "@lucide/svelte/icons/search-x";
 
   // Choosing a movement from the library: search, muscle-group chips, the
@@ -40,6 +42,10 @@
     onPick: (exercise: Exercise) => void;
     onCancel: () => void;
   } = $props();
+
+  // Chips in the loading placeholder — one per muscle group with anything in
+  // it, which for the seeded library is most of the nine.
+  const SKELETON_CHIPS = [0, 1, 2, 3, 4, 5, 6, 7];
 
   let exercises = $state<Exercise[]>([]);
   let loading = $state(true);
@@ -85,7 +91,22 @@
 </script>
 
 {#if loading}
-  <div class="h-24 animate-pulse rounded-md bg-muted/40" aria-hidden="true"></div>
+  <!-- The picker's own shape: the search box, the muscle-group chips and the
+       scrolling list, which is capped at max-h-64 whatever comes back. A single
+       h-24 block used to stand in for all three, so the panel grew by most of
+       its own height when the library landed — inside a dialog or an expanded
+       card, which pushed whatever was under it down the page. -->
+  <Loading label="Loading the exercise library" class="flex flex-col gap-3">
+    <Skeleton class="h-[38px] w-full" />
+    <div class="flex flex-wrap gap-1.5">
+      {#each SKELETON_CHIPS as chip (chip)}
+        <Skeleton class="h-[22px] w-16 rounded-full" />
+      {/each}
+    </div>
+    <Skeleton class="h-64 w-full" />
+    <!-- Cancel, which the loaded branch draws whatever came back. -->
+    <Skeleton class="h-8 w-20 self-start rounded-md" />
+  </Loading>
 {:else if failed}
   <ErrorBanner message="Couldn't load the exercise library." onRetry={load} />
 {:else}

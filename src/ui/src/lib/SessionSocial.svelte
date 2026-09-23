@@ -4,6 +4,8 @@
   import { Button } from "$lib/components/ui/button";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import Avatar from "./Avatar.svelte";
+  import Loading from "./skeleton/Loading.svelte";
+  import Skeleton from "./skeleton/Skeleton.svelte";
   import { auth } from "./auth.svelte";
   import {
     addSessionComment,
@@ -41,6 +43,29 @@
   let posting = $state(false);
   let error = $state<string | null>(null);
 
+  // The two actions that used to run silently.
+  //
+  // Posting a comment has always had `posting` behind it; applauding and
+  // removing did not, so the tap that mattered most — a reaction, which costs
+  // two round trips because the count is refetched rather than guessed — gave
+  // no sign it had been heard. On anything slower than a LAN that reads as a
+  // dead button, and the second tap is a withdrawal of the first.
+  let pending = $state<ReactionEmoji | null>(null);
+  let removingId = $state<number | null>(null);
+
+  // Whether the first pair of requests has come back.
+  //
+  // This card used to draw immediately with both lists empty and then grow as
+  // each landed — the reaction row gaining its counts, the comment list
+  // unfolding from nothing — which pushed the comment box down the page a beat
+  // after the lifter had reached for it. There was also nothing here to tell a
+  // screen reader that anything was on its way.
+  //
+  // One flag for both requests rather than one each: they are fired together and
+  // land within a few milliseconds of each other, and two flags would mean two
+  // separate moments of the card changing height.
+  let loaded = $state(false);
+
   // Applauding your own workout is refused by the API, so the buttons are not
   // offered — a control that always errors is worse than no control. The counts
   // still show: seeing who applauded your session is the point of having it.
@@ -65,13 +90,15 @@
   }
 
   async function toggle(emoji: ReactionEmoji) {
-    if (isMine) return;
+    if (isMine || pending !== null) return;
     error = null;
+    pending = emoji;
     const pressed = minePressed(emoji);
     const result = pressed
       ? await removeSessionReaction(sessionId, { emoji })
       : await addSessionReaction(sessionId, { emoji });
     if (result.status !== 204) {
+      pending = null;
       error = "Couldn't save that.";
       return;
     }
@@ -80,6 +107,10 @@
     // trip — guessing the new number would be the only way this could show one
     // the server disagrees with.
     await loadReactions();
+    // Cleared after the refetch, not after the write. The count is what the tap
+    // is FOR, and releasing the button while it is still the old number invites
+    // the second tap that undoes the first.
+    pending = null;
   }
 
   async function post(event: SubmitEvent) {
@@ -105,8 +136,11 @@
   }
 
   async function remove(comment: SessionComment) {
+    if (removingId !== null) return;
     error = null;
+    removingId = comment.id;
     const result = await deleteSessionComment(sessionId, comment.id);
+    removingId = null;
     if (result.status !== 204) {
       error = "Couldn't remove that.";
       return;
@@ -129,88 +163,126 @@
 
   onMount(() => {
     // Both at once: they are separate requests and neither waits on the other.
-    void loadReactions();
-    void loadComments();
+    // The card stays in its placeholder until both have answered, so it changes
+    // height once rather than twice. A failure still clears it — the emoji
+    // buttons are usable with no counts behind them, and a permanent shimmer
+    // would be a worse lie than a zero.
+    void Promise.all([loadReactions(), loadComments()]).finally(() => {
+      loaded = true;
+    });
   });
 </script>
 
 <Card class="flex flex-col gap-4 p-4" data-testid="session-social">
-  <!-- Reactions -->
-  <div class="flex flex-wrap items-center gap-2">
-    {#if isMine}
-      <!-- Read-only: the counts, without controls that would only ever 403. -->
-      {#each reactions as reaction (reaction.emoji)}
-        <span
-          class="inline-flex items-center gap-1 rounded-full border border-border/60 px-2.5 py-1 text-sm"
-        >
-          <span aria-hidden="true">{reaction.emoji}</span>
-          <span class="text-xs font-semibold text-muted-foreground">{reaction.count}</span>
-        </span>
-      {/each}
-      {#if reactions.length === 0}
-        <span class="text-xs text-muted-foreground">No reactions yet.</span>
-      {/if}
-    {:else}
+  {#if !loaded}
+    <!-- The reaction row only, at the exact height its pills will be. The
+         comment list above the box is NOT reserved: most sessions have no
+         comments, so holding a couple of rows for them would collapse when the
+         answer came back — the same reflow, pointed the other way. -->
+    <Loading label="Loading applause and comments" class="flex flex-row flex-wrap items-center gap-2">
       {#each EMOJI as emoji (emoji)}
-        {@const count = countFor(emoji)}
-        <button
-          type="button"
-          onclick={() => toggle(emoji)}
-          aria-pressed={minePressed(emoji)}
-          aria-label={`React with ${emoji}`}
-          class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary {minePressed(
-            emoji,
-          )
-            ? 'border-primary bg-primary/15'
-            : 'border-border/60 hover:bg-white/5'}"
-        >
-          <span aria-hidden="true">{emoji}</span>
-          {#if count > 0}
-            <span class="text-xs font-semibold text-muted-foreground">{count}</span>
-          {/if}
-        </button>
+        <Skeleton class="h-[34px] w-14 rounded-full" />
       {/each}
-    {/if}
-  </div>
-
-  {#if error}
-    <p class="text-sm text-destructive" role="status">{error}</p>
-  {/if}
-
-  <!-- Comments -->
-  {#if comments.length > 0}
-    <ul class="flex flex-col divide-y divide-border/60">
-      {#each comments as comment (comment.id)}
-        <li class="flex items-start gap-2.5 py-2.5">
-          <Avatar user={comment.author} size={28} />
-          <div class="min-w-0 flex-1">
-            <p class="flex items-baseline gap-2">
-              <span class="truncate text-sm font-semibold text-foreground">
-                {comment.author.displayName || comment.author.username}
-              </span>
-              <span class="shrink-0 text-xs text-muted-foreground">
-                {saidAt(comment.createdAt)}
-              </span>
-            </p>
-            <!-- break-words, not truncate: a comment is the content, and 256
-                 characters wrap rather than being cut off. -->
-            <p class="break-words text-sm text-foreground/90">{comment.body}</p>
-          </div>
-          {#if canRemove(comment)}
-            <button
-              type="button"
-              onclick={() => remove(comment)}
-              aria-label="Remove this comment"
-              class="shrink-0 rounded-md p-1 text-muted-foreground transition hover:bg-white/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+    </Loading>
+  {:else}
+    <!-- Reactions -->
+    <div class="flex flex-wrap items-center gap-2">
+      {#if isMine}
+        <!-- Read-only: the counts, without controls that would only ever 403. -->
+        {#each reactions as reaction (reaction.emoji)}
+          <span
+            class="inline-flex items-center gap-1 rounded-full border border-border/60 px-2.5 py-1 text-sm"
+          >
+            <span aria-hidden="true">{reaction.emoji}</span>
+            <span class="text-xs font-semibold text-muted-foreground">{reaction.count}</span>
+          </span>
+        {/each}
+        {#if reactions.length === 0}
+          <span class="text-xs text-muted-foreground">No reactions yet.</span>
+        {/if}
+      {:else}
+        {#each EMOJI as emoji (emoji)}
+          {@const count = countFor(emoji)}
+          {@const saving = pending === emoji}
+          <!-- The whole row goes inert while one of them is in flight, because
+               the count they all read from is about to be replaced wholesale by
+               the refetch. `disabled` alone would be silent to a screen reader
+               mid-press, so aria-busy says which one is working. -->
+          <button
+            type="button"
+            onclick={() => toggle(emoji)}
+            aria-pressed={minePressed(emoji)}
+            aria-label={saving ? `Saving ${emoji}` : `React with ${emoji}`}
+            aria-busy={saving}
+            disabled={pending !== null}
+            class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-60 {minePressed(
+              emoji,
+            )
+              ? 'border-primary bg-primary/15'
+              : 'border-border/60 hover:bg-white/5'}"
+          >
+            <span
+              class={saving ? "animate-pulse motion-reduce:animate-none" : ""}
+              aria-hidden="true"
             >
-              <Trash2 class="size-4" aria-hidden="true" />
-            </button>
-          {/if}
-        </li>
-      {/each}
-    </ul>
+              {emoji}
+            </span>
+            {#if count > 0}
+              <span class="text-xs font-semibold text-muted-foreground">{count}</span>
+            {/if}
+          </button>
+        {/each}
+      {/if}
+    </div>
+
+    {#if error}
+      <p class="text-sm text-destructive" role="status">{error}</p>
+    {/if}
+
+    <!-- Comments -->
+    {#if comments.length > 0}
+      <ul class="flex flex-col divide-y divide-border/60">
+        {#each comments as comment (comment.id)}
+          <li class="flex items-start gap-2.5 py-2.5">
+            <Avatar user={comment.author} size={28} />
+            <div class="min-w-0 flex-1">
+              <p class="flex items-baseline gap-2">
+                <span class="truncate text-sm font-semibold text-foreground">
+                  {comment.author.displayName || comment.author.username}
+                </span>
+                <span class="shrink-0 text-xs text-muted-foreground">
+                  {saidAt(comment.createdAt)}
+                </span>
+              </p>
+              <!-- break-words, not truncate: a comment is the content, and 256
+                   characters wrap rather than being cut off. -->
+              <p class="break-words text-sm text-foreground/90">{comment.body}</p>
+            </div>
+            {#if canRemove(comment)}
+              {@const removing = removingId === comment.id}
+              <button
+                type="button"
+                onclick={() => remove(comment)}
+                aria-label="Remove this comment"
+                aria-busy={removing}
+                disabled={removingId !== null}
+                class="shrink-0 rounded-md p-1 text-muted-foreground transition hover:bg-white/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"
+              >
+                <Trash2
+                  class="size-4 {removing ? 'animate-pulse motion-reduce:animate-none' : ''}"
+                  aria-hidden="true"
+                />
+              </button>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+    {/if}
   {/if}
 
+  <!-- Outside the branch above, deliberately. Posting a comment needs nothing
+       either request returns, so there is no reason to withhold the box — and
+       leaving it mounted means it does not move when they land. -->
   <form class="flex items-center gap-2" onsubmit={post}>
     <label class="sr-only" for={`comment-${sessionId}`}>Add a comment</label>
     <input
