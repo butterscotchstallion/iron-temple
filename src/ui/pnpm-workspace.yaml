@@ -1,17 +1,3 @@
-# pnpm settings. As of pnpm 12 this file is the ONLY place they are read from —
-# the "pnpm" field in package.json is ignored outright, with a warning:
-#   The "pnpm" field in package.json is no longer read by pnpm.
-#   The following keys were ignored: "pnpm.overrides".
-# That field has been deleted rather than kept "just in case": a retired setting
-# left lying around is indistinguishable from a live one, which is the exact
-# failure this migration hit twice (see allowBuilds below).
-#
-# Measured, not taken from release notes: pnpm 9.15.9 and 10.34.5 both still
-# APPLY package.json overrides (verified by resolved version, not by absence of
-# a warning); 12.3.4 ignores them. pnpm 10 introduced this file, it did not
-# retire the old location. pnpm 11 was not testable here — it requires
-# Node >=22.13 — so the cutover is 11 or 12.
-
 overrides:
   # js-yaml: floor at the PATCHED version, not merely a satisfiable range.
   # pnpm reuses a locked version whenever it still satisfies the range, so
@@ -43,7 +29,7 @@ overrides:
   # EXACTLY — no caret. Checked against the registry: 0.13.5, 0.14.0 and
   # latest 0.15.0 all carry the same exact pin, so no upgrade path upstream
   # resolves this and every future orval bump would re-introduce it.
-  undici@7: ^7.29.1
+  undici@7: ^8.0.0
 
 # Dependencies permitted to run install scripts. pnpm 10+ blocks them by
 # default — arbitrary code execution on `install` is the npm ecosystem's widest
@@ -60,24 +46,3 @@ overrides:
 # vitest cannot start without it.
 allowBuilds:
   esbuild: true
-
-# minimumReleaseAge is deliberately NOT set here, so pnpm 12's built-in
-# 1440-minute (24h) default applies: a dependency published in the last day is
-# refused. Fresh resolution simply picks the newest version old enough, but a
-# committed lockfile naming a too-new version fails hard with
-# ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION.
-#
-# This is the BACKSTOP, not the only gate. It protects developer machines and
-# any lockfile however it was produced, so it stays at 24h regardless of what
-# the bot does. Renovate is configured to wait longer than this before it even
-# raises a branch (security:minimumReleaseAgeNpm, 3 days — see renovate.json),
-# which is what keeps a dependency PR from arriving already red. Those two
-# windows are layered on purpose: Renovate's must stay at or above this one, so
-# a red dependency PR is answered by raising Renovate's side, never by lowering
-# this. That cooling-off is the point — compromised packages are typically
-# caught within hours.
-#
-# Still expect to see this fire. A PR that was already open when a new version
-# shipped gets updated past Renovate's window, and a hand-edited lockfile never
-# passed through Renovate at all; both land here and fail hard. That is the
-# backstop working, and it clears by letting the version age out.
