@@ -30,6 +30,12 @@
                 lift.setsLogged,
                 lift.setsPrescribed,
               )} sets
+              <!-- Sets added after the session was otherwise finished. Already
+                   inside the count to its left, so it reads as "of which",
+                   not as a second total. -->
+              {#if lift.setsBonus > 0}
+                <span class="text-primary">· {lift.setsBonus} bonus</span>
+              {/if}
               {#if lift.hitEveryTarget}
                 <Check class="inline size-3 text-primary" aria-label="every set completed" />
               {/if}

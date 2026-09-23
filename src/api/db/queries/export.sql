@@ -75,6 +75,10 @@ ORDER BY e.name;
 -- the join can still answer for a lift the lifter has since removed. INNER would
 -- make the ordering a filter and quietly drop those sets from the export, which
 -- is the one thing an export may never do.
+--
+-- is_bonus is here for that same rule. The app shows it, so the export carries
+-- it — and it is the one field in this row that a lifter could not work out
+-- again from the others, since nothing else records when a set was added.
 -- name: ExportSessionSets :many
 SELECT ss.session_id,
        e.name AS exercise_name,
@@ -83,6 +87,7 @@ SELECT ss.session_id,
        ss.actual_reps,
        ss.weight_lb,
        ss.completed,
+       ss.is_bonus,
        (pde.id IS NULL)::bool AS is_assistance
 FROM session_sets ss
 JOIN sessions s ON s.id = ss.session_id

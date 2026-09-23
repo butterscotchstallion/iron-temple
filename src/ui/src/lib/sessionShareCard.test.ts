@@ -27,6 +27,7 @@ function mkRecap(over: Partial<SessionRecap> = {}): SessionRecap {
       setsPrescribed: 25,
       repsLogged: 125,
       repsTargeted: 125,
+      setsBonus: 0,
     },
     progress: {
       previousSessionId: null,
@@ -75,6 +76,7 @@ function mkLift(name: string, volumeLb: number, topWeightLb: number) {
     setsPrescribed: 5,
     repsLogged: 25,
     repsTargeted: 25,
+    setsBonus: 0,
     volumeLb,
     hitEveryTarget: true,
     previous: null,

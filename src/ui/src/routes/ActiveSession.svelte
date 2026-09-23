@@ -500,6 +500,10 @@
           actualReps: null,
           weightLb: choice.weightLb,
           completed: false,
+          // Never a bonus set. Only appending to a lift already in the session
+          // can produce one; adding a whole lift is a different gesture, and
+          // the server agrees — addSessionAssistance does not set the flag.
+          isBonus: false,
           restSeconds: exercise.restSeconds,
           equipment: exercise.equipment,
         })),

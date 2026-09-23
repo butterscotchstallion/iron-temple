@@ -75,6 +75,19 @@ type Prescribed struct {
 	Reps         int
 	Completed    bool
 	IsAssistance bool
+	// IsBonus is true for a set the lifter added after everything else in the
+	// session was already done — extra work, rather than the workout as it was
+	// planned. Recorded when the set is appended rather than worked out later,
+	// because what was outstanding at that moment leaves no trace afterwards;
+	// see migration 0027.
+	//
+	// It lives here and NOT on Set, though a bonus set is obviously also a set.
+	// Set is shared with the monthly recap, which loads its rows through
+	// RackedPeriodSets — a query with no is_bonus to give. A field that is only
+	// ever populated on one of the two paths reads as an answer on both, and the
+	// wrong answer is the quiet one. The session counters walk Prescribed for
+	// every other figure they report, so nothing is lost by it living here.
+	IsBonus bool
 }
 
 // SessionOutcome is one past session reduced to what a streak is judged on.
@@ -130,6 +143,19 @@ type SessionVolume struct {
 	SetsPrescribed int
 	RepsLogged     int
 	RepsTargeted   int
+	// SetsBonus counts the logged sets among those that were added after the
+	// rest of the session was already done.
+	//
+	// A count OF SetsLogged, not a count beside it. Bonus sets stay inside every
+	// other figure here — the tonnage, the logged counts, the prescribed
+	// denominator — which is the same stance Set.IsAssistance takes: extra work
+	// is still work, and a number that quietly excluded it would disagree with
+	// the same session's total in the history list. This says how much of what
+	// the lifter did was extra, and changes nothing about what they did.
+	//
+	// Unlogged bonus sets are not counted. A set added and then left empty is
+	// not bonus work that happened, and the recap reports what happened.
+	SetsBonus int
 }
 
 // SessionProgress is how the weights moved since this day was last performed.
@@ -162,6 +188,9 @@ type SessionLift struct {
 	SetsPrescribed int
 	RepsLogged     int
 	RepsTargeted   int
+	// SetsBonus is this lift's share of SessionVolume.SetsBonus, on the same
+	// terms — logged only, and already inside SetsLogged.
+	SetsBonus      int
 	VolumeLb       float64
 	HitEveryTarget bool
 
@@ -321,6 +350,9 @@ func sessionVolume(sess session, in SessionInput) SessionVolume {
 		if p.Reps > 0 {
 			v.SetsLogged++
 			v.RepsLogged += p.Reps
+			if p.IsBonus {
+				v.SetsBonus++
+			}
 		}
 	}
 	v.Comparison = compare(v.TotalLb)
@@ -384,6 +416,9 @@ func sessionLifts(sess session, in SessionInput) []SessionLift {
 		if p.Reps > 0 {
 			l.SetsLogged++
 			l.RepsLogged += p.Reps
+			if p.IsBonus {
+				l.SetsBonus++
+			}
 		}
 		if !p.Completed {
 			l.HitEveryTarget = false

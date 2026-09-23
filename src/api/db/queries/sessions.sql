@@ -310,6 +310,7 @@ SELECT ss.id,
        ss.actual_reps,
        ss.weight_lb,
        ss.completed,
+       ss.is_bonus,
        (pde.id IS NULL)::bool AS is_assistance,
        e.rest_seconds,
        e.equipment
@@ -343,6 +344,7 @@ SELECT ss.id,
        ss.actual_reps,
        ss.weight_lb,
        ss.completed,
+       ss.is_bonus,
        (pde.id IS NULL)::bool AS is_assistance,
        e.rest_seconds,
        e.equipment
@@ -372,13 +374,43 @@ WHERE ss.id = sqlc.arg('id')
 -- tells a bad exerciseId from a real failure. Ownership and whether the session
 -- is still open are checked before this runs, so they are 404 and 409 rather
 -- than an indistinguishable empty result.
+--
+-- is_bonus is decided here too, and for the same reason set_number is: it is a
+-- question about the state of the session at the instant of the insert, and a
+-- handler that read it first would be answering about a slightly older session
+-- than the one it writes to. The NOT EXISTS runs against the same snapshot as
+-- the rest of the statement, so the answer cannot be stale by the time it is
+-- stored. This is also the ONLY place it is ever written — see 0027 for why a
+-- set's bonus-ness is a fact about the moment it was added and not something a
+-- later read can recover.
+--
+-- The rule is "everything else in the session was already done". Two details of
+-- how that is spelled are deliberate:
+--
+--   NOT prior.completed  — the whole session, not just this lift. An extra set
+--   of squats while the bench work is still pending is a mid-workout
+--   adjustment, not bonus work, and the lifter reads it as one.
+--
+--   NOT prior.is_bonus   — an earlier bonus set that is not yet logged does not
+--   stop the next one counting. Without this, tapping "add set" twice before
+--   logging either would make the first a bonus and the second not, which is an
+--   arbitrary distinction between two taps of the same gesture. What makes the
+--   gesture a bonus is that the PRESCRIBED work is finished; bonus sets are the
+--   gesture itself and cannot disqualify each other.
 -- name: AppendSessionSet :one
-INSERT INTO session_sets (session_id, exercise_id, set_number, target_reps, weight_lb)
+INSERT INTO session_sets (session_id, exercise_id, set_number, target_reps, weight_lb, is_bonus)
 SELECT last.session_id,
        last.exercise_id,
        last.set_number + 1,
        last.target_reps,
-       last.weight_lb
+       last.weight_lb,
+       NOT EXISTS (
+           SELECT 1
+           FROM session_sets prior
+           WHERE prior.session_id = last.session_id
+             AND NOT prior.completed
+             AND NOT prior.is_bonus
+       )
 FROM (
     SELECT ss.session_id, ss.exercise_id, ss.set_number, ss.target_reps, ss.weight_lb
     FROM session_sets ss
@@ -389,7 +421,7 @@ FROM (
     ORDER BY ss.set_number DESC
     LIMIT 1
 ) AS last
-RETURNING id, session_id, exercise_id, set_number, target_reps, actual_reps, weight_lb, completed;
+RETURNING id, session_id, exercise_id, set_number, target_reps, actual_reps, weight_lb, completed, is_bonus;
 
 -- DeleteSessionSet removes one set. Reaches the owner through sessions, the same
 -- way GetSessionSet does, so a set id belonging to someone else does not resolve
@@ -415,6 +447,11 @@ WHERE ss.id = sqlc.arg('id')
 -- clear a prior entry (COALESCE could not express that). The owner check is
 -- repeated here rather than inferred from the preceding GetSessionSet: an
 -- UPDATE that trusts a prior read is one refactor away from trusting nothing.
+--
+-- is_bonus is returned but never assigned, and that omission is the point: it
+-- records how a set came to exist, which logging it does not change. A bonus
+-- set is still a bonus set once its reps are in, and a prescribed set does not
+-- become one by being finished last. AppendSessionSet is its only writer.
 -- name: UpdateSessionSet :one
 UPDATE session_sets ss
 SET actual_reps = sqlc.narg('actual_reps'),
@@ -424,7 +461,7 @@ FROM sessions s
 WHERE ss.id = sqlc.arg('id')
   AND s.id = ss.session_id
   AND s.user_id = sqlc.arg('user_id')::int
-RETURNING ss.id, ss.session_id, ss.exercise_id, ss.set_number, ss.target_reps, ss.actual_reps, ss.weight_lb, ss.completed;
+RETURNING ss.id, ss.session_id, ss.exercise_id, ss.set_number, ss.target_reps, ss.actual_reps, ss.weight_lb, ss.completed, ss.is_bonus;
 
 -- ListSessionExerciseWeights returns each exercise's top working weight for the
 -- given sessions, ordered by the day's exercise position — used to show a

@@ -475,8 +475,13 @@ func (s *Server) updateSessionSet(w http.ResponseWriter, r *http.Request) {
 		ActualReps:   updated.ActualReps,
 		WeightLb:     numericToFloat(updated.WeightLb),
 		Completed:    updated.Completed,
-		RestSeconds:  current.RestSeconds,
-		Equipment:    current.Equipment,
+		// From the UPDATE's RETURNING rather than from `current`, though the two
+		// always agree: UpdateSessionSet does not assign the column, so echoing
+		// the row it wrote keeps that true by construction instead of by
+		// remembering it here.
+		IsBonus:     updated.IsBonus,
+		RestSeconds: current.RestSeconds,
+		Equipment:   current.Equipment,
 	})
 }
 
@@ -565,8 +570,12 @@ func (s *Server) addSessionSet(w http.ResponseWriter, r *http.Request) {
 		ActualReps:   full.ActualReps,
 		WeightLb:     numericToFloat(full.WeightLb),
 		Completed:    full.Completed,
-		RestSeconds:  full.RestSeconds,
-		Equipment:    full.Equipment,
+		// From `created`, not `full`, though the re-read would say the same
+		// thing. This is the one field the INSERT decided rather than derived,
+		// and taking it from the statement that decided it says so.
+		IsBonus:     created.IsBonus,
+		RestSeconds: full.RestSeconds,
+		Equipment:   full.Equipment,
 	})
 }
 
@@ -696,6 +705,7 @@ func sessionSetToDTO(set store.ListSessionSetsRow) sessionSetDTO {
 		ActualReps:   set.ActualReps,
 		WeightLb:     numericToFloat(set.WeightLb),
 		Completed:    set.Completed,
+		IsBonus:      set.IsBonus,
 		RestSeconds:  set.RestSeconds,
 		Equipment:    set.Equipment,
 	}

@@ -38,6 +38,7 @@ function mkSet(over: Partial<SessionSet> & Pick<SessionSet, "id">): SessionSet {
     actualReps: null,
     weightLb: 200,
     completed: false,
+    isBonus: false,
     restSeconds: 180,
     equipment: "barbell",
     ...over,

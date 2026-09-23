@@ -40,6 +40,9 @@
 -- Ordering, is_assistance and the two LEFT joins are lifted from ListSessionSets
 -- unchanged, including why they are LEFT — a finished session is a record, and a
 -- prescription edited afterwards must not make a set disappear from it.
+--
+-- is_bonus is carried plainly from the column, not derived: unlike is_assistance
+-- there is no join that could work it out after the fact. See 0027.
 -- name: RecapSessionSets :many
 SELECT ss.id,
        ss.exercise_id,
@@ -50,6 +53,7 @@ SELECT ss.id,
        ss.actual_reps,
        ss.weight_lb,
        ss.completed,
+       ss.is_bonus,
        (pde.id IS NULL)::bool AS is_assistance
 FROM session_sets ss
 JOIN exercises e ON e.id = ss.exercise_id

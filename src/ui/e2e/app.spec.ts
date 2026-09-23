@@ -216,6 +216,7 @@ function sessionRecap(overrides: Partial<SessionRecap> = {}): SessionRecap {
       setsPrescribed: 2,
       repsLogged: 10,
       repsTargeted: 10,
+      setsBonus: 0,
     },
     progress: {
       previousSessionId: 9,
@@ -236,6 +237,7 @@ function sessionRecap(overrides: Partial<SessionRecap> = {}): SessionRecap {
         setsPrescribed: 2,
         repsLogged: 10,
         repsTargeted: 10,
+        setsBonus: 0,
         volumeLb: 800,
         hitEveryTarget: true,
         previous: {

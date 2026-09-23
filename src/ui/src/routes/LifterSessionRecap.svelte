@@ -86,6 +86,7 @@
           setsPrescribed: recap.volume.setsPrescribed,
           repsLogged: recap.volume.repsLogged,
           repsTargeted: recap.volume.repsTargeted,
+          setsBonus: recap.volume.setsBonus,
         }
       : null,
   );
@@ -101,6 +102,7 @@
       setsPrescribed: l.setsPrescribed,
       repsLogged: l.repsLogged,
       repsTargeted: l.repsTargeted,
+      setsBonus: l.setsBonus,
       hitEveryTarget: l.hitEveryTarget,
       previousTopWeightLb: l.previous?.topWeightLb ?? null,
       weightDeltaPct: l.weightDeltaPct,
