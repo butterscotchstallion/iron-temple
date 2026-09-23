@@ -49,8 +49,12 @@
       every weight we give you is built out of it.
     </p>
     <div class="mt-3 flex items-center gap-4">
+      <!-- Straight at the section, not at the profile's front door. The
+           profile is five sections behind a sub-nav now, and a bare /profile
+           lands on Details — which would leave a lifter who pressed "Set up my
+           gym" looking at their display name. -->
       <a
-        href="/profile"
+        href="/profile/equipment"
         use:link
         class="text-sm font-semibold text-primary transition hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
       >

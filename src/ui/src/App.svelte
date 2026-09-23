@@ -75,7 +75,14 @@
     // The biggest single win from splitting — it drags in five chart components
     // and the share-card renderer.
     "/racked": wrap({ asyncComponent: () => import("./routes/Racked.svelte") }),
+    // The profile is a shell with five sections behind a sub-nav, one per URL,
+    // so both paths land on the same component: the bare one redirects to the
+    // default section rather than rendering a sixth thing. Two entries pointing
+    // at one dynamic import costs no second chunk — the bundler emits it once.
     "/profile": wrap({ asyncComponent: () => import("./routes/Profile.svelte") }),
+    "/profile/:section": wrap({
+      asyncComponent: () => import("./routes/Profile.svelte"),
+    }),
     // Account management, for the one account that claimed the install.
     //
     // The condition is the router's own guard: a failing one falls through to

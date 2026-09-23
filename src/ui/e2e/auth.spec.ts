@@ -397,10 +397,40 @@ test("the account menu navigates to the profile page", async ({ page }) => {
   await page.getByRole("button", { name: /account menu/i }).click();
   await page.getByRole("menuitem", { name: /configure profile/i }).click();
 
-  await expect(page).toHaveURL(/#\/profile$/);
+  // The menu points at the bare /profile, which redirects to the default
+  // section — so the assertion is on where you end up, not on what was linked.
+  await expect(page).toHaveURL(/#\/profile\/details$/);
   await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Avatar" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Details" })).toBeVisible();
+  // One section at a time now: the password form is a pill away, not below.
+  await expect(page.getByRole("heading", { name: "Password" })).toBeHidden();
+
+  const sections = page.getByRole("navigation", { name: "Profile sections" });
+  await sections.getByRole("link", { name: "Password" }).click();
+
+  await expect(page).toHaveURL(/#\/profile\/password$/);
   await expect(page.getByRole("heading", { name: "Password" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Details" })).toBeHidden();
+
+  // Back returns to the section you came from rather than leaving the profile,
+  // which is the whole point of giving each one a URL.
+  await page.goBack();
+  await expect(page).toHaveURL(/#\/profile\/details$/);
+  await expect(page.getByRole("heading", { name: "Details" })).toBeVisible();
+});
+
+test("a profile section is reachable by its own URL", async ({ page }) => {
+  await mockSignedIn(page);
+
+  await page.goto("/#/profile/equipment");
+
+  await expect(page.getByRole("heading", { name: "Equipment" })).toBeVisible();
+  await expect(page.getByLabel("Bar weight (lb)")).toBeVisible();
+  await expect(
+    page
+      .getByRole("navigation", { name: "Profile sections" })
+      .getByRole("link", { name: "Equipment" }),
+  ).toHaveAttribute("aria-current", "page");
 });
 
 test("signing out returns to the sign-in form", async ({ page }) => {
@@ -438,15 +468,9 @@ test("the profile page saves a display name", async ({ page }) => {
     await route.fulfill({ json: ada });
   });
 
-  await page.goto("/#/profile");
+  await page.goto("/#/profile/details");
   await page.getByLabel("Display name").fill("Ada B. Lovelace");
-  // Scoped to the Details form: the gym-setup card below it has a Save of its
-  // own, so the label alone no longer names one button.
-  await page
-    .locator("form")
-    .filter({ has: page.getByLabel("Display name") })
-    .getByRole("button", { name: "Save", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
 
   await expect(page.getByText("Saved.")).toBeVisible();
   expect(patched).toMatchObject({ displayName: "Ada B. Lovelace" });
