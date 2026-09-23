@@ -64,23 +64,39 @@ type Persona struct {
 
 // names is the roster personas are drawn from, in order.
 //
-// Ordinary-sounding and deliberately not famous. A list of physicists and
-// computer scientists would be a tell, and these accounts are meant to look like
-// the household they are standing in for rather than like a fixture.
+// Lifting puns on famous names, eight of them, drawn from the same joke the admin
+// area's "add someone" form suggests usernames from (src/ui/src/lib/punNames.ts).
+// The install already tells that joke to the one person who can add an account;
+// having the generator tell a different one meant a demo install populated with
+// strangers, when the whole point of these accounts is that they are obviously
+// furniture.
+//
+// Duplicated rather than shared, because a Go package cannot read a TypeScript
+// const and the alternative — generating one from the other — is a build step in
+// service of sixteen strings. The two lists agree in SPIRIT, not by mechanism: the
+// UI's is long and grows freely, this one is eight and cannot. Adding a pun over
+// there needs nothing done here.
 //
 // The order is fixed and the list is append-only in spirit: Roster(4) must keep
 // returning the same four people across runs, because that is what lets a later
 // teardown find the accounts an earlier backfill created without a marker column
-// to look them up by.
+// to look them up by. Renaming a slot strands the account carrying the old name —
+// so a better pun is not a reason to edit this list, it is a reason to append.
+//
+// One consequence worth naming: the admin form suggests these very names, so a
+// real lifter called "judi.bench" is now plausible rather than a freak accident.
+// Teardown handles it — it verifies the password hash and never the name alone,
+// see removeGeneratedLifters — and that check is what makes this list safe to draw
+// from a suggestion box at all.
 var names = []struct{ username, display string }{
-	{"mara.quinn", "Mara Quinn"},
-	{"dev.oyelaran", "Dev Oyelaran"},
-	{"tess.haraldsen", "Tess Haraldsen"},
-	{"otto.brandt", "Otto Brandt"},
-	{"nell.ferreira", "Nell Ferreira"},
-	{"sunil.raghavan", "Sunil Raghavan"},
-	{"ivy.kowalczyk", "Ivy Kowalczyk"},
-	{"bram.delacroix", "Bram Delacroix"},
+	{"judi.bench", "Judi Bench"},
+	{"dua.lats", "Dua Lats"},
+	{"bulkie.eilish", "Bulkie Eilish"},
+	{"clint.beastwood", "Clint Beastwood"},
+	{"morgan.freeweight", "Morgan Freeweight"},
+	{"seth.rowgen", "Seth Rowgen"},
+	{"albert.gainstein", "Albert Gainstein"},
+	{"keanu.heaves", "Keanu Heaves"},
 }
 
 // MaxRoster is how many personas exist. Asking for more yields this many rather
@@ -275,7 +291,7 @@ func (p Persona) SetReps(target int32, setNumber, totalSets int, wentWell bool, 
 // obvious tell in the whole simulation. Vague approval is both more realistic and
 // safer, and it is the one rule to keep when adding phrases here.
 var voices = [][]string{
-	// mara.quinn — reliable, says little. Understated to the point of curt.
+	// judi.bench — reliable, says little. Understated to the point of curt.
 	{
 		"solid",
 		"good work",
@@ -290,7 +306,7 @@ var voices = [][]string{
 		"tidy",
 		"nothing wasted there",
 	},
-	// dev.oyelaran — the enthusiast. Loud, generous, exclamatory.
+	// dua.lats — the enthusiast. Loud, generous, exclamatory.
 	{
 		"absolutely flying!",
 		"look at you go",
@@ -305,7 +321,7 @@ var voices = [][]string{
 		"the grind is paying off big time",
 		"hats off, that looked brutal",
 	},
-	// tess.haraldsen — flaky, warm, a little self-deprecating about it.
+	// bulkie.eilish — flaky, warm, a little self-deprecating about it.
 	{
 		"meanwhile I skipped mine",
 		"putting me to shame here",
@@ -320,7 +336,7 @@ var voices = [][]string{
 		"one of us is doing it properly",
 		"okay you've convinced me",
 	},
-	// otto.brandt — the grinder who fails often. Grim, technical, no warmth.
+	// clint.beastwood — the grinder who fails often. Grim, technical, no warmth.
 	{
 		"that looked heavy",
 		"hard earned",
@@ -335,7 +351,7 @@ var voices = [][]string{
 		"nothing pretty about it",
 		"earned every one",
 	},
-	// nell.ferreira — encouraging, coach-like.
+	// morgan.freeweight — encouraging, coach-like.
 	{
 		"great to see the progress",
 		"you're building something here",
@@ -350,7 +366,7 @@ var voices = [][]string{
 		"this is what patience looks like",
 		"onwards",
 	},
-	// sunil.raghavan — dry, wry, understated humour.
+	// seth.rowgen — dry, wry, understated humour.
 	{
 		"well, that happened",
 		"the bar lost that argument",
@@ -365,7 +381,7 @@ var voices = [][]string{
 		"you've done this before, haven't you",
 		"unnecessary but appreciated",
 	},
-	// ivy.kowalczyk — analytical, thinks in trends and process.
+	// albert.gainstein — analytical, thinks in trends and process.
 	{
 		"the trend on this is excellent",
 		"nice clean progression",
@@ -380,7 +396,7 @@ var voices = [][]string{
 		"disciplined pacing",
 		"exactly on schedule",
 	},
-	// bram.delacroix — barely comments at all. Telegraphic when he does.
+	// keanu.heaves — barely comments at all. Telegraphic when they do.
 	{
 		"strong",
 		"good",

@@ -165,7 +165,7 @@ SELECT id FROM users WHERE lower(username) = lower($1)
 // allowed to read a password hash and must not be called for anything else.
 //
 // Matched on lower(username) so it agrees with the unique index and with login —
-// an account created as "Mara.Quinn" is found by "mara.quinn".
+// an account created as "Judi.Bench" is found by "judi.bench".
 func (q *Queries) FindUserIDByUsername(ctx context.Context, username string) (int32, error) {
 	row := q.db.QueryRow(ctx, findUserIDByUsername, username)
 	var id int32
@@ -276,8 +276,9 @@ type ListGeneratedActivityCandidatesRow struct {
 // Generated accounts carry no marker — nothing in the schema and nothing on the
 // wire says they were not typed in by hand — which is a decision the install's
 // owner made. Teardown therefore used to match on USERNAME alone, and that was a
-// real hazard rather than a pedantic one: the personas are ordinary household
-// names on purpose, so an account the owner created by hand as "mara.quinn" was
+// real hazard rather than a pedantic one: the personas are named from the same pun
+// list the admin area suggests usernames from, so an account the owner created by
+// hand as "judi.bench" — a name that form may well have offered them — was
 // indistinguishable from a generated one and would have been deleted along with
 // everything that lifter ever logged.
 //

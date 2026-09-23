@@ -8,6 +8,12 @@
 //
 // A suggestion, not a decision. The field it fills is an ordinary editable
 // input, and an admin who wants "dave" types "dave".
+//
+// The API's generated-activity roster (internal/activity, names) tells the same
+// joke with eight of these, hand-copied rather than shared — Go cannot read this
+// const, and a build step to bridge sixteen strings would cost more than it
+// saves. Adding a pun here needs nothing done there; that list is pinned by its
+// teardown path and can only be appended to. See docs/generated-activity.md.
 export const PUN_NAMES: readonly string[] = [
   "abdom.sandler",
   "ab.pacino",

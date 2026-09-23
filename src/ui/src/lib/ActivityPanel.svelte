@@ -102,7 +102,7 @@
     const fresh = next.actions - previous.actions;
     if (fresh <= 0) return;
     pushToast({
-      // The server's own description of the last thing done — "Mara Quinn logged
+      // The server's own description of the last thing done — "Judi Bench logged
       // Workout A". A toast that only said "1 new action" would be a counter, and
       // the point of watching this screen is seeing the gym move.
       title: next.lastAction ?? "Generated some activity",
