@@ -33,7 +33,7 @@ beforeEach(() => {
       actions: 0,
       maxLifters: 8,
       maxWeeks: 26,
-      roster: ["mara.quinn"],
+      roster: ["judi.bench"],
     },
   });
   getActivitySchedule.mockResolvedValue({ status: 200, data: { enabled: false, lifters: 4 } });

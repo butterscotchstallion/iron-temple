@@ -9,10 +9,18 @@ Find it on **Account menu → Astroturfing**. It is owner-only.
 
 The screen is named for what it does, which the rest of the system deliberately is
 not: nothing on the wire, in the schema or in any response calls these accounts
-generated, because a lifter reading the feed should not be able to tell. That
-discretion is owed to the people using the install, not to the person who set it
-up — so the one screen only its owner can see says the quiet part, while the
-endpoints under it stay named for *activity*.
+generated. They are ordinary accounts that happen to have been made by a loop, and
+the endpoints under this screen stay named for *activity* — the one screen only its
+owner can see is where the quiet part gets said out loud.
+
+The **names** are not part of that reticence. The personas are lifting puns on
+famous names — Judi Bench, Dua Lats, Clint Beastwood — the same joke the admin
+area's "add someone" form suggests usernames from. Anybody who reads the feed will
+work out that Keanu Heaves does not train here, and that is the intent: an install
+being filled in for the look of it should be obvious to the people looking at it.
+What the system withholds is a *marker*, and only because nothing needs one —
+clean-up re-derives the roster and checks a password hash, and no lifter-facing
+query has any business branching on whether an account was typed in by hand.
 
 ## What it does
 
@@ -47,7 +55,7 @@ several seconds of a screen with nothing arriving on it. It has no dismiss butto
 while it is pending — there is nothing to dismiss yet, and taking it down would
 leave a screen that looks idle with the request still open.
 
-The **live loop** raises one per tick, in the server's own words — "Mara Quinn
+The **live loop** raises one per tick, in the server's own words — "Judi Bench
 logged Workout A" — which is the actual reason to leave this screen open. Work done
 *before* the screen opened is deliberately silent: the panel compares each poll
 against the previous one rather than against a stored count, so a loop that has
@@ -158,7 +166,14 @@ The consequence is that **clean-up works by re-deriving the roster that named
 them** — a fixed list of eight people in `internal/activity`. That is why the
 roster is required to be stable and append-only, and why there are tests that fail
 if it stops being either. Change a name and the account carrying the old one
-becomes unremovable from the panel.
+becomes unremovable from the panel, which is why a better pun is a reason to
+*append* to that list rather than to edit it.
+
+Those eight are written out in Go and the admin form's suggestions in TypeScript
+(`src/ui/src/lib/punNames.ts`), with nothing keeping them in step. Deliberately:
+the UI's list is long and grows whenever somebody thinks of one, this one is eight
+and is pinned by the paragraph above. They tell the same joke; they are not one
+list.
 
 **An account that administers the install is never touched**, whatever it is
 called. The delete refuses on `NOT is_admin`, so a roster name colliding with yours
@@ -177,9 +192,10 @@ each one's hash against that password, and deletes only the matches.
 
 The consequence is the one that matters: **a real lifter who happens to be named
 after a persona survives.** They chose their own password, so their hash does not
-verify, and they keep every session they ever logged. Since the personas are
-deliberately ordinary household names, that collision is plausible rather than
-contrived, which is why it is worth closing properly rather than warning about.
+verify, and they keep every session they ever logged. That collision is plausible
+rather than contrived — the admin form suggests usernames from the same pun list
+the personas are named out of, so the install itself may well have offered somebody
+`judi.bench` — which is why it is worth closing properly rather than warning about.
 
 An account that administers the install is never a candidate in the first place —
 `NOT is_admin`, at both the lookup and the delete.
@@ -193,8 +209,8 @@ returned. Both `db/queries/users.sql` and `db/queries/activity.sql` say so.
 
 The flip side of using the password as proof is that the password is a constant in
 this repository. So **login refuses it outright** — anyone who has read the source
-would otherwise be able to authenticate as `mara.quinn` and post comments and
-reactions as her. The generator being owner-only says nothing about the login route;
+would otherwise be able to authenticate as `judi.bench` and post comments and
+reactions as them. The generator being owner-only says nothing about the login route;
 that is a separate door and it is now shut.
 
 The refusal is worded and timed exactly like a wrong password, so it does not

@@ -328,8 +328,9 @@ func (s *Server) deleteActivity(w http.ResponseWriter, r *http.Request) {
 // Then each candidate's hash is verified against the fixed password every generated
 // account is made with. That is what makes this ORIGIN-scoped rather than
 // name-scoped, and the difference is somebody's training history: the personas are
-// ordinary household names on purpose, so an account the owner created by hand as
-// "mara.quinn" used to be indistinguishable from a generated one and would have
+// named from the same pun list the admin area suggests usernames from, so an
+// account the owner created by hand as "judi.bench" — a name the form may well have
+// offered them — used to be indistinguishable from a generated one and would have
 // been deleted with everything that lifter had logged. They chose their own
 // password, so their hash does not verify, so they survive.
 //
@@ -960,7 +961,7 @@ func (s *Server) generateRecognitionOnce(
 
 	// Counted into locals rather than the named returns, so a rolled-back tick
 	// cannot report activity the database does not have. The loop turns these
-	// into the "Mara reacted to a session" line it shows the owner.
+	// into the "Judi reacted to a session" line it shows the owner.
 	var reacted, commented int
 
 	if person.persona.Reacts(rng) {

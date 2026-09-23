@@ -10,11 +10,13 @@
   // with its own bounds and its own idea of what "running" means.
   //
   // Named for what it is. Everything on the wire is called *activity* and nothing
-  // in the schema or any response marks a generated account, because the whole
-  // point is that a lifter reading the feed cannot tell — see
-  // docs/generated-activity.md. That discretion is owed to the people using the
-  // install, not to its owner, and an owner-only screen that called this
-  // "activity" would be keeping a secret from the one person already in on it.
+  // in the schema or any response marks a generated account — not as camouflage
+  // but because nothing needs a marker: teardown re-derives the roster and checks
+  // a password hash, and no lifter-facing query branches on it. See
+  // docs/generated-activity.md. The personas themselves are lifting puns from the
+  // same list the admin area suggests usernames from, so the feed makes no secret
+  // of what they are, and an owner-only screen that called this "activity" would
+  // be coy with the one person who pressed the button.
   //
   // Owner-only: the route condition in App.svelte turns the hash away for anybody
   // else, and every endpoint the panel calls sits inside the API's /admin subtree,

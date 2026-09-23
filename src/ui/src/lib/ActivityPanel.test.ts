@@ -51,7 +51,7 @@ function status(over: Partial<ActivityStatus> = {}): { status: 200; data: Activi
       maxWeeks: 26,
       // Two names is enough to assert the list is rendered from the server's
       // roster rather than hard-coded.
-      roster: ["mara.quinn", "dev.oyelaran"],
+      roster: ["judi.bench", "dua.lats"],
       ...over,
     },
   };
@@ -190,7 +190,7 @@ describe("ActivityPanel", () => {
 
   it("offers Stop rather than Start while a loop is running", async () => {
     getActivityStatus.mockResolvedValue(
-      status({ running: true, lifters: 3, tickSeconds: 20, actions: 7, lastAction: "Mara Quinn logged Workout A" }),
+      status({ running: true, lifters: 3, tickSeconds: 20, actions: 7, lastAction: "Judi Bench logged Workout A" }),
     );
     render(ActivityPanel);
 
@@ -201,7 +201,7 @@ describe("ActivityPanel", () => {
     // The action count and the last thing done are how the screen shows the loop
     // is alive rather than merely flagged as on.
     expect(screen.getByText(/7 actions/)).toBeInTheDocument();
-    expect(screen.getByText(/Mara Quinn logged Workout A/)).toBeInTheDocument();
+    expect(screen.getByText(/Judi Bench logged Workout A/)).toBeInTheDocument();
   });
 
   it("stops the loop", async () => {
@@ -290,13 +290,13 @@ describe("ActivityPanel", () => {
         lifters: 3,
         tickSeconds: 20,
         actions: 8,
-        lastAction: "Mara Quinn logged Workout A",
+        lastAction: "Judi Bench logged Workout A",
       }),
     );
     await vi.advanceTimersByTimeAsync(5_500);
 
     await vi.waitFor(() => {
-      expect(screen.getByText("Mara Quinn logged Workout A")).toBeInTheDocument();
+      expect(screen.getByText("Judi Bench logged Workout A")).toBeInTheDocument();
     });
   });
 
@@ -309,7 +309,7 @@ describe("ActivityPanel", () => {
         lifters: 3,
         tickSeconds: 20,
         actions: 40,
-        lastAction: "Mara Quinn logged Workout A",
+        lastAction: "Judi Bench logged Workout A",
       }),
     );
     renderWithToasts();
@@ -344,7 +344,7 @@ describe("ActivityPanel", () => {
     render(ActivityPanel);
 
     await waitFor(() => {
-      expect(screen.getByText(/mara\.quinn, dev\.oyelaran/)).toBeInTheDocument();
+      expect(screen.getByText(/judi\.bench, dua\.lats/)).toBeInTheDocument();
     });
     expect(screen.getByText(/keeps the ones that aren't actually generated/)).toBeInTheDocument();
   });
@@ -360,7 +360,7 @@ describe("ActivityPanel", () => {
     });
     // Twice now — under the button and again in the dialog, which is the last
     // thing read before agreeing.
-    expect(screen.getAllByText(/mara\.quinn, dev\.oyelaran/)).toHaveLength(2);
+    expect(screen.getAllByText(/judi\.bench, dua\.lats/)).toHaveLength(2);
     // The dialog's own wording, which the panel's shorter note does not use.
     expect(
       screen.getByText(/a real lifter who happens to share one of those names/i),

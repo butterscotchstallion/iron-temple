@@ -111,7 +111,7 @@ async function mockCommon(page: import("@playwright/test").Page) {
         actions: 0,
         maxLifters: 8,
         maxWeeks: 26,
-        roster: ["mara.quinn", "dev.oyelaran"],
+        roster: ["judi.bench", "dua.lats"],
       },
     }),
   );
