@@ -12,12 +12,19 @@ import (
 )
 
 const appendSessionSet = `-- name: AppendSessionSet :one
-INSERT INTO session_sets (session_id, exercise_id, set_number, target_reps, weight_lb)
+INSERT INTO session_sets (session_id, exercise_id, set_number, target_reps, weight_lb, is_bonus)
 SELECT last.session_id,
        last.exercise_id,
        last.set_number + 1,
        last.target_reps,
-       last.weight_lb
+       last.weight_lb,
+       NOT EXISTS (
+           SELECT 1
+           FROM session_sets prior
+           WHERE prior.session_id = last.session_id
+             AND NOT prior.completed
+             AND NOT prior.is_bonus
+       )
 FROM (
     SELECT ss.session_id, ss.exercise_id, ss.set_number, ss.target_reps, ss.weight_lb
     FROM session_sets ss
@@ -28,7 +35,7 @@ FROM (
     ORDER BY ss.set_number DESC
     LIMIT 1
 ) AS last
-RETURNING id, session_id, exercise_id, set_number, target_reps, actual_reps, weight_lb, completed
+RETURNING id, session_id, exercise_id, set_number, target_reps, actual_reps, weight_lb, completed, is_bonus
 `
 
 type AppendSessionSetParams struct {
@@ -55,6 +62,29 @@ type AppendSessionSetParams struct {
 // tells a bad exerciseId from a real failure. Ownership and whether the session
 // is still open are checked before this runs, so they are 404 and 409 rather
 // than an indistinguishable empty result.
+//
+// is_bonus is decided here too, and for the same reason set_number is: it is a
+// question about the state of the session at the instant of the insert, and a
+// handler that read it first would be answering about a slightly older session
+// than the one it writes to. The NOT EXISTS runs against the same snapshot as
+// the rest of the statement, so the answer cannot be stale by the time it is
+// stored. This is also the ONLY place it is ever written — see 0027 for why a
+// set's bonus-ness is a fact about the moment it was added and not something a
+// later read can recover.
+//
+// The rule is "everything else in the session was already done". Two details of
+// how that is spelled are deliberate:
+//
+//	NOT prior.completed  — the whole session, not just this lift. An extra set
+//	of squats while the bench work is still pending is a mid-workout
+//	adjustment, not bonus work, and the lifter reads it as one.
+//
+//	NOT prior.is_bonus   — an earlier bonus set that is not yet logged does not
+//	stop the next one counting. Without this, tapping "add set" twice before
+//	logging either would make the first a bonus and the second not, which is an
+//	arbitrary distinction between two taps of the same gesture. What makes the
+//	gesture a bonus is that the PRESCRIBED work is finished; bonus sets are the
+//	gesture itself and cannot disqualify each other.
 func (q *Queries) AppendSessionSet(ctx context.Context, arg AppendSessionSetParams) (SessionSet, error) {
 	row := q.db.QueryRow(ctx, appendSessionSet, arg.SessionID, arg.ExerciseID, arg.UserID)
 	var i SessionSet
@@ -67,6 +97,7 @@ func (q *Queries) AppendSessionSet(ctx context.Context, arg AppendSessionSetPara
 		&i.ActualReps,
 		&i.WeightLb,
 		&i.Completed,
+		&i.IsBonus,
 	)
 	return i, err
 }
@@ -137,7 +168,18 @@ type CreateSessionSetParams struct {
 	WeightLb   pgtype.Numeric `json:"weight_lb"`
 }
 
-func (q *Queries) CreateSessionSet(ctx context.Context, arg CreateSessionSetParams) (SessionSet, error) {
+type CreateSessionSetRow struct {
+	ID         int32          `json:"id"`
+	SessionID  int32          `json:"session_id"`
+	ExerciseID int32          `json:"exercise_id"`
+	SetNumber  int32          `json:"set_number"`
+	TargetReps int32          `json:"target_reps"`
+	ActualReps *int32         `json:"actual_reps"`
+	WeightLb   pgtype.Numeric `json:"weight_lb"`
+	Completed  bool           `json:"completed"`
+}
+
+func (q *Queries) CreateSessionSet(ctx context.Context, arg CreateSessionSetParams) (CreateSessionSetRow, error) {
 	row := q.db.QueryRow(ctx, createSessionSet,
 		arg.SessionID,
 		arg.ExerciseID,
@@ -145,7 +187,7 @@ func (q *Queries) CreateSessionSet(ctx context.Context, arg CreateSessionSetPara
 		arg.TargetReps,
 		arg.WeightLb,
 	)
-	var i SessionSet
+	var i CreateSessionSetRow
 	err := row.Scan(
 		&i.ID,
 		&i.SessionID,
@@ -311,6 +353,7 @@ SELECT ss.id,
        ss.actual_reps,
        ss.weight_lb,
        ss.completed,
+       ss.is_bonus,
        (pde.id IS NULL)::bool AS is_assistance,
        e.rest_seconds,
        e.equipment
@@ -338,6 +381,7 @@ type GetSessionSetRow struct {
 	ActualReps   *int32         `json:"actual_reps"`
 	WeightLb     pgtype.Numeric `json:"weight_lb"`
 	Completed    bool           `json:"completed"`
+	IsBonus      bool           `json:"is_bonus"`
 	IsAssistance bool           `json:"is_assistance"`
 	RestSeconds  int32          `json:"rest_seconds"`
 	Equipment    string         `json:"equipment"`
@@ -363,6 +407,7 @@ func (q *Queries) GetSessionSet(ctx context.Context, arg GetSessionSetParams) (G
 		&i.ActualReps,
 		&i.WeightLb,
 		&i.Completed,
+		&i.IsBonus,
 		&i.IsAssistance,
 		&i.RestSeconds,
 		&i.Equipment,
@@ -731,6 +776,7 @@ SELECT ss.id,
        ss.actual_reps,
        ss.weight_lb,
        ss.completed,
+       ss.is_bonus,
        (pde.id IS NULL)::bool AS is_assistance,
        e.rest_seconds,
        e.equipment
@@ -763,6 +809,7 @@ type ListSessionSetsRow struct {
 	ActualReps   *int32         `json:"actual_reps"`
 	WeightLb     pgtype.Numeric `json:"weight_lb"`
 	Completed    bool           `json:"completed"`
+	IsBonus      bool           `json:"is_bonus"`
 	IsAssistance bool           `json:"is_assistance"`
 	RestSeconds  int32          `json:"rest_seconds"`
 	Equipment    string         `json:"equipment"`
@@ -817,6 +864,7 @@ func (q *Queries) ListSessionSets(ctx context.Context, arg ListSessionSetsParams
 			&i.ActualReps,
 			&i.WeightLb,
 			&i.Completed,
+			&i.IsBonus,
 			&i.IsAssistance,
 			&i.RestSeconds,
 			&i.Equipment,
@@ -1027,7 +1075,7 @@ FROM sessions s
 WHERE ss.id = $4
   AND s.id = ss.session_id
   AND s.user_id = $5::int
-RETURNING ss.id, ss.session_id, ss.exercise_id, ss.set_number, ss.target_reps, ss.actual_reps, ss.weight_lb, ss.completed
+RETURNING ss.id, ss.session_id, ss.exercise_id, ss.set_number, ss.target_reps, ss.actual_reps, ss.weight_lb, ss.completed, ss.is_bonus
 `
 
 type UpdateSessionSetParams struct {
@@ -1043,6 +1091,11 @@ type UpdateSessionSetParams struct {
 // clear a prior entry (COALESCE could not express that). The owner check is
 // repeated here rather than inferred from the preceding GetSessionSet: an
 // UPDATE that trusts a prior read is one refactor away from trusting nothing.
+//
+// is_bonus is returned but never assigned, and that omission is the point: it
+// records how a set came to exist, which logging it does not change. A bonus
+// set is still a bonus set once its reps are in, and a prescribed set does not
+// become one by being finished last. AppendSessionSet is its only writer.
 func (q *Queries) UpdateSessionSet(ctx context.Context, arg UpdateSessionSetParams) (SessionSet, error) {
 	row := q.db.QueryRow(ctx, updateSessionSet,
 		arg.ActualReps,
@@ -1061,6 +1114,7 @@ func (q *Queries) UpdateSessionSet(ctx context.Context, arg UpdateSessionSetPara
 		&i.ActualReps,
 		&i.WeightLb,
 		&i.Completed,
+		&i.IsBonus,
 	)
 	return i, err
 }

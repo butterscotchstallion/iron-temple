@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/svelte";
+import { render, screen, fireEvent, waitFor } from "@testing-library/svelte";
 import ExerciseCard from "./ExerciseCard.svelte";
 import { auth } from "./auth.svelte";
 import type { SessionSet } from "./api";
@@ -212,6 +212,133 @@ describe("ExerciseCard", () => {
         expect.stringContaining("Warm-up 140 lb"),
       );
       expect(ramp(container).map((b) => b.textContent?.trim())).toEqual(["3", "2"]);
+    });
+  });
+
+  // A session is a stack of these, and a lifter is in the middle of one lift at
+  // a time: a squat finished twenty minutes ago is a result rather than a
+  // control, and at full height it pushes the lift being done off the screen.
+  describe("folding a finished lift away", () => {
+    // Every set tapped out to its target, which is what `completed` means.
+    const allDone = (sets: SessionSet[]) =>
+      sets.map((s) => set({ ...s, actualReps: 5, completed: true }));
+
+    it("folds the card once every set is complete", async () => {
+      const sets = workSets(80, 3);
+      const { rerender } = render(ExerciseCard, {
+        name: "Squat",
+        sets,
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+      });
+      expect(screen.getByRole("button", { name: "Set 1: not logged" })).toBeInTheDocument();
+
+      await rerender({ sets: allDone(sets) });
+
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: /^Set 1/ })).not.toBeInTheDocument(),
+      );
+      // The header still says what the lift was and what it carried.
+      expect(screen.getByRole("heading", { name: "Squat" })).toBeInTheDocument();
+      expect(screen.getByText("3/3 sets · 80 lb")).toBeInTheDocument();
+    });
+
+    it("leaves a lift with a set still to go alone", async () => {
+      const sets = workSets(80, 3);
+      sets[0] = set({ ...sets[0], actualReps: 5, completed: true });
+      render(ExerciseCard, {
+        name: "Squat",
+        sets,
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+      });
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Set 2: not logged" })).toBeInTheDocument(),
+      );
+    });
+
+    it("unfolds again on a tap, because done is not finished with", async () => {
+      const onCycle = vi.fn();
+      const sets = allDone(workSets(80, 2));
+      render(ExerciseCard, { name: "Squat", sets, onCycle, onChangeWeight: vi.fn() });
+
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: /^Set 1/ })).not.toBeInTheDocument(),
+      );
+
+      await fireEvent.click(screen.getByRole("button", { name: "Squat" }));
+
+      // The circles are back, and tapping one still clears a mis-tapped set.
+      const first = screen.getByRole("button", { name: "Set 1: 5 reps" });
+      await fireEvent.click(first);
+      expect(onCycle).toHaveBeenCalledWith(expect.objectContaining({ setNumber: 1 }));
+    });
+
+    it("stays open after the lifter opens it by hand", async () => {
+      const sets = allDone(workSets(80, 2));
+      const { rerender } = render(ExerciseCard, {
+        name: "Squat",
+        sets,
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+      });
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: /^Set 1/ })).not.toBeInTheDocument(),
+      );
+      await fireEvent.click(screen.getByRole("button", { name: "Squat" }));
+
+      // A weight nudge on the open card re-renders it; nothing re-folds it.
+      await rerender({ sets: allDone(workSets(85, 2)) });
+      expect(screen.getByRole("button", { name: /^Set 1/ })).toBeInTheDocument();
+    });
+
+    it("opens itself when a set stops being complete", async () => {
+      const sets = workSets(80, 2);
+      const { rerender } = render(ExerciseCard, {
+        name: "Squat",
+        sets: allDone(sets),
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+      });
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: /^Set 1/ })).not.toBeInTheDocument(),
+      );
+
+      // A set cleared, or one added at the rack: there is something to tap again.
+      await rerender({ sets });
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Set 1: not logged" })).toBeInTheDocument(),
+      );
+    });
+
+    it("can be folded by hand before the lift is done", async () => {
+      const sets = workSets(80, 3);
+      sets[0] = set({ ...sets[0], actualReps: 5, completed: true });
+      render(ExerciseCard, {
+        name: "Squat",
+        sets,
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+      });
+
+      await fireEvent.click(screen.getByRole("button", { name: "Squat" }));
+      expect(screen.queryByRole("button", { name: /^Set 1/ })).not.toBeInTheDocument();
+      expect(screen.getByText("1/3 sets · 80 lb")).toBeInTheDocument();
+    });
+
+    it("leaves a finished session's cards open — it is the record", async () => {
+      // Every lift in an over session is complete, so folding on load would
+      // leave a screen of headings where the set-by-set detail should be.
+      render(ExerciseCard, {
+        name: "Squat",
+        sets: allDone(workSets(80, 2)),
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+        readonly: true,
+      });
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Set 1: 5 reps" })).toBeInTheDocument(),
+      );
     });
   });
 

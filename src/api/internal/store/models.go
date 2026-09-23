@@ -141,6 +141,7 @@ type SessionSet struct {
 	ActualReps *int32         `json:"actual_reps"`
 	WeightLb   pgtype.Numeric `json:"weight_lb"`
 	Completed  bool           `json:"completed"`
+	IsBonus    bool           `json:"is_bonus"`
 }
 
 type User struct {

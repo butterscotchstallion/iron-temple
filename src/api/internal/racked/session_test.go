@@ -601,3 +601,138 @@ func TestBuildSessionVolumeDelta(t *testing.T) {
 		t.Fatalf("deltaPct = %v, want 0.10", got)
 	}
 }
+
+// bonus marks prescription rows as sets the lifter added after the rest of the
+// session was already done — what AppendSessionSet stamps onto session_sets.
+func bonus(rows []Prescribed) []Prescribed {
+	for i := range rows {
+		rows[i].IsBonus = true
+	}
+	return rows
+}
+
+// A bonus set is counted, and counted INSIDE the ordinary totals rather than
+// beside them.
+//
+// The distinction is the whole reason the figure is safe to add: a lifter who
+// did five prescribed sets and one extra reads "6 of 6 sets, 1 bonus", not
+// "5 of 5 and also 1", and the tonnage is the tonnage either way. A recap that
+// quietly held bonus work out of its own totals would disagree with the same
+// session's volume in the history list, which is the bug this shape avoids.
+func TestBuildSessionCountsBonusSets(t *testing.T) {
+	on := day(2026, time.March, 2)
+	sets := finish(mkSets(1, on, 1, "Squat", 6, 5, 200), 45*time.Minute)
+
+	prescribed := mkPrescribed(1, "Squat", 5, 5, 5, false)
+	prescribed = append(prescribed, bonus(mkPrescribed(1, "Squat", 1, 5, 5, false))...)
+
+	rec := BuildSession(SessionInput{
+		Meta:       mkMeta(1, on, 45*time.Minute),
+		Sets:       sets,
+		Prescribed: prescribed,
+	})
+
+	if rec.Volume.SetsBonus != 1 {
+		t.Fatalf("setsBonus = %d, want 1", rec.Volume.SetsBonus)
+	}
+	// Inside, not beside: six sets were done and one of them was the extra.
+	if rec.Volume.SetsLogged != 6 || rec.Volume.SetsPrescribed != 6 {
+		t.Fatalf("sets = %d of %d, want 6 of 6 — bonus work stays in both",
+			rec.Volume.SetsLogged, rec.Volume.SetsPrescribed)
+	}
+	if rec.Volume.TotalLb != 6000 {
+		t.Fatalf("volume = %v, want 6000 — the bonus set moved weight too", rec.Volume.TotalLb)
+	}
+	if len(rec.Lifts) != 1 || rec.Lifts[0].SetsBonus != 1 {
+		t.Fatalf("lifts = %+v, want the bonus attributed to Squat", rec.Lifts)
+	}
+}
+
+// An ordinary session reports zero, which is also what every session performed
+// before the column existed reports. Nothing infers a bonus set from a set
+// count that happens to exceed the usual prescription.
+func TestBuildSessionWithoutBonusSetsReportsZero(t *testing.T) {
+	on := day(2026, time.March, 2)
+
+	rec := BuildSession(SessionInput{
+		Meta:       mkMeta(1, on, 45*time.Minute),
+		Sets:       finish(mkSets(1, on, 1, "Squat", 6, 5, 200), 45*time.Minute),
+		Prescribed: mkPrescribed(1, "Squat", 6, 5, 5, false),
+	})
+
+	if rec.Volume.SetsBonus != 0 {
+		t.Fatalf("setsBonus = %d, want 0 — six prescribed sets are not five plus a bonus",
+			rec.Volume.SetsBonus)
+	}
+	if len(rec.Lifts) != 1 || rec.Lifts[0].SetsBonus != 0 {
+		t.Fatalf("lifts = %+v, want no bonus on any lift", rec.Lifts)
+	}
+}
+
+// A bonus set added and then never logged is not bonus work that happened.
+//
+// The recap reports what the lifter did, and an empty row is the one thing it
+// must not dress up as a set. SetsBonus therefore counts only logged sets,
+// which is the same rule SetsLogged keeps — and it stays a count OF SetsLogged
+// rather than drifting above it.
+func TestBuildSessionIgnoresUnloggedBonusSets(t *testing.T) {
+	on := day(2026, time.March, 2)
+
+	prescribed := mkPrescribed(1, "Squat", 5, 5, 5, false)
+	prescribed = append(prescribed, bonus(mkPrescribed(1, "Squat", 1, 5, 0, false))...)
+
+	rec := BuildSession(SessionInput{
+		Meta:       mkMeta(1, on, 45*time.Minute),
+		Sets:       finish(mkSets(1, on, 1, "Squat", 5, 5, 200), 45*time.Minute),
+		Prescribed: prescribed,
+	})
+
+	if rec.Volume.SetsBonus != 0 {
+		t.Fatalf("setsBonus = %d, want 0 — the set was added but never performed",
+			rec.Volume.SetsBonus)
+	}
+	if rec.Volume.SetsLogged != 5 || rec.Volume.SetsPrescribed != 6 {
+		t.Fatalf("sets = %d of %d, want 5 of 6", rec.Volume.SetsLogged, rec.Volume.SetsPrescribed)
+	}
+}
+
+// Bonus sets land on the lift they belong to, not on whichever lift came first.
+func TestBuildSessionAttributesBonusSetsPerLift(t *testing.T) {
+	on := day(2026, time.March, 2)
+
+	sets := finish(mkSets(1, on, 1, "Squat", 5, 5, 200), time.Hour)
+	sets = append(sets, finish(mkSets(1, on, 2, "Bench Press", 7, 5, 135), time.Hour)...)
+
+	prescribed := mkPrescribed(1, "Squat", 5, 5, 5, false)
+	prescribed = append(prescribed, mkPrescribed(2, "Bench Press", 5, 5, 5, false)...)
+	prescribed = append(prescribed, bonus(mkPrescribed(2, "Bench Press", 2, 5, 5, false))...)
+
+	rec := BuildSession(SessionInput{
+		Meta:       mkMeta(1, on, time.Hour),
+		Sets:       sets,
+		Prescribed: prescribed,
+	})
+
+	if rec.Volume.SetsBonus != 2 {
+		t.Fatalf("setsBonus = %d, want 2", rec.Volume.SetsBonus)
+	}
+	byName := map[string]SessionLift{}
+	for _, l := range rec.Lifts {
+		byName[l.ExerciseName] = l
+	}
+	if got := byName["Squat"].SetsBonus; got != 0 {
+		t.Fatalf("Squat setsBonus = %d, want 0", got)
+	}
+	if got := byName["Bench Press"].SetsBonus; got != 2 {
+		t.Fatalf("Bench Press setsBonus = %d, want 2", got)
+	}
+	// The per-lift counts must add up to the session's, or the two figures on
+	// the recap screen contradict each other.
+	var total int
+	for _, l := range rec.Lifts {
+		total += l.SetsBonus
+	}
+	if total != rec.Volume.SetsBonus {
+		t.Fatalf("per-lift bonus sets sum to %d, session says %d", total, rec.Volume.SetsBonus)
+	}
+}

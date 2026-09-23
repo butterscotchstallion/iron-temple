@@ -141,6 +141,7 @@
           setsPrescribed: recap.volume.setsPrescribed,
           repsLogged: recap.volume.repsLogged,
           repsTargeted: recap.volume.repsTargeted,
+          setsBonus: recap.volume.setsBonus,
         }
       : local && {
           durationSeconds: local.durationSeconds,
@@ -149,6 +150,7 @@
           setsPrescribed: local.setsPrescribed,
           repsLogged: local.repsLogged,
           repsTargeted: local.repsTargeted,
+          setsBonus: local.setsBonus,
         },
   );
 
@@ -164,6 +166,7 @@
           setsPrescribed: l.setsPrescribed,
           repsLogged: l.repsLogged,
           repsTargeted: l.repsTargeted,
+          setsBonus: l.setsBonus,
           hitEveryTarget: l.hitEveryTarget,
           previousTopWeightLb: l.previous?.topWeightLb ?? null,
           weightDeltaPct: l.weightDeltaPct,

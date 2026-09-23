@@ -237,3 +237,131 @@ func setNumbered(e *httpexpect.Expect, sessionID, exerciseID, setNumber int) int
 	}
 	return 0
 }
+
+// completeEverySet logs and completes every set currently in the session, which
+// is the state that makes the NEXT appended set a bonus set.
+func completeEverySet(e *httpexpect.Expect, sessionID int) {
+	sets := e.GET(fmt.Sprintf("/sessions/%d", sessionID)).
+		Expect().Status(http.StatusOK).JSON().Object().Value("sets").Array()
+
+	for i := 0; i < int(sets.Length().Raw()); i++ {
+		set := sets.Value(i).Object()
+		if set.Value("completed").Boolean().Raw() {
+			continue
+		}
+		setID := int(set.Value("id").Number().Raw())
+		e.PATCH(fmt.Sprintf("/sessions/%d/sets/%d", sessionID, setID)).
+			WithJSON(map[string]any{
+				"actualReps": int(set.Value("targetReps").Number().Raw()),
+				"completed":  true,
+			}).
+			Expect().Status(http.StatusOK)
+	}
+}
+
+// A set added while the workout still has work outstanding is an adjustment,
+// not a bonus.
+//
+// This is the whole-session reading of "after the other sets are complete": the
+// squat rack is not the session. A sixth set of squats with the bench press
+// still to come is a lifter changing their mind mid-workout, and calling it
+// bonus work would empty the term of meaning — most sessions would have one.
+func TestAddSetIsNotBonusWhileWorkRemains(t *testing.T) {
+	e := expect(t)
+	_, dayID := firstProgramAndDay(e)
+
+	created := startSession(t, e, dayID)
+	sessionID := int(created.Value("id").Number().Raw())
+	exerciseID := int(created.Value("sets").Array().Value(0).Object().
+		Value("exerciseId").Number().Raw())
+
+	// Nothing logged at all yet — the clearest case of work remaining.
+	e.POST(fmt.Sprintf("/sessions/%d/sets", sessionID)).
+		WithJSON(map[string]any{"exerciseId": exerciseID}).
+		Expect().Status(http.StatusCreated).JSON().Object().
+		Value("isBonus").Boolean().IsFalse()
+
+	// And still not a bonus once this one lift is finished, while the rest of
+	// the session is not.
+	first := created.Value("sets").Array().Value(0).Object()
+	setID := int(first.Value("id").Number().Raw())
+	e.PATCH(fmt.Sprintf("/sessions/%d/sets/%d", sessionID, setID)).
+		WithJSON(map[string]any{"actualReps": 5, "completed": true}).
+		Expect().Status(http.StatusOK)
+
+	e.POST(fmt.Sprintf("/sessions/%d/sets", sessionID)).
+		WithJSON(map[string]any{"exerciseId": exerciseID}).
+		Expect().Status(http.StatusCreated).JSON().Object().
+		Value("isBonus").Boolean().IsFalse()
+}
+
+// Finish the whole workout, then add one more: that is a bonus set.
+func TestAddSetIsBonusOnceEverythingElseIsDone(t *testing.T) {
+	e := expect(t)
+	_, dayID := firstProgramAndDay(e)
+
+	created := startSession(t, e, dayID)
+	sessionID := int(created.Value("id").Number().Raw())
+	exerciseID := int(created.Value("sets").Array().Value(0).Object().
+		Value("exerciseId").Number().Raw())
+
+	completeEverySet(e, sessionID)
+
+	added := e.POST(fmt.Sprintf("/sessions/%d/sets", sessionID)).
+		WithJSON(map[string]any{"exerciseId": exerciseID}).
+		Expect().Status(http.StatusCreated).JSON().Object()
+	added.Value("isBonus").Boolean().IsTrue()
+
+	// A second tap, with the first bonus set still unlogged, is also a bonus
+	// set. Nothing about the lifter's gesture changed between the two taps, and
+	// a rule that split them would be deciding on timing rather than on intent.
+	second := e.POST(fmt.Sprintf("/sessions/%d/sets", sessionID)).
+		WithJSON(map[string]any{"exerciseId": exerciseID}).
+		Expect().Status(http.StatusCreated).JSON().Object()
+	second.Value("isBonus").Boolean().IsTrue()
+
+	// Logging a bonus set does not stop it being one. is_bonus records how the
+	// set came to exist, which filling in its reps cannot change.
+	addedID := int(added.Value("id").Number().Raw())
+	e.PATCH(fmt.Sprintf("/sessions/%d/sets/%d", sessionID, addedID)).
+		WithJSON(map[string]any{"actualReps": 5, "completed": true}).
+		Expect().Status(http.StatusOK).JSON().Object().
+		Value("isBonus").Boolean().IsTrue()
+
+	// And it survives a re-read, rather than living only in the echo.
+	sets := e.GET(fmt.Sprintf("/sessions/%d", sessionID)).
+		Expect().Status(http.StatusOK).JSON().Object().Value("sets").Array()
+	var bonusCount int
+	for i := 0; i < int(sets.Length().Raw()); i++ {
+		if sets.Value(i).Object().Value("isBonus").Boolean().Raw() {
+			bonusCount++
+		}
+	}
+	if bonusCount != 2 {
+		t.Fatalf("session reports %d bonus sets, want 2", bonusCount)
+	}
+}
+
+// The sets a session opens with are never bonus sets, however the lifter works
+// through them. Only an append can produce one.
+func TestSessionStartsWithNoBonusSets(t *testing.T) {
+	e := expect(t)
+	_, dayID := firstProgramAndDay(e)
+
+	created := startSession(t, e, dayID)
+	sessionID := int(created.Value("id").Number().Raw())
+
+	sets := created.Value("sets").Array()
+	for i := 0; i < int(sets.Length().Raw()); i++ {
+		sets.Value(i).Object().Value("isBonus").Boolean().IsFalse()
+	}
+
+	// Still false after the whole prescription is completed — finishing last
+	// does not make a prescribed set a bonus one.
+	completeEverySet(e, sessionID)
+	reread := e.GET(fmt.Sprintf("/sessions/%d", sessionID)).
+		Expect().Status(http.StatusOK).JSON().Object().Value("sets").Array()
+	for i := 0; i < int(reread.Length().Raw()); i++ {
+		reread.Value(i).Object().Value("isBonus").Boolean().IsFalse()
+	}
+}

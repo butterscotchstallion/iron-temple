@@ -74,6 +74,7 @@ function fullRecap(): Recap {
       setsPrescribed: 25,
       repsLogged: 125,
       repsTargeted: 125,
+      setsBonus: 0,
     },
     progress: {
       previousSessionId: 40,
@@ -94,6 +95,7 @@ function fullRecap(): Recap {
         setsPrescribed: 5,
         repsLogged: 25,
         repsTargeted: 25,
+        setsBonus: 0,
         volumeLb: 6125,
         hitEveryTarget: true,
         previous: {
@@ -143,6 +145,7 @@ function mkSet(over: Partial<SessionSet> & Pick<SessionSet, "id">): SessionSet {
     actualReps: 5,
     weightLb: 200,
     completed: true,
+    isBonus: false,
     restSeconds: 180,
     equipment: "barbell",
     ...over,
@@ -191,6 +194,34 @@ describe("SessionRecap", () => {
     expect(screen.getByText("18,240")).toBeInTheDocument();
     expect(screen.getByText("25 / 25")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /Workout complete/ })).toBeInTheDocument();
+  });
+
+  // Bonus work gets named, and named as a qualifier rather than as a total:
+  // the sets tile still reads 26 of 26, with "1 bonus" under it saying how much
+  // of that was extra. A lifter who tacked a set on at the end should see it
+  // acknowledged without the headline count appearing to disagree with itself.
+  it("names bonus sets without disturbing the counts they sit inside", async () => {
+    const recap = fullRecap();
+    recap.volume = { ...recap.volume, setsLogged: 26, setsPrescribed: 26, setsBonus: 1 };
+    recap.lifts = [{ ...recap.lifts[0], setsLogged: 6, setsPrescribed: 6, setsBonus: 1 }];
+    getSessionRecap.mockResolvedValue({ status: 200, data: recap, headers: new Headers() });
+    render(SessionRecap, props);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("stat-sets-bonus")).toHaveTextContent("1 bonus"),
+    );
+    expect(screen.getByTestId("stat-sets")).toHaveTextContent("26 / 26");
+    expect(screen.getByTestId("recap-lifts")).toHaveTextContent("1 bonus");
+  });
+
+  // An ordinary session says nothing at all. "0 bonus" is a line about an
+  // absence, and every session before the field existed would have carried it.
+  it("stays silent about bonus sets when there were none", async () => {
+    getSessionRecap.mockResolvedValue({ status: 200, data: fullRecap(), headers: new Headers() });
+    render(SessionRecap, props);
+
+    await waitFor(() => expect(screen.getByTestId("stat-sets")).toBeInTheDocument());
+    expect(screen.queryByTestId("stat-sets-bonus")).not.toBeInTheDocument();
   });
 
   it("restates the tonnage as something to picture", async () => {

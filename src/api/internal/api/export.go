@@ -108,6 +108,9 @@ type exportSessionSetDTO struct {
 	ActualReps   *int32  `json:"actualReps"`
 	WeightLb     float64 `json:"weightLb"`
 	Completed    bool    `json:"completed"`
+	// IsBonus is the one field on this row a lifter could not work out again
+	// from the others — nothing else records when a set was added. See 0027.
+	IsBonus bool `json:"isBonus"`
 }
 
 // exportAccount serves the whole account as one JSON document.
@@ -306,6 +309,7 @@ func (s *Server) exportSessions(ctx context.Context, userID int32) ([]exportSess
 			ActualReps:   set.ActualReps,
 			WeightLb:     numericToFloat(set.WeightLb),
 			Completed:    set.Completed,
+			IsBonus:      set.IsBonus,
 		})
 	}
 

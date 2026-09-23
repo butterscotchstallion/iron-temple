@@ -157,6 +157,7 @@ export function testSessionRecap(overrides: Partial<SessionRecap> = {}): Session
       setsPrescribed: 5,
       repsLogged: 0,
       repsTargeted: 25,
+      setsBonus: 0,
     },
     progress: {
       previousSessionId: null,

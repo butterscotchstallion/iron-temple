@@ -337,7 +337,7 @@ func TestRecapShapeMatchesTheSchema(t *testing.T) {
 	)
 	r.Value("volume").Object().Keys().ContainsOnly(
 		"totalLb", "previousLb", "deltaPct", "comparison",
-		"setsLogged", "setsPrescribed", "repsLogged", "repsTargeted",
+		"setsLogged", "setsPrescribed", "repsLogged", "repsTargeted", "setsBonus",
 	)
 	r.Value("volume").Object().Value("comparison").Object().
 		Keys().ContainsOnly("count", "label", "unitLb")
@@ -350,8 +350,9 @@ func TestRecapShapeMatchesTheSchema(t *testing.T) {
 	lift := r.Value("lifts").Array().Value(0).Object()
 	lift.Keys().ContainsOnly(
 		"exerciseId", "exerciseName", "kind", "topWeightLb", "topReps", "topE1rmLb",
-		"setsLogged", "setsPrescribed", "repsLogged", "repsTargeted", "volumeLb",
-		"hitEveryTarget", "previous", "weightDeltaLb", "weightDeltaPct", "e1rmDeltaPct",
+		"setsLogged", "setsPrescribed", "repsLogged", "repsTargeted", "setsBonus",
+		"volumeLb", "hitEveryTarget", "previous", "weightDeltaLb", "weightDeltaPct",
+		"e1rmDeltaPct",
 	)
 	lift.Value("previous").Object().
 		Keys().ContainsOnly("performedOn", "topWeightLb", "topReps", "topE1rmLb")

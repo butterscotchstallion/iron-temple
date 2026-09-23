@@ -12,6 +12,7 @@ function mkSet(over: Partial<SessionSet> & Pick<SessionSet, "id">): SessionSet {
     actualReps: 5,
     weightLb: 200,
     completed: true,
+    isBonus: false,
     restSeconds: 180,
     equipment: "barbell",
     ...over,
@@ -198,5 +199,45 @@ describe("localRecap", () => {
       }),
     );
     expect(r.lifts[0].kind).toBe("assistance");
+  });
+
+  // Bonus sets are one of the few things this file knows as exactly as the
+  // server does: the flag was decided when the set was appended and rides on
+  // the session object already in hand, so offline there is nothing to guess.
+  it("counts bonus sets, inside the ordinary totals", () => {
+    const r = localRecap(
+      mkSession({
+        sets: [
+          ...[1, 2, 3, 4, 5].map((n) => mkSet({ id: n, setNumber: n })),
+          mkSet({ id: 6, setNumber: 6, isBonus: true }),
+        ],
+      }),
+    );
+    expect(r.setsBonus).toBe(1);
+    // Inside, not beside — six sets were done and one of them was the extra.
+    expect(r.setsLogged).toBe(6);
+    expect(r.setsPrescribed).toBe(6);
+    expect(r.volumeLb).toBe(6000);
+    expect(r.lifts[0].setsBonus).toBe(1);
+  });
+
+  it("reports no bonus sets for an ordinary session", () => {
+    expect(localRecap(mkSession()).setsBonus).toBe(0);
+  });
+
+  // A set added and then left empty is not bonus work that happened, and the
+  // recap reports what happened. Same rule the server keeps.
+  it("ignores a bonus set that was never logged", () => {
+    const r = localRecap(
+      mkSession({
+        sets: [
+          ...[1, 2, 3, 4, 5].map((n) => mkSet({ id: n, setNumber: n })),
+          mkSet({ id: 6, setNumber: 6, isBonus: true, actualReps: null, completed: false }),
+        ],
+      }),
+    );
+    expect(r.setsBonus).toBe(0);
+    expect(r.setsLogged).toBe(5);
+    expect(r.setsPrescribed).toBe(6);
   });
 });

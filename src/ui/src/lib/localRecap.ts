@@ -38,6 +38,8 @@ export type LocalLift = {
   setsPrescribed: number;
   repsLogged: number;
   repsTargeted: number;
+  /** Logged sets among this lift's bonus work; already inside setsLogged. */
+  setsBonus: number;
   volumeLb: number;
   hitEveryTarget: boolean;
 };
@@ -58,6 +60,15 @@ export type LocalRecap = {
   setsPrescribed: number;
   repsLogged: number;
   repsTargeted: number;
+  /**
+   * Logged sets the lifter added after the rest of the session was done.
+   *
+   * One of the few figures this file can state as confidently as the server
+   * does. `isBonus` was decided when the set was appended and rides on the
+   * session object already in hand, so offline there is nothing to estimate —
+   * unlike the deltas and milestones, which need sessions this one cannot see.
+   */
+  setsBonus: number;
   lifts: LocalLift[];
   prs: LocalPR[];
 };
@@ -70,6 +81,7 @@ export function localRecap(session: Session): LocalRecap {
     setsPrescribed: 0,
     repsLogged: 0,
     repsTargeted: 0,
+    setsBonus: 0,
     lifts: [],
     prs: [],
   };
@@ -87,6 +99,9 @@ export function localRecap(session: Session): LocalRecap {
       out.setsLogged += 1;
       out.repsLogged += reps;
       out.volumeLb += reps * set.weightLb;
+      // Logged bonus sets only, matching sessionVolume server-side: a bonus set
+      // added and then left empty is not bonus work that happened.
+      if (set.isBonus) out.setsBonus += 1;
     }
 
     let lift = byId.get(set.exerciseId);
@@ -102,6 +117,7 @@ export function localRecap(session: Session): LocalRecap {
         setsPrescribed: 0,
         repsLogged: 0,
         repsTargeted: 0,
+        setsBonus: 0,
         volumeLb: 0,
         hitEveryTarget: true,
       };
@@ -115,6 +131,7 @@ export function localRecap(session: Session): LocalRecap {
 
     lift.setsLogged += 1;
     lift.repsLogged += reps;
+    if (set.isBonus) lift.setsBonus += 1;
     lift.volumeLb += reps * set.weightLb;
     if (set.weightLb > lift.topWeightLb) {
       lift.topWeightLb = set.weightLb;

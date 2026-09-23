@@ -3012,7 +3012,7 @@ components:
 
     ExportSessionSet:
       type: object
-      required: [exerciseName, kind, setNumber, targetReps, weightLb, completed]
+      required: [exerciseName, kind, setNumber, targetReps, weightLb, completed, isBonus]
       properties:
         exerciseName:
           type: string
@@ -3033,6 +3033,12 @@ components:
           minimum: 0
         completed:
           type: boolean
+        isBonus:
+          type: boolean
+          description: >-
+            Whether this was bonus work — see SessionSet.isBonus. Carried in the
+            export because it is the one field on the row that cannot be derived
+            again from the others; false for everything logged before it existed.
 
     RegistrationStatus:
       type: object
@@ -4077,7 +4083,7 @@ components:
     SessionSet:
       type: object
       required:
-        [id, exerciseId, exerciseName, kind, setNumber, targetReps, weightLb, completed, restSeconds, equipment]
+        [id, exerciseId, exerciseName, kind, setNumber, targetReps, weightLb, completed, isBonus, restSeconds, equipment]
       properties:
         id:
           type: integer
@@ -4107,6 +4113,20 @@ components:
           example: 50
         completed:
           type: boolean
+        isBonus:
+          type: boolean
+          description: >-
+            True for a set the lifter added once everything else in the session
+            was already done — extra work, rather than the workout as it was
+            planned. Set by POST /sessions/{sessionId}/sets at the moment of the
+            append and never recalculated: the thing it describes, what was
+            still outstanding just then, leaves no trace to reconstruct it from.
+
+            Always false for the sets a session opens with, for sets added while
+            other work was still pending, and for every set logged before the
+            field existed — so a recap of an older session reports no bonus sets
+            rather than guessing at them.
+          example: false
         restSeconds:
           type: integer
           description: >-
@@ -4369,7 +4389,7 @@ components:
       type: object
       required:
         [totalLb, previousLb, deltaPct, comparison, setsLogged, setsPrescribed,
-         repsLogged, repsTargeted]
+         repsLogged, repsTargeted, setsBonus]
       properties:
         totalLb:
           type: number
@@ -4400,6 +4420,22 @@ components:
           type: integer
         repsTargeted:
           type: integer
+        setsBonus:
+          type: integer
+          description: >-
+            How many of the logged sets were bonus work — added after everything
+            else in the session was already done. See SessionSet.isBonus.
+
+            This is a count OF setsLogged rather than one beside it. Bonus sets
+            remain inside every other figure here, including totalLb and
+            setsPrescribed, on the same grounds assistance work does: extra work
+            is still work, and excluding it would put this recap at odds with
+            the same session's tonnage in the history list. The figure says how
+            much of the session was extra; it does not restate what was done.
+
+            Zero for sessions performed before the field existed, since nothing
+            recorded it at the time.
+          example: 1
 
     SessionRecapProgress:
       description: >
@@ -4447,8 +4483,8 @@ components:
       type: object
       required:
         [exerciseId, exerciseName, kind, topWeightLb, topReps, topE1rmLb, setsLogged,
-         setsPrescribed, repsLogged, repsTargeted, volumeLb, hitEveryTarget, previous,
-         weightDeltaLb, weightDeltaPct, e1rmDeltaPct]
+         setsPrescribed, repsLogged, repsTargeted, setsBonus, volumeLb, hitEveryTarget,
+         previous, weightDeltaLb, weightDeltaPct, e1rmDeltaPct]
       properties:
         exerciseId:
           type: integer
@@ -4477,6 +4513,12 @@ components:
           type: integer
         repsTargeted:
           type: integer
+        setsBonus:
+          type: integer
+          description: >-
+            This lift's share of SessionRecapVolume.setsBonus, on the same terms
+            — logged sets only, and already counted inside setsLogged.
+          example: 1
         volumeLb:
           type: number
           minimum: 0

@@ -646,7 +646,14 @@ type sessionSetDTO struct {
 	ActualReps   *int32  `json:"actualReps"`
 	WeightLb     float64 `json:"weightLb"`
 	Completed    bool    `json:"completed"`
-	RestSeconds  int32   `json:"restSeconds"`
+	// IsBonus marks a set the lifter added after finishing everything else in
+	// the session — extra work, rather than the workout as it was planned.
+	//
+	// Recorded when the set is appended and never recomputed; see 0027 for why
+	// it cannot be. Always false for sets a session opened with, and for every
+	// set logged before the column existed.
+	IsBonus     bool  `json:"isBonus"`
+	RestSeconds int32 `json:"restSeconds"`
 	// Equipment is the movement's, carried on every set because the session
 	// screen is the one screen that never loads the exercise library. Two things
 	// there are wrong without it: the warm-up ramp opens with two sets of an
@@ -759,6 +766,7 @@ type sessionRecapVolumeDTO struct {
 	SetsPrescribed int `json:"setsPrescribed"`
 	RepsLogged     int `json:"repsLogged"`
 	RepsTargeted   int `json:"repsTargeted"`
+	SetsBonus      int `json:"setsBonus"`
 }
 
 type sessionRecapProgressDTO struct {
@@ -781,6 +789,7 @@ type sessionRecapLiftDTO struct {
 	SetsPrescribed int     `json:"setsPrescribed"`
 	RepsLogged     int     `json:"repsLogged"`
 	RepsTargeted   int     `json:"repsTargeted"`
+	SetsBonus      int     `json:"setsBonus"`
 	VolumeLb       float64 `json:"volumeLb"`
 	HitEveryTarget bool    `json:"hitEveryTarget"`
 
