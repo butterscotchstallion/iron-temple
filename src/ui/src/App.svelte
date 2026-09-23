@@ -63,6 +63,9 @@
     "/programs/new": wrap({
       asyncComponent: () => import("./routes/ProgramCreate.svelte"),
     }),
+    "/programs/:id/edit": wrap({
+      asyncComponent: () => import("./routes/ProgramEdit.svelte"),
+    }),
     "/programs/:id": ProgramDetail,
     "/sessions/:id": wrap({ asyncComponent: () => import("./routes/ActiveSession.svelte") }),
     // Where finishing a workout lands, and reachable afterwards by its own URL.

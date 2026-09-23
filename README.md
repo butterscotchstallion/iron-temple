@@ -35,12 +35,13 @@ lifts, sets and reps.
 
 - **Build your own.** Start from nothing, or take a copy of one that already works
   and change what you need — swap the overhead press for dumbbells, drop a lift your
-  shoulder doesn't like. **A copy leaves the original alone**: the eight seeded
-  programs belong to the install and stay exactly as they are for everybody, which
-  is a property of the schema rather than a rule somebody has to remember. **Your
-  lifts keep their history**, because history follows the lift and not the program
-  — a squat in a program you built this morning picks up the weight you were already
-  squatting rather than sending you back to an empty bar.
+  shoulder doesn't like. Name the days, put the lifts on them in the order you do
+  them, and set where each one starts. **A copy leaves the original alone**: the
+  eight seeded programs belong to the install and stay exactly as they are for
+  everybody, which is a property of the schema rather than a rule somebody has to
+  remember. **Your lifts keep their history**, because history follows the lift
+  and not the program — a squat in a program you built this morning picks up the
+  weight you were already squatting rather than sending you back to an empty bar.
 
   You choose whether the rest of the install can see it. **Sharing controls who can
   find it, not who can keep it**: turn sharing off and it leaves everyone else's
@@ -50,7 +51,9 @@ lifts, sets and reps.
 
   Finished with one? **Archive it.** It leaves the picker and stays trainable, and
   every session you logged against it stays exactly where it is — a program you have
-  trained can't be deleted, because deleting it would mean deleting the work.
+  trained can't be deleted, because deleting it would mean deleting the work. The same
+  rule applies one level down: take a day out of a program and it goes, but if you
+  have trained it the workout stays in your history and keeps its name.
 - **Put the days on a calendar.** Assign a weekday to each program day, and the app
   knows what you're scheduled to do and when you missed it.
 - **Add your own assistance work, and have it progress like everything else.**

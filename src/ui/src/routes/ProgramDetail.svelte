@@ -8,7 +8,7 @@
     previewNextSession,
     previewNextSessions,
     createSession,
-    updateProgramDayWeekday,
+    updateProgramDay,
     addAssistance,
     removeAssistance,
     updateAssistance,
@@ -469,7 +469,7 @@
     weekdayFailed = false;
     const value = select.value;
     const weekday = value === "" ? null : Number(value);
-    const saved = await updateProgramDayWeekday(programId, day.id, { weekday });
+    const saved = await updateProgramDay(programId, day.id, { weekday });
     if (saved.status !== 204) {
       // The one-way `value={...}` binding won't re-assert the old value when
       // `day.weekday` is unchanged, so reset the DOM control explicitly.
@@ -577,13 +577,28 @@
   {:else if failed}
     <ErrorCard message="Couldn't load this program." onRetry={load} />
   {:else if program}
-    <div>
-      <h2 class="text-3xl font-black text-foreground">{program.name}</h2>
-      <p class="mt-1 text-sm text-muted-foreground">{program.description}</p>
-      {#if programAttribution(program)}
-        <p class="mt-1 text-xs text-muted-foreground/80">
-          {programAttribution(program)}
-        </p>
+    <div class="flex items-start justify-between gap-3">
+      <div>
+        <h2 class="text-3xl font-black text-foreground">{program.name}</h2>
+        <p class="mt-1 text-sm text-muted-foreground">{program.description}</p>
+        {#if programAttribution(program)}
+          <p class="mt-1 text-xs text-muted-foreground/80">
+            {programAttribution(program)}
+          </p>
+        {/if}
+      </div>
+      <!--
+        Only on a program you own. The seeded ones have no owner, so this is
+        false for everybody — the API refuses every edit to them regardless, and
+        an Edit link that leads to a screen of 404s is a worse way of saying so.
+      -->
+      {#if program.isMine}
+        <a use:link href="/programs/{programId}/edit" class="shrink-0">
+          <Button variant="outline" size="sm">
+            <Pencil />
+            Edit program
+          </Button>
+        </a>
       {/if}
     </div>
 

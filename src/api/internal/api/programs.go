@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"math"
 	"net/http"
@@ -176,40 +175,6 @@ func (s *Server) writeProgram(w http.ResponseWriter, r *http.Request, id int32, 
 		),
 		Days: dayDTOs,
 	})
-}
-
-type updateProgramDayRequest struct {
-	Weekday *int32 `json:"weekday"`
-}
-
-func (s *Server) updateProgramDayWeekday(w http.ResponseWriter, r *http.Request) {
-	dayID, ok := idParam(r, "dayId")
-	if !ok {
-		notFound(w, "program day not found")
-		return
-	}
-
-	var req updateProgramDayRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		badRequest(w, "invalid JSON body")
-		return
-	}
-	if req.Weekday != nil && (*req.Weekday < 0 || *req.Weekday > 6) {
-		badRequest(w, "weekday must be between 0 and 6")
-		return
-	}
-
-	if _, err := s.q.UpdateProgramDayWeekday(r.Context(), store.UpdateProgramDayWeekdayParams{
-		ID: dayID, Weekday: req.Weekday,
-	}); errors.Is(err, pgx.ErrNoRows) {
-		notFound(w, "program day not found")
-		return
-	} else if err != nil {
-		internalError(w)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) previewNextSession(w http.ResponseWriter, r *http.Request) {

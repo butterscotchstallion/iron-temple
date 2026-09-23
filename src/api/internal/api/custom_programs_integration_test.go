@@ -789,3 +789,392 @@ func TestLifterRecapMasksAPrivateProgramName(t *testing.T) {
 		JSON().Object().Value("session").Object().
 		HasValue("programName", "Secret Bench Cycle")
 }
+
+// ---------------------------------------------------------------------------
+// Editing: days, prescriptions and order.
+// ---------------------------------------------------------------------------
+
+// buildEmptyProgram creates a program through the API and returns its id.
+func buildEmptyProgram(t *testing.T, e *httpexpect.Expect, name string) int {
+	t.Helper()
+	created := createProgram(e, map[string]any{"name": name})
+	id := int(created.Value("id").Number().Raw())
+	dropProgram(t, id)
+	return id
+}
+
+// addDay posts a day and returns the id of the one that was added.
+func addDay(t *testing.T, e *httpexpect.Expect, programID int, name string) int {
+	t.Helper()
+	days := e.POST(fmt.Sprintf("/programs/%d/days", programID)).
+		WithJSON(map[string]any{"name": name}).
+		Expect().Status(http.StatusCreated).
+		JSON().Object().Value("days").Array()
+	for _, v := range days.Iter() {
+		if v.Object().Value("name").String().Raw() == name {
+			return int(v.Object().Value("id").Number().Raw())
+		}
+	}
+	t.Fatalf("day %q missing from the response", name)
+	return 0
+}
+
+// exerciseNamed looks up a movement's id from the library.
+func exerciseNamed(t *testing.T, e *httpexpect.Expect, name string) int {
+	t.Helper()
+	for _, v := range e.GET("/exercises").Expect().Status(http.StatusOK).JSON().Array().Iter() {
+		if v.Object().Value("name").String().Raw() == name {
+			return int(v.Object().Value("id").Number().Raw())
+		}
+	}
+	t.Fatalf("exercise %q not in the library", name)
+	return 0
+}
+
+// addLift posts a prescription and returns the day it landed on.
+func addLift(
+	t *testing.T, e *httpexpect.Expect, programID, dayID, exerciseID int, sets, reps int,
+) *httpexpect.Object {
+	t.Helper()
+	program := e.POST(fmt.Sprintf("/programs/%d/days/%d/exercises", programID, dayID)).
+		WithJSON(map[string]any{
+			"exerciseId": exerciseID, "sets": sets, "reps": reps, "startingWeightLb": 95,
+		}).
+		Expect().Status(http.StatusCreated).JSON().Object()
+	return dayIn(t, program, dayID)
+}
+
+// dayIn plucks one day out of a Program response.
+func dayIn(t *testing.T, program *httpexpect.Object, dayID int) *httpexpect.Object {
+	t.Helper()
+	for _, v := range program.Value("days").Array().Iter() {
+		if int(v.Object().Value("id").Number().Raw()) == dayID {
+			return v.Object()
+		}
+	}
+	t.Fatalf("day %d missing from the program", dayID)
+	return nil
+}
+
+// liftIDs reads a day's prescribed exercise row ids, in order.
+func liftIDs(day *httpexpect.Object) []int {
+	var out []int
+	for _, v := range day.Value("exercises").Array().Iter() {
+		out = append(out, int(v.Object().Value("id").Number().Raw()))
+	}
+	return out
+}
+
+func TestBuildAProgramFromNothing(t *testing.T) {
+	_, e := ownLifter(t, "day-builder")
+	programID := buildEmptyProgram(t, e, "Hand Built Program")
+
+	dayID := addDay(t, e, programID, "Push")
+	squat := exerciseNamed(t, e, "Squat")
+	day := addLift(t, e, programID, dayID, squat, 5, 5)
+
+	lifts := day.Value("exercises").Array()
+	lifts.Length().IsEqual(1)
+	lifts.Value(0).Object().HasValue("exerciseName", "Squat")
+	lifts.Value(0).Object().HasValue("sets", 5)
+
+	// And it is immediately trainable, which is the point of the whole exercise.
+	e.GET(fmt.Sprintf("/programs/%d/days/%d/next-session", programID, dayID)).
+		Expect().Status(http.StatusOK).
+		JSON().Object().Value("exercises").Array().Length().IsEqual(1)
+}
+
+func TestTheSameLiftCannotBeAddedTwice(t *testing.T) {
+	_, e := ownLifter(t, "double-adder")
+	programID := buildEmptyProgram(t, e, "Duplicate Lift Program")
+	dayID := addDay(t, e, programID, "Day One")
+	squat := exerciseNamed(t, e, "Squat")
+	addLift(t, e, programID, dayID, squat, 5, 5)
+
+	// "3x8 and also 3x10" is one entry with the sets edited, which is the rule
+	// program_day_assistance states and this table has had since 0001.
+	e.POST(fmt.Sprintf("/programs/%d/days/%d/exercises", programID, dayID)).
+		WithJSON(map[string]any{"exerciseId": squat, "sets": 3, "reps": 8}).
+		Expect().Status(http.StatusConflict).
+		JSON().Object().HasValue("code", "duplicate_exercise")
+}
+
+func TestEditAndRemoveALift(t *testing.T) {
+	_, e := ownLifter(t, "lift-editor")
+	programID := buildEmptyProgram(t, e, "Editable Program")
+	dayID := addDay(t, e, programID, "Day One")
+	squat := exerciseNamed(t, e, "Squat")
+	day := addLift(t, e, programID, dayID, squat, 5, 5)
+	liftID := liftIDs(day)[0]
+
+	updated := e.PATCH(fmt.Sprintf("/programs/%d/days/%d/exercises/%d", programID, dayID, liftID)).
+		WithJSON(map[string]any{"sets": 3, "startingWeightLb": 135}).
+		Expect().Status(http.StatusOK).JSON().Object()
+	lift := dayIn(t, updated, dayID).Value("exercises").Array().Value(0).Object()
+	lift.HasValue("sets", 3)
+	lift.HasValue("startingWeightLb", 135)
+	// Omitted fields are left alone.
+	lift.HasValue("reps", 5)
+
+	e.DELETE(fmt.Sprintf("/programs/%d/days/%d/exercises/%d", programID, dayID, liftID)).
+		Expect().Status(http.StatusNoContent)
+	e.GET(fmt.Sprintf("/programs/%d", programID)).Expect().Status(http.StatusOK).
+		JSON().Object().Value("days").Array().Value(0).Object().
+		Value("exercises").Array().IsEmpty()
+}
+
+// TestRemovingALiftKeepsItsHistory is why program_day_exercises needs no
+// archived_at while program_days does: session_sets references the MOVEMENT, so
+// taking a lift off a day loses a plan and never a performance.
+func TestRemovingALiftKeepsItsHistory(t *testing.T) {
+	owner, e := ownLifter(t, "lift-remover")
+	programID, dayID := makeProgram(t, owner, "History Keeping Program", false)
+	logCleanSession(t, e, dayID)
+
+	squat := exerciseNamed(t, e, "Squat")
+	before := e.GET(fmt.Sprintf("/exercises/%d/history", squat)).
+		Expect().Status(http.StatusOK).JSON().Object().Value("points").Array()
+	before.Length().Gt(0)
+
+	day := dayIn(t, e.GET(fmt.Sprintf("/programs/%d", programID)).
+		Expect().Status(http.StatusOK).JSON().Object(), dayID)
+	e.DELETE(fmt.Sprintf("/programs/%d/days/%d/exercises/%d",
+		programID, dayID, liftIDs(day)[0])).
+		Expect().Status(http.StatusNoContent)
+
+	e.GET(fmt.Sprintf("/exercises/%d/history", squat)).
+		Expect().Status(http.StatusOK).
+		JSON().Object().Value("points").Array().
+		Length().IsEqual(len(before.Raw()))
+}
+
+// TestReorderRotatesLifts is the case a naive multi-row UPDATE cannot do.
+//
+// 1,2,3 -> 2,3,1 collides part-way through a single statement against a
+// non-deferrable UNIQUE, and WHICH shuffles collide depends on the physical row
+// order — so the bug ships green under any shuffle nobody thought to test.
+func TestReorderRotatesLifts(t *testing.T) {
+	_, e := ownLifter(t, "reordering-lifter")
+	programID := buildEmptyProgram(t, e, "Reorderable Program")
+	dayID := addDay(t, e, programID, "Day One")
+
+	var ids []int
+	for _, name := range []string{"Squat", "Bench Press", "Barbell Row"} {
+		day := addLift(t, e, programID, dayID, exerciseNamed(t, e, name), 5, 5)
+		ids = liftIDs(day)
+	}
+	if len(ids) != 3 {
+		t.Fatalf("expected three lifts, got %d", len(ids))
+	}
+
+	rotated := []int{ids[1], ids[2], ids[0]}
+	program := e.PUT(fmt.Sprintf("/programs/%d/days/%d/exercises/order", programID, dayID)).
+		WithJSON(map[string]any{"ids": rotated}).
+		Expect().Status(http.StatusOK).JSON().Object()
+
+	got := liftIDs(dayIn(t, program, dayID))
+	for i, want := range rotated {
+		if got[i] != want {
+			t.Fatalf("after rotation position %d holds %d, want %d", i+1, got[i], want)
+		}
+	}
+	// And it survives a re-read, so the order is stored rather than merely echoed.
+	reread := liftIDs(dayIn(t, e.GET(fmt.Sprintf("/programs/%d", programID)).
+		Expect().Status(http.StatusOK).JSON().Object(), dayID))
+	for i, want := range rotated {
+		if reread[i] != want {
+			t.Fatalf("re-read position %d holds %d, want %d", i+1, reread[i], want)
+		}
+	}
+}
+
+// TestPartialReorderIsRefusedAndChangesNothing is the guard against the silent
+// corruption the park-and-place approach would otherwise allow: a request naming
+// only some of a day's lifts would leave the rest parked at max+n for ever.
+func TestPartialReorderIsRefusedAndChangesNothing(t *testing.T) {
+	_, e := ownLifter(t, "partial-reorderer")
+	programID := buildEmptyProgram(t, e, "Partial Reorder Program")
+	dayID := addDay(t, e, programID, "Day One")
+
+	var ids []int
+	for _, name := range []string{"Squat", "Bench Press"} {
+		day := addLift(t, e, programID, dayID, exerciseNamed(t, e, name), 5, 5)
+		ids = liftIDs(day)
+	}
+
+	e.PUT(fmt.Sprintf("/programs/%d/days/%d/exercises/order", programID, dayID)).
+		WithJSON(map[string]any{"ids": []int{ids[1]}}).
+		Expect().Status(http.StatusBadRequest)
+	// A repeat is refused too: [7,7] against a two-row day moves one row and
+	// reports one, which a bare count comparison would wave through.
+	e.PUT(fmt.Sprintf("/programs/%d/days/%d/exercises/order", programID, dayID)).
+		WithJSON(map[string]any{"ids": []int{ids[0], ids[0]}}).
+		Expect().Status(http.StatusBadRequest)
+
+	// The transaction rolled back, so the original order stands — rather than
+	// leaving the day parked in the numbering nothing can read.
+	got := liftIDs(dayIn(t, e.GET(fmt.Sprintf("/programs/%d", programID)).
+		Expect().Status(http.StatusOK).JSON().Object(), dayID))
+	for i, want := range ids {
+		if got[i] != want {
+			t.Fatalf("after a refused reorder position %d holds %d, want %d", i+1, got[i], want)
+		}
+	}
+}
+
+func TestReorderDays(t *testing.T) {
+	_, e := ownLifter(t, "day-reorderer")
+	programID := buildEmptyProgram(t, e, "Day Order Program")
+	a := addDay(t, e, programID, "Push")
+	b := addDay(t, e, programID, "Pull")
+	c := addDay(t, e, programID, "Legs")
+
+	// The same rotation, one level up — and a check that /days/order reaches the
+	// reorder handler rather than being swallowed by /days/{dayId}.
+	program := e.PUT(fmt.Sprintf("/programs/%d/days/order", programID)).
+		WithJSON(map[string]any{"ids": []int{b, c, a}}).
+		Expect().Status(http.StatusOK).JSON().Object()
+
+	days := program.Value("days").Array()
+	days.Value(0).Object().HasValue("id", b)
+	days.Value(1).Object().HasValue("id", c)
+	days.Value(2).Object().HasValue("id", a)
+}
+
+// TestRenamingADayDoesNotClearItsWeekday is the latent bug the second field
+// detonates: absent and null are indistinguishable in a bare *int32 decode, so
+// a rename would silently unschedule the day.
+func TestRenamingADayDoesNotClearItsWeekday(t *testing.T) {
+	_, e := ownLifter(t, "day-renamer")
+	programID := buildEmptyProgram(t, e, "Renaming Program")
+	dayID := addDay(t, e, programID, "Day One")
+
+	e.PATCH(fmt.Sprintf("/programs/%d/days/%d", programID, dayID)).
+		WithJSON(map[string]any{"weekday": 1}).
+		Expect().Status(http.StatusNoContent)
+
+	e.PATCH(fmt.Sprintf("/programs/%d/days/%d", programID, dayID)).
+		WithJSON(map[string]any{"name": "Squat Day"}).
+		Expect().Status(http.StatusNoContent)
+
+	day := dayIn(t, e.GET(fmt.Sprintf("/programs/%d", programID)).
+		Expect().Status(http.StatusOK).JSON().Object(), dayID)
+	day.HasValue("name", "Squat Day")
+	day.HasValue("weekday", 1)
+
+	// An explicit null still means "unschedule it", which is the distinction the
+	// raw decode exists to keep.
+	e.PATCH(fmt.Sprintf("/programs/%d/days/%d", programID, dayID)).
+		WithJSON(map[string]any{"weekday": nil}).
+		Expect().Status(http.StatusNoContent)
+	dayIn(t, e.GET(fmt.Sprintf("/programs/%d", programID)).
+		Expect().Status(http.StatusOK).JSON().Object(), dayID).
+		Value("weekday").IsNull()
+}
+
+// TestSeededProgramDaysStayScheduleableButNotRenameable pins the split rule in
+// updateProgramDay, which looks like a bug unless it is asserted on purpose.
+func TestSeededProgramDaysStayScheduleableButNotRenameable(t *testing.T) {
+	_, e := ownLifter(t, "seed-scheduler")
+	seeded := seededProgram(t, e, "StrongLifts 5x5")
+	programID := int(seeded.Value("id").Number().Raw())
+	dayID := int(e.GET(fmt.Sprintf("/programs/%d", programID)).
+		Expect().Status(http.StatusOK).JSON().Object().
+		Value("days").Array().Value(0).Object().Value("id").Number().Raw())
+
+	// The weekday picker on the program screen has worked on seeded programs
+	// since 0003 and must keep working: they have no owner, so owner-scoping this
+	// outright would remove the ability to schedule StrongLifts at all.
+	e.PATCH(fmt.Sprintf("/programs/%d/days/%d", programID, dayID)).
+		WithJSON(map[string]any{"weekday": 3}).
+		Expect().Status(http.StatusNoContent)
+
+	// Renaming is a change to the program, and the program is the install's.
+	e.PATCH(fmt.Sprintf("/programs/%d/days/%d", programID, dayID)).
+		WithJSON(map[string]any{"name": "Leg Day"}).
+		Expect().Status(http.StatusNotFound)
+
+	// As is everything structural.
+	e.POST(fmt.Sprintf("/programs/%d/days", programID)).
+		WithJSON(map[string]any{"name": "Workout Z"}).
+		Expect().Status(http.StatusNotFound)
+	e.DELETE(fmt.Sprintf("/programs/%d/days/%d", programID, dayID)).
+		Expect().Status(http.StatusNotFound)
+	e.POST(fmt.Sprintf("/programs/%d/days/%d/exercises", programID, dayID)).
+		WithJSON(map[string]any{"exerciseId": exerciseNamed(t, e, "Squat"), "sets": 5, "reps": 5}).
+		Expect().Status(http.StatusNotFound)
+
+	// Put it back, since program_days.weekday is a shared column and the suite
+	// runs against one database.
+	e.PATCH(fmt.Sprintf("/programs/%d/days/%d", programID, dayID)).
+		WithJSON(map[string]any{"weekday": nil}).
+		Expect().Status(http.StatusNoContent)
+}
+
+// TestRemovingAnUntrainedDayDeletesIt, and its sibling below, are the two halves
+// of what the schema allows.
+func TestRemovingAnUntrainedDayDeletesIt(t *testing.T) {
+	_, e := ownLifter(t, "day-deleter")
+	programID := buildEmptyProgram(t, e, "Deletable Day Program")
+	dayID := addDay(t, e, programID, "Day One")
+
+	e.DELETE(fmt.Sprintf("/programs/%d/days/%d", programID, dayID)).
+		Expect().Status(http.StatusNoContent)
+	e.GET(fmt.Sprintf("/programs/%d", programID)).Expect().Status(http.StatusOK).
+		JSON().Object().Value("days").Array().IsEmpty()
+
+	// And the name is free again, which is what the partial unique index buys:
+	// an archived or deleted day must not hold its name hostage.
+	addDay(t, e, programID, "Day One")
+}
+
+// TestRemovingATrainedDayArchivesIt: sessions.program_day_id restricts, so the
+// row cannot go. Archiving is the honest version of that, and the session it
+// could not delete is the proof.
+func TestRemovingATrainedDayArchivesIt(t *testing.T) {
+	owner, e := ownLifter(t, "day-archiver")
+	programID, dayID := makeProgram(t, owner, "Trained Day Program", false)
+
+	session := e.POST("/sessions").WithJSON(map[string]any{"programDayId": dayID}).
+		Expect().Status(http.StatusCreated).JSON().Object()
+	sessionID := int(session.Value("id").Number().Raw())
+
+	e.DELETE(fmt.Sprintf("/programs/%d/days/%d", programID, dayID)).
+		Expect().Status(http.StatusNoContent)
+
+	// Gone from the program...
+	e.GET(fmt.Sprintf("/programs/%d", programID)).Expect().Status(http.StatusOK).
+		JSON().Object().Value("days").Array().IsEmpty()
+	// ...and the workout performed on it is exactly where it was, still naming
+	// the day it was done on.
+	e.GET(fmt.Sprintf("/sessions/%d", sessionID)).Expect().Status(http.StatusOK).
+		JSON().Object().HasValue("programDayName", "Day One")
+
+	// The name is reusable, because the unique index is restricted to live days.
+	addDay(t, e, programID, "Day One")
+}
+
+func TestPrescriptionBoundsAreEnforced(t *testing.T) {
+	_, e := ownLifter(t, "bounds-tester")
+	programID := buildEmptyProgram(t, e, "Bounded Program")
+	dayID := addDay(t, e, programID, "Day One")
+	squat := exerciseNamed(t, e, "Squat")
+
+	for _, body := range []map[string]any{
+		{"exerciseId": squat, "sets": 0, "reps": 5},
+		{"exerciseId": squat, "sets": 21, "reps": 5},
+		{"exerciseId": squat, "sets": 5, "reps": 0},
+		{"exerciseId": squat, "sets": 5, "reps": 101},
+		// Above this, NUMERIC(6,2) would take it and the next one would 500.
+		{"exerciseId": squat, "sets": 5, "reps": 5, "startingWeightLb": 2001},
+		{"exerciseId": squat, "sets": 5, "reps": 5, "startingWeightLb": -1},
+	} {
+		e.POST(fmt.Sprintf("/programs/%d/days/%d/exercises", programID, dayID)).
+			WithJSON(body).Expect().Status(http.StatusBadRequest)
+	}
+
+	// An exercise nobody can use is rejected rather than 500ing on the key.
+	e.POST(fmt.Sprintf("/programs/%d/days/%d/exercises", programID, dayID)).
+		WithJSON(map[string]any{"exerciseId": 999999, "sets": 5, "reps": 5}).
+		Expect().Status(http.StatusBadRequest)
+}

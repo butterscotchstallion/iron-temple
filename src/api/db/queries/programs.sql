@@ -137,12 +137,6 @@ WHERE program_id = $1
   AND archived_at IS NULL
 ORDER BY position;
 
--- name: UpdateProgramDayWeekday :one
-UPDATE program_days
-SET weekday = sqlc.narg('weekday')
-WHERE id = sqlc.arg('id')
-RETURNING id, program_id, name, position, weekday;
-
 -- ListPrescriptionsByProgram returns every prescribed exercise across all of a
 -- program's days, joined to the exercise name, ordered for assembly in Go.
 --
@@ -380,3 +374,186 @@ JOIN program_days tgt ON tgt.program_id = sqlc.arg('target_program_id')::int
                      AND tgt.name = src.name
 WHERE src.program_id = sqlc.arg('source_program_id')::int
   AND src.archived_at IS NULL;
+
+-- ---------------------------------------------------------------------------
+-- Days
+-- ---------------------------------------------------------------------------
+
+-- CreateProgramDay appends a day to a program.
+--
+-- position is max+1 computed inside the INSERT, copying CreateAssistance — and
+-- inheriting its caveat, that two concurrent adds can both read "3". Here the
+-- partial unique index makes that a lost race rather than two rows at the same
+-- position, so the second one fails and the handler answers 409 instead of
+-- quietly corrupting the order. One lifter editing one program from one phone
+-- will never see it.
+-- name: CreateProgramDay :one
+INSERT INTO program_days (program_id, name, position)
+VALUES (
+    sqlc.arg('program_id'),
+    sqlc.arg('name'),
+    (SELECT COALESCE(MAX(position), 0) + 1 FROM program_days
+     WHERE program_id = sqlc.arg('program_id') AND archived_at IS NULL)
+)
+RETURNING id;
+
+-- UpdateProgramDay patches a day's name and weekday.
+--
+-- weekday is a narg and name is not, which looks inconsistent and is not: a
+-- weekday of NULL MEANS something — unscheduled — so absent and null have to be
+-- told apart by the handler before this is called, and it always passes an
+-- explicit value. A name has no such null.
+-- name: UpdateProgramDay :execrows
+UPDATE program_days
+SET name    = COALESCE(sqlc.narg('name'), name),
+    weekday = sqlc.narg('weekday')
+WHERE id = sqlc.arg('id')
+  AND archived_at IS NULL;
+
+-- CountDayUses reports what would be lost if a day were removed, which decides
+-- whether it can be deleted outright or has to be archived.
+--
+-- sessions is the one that forces the issue: sessions.program_day_id RESTRICTs,
+-- so a day anybody has trained cannot be deleted at all — not by this lifter,
+-- and not on behalf of the follower whose session it is.
+-- name: CountDayUses :one
+SELECT (SELECT count(*) FROM sessions s
+        WHERE s.program_day_id = sqlc.arg('day_id'))::bigint AS sessions;
+
+-- DeleteProgramDay removes a day nobody has trained, taking its prescriptions
+-- with it (ON DELETE CASCADE) and any assistance anybody hung on it.
+--
+-- The assistance cascade is worth naming: it can delete a row belonging to a
+-- DIFFERENT lifter, on a shared program. That is correct — the day is gone, so a
+-- plan attached to it has nothing left to attach to — and it costs them no
+-- history, because a session that would have proved otherwise is exactly what
+-- makes this path unreachable.
+-- name: DeleteProgramDay :execrows
+DELETE FROM program_days
+WHERE id = sqlc.arg('id');
+
+-- ArchiveProgramDay retires a day that has been trained.
+--
+-- It leaves program_days.id resolvable, which is the point: every session ever
+-- logged against it references that row, and the history page, the recap and
+-- every Racked figure read the day's name through it.
+-- name: ArchiveProgramDay :execrows
+UPDATE program_days
+SET archived_at = now()
+WHERE id = sqlc.arg('id')
+  AND archived_at IS NULL;
+
+-- ---------------------------------------------------------------------------
+-- Prescriptions
+-- ---------------------------------------------------------------------------
+
+-- name: GetPrescription :one
+SELECT id, program_day_id, exercise_id, position, sets, reps, starting_weight_lb
+FROM program_day_exercises
+WHERE id = sqlc.arg('id');
+
+-- name: CreatePrescription :one
+INSERT INTO program_day_exercises
+    (program_day_id, exercise_id, position, sets, reps, starting_weight_lb)
+VALUES (
+    sqlc.arg('program_day_id'),
+    sqlc.arg('exercise_id'),
+    (SELECT COALESCE(MAX(position), 0) + 1 FROM program_day_exercises
+     WHERE program_day_id = sqlc.arg('program_day_id')),
+    sqlc.arg('sets'),
+    sqlc.arg('reps'),
+    sqlc.arg('starting_weight_lb')
+)
+RETURNING id;
+
+-- name: UpdatePrescription :execrows
+UPDATE program_day_exercises
+SET sets               = sqlc.arg('sets'),
+    reps               = sqlc.arg('reps'),
+    starting_weight_lb = sqlc.arg('starting_weight_lb')
+WHERE id = sqlc.arg('id');
+
+-- DeletePrescription takes a lift off a day.
+--
+-- A plain DELETE, and it cannot lose a performance: session_sets references the
+-- EXERCISE, never the prescription, so every set ever logged for the movement
+-- stays where it is and keeps counting toward volume, records and Racked. That
+-- is the same property removeAssistance relies on, and the reason this table
+-- needs no archived_at while program_days does.
+--
+-- The gap it leaves in position is fine. Every read is ORDER BY position and
+-- nothing assumes the numbers are contiguous.
+-- name: DeletePrescription :execrows
+DELETE FROM program_day_exercises
+WHERE id = sqlc.arg('id');
+
+-- ---------------------------------------------------------------------------
+-- Reordering
+-- ---------------------------------------------------------------------------
+--
+-- UNIQUE (program_day_id, position) is not deferrable and is checked per row, so
+-- a rotation like 1,2,3 -> 2,3,1 fails part-way through a single UPDATE. Worse,
+-- WHICH shuffles fail depends on the physical order the rows are visited in, so
+-- the naive version passes every test somebody thinks to write and breaks on a
+-- shuffle nobody did.
+--
+-- So it takes two statements in one transaction: park everything out of the way,
+-- then write the final positions. The classic trick is to negate, which
+-- CHECK (position > 0) rules out here — hence parking UP.
+--
+-- Why not make the constraint DEFERRABLE: a deferrable unique constraint cannot
+-- be an ON CONFLICT arbiter, and the seed migrations use ON CONFLICT on these
+-- tables. 0009's down migration already documents at length how painful a
+-- non-inferrable constraint is; choosing one deliberately, to avoid writing two
+-- statements, is not a good trade.
+
+-- ParkPrescriptionPositions shifts every position on a day into
+-- [max+1, 2*max] — provably disjoint from [1, max], so no row can collide with
+-- one that has not moved yet, for any input, in any physical row order.
+-- name: ParkPrescriptionPositions :exec
+UPDATE program_day_exercises pde
+SET position = pde.position + (
+        SELECT COALESCE(MAX(m.position), 0) FROM program_day_exercises m
+        WHERE m.program_day_id = sqlc.arg('program_day_id')::int)
+WHERE pde.program_day_id = sqlc.arg('program_day_id')::int;
+
+-- ReorderPrescriptions assigns final positions from the order of the ids given.
+--
+-- Returns the number of rows it moved. The handler compares that against the
+-- day's live count and rolls back on a mismatch: a request naming only some of
+-- the day's lifts would otherwise leave the rest parked at max+n for ever, which
+-- is silent corruption rather than an error anybody sees.
+-- name: ReorderPrescriptions :execrows
+UPDATE program_day_exercises pde
+SET position = ord.position
+FROM (
+    SELECT id, ordinality::int AS position
+    FROM unnest(sqlc.arg('ids')::int[]) WITH ORDINALITY AS t(id, ordinality)
+) ord
+WHERE pde.id = ord.id
+  AND pde.program_day_id = sqlc.arg('program_day_id');
+
+-- ParkProgramDayPositions and ReorderProgramDays are the same pair for the days
+-- of a program.
+--
+-- Both exclude archived rows, because the partial index is what constrains them:
+-- an archived day is outside it, so parking one would renumber a row nothing can
+-- collide with and then strand it.
+-- name: ParkProgramDayPositions :exec
+UPDATE program_days pd
+SET position = pd.position + (
+        SELECT COALESCE(MAX(m.position), 0) FROM program_days m
+        WHERE m.program_id = sqlc.arg('program_id')::int AND m.archived_at IS NULL)
+WHERE pd.program_id = sqlc.arg('program_id')::int
+  AND pd.archived_at IS NULL;
+
+-- name: ReorderProgramDays :execrows
+UPDATE program_days pd
+SET position = ord.position
+FROM (
+    SELECT id, ordinality::int AS position
+    FROM unnest(sqlc.arg('ids')::int[]) WITH ORDINALITY AS t(id, ordinality)
+) ord
+WHERE pd.id = ord.id
+  AND pd.program_id = sqlc.arg('program_id')
+  AND pd.archived_at IS NULL;

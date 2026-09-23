@@ -1325,14 +1325,86 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /programs/{programId}/days:
+    parameters:
+      - $ref: "#/components/parameters/ProgramId"
+    post:
+      tags: [programs]
+      operationId: addProgramDay
+      summary: Add a day to a program of your own
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProgramDayRequest"
+      responses:
+        "201":
+          description: The program with the new day on it
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Program"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: "`duplicate_day` — this program already has a day with that name"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /programs/{programId}/days/order:
+    parameters:
+      - $ref: "#/components/parameters/ProgramId"
+    put:
+      tags: [programs]
+      operationId: reorderProgramDays
+      summary: Reorder the days of a program of your own
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReorderRequest"
+      responses:
+        "200":
+          description: The program in its new order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Program"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /programs/{programId}/days/{dayId}:
     parameters:
       - $ref: "#/components/parameters/ProgramId"
       - $ref: "#/components/parameters/DayId"
     patch:
       tags: [programs]
-      operationId: updateProgramDayWeekday
-      summary: Set or clear the weekday a program day is scheduled on
+      operationId: updateProgramDay
+      summary: Rename a program day, or set the weekday it is scheduled on
+      description: >
+        Two fields with two different rules, and the difference is deliberate.
+
+
+        `weekday` can be set on ANY program the caller can see, including the
+        seeded ones — which have no owner, so requiring one would remove the
+        ability to schedule StrongLifts at all. `name` is part of the program, so
+        it needs the program's owner and answers 404 otherwise.
+
+
+        Omitting `weekday` leaves the schedule alone; sending it as null clears
+        it. Those are different instructions and the endpoint tells them apart.
       requestBody:
         required: true
         content:
@@ -1344,6 +1416,150 @@ paths:
           description: Updated
         "400":
           $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: "`duplicate_day` — this program already has a day with that name"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    delete:
+      tags: [programs]
+      operationId: removeProgramDay
+      summary: Take a day out of a program of your own
+      description: >
+        Deleted outright if nobody has trained it, and archived if anybody has —
+        including another lifter, on a shared program. That split is not a policy
+        choice: sessions reference a day and the key restricts, so a day with a
+        workout behind it cannot be removed, and cascading through would mean
+        deleting a day destroyed the training performed on it.
+
+
+        Either way the day leaves the program, its name becomes reusable, and
+        every session logged against it stays exactly where it is.
+      responses:
+        "204":
+          description: Removed
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /programs/{programId}/days/{dayId}/exercises:
+    parameters:
+      - $ref: "#/components/parameters/ProgramId"
+      - $ref: "#/components/parameters/DayId"
+    post:
+      tags: [programs]
+      operationId: addPrescription
+      summary: Prescribe a lift on a day of a program of your own
+      description: >
+        Unlike assistance, this changes what the PROGRAM prescribes — so it
+        reaches every lifter training it, and it comes with a progression behind
+        it. Takes effect on the next session started from this day.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePrescriptionRequest"
+      responses:
+        "201":
+          description: The program with the new lift on the day
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Program"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            `duplicate_exercise` — the lift is already prescribed on this day.
+            "3x8 dips and also 3x10 dips" is one entry with the sets edited
+            rather than two rows to reconcile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /programs/{programId}/days/{dayId}/exercises/order:
+    parameters:
+      - $ref: "#/components/parameters/ProgramId"
+      - $ref: "#/components/parameters/DayId"
+    put:
+      tags: [programs]
+      operationId: reorderPrescriptions
+      summary: Reorder the lifts on a day of a program of your own
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReorderRequest"
+      responses:
+        "200":
+          description: The program in its new order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Program"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /programs/{programId}/days/{dayId}/exercises/{prescriptionId}:
+    parameters:
+      - $ref: "#/components/parameters/ProgramId"
+      - $ref: "#/components/parameters/DayId"
+      - $ref: "#/components/parameters/PrescriptionId"
+    patch:
+      tags: [programs]
+      operationId: updatePrescription
+      summary: Change the sets, reps or starting weight of a prescribed lift
+      description: >
+        Not the exercise itself: swapping the movement is a remove plus an add,
+        because a starting weight means something different for a different lift
+        and carrying it across would put a squat's opener on a lateral raise.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePrescriptionRequest"
+      responses:
+        "200":
+          description: The program as updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Program"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    delete:
+      tags: [programs]
+      operationId: removePrescription
+      summary: Take a lift off a day of a program of your own
+      description: >
+        Loses a plan and never a performance. Logged sets reference the movement
+        rather than the prescription, so everything ever lifted stays in the
+        lifter's history and keeps counting toward volume, records and Racked.
+      responses:
+        "204":
+          description: Removed
         "404":
           $ref: "#/components/responses/NotFound"
         "401":
@@ -2122,6 +2338,17 @@ components:
       name: dayId
       in: path
       required: true
+      schema:
+        type: integer
+        format: int64
+    PrescriptionId:
+      name: prescriptionId
+      in: path
+      required: true
+      description: >
+        The id of the prescription ROW — a lift on a particular day — not of the
+        exercise. `/exercises/{exerciseId}` elsewhere in this spec means a
+        movement in the library, which is a different thing.
       schema:
         type: integer
         format: int64
@@ -3801,16 +4028,108 @@ components:
           minimum: 1
           maximum: 100
 
+    CreateProgramDayRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+          example: Push
+        weekday:
+          type: integer
+          nullable: true
+          minimum: 0
+          maximum: 6
+          default: null
+          description: 0 = Sunday … 6 = Saturday; omit to leave it unscheduled.
+
     UpdateProgramDayRequest:
       type: object
-      required: [weekday]
+      description: >
+        `weekday` is nullable AND optional, and the two mean different things:
+        omitting it leaves the schedule alone, sending null clears it. `name`
+        needs the program's owner; `weekday` does not.
       properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
         weekday:
           type: integer
           nullable: true
           minimum: 0
           maximum: 6
           description: 0 = Sunday … 6 = Saturday; null to unschedule.
+
+    CreatePrescriptionRequest:
+      type: object
+      required: [exerciseId, sets, reps]
+      properties:
+        exerciseId:
+          type: integer
+          format: int64
+          description: >
+            A movement from the library — seeded, or one of the caller's own.
+        sets:
+          type: integer
+          minimum: 1
+          maximum: 20
+        reps:
+          type: integer
+          minimum: 1
+          maximum: 100
+        startingWeightLb:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 2000
+          default: 0
+          description: >
+            Where the lift begins, consulted ONLY while it has no history — so
+            this decides the first session and nothing after it. 0 is right for
+            bodyweight work, and harmless otherwise.
+
+    UpdatePrescriptionRequest:
+      type: object
+      description: >
+        A partial update; omitted fields are left as they are. The exercise
+        cannot be changed — swapping the movement is a remove plus an add.
+      properties:
+        sets:
+          type: integer
+          minimum: 1
+          maximum: 20
+        reps:
+          type: integer
+          minimum: 1
+          maximum: 100
+        startingWeightLb:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 2000
+
+    ReorderRequest:
+      type: object
+      required: [ids]
+      description: >
+        The COMPLETE new order, as ids. Not "move this one to position N": a full
+        list is idempotent and immune to a lost update, where an incremental move
+        from two clients interleaves into an order neither asked for.
+
+
+        Every live row must be named exactly once. A partial list is a 400 and
+        changes nothing, rather than leaving the unnamed rows in an order nothing
+        can read.
+      properties:
+        ids:
+          type: array
+          minItems: 1
+          items:
+            type: integer
+            format: int64
 
     ProgramDayExercise:
       type: object

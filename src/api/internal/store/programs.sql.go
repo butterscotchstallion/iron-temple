@@ -11,6 +11,26 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const archiveProgramDay = `-- name: ArchiveProgramDay :execrows
+UPDATE program_days
+SET archived_at = now()
+WHERE id = $1
+  AND archived_at IS NULL
+`
+
+// ArchiveProgramDay retires a day that has been trained.
+//
+// It leaves program_days.id resolvable, which is the point: every session ever
+// logged against it references that row, and the history page, the recap and
+// every Racked figure read the day's name through it.
+func (q *Queries) ArchiveProgramDay(ctx context.Context, id int32) (int64, error) {
+	result, err := q.db.Exec(ctx, archiveProgramDay, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const canReadProgram = `-- name: CanReadProgram :one
 SELECT EXISTS (
     SELECT 1
@@ -102,6 +122,24 @@ func (q *Queries) CloneProgramDays(ctx context.Context, arg CloneProgramDaysPara
 	return err
 }
 
+const countDayUses = `-- name: CountDayUses :one
+SELECT (SELECT count(*) FROM sessions s
+        WHERE s.program_day_id = $1)::bigint AS sessions
+`
+
+// CountDayUses reports what would be lost if a day were removed, which decides
+// whether it can be deleted outright or has to be archived.
+//
+// sessions is the one that forces the issue: sessions.program_day_id RESTRICTs,
+// so a day anybody has trained cannot be deleted at all — not by this lifter,
+// and not on behalf of the follower whose session it is.
+func (q *Queries) CountDayUses(ctx context.Context, dayID int32) (int64, error) {
+	row := q.db.QueryRow(ctx, countDayUses, dayID)
+	var sessions int64
+	err := row.Scan(&sessions)
+	return sessions, err
+}
+
 const countProgramNameConflicts = `-- name: CountProgramNameConflicts :one
 
 SELECT count(*)
@@ -143,6 +181,42 @@ func (q *Queries) CountProgramNameConflicts(ctx context.Context, arg CountProgra
 	return count, err
 }
 
+const createPrescription = `-- name: CreatePrescription :one
+INSERT INTO program_day_exercises
+    (program_day_id, exercise_id, position, sets, reps, starting_weight_lb)
+VALUES (
+    $1,
+    $2,
+    (SELECT COALESCE(MAX(position), 0) + 1 FROM program_day_exercises
+     WHERE program_day_id = $1),
+    $3,
+    $4,
+    $5
+)
+RETURNING id
+`
+
+type CreatePrescriptionParams struct {
+	ProgramDayID     int32          `json:"program_day_id"`
+	ExerciseID       int32          `json:"exercise_id"`
+	Sets             int32          `json:"sets"`
+	Reps             int32          `json:"reps"`
+	StartingWeightLb pgtype.Numeric `json:"starting_weight_lb"`
+}
+
+func (q *Queries) CreatePrescription(ctx context.Context, arg CreatePrescriptionParams) (int32, error) {
+	row := q.db.QueryRow(ctx, createPrescription,
+		arg.ProgramDayID,
+		arg.ExerciseID,
+		arg.Sets,
+		arg.Reps,
+		arg.StartingWeightLb,
+	)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
+}
+
 const createProgram = `-- name: CreateProgram :one
 INSERT INTO programs (name, description, created_by_user_id, is_shared)
 VALUES ($1, $2, $3::int,
@@ -167,6 +241,110 @@ func (q *Queries) CreateProgram(ctx context.Context, arg CreateProgramParams) (i
 	var id int32
 	err := row.Scan(&id)
 	return id, err
+}
+
+const createProgramDay = `-- name: CreateProgramDay :one
+
+INSERT INTO program_days (program_id, name, position)
+VALUES (
+    $1,
+    $2,
+    (SELECT COALESCE(MAX(position), 0) + 1 FROM program_days
+     WHERE program_id = $1 AND archived_at IS NULL)
+)
+RETURNING id
+`
+
+type CreateProgramDayParams struct {
+	ProgramID int32  `json:"program_id"`
+	Name      string `json:"name"`
+}
+
+// ---------------------------------------------------------------------------
+// Days
+// ---------------------------------------------------------------------------
+// CreateProgramDay appends a day to a program.
+//
+// position is max+1 computed inside the INSERT, copying CreateAssistance — and
+// inheriting its caveat, that two concurrent adds can both read "3". Here the
+// partial unique index makes that a lost race rather than two rows at the same
+// position, so the second one fails and the handler answers 409 instead of
+// quietly corrupting the order. One lifter editing one program from one phone
+// will never see it.
+func (q *Queries) CreateProgramDay(ctx context.Context, arg CreateProgramDayParams) (int32, error) {
+	row := q.db.QueryRow(ctx, createProgramDay, arg.ProgramID, arg.Name)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
+}
+
+const deletePrescription = `-- name: DeletePrescription :execrows
+DELETE FROM program_day_exercises
+WHERE id = $1
+`
+
+// DeletePrescription takes a lift off a day.
+//
+// A plain DELETE, and it cannot lose a performance: session_sets references the
+// EXERCISE, never the prescription, so every set ever logged for the movement
+// stays where it is and keeps counting toward volume, records and Racked. That
+// is the same property removeAssistance relies on, and the reason this table
+// needs no archived_at while program_days does.
+//
+// The gap it leaves in position is fine. Every read is ORDER BY position and
+// nothing assumes the numbers are contiguous.
+func (q *Queries) DeletePrescription(ctx context.Context, id int32) (int64, error) {
+	result, err := q.db.Exec(ctx, deletePrescription, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteProgramDay = `-- name: DeleteProgramDay :execrows
+DELETE FROM program_days
+WHERE id = $1
+`
+
+// DeleteProgramDay removes a day nobody has trained, taking its prescriptions
+// with it (ON DELETE CASCADE) and any assistance anybody hung on it.
+//
+// The assistance cascade is worth naming: it can delete a row belonging to a
+// DIFFERENT lifter, on a shared program. That is correct — the day is gone, so a
+// plan attached to it has nothing left to attach to — and it costs them no
+// history, because a session that would have proved otherwise is exactly what
+// makes this path unreachable.
+func (q *Queries) DeleteProgramDay(ctx context.Context, id int32) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteProgramDay, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const getPrescription = `-- name: GetPrescription :one
+
+SELECT id, program_day_id, exercise_id, position, sets, reps, starting_weight_lb
+FROM program_day_exercises
+WHERE id = $1
+`
+
+// ---------------------------------------------------------------------------
+// Prescriptions
+// ---------------------------------------------------------------------------
+func (q *Queries) GetPrescription(ctx context.Context, id int32) (ProgramDayExercise, error) {
+	row := q.db.QueryRow(ctx, getPrescription, id)
+	var i ProgramDayExercise
+	err := row.Scan(
+		&i.ID,
+		&i.ProgramDayID,
+		&i.ExerciseID,
+		&i.Position,
+		&i.Sets,
+		&i.Reps,
+		&i.StartingWeightLb,
+	)
+	return i, err
 }
 
 const getProgram = `-- name: GetProgram :one
@@ -766,6 +944,117 @@ func (q *Queries) ListSetPlansByProgram(ctx context.Context, programID int32) ([
 	return items, nil
 }
 
+const parkPrescriptionPositions = `-- name: ParkPrescriptionPositions :exec
+
+UPDATE program_day_exercises pde
+SET position = pde.position + (
+        SELECT COALESCE(MAX(m.position), 0) FROM program_day_exercises m
+        WHERE m.program_day_id = $1::int)
+WHERE pde.program_day_id = $1::int
+`
+
+// ---------------------------------------------------------------------------
+// Reordering
+// ---------------------------------------------------------------------------
+//
+// UNIQUE (program_day_id, position) is not deferrable and is checked per row, so
+// a rotation like 1,2,3 -> 2,3,1 fails part-way through a single UPDATE. Worse,
+// WHICH shuffles fail depends on the physical order the rows are visited in, so
+// the naive version passes every test somebody thinks to write and breaks on a
+// shuffle nobody did.
+//
+// So it takes two statements in one transaction: park everything out of the way,
+// then write the final positions. The classic trick is to negate, which
+// CHECK (position > 0) rules out here — hence parking UP.
+//
+// Why not make the constraint DEFERRABLE: a deferrable unique constraint cannot
+// be an ON CONFLICT arbiter, and the seed migrations use ON CONFLICT on these
+// tables. 0009's down migration already documents at length how painful a
+// non-inferrable constraint is; choosing one deliberately, to avoid writing two
+// statements, is not a good trade.
+// ParkPrescriptionPositions shifts every position on a day into
+// [max+1, 2*max] — provably disjoint from [1, max], so no row can collide with
+// one that has not moved yet, for any input, in any physical row order.
+func (q *Queries) ParkPrescriptionPositions(ctx context.Context, programDayID int32) error {
+	_, err := q.db.Exec(ctx, parkPrescriptionPositions, programDayID)
+	return err
+}
+
+const parkProgramDayPositions = `-- name: ParkProgramDayPositions :exec
+UPDATE program_days pd
+SET position = pd.position + (
+        SELECT COALESCE(MAX(m.position), 0) FROM program_days m
+        WHERE m.program_id = $1::int AND m.archived_at IS NULL)
+WHERE pd.program_id = $1::int
+  AND pd.archived_at IS NULL
+`
+
+// ParkProgramDayPositions and ReorderProgramDays are the same pair for the days
+// of a program.
+//
+// Both exclude archived rows, because the partial index is what constrains them:
+// an archived day is outside it, so parking one would renumber a row nothing can
+// collide with and then strand it.
+func (q *Queries) ParkProgramDayPositions(ctx context.Context, programID int32) error {
+	_, err := q.db.Exec(ctx, parkProgramDayPositions, programID)
+	return err
+}
+
+const reorderPrescriptions = `-- name: ReorderPrescriptions :execrows
+UPDATE program_day_exercises pde
+SET position = ord.position
+FROM (
+    SELECT id, ordinality::int AS position
+    FROM unnest($2::int[]) WITH ORDINALITY AS t(id, ordinality)
+) ord
+WHERE pde.id = ord.id
+  AND pde.program_day_id = $1
+`
+
+type ReorderPrescriptionsParams struct {
+	ProgramDayID int32   `json:"program_day_id"`
+	Ids          []int32 `json:"ids"`
+}
+
+// ReorderPrescriptions assigns final positions from the order of the ids given.
+//
+// Returns the number of rows it moved. The handler compares that against the
+// day's live count and rolls back on a mismatch: a request naming only some of
+// the day's lifts would otherwise leave the rest parked at max+n for ever, which
+// is silent corruption rather than an error anybody sees.
+func (q *Queries) ReorderPrescriptions(ctx context.Context, arg ReorderPrescriptionsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reorderPrescriptions, arg.ProgramDayID, arg.Ids)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const reorderProgramDays = `-- name: ReorderProgramDays :execrows
+UPDATE program_days pd
+SET position = ord.position
+FROM (
+    SELECT id, ordinality::int AS position
+    FROM unnest($2::int[]) WITH ORDINALITY AS t(id, ordinality)
+) ord
+WHERE pd.id = ord.id
+  AND pd.program_id = $1
+  AND pd.archived_at IS NULL
+`
+
+type ReorderProgramDaysParams struct {
+	ProgramID int32   `json:"program_id"`
+	Ids       []int32 `json:"ids"`
+}
+
+func (q *Queries) ReorderProgramDays(ctx context.Context, arg ReorderProgramDaysParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reorderProgramDays, arg.ProgramID, arg.Ids)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setProgramArchived = `-- name: SetProgramArchived :execrows
 UPDATE programs
 SET archived_at = CASE WHEN $1::bool THEN now() ELSE NULL END
@@ -795,6 +1084,34 @@ type SetProgramArchivedParams struct {
 // lifters.sql exists to refuse.
 func (q *Queries) SetProgramArchived(ctx context.Context, arg SetProgramArchivedParams) (int64, error) {
 	result, err := q.db.Exec(ctx, setProgramArchived, arg.Archived, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const updatePrescription = `-- name: UpdatePrescription :execrows
+UPDATE program_day_exercises
+SET sets               = $1,
+    reps               = $2,
+    starting_weight_lb = $3
+WHERE id = $4
+`
+
+type UpdatePrescriptionParams struct {
+	Sets             int32          `json:"sets"`
+	Reps             int32          `json:"reps"`
+	StartingWeightLb pgtype.Numeric `json:"starting_weight_lb"`
+	ID               int32          `json:"id"`
+}
+
+func (q *Queries) UpdatePrescription(ctx context.Context, arg UpdatePrescriptionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updatePrescription,
+		arg.Sets,
+		arg.Reps,
+		arg.StartingWeightLb,
+		arg.ID,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -838,35 +1155,30 @@ func (q *Queries) UpdateProgram(ctx context.Context, arg UpdateProgramParams) (i
 	return result.RowsAffected(), nil
 }
 
-const updateProgramDayWeekday = `-- name: UpdateProgramDayWeekday :one
+const updateProgramDay = `-- name: UpdateProgramDay :execrows
 UPDATE program_days
-SET weekday = $1
-WHERE id = $2
-RETURNING id, program_id, name, position, weekday
+SET name    = COALESCE($1, name),
+    weekday = $2
+WHERE id = $3
+  AND archived_at IS NULL
 `
 
-type UpdateProgramDayWeekdayParams struct {
-	Weekday *int32 `json:"weekday"`
-	ID      int32  `json:"id"`
+type UpdateProgramDayParams struct {
+	Name    *string `json:"name"`
+	Weekday *int32  `json:"weekday"`
+	ID      int32   `json:"id"`
 }
 
-type UpdateProgramDayWeekdayRow struct {
-	ID        int32  `json:"id"`
-	ProgramID int32  `json:"program_id"`
-	Name      string `json:"name"`
-	Position  int32  `json:"position"`
-	Weekday   *int32 `json:"weekday"`
-}
-
-func (q *Queries) UpdateProgramDayWeekday(ctx context.Context, arg UpdateProgramDayWeekdayParams) (UpdateProgramDayWeekdayRow, error) {
-	row := q.db.QueryRow(ctx, updateProgramDayWeekday, arg.Weekday, arg.ID)
-	var i UpdateProgramDayWeekdayRow
-	err := row.Scan(
-		&i.ID,
-		&i.ProgramID,
-		&i.Name,
-		&i.Position,
-		&i.Weekday,
-	)
-	return i, err
+// UpdateProgramDay patches a day's name and weekday.
+//
+// weekday is a narg and name is not, which looks inconsistent and is not: a
+// weekday of NULL MEANS something — unscheduled — so absent and null have to be
+// told apart by the handler before this is called, and it always passes an
+// explicit value. A name has no such null.
+func (q *Queries) UpdateProgramDay(ctx context.Context, arg UpdateProgramDayParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateProgramDay, arg.Name, arg.Weekday, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
