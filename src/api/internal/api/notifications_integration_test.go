@@ -224,9 +224,13 @@ func TestSecondCommenterNotifiesTheOwnerAndTheFirstCommenter(t *testing.T) {
 		WithJSON(map[string]any{"body": "nice work"}).
 		Expect().Status(http.StatusCreated)
 
-	ownerComments := matching(owner, "comment", sessionID)
 	ownerReplies := matching(owner, "reply", sessionID)
 	firstReplies := matching(first, "reply", sessionID)
+	// One 'comment' item, folding one person: the conversation on a session is a
+	// group, so what grows when somebody joins it is the group rather than the
+	// list. See ListNotificationGroups.
+	ownerComments := findNotification(t, owner, "comment", sessionID)
+	ownerComments.Value("actorCount").Number().IsEqual(1)
 
 	// A third lifter says something. The owner hears "commented", the earlier
 	// commenter hears "reply".
@@ -235,9 +239,17 @@ func TestSecondCommenterNotifiesTheOwnerAndTheFirstCommenter(t *testing.T) {
 		WithJSON(map[string]any{"body": "how heavy?"}).
 		Expect().Status(http.StatusCreated)
 
-	if got := matching(owner, "comment", sessionID); got != ownerComments+1 {
-		t.Fatalf("owner's 'comment' notifications: got %d, want %d", got, ownerComments+1)
+	if got := matching(owner, "comment", sessionID); got != 1 {
+		t.Fatalf("owner's 'comment' items for one session: got %d, want 1", got)
 	}
+	// Told about the second comment all the same — the item now folds two people
+	// and leads with the newest of them, which is what the panel draws.
+	folded := findNotification(t, owner, "comment", sessionID)
+	folded.Value("actorCount").Number().IsEqual(2)
+	folded.Value("actor").Object().Value("username").String().IsEqual("notify-reply-third")
+	folded.Value("commentBody").String().IsEqual("how heavy?")
+	folded.Value("otherActorNames").Array().Length().IsEqual(1)
+
 	// Exactly once: the owner is not ALSO told it was a reply, even though they
 	// are among the session's commenters.
 	if got := matching(owner, "reply", sessionID); got != ownerReplies {
@@ -639,6 +651,144 @@ func TestWithdrawingApplauseKeepsANotificationAlreadyRead(t *testing.T) {
 	}
 	// The applause itself is gone — only the telling of it survives.
 	reactions(expectAs(t, ownerToken), sessionID).IsEmpty()
+}
+
+// ---- grouping ----
+//
+// The panel folds: one item per thing that happened rather than per notification
+// raised. Every test below is about a fold, and they share one shape — create
+// every account the test needs BEFORE reading the badge, because a new account
+// announces itself to everybody already here and would move a count that is
+// supposed to be about applause.
+
+// TestApplauseFromSeveralLiftersFoldsIntoOneItem is the behaviour the grouping is
+// for. Three lifters applauding one session used to be three rows saying the same
+// sentence and three on the badge.
+func TestApplauseFromSeveralLiftersFoldsIntoOneItem(t *testing.T) {
+	sessionID, ownerToken := otherLiftersSession(t, "notify-fold-owner")
+	owner := expectAs(t, ownerToken)
+	_, secondToken := secondLifter(t, "notify-fold-second")
+	_, thirdToken := secondLifter(t, "notify-fold-third")
+
+	unreadBefore := unreadCount(owner)
+
+	for _, actor := range []*httpexpect.Expect{
+		expect(t), expectAs(t, secondToken), expectAs(t, thirdToken),
+	} {
+		actor.POST(fmt.Sprintf("/sessions/%d/reactions", sessionID)).
+			WithJSON(map[string]any{"emoji": "👏"}).
+			Expect().Status(http.StatusNoContent)
+	}
+
+	if got := matching(owner, "reaction", sessionID); got != 1 {
+		t.Fatalf("items for three applause on one session: got %d, want 1", got)
+	}
+
+	item := findNotification(t, owner, "reaction", sessionID)
+	item.Value("actorCount").Number().IsEqual(3)
+	// The most recent of them leads, because that is the avatar the row draws.
+	item.Value("actor").Object().Value("username").String().IsEqual("notify-fold-third")
+	// Two names on the wire however many people are in the group — the client
+	// counts the remainder off actorCount. See maxNamedOthers.
+	item.Value("otherActorNames").Array().Length().IsEqual(2)
+
+	// One thing happened to this lifter, so the badge moved by one. It counting
+	// three would leave a number nobody could reconcile with the single row.
+	if got := unreadCount(owner); got != unreadBefore+1 {
+		t.Fatalf("badge after three applause on one session: got %d, want %d",
+			got, unreadBefore+1)
+	}
+}
+
+// TestReadingAFoldedItemMarksEveryNotificationInIt — the id the panel hands back
+// names the group's newest member, and reading it reads the group.
+func TestReadingAFoldedItemMarksEveryNotificationInIt(t *testing.T) {
+	sessionID, ownerToken := otherLiftersSession(t, "notify-fold-read")
+	owner := expectAs(t, ownerToken)
+	_, secondToken := secondLifter(t, "notify-fold-read-second")
+
+	expect(t).POST(fmt.Sprintf("/sessions/%d/reactions", sessionID)).
+		WithJSON(map[string]any{"emoji": "💪"}).
+		Expect().Status(http.StatusNoContent)
+	expectAs(t, secondToken).POST(fmt.Sprintf("/sessions/%d/reactions", sessionID)).
+		WithJSON(map[string]any{"emoji": "🔥"}).
+		Expect().Status(http.StatusNoContent)
+
+	unreadBefore := unreadCount(owner)
+	item := findNotification(t, owner, "reaction", sessionID)
+	item.Value("actorCount").Number().IsEqual(2)
+	item.NotContainsKey("readAt")
+
+	markRead(owner, int(item.Value("id").Number().Raw()))
+
+	// readAt is only reported once EVERY member has been read, so this asserts
+	// both rows moved rather than just the one named. Had the other stayed
+	// unread, the item would have come back with its dot and no way to clear it
+	// short of "mark all read".
+	findNotification(t, owner, "reaction", sessionID).ContainsKey("readAt")
+	if got := unreadCount(owner); got != unreadBefore-1 {
+		t.Fatalf("badge after reading one folded item: got %d, want %d",
+			got, unreadBefore-1)
+	}
+}
+
+// TestTwoEmojiFromOneLifterAreStillOnePerson — actorCount counts PEOPLE, and the
+// two are not the same number. Deduping by name instead of by id would also pass
+// this and quietly fail on two accounts that chose the same display name.
+func TestTwoEmojiFromOneLifterAreStillOnePerson(t *testing.T) {
+	sessionID, ownerToken := otherLiftersSession(t, "notify-fold-emoji")
+	owner := expectAs(t, ownerToken)
+
+	for _, emoji := range []string{"💪", "🔥"} {
+		expect(t).POST(fmt.Sprintf("/sessions/%d/reactions", sessionID)).
+			WithJSON(map[string]any{"emoji": emoji}).
+			Expect().Status(http.StatusNoContent)
+	}
+
+	if got := matching(owner, "reaction", sessionID); got != 1 {
+		t.Fatalf("items for two emoji on one session: got %d, want 1", got)
+	}
+	item := findNotification(t, owner, "reaction", sessionID)
+	item.Value("actorCount").Number().IsEqual(1)
+	// Nobody else to name, so the field is absent rather than empty.
+	item.NotContainsKey("otherActorNames")
+}
+
+// TestNewAccountsFoldIntoOneJoinedItem — 'joined' has no session, and folding on
+// a NULL subject is what makes every new account one row. The case this matters
+// for is a freshly seeded install, where the generated-activity roster announces
+// four personas at once.
+func TestNewAccountsFoldIntoOneJoinedItem(t *testing.T) {
+	_, existingToken := secondLifter(t, "notify-fold-join-existing")
+	existing := expectAs(t, existingToken)
+
+	unreadBefore := unreadCount(existing)
+
+	secondLifter(t, "notify-fold-join-first")
+	secondLifter(t, "notify-fold-join-second")
+
+	joined := 0
+	var item *httpexpect.Object
+	for _, it := range notificationsFor(existing, "limit", 100).Iter() {
+		obj := it.Object()
+		if obj.Value("kind").String().Raw() == "joined" {
+			joined++
+			item = obj
+		}
+	}
+	if joined != 1 {
+		t.Fatalf("'joined' items after two new accounts: got %d, want 1", joined)
+	}
+
+	item.Value("actorCount").Number().IsEqual(2)
+	item.Value("actor").Object().Value("username").String().
+		IsEqual("notify-fold-join-second")
+	item.NotContainsKey("sessionId")
+
+	if got := unreadCount(existing); got != unreadBefore+1 {
+		t.Fatalf("badge after two accounts joined: got %d, want %d",
+			got, unreadBefore+1)
+	}
 }
 
 // ---- retention ----

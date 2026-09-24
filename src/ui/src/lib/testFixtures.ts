@@ -107,12 +107,18 @@ export function testProgramSummary(
  * case: almost every notification is about your own training. A test covering
  * the `reply` kind, the one that reaches somebody about a session that was
  * never theirs, overrides it, and that override is the thing under test.
+ *
+ * `actorCount: 1` with no `otherActorNames` is the ungrouped case: one person did
+ * one thing. An item from the API is a GROUP, so a test about the folding says so
+ * by raising the count and naming the others — and defaulting to the fold would
+ * hide the single-actor sentence, which is still what most rows are.
  */
 export function testNotification(overrides: Partial<Notification> = {}): Notification {
   return {
     id: 1,
     kind: "reaction",
     actor: testLifter(),
+    actorCount: 1,
     sessionId: 7,
     sessionOwnerId: 1,
     programDayName: "Workout A",

@@ -43,6 +43,14 @@ sql:
       # 0029 is mixed like 0009 and 0015: the ALTERs and the partial indexes are
       # schema, the is_shared backfill below them is DML sqlc ignores.
       - "db/migrations/0029_custom_programs.up.sql"
+      # 0030 adds notifications.archived_at, which six queries in
+      # notifications.sql filter on. It was missed when that migration landed, so
+      # this file went on describing a schema the queries had already moved past
+      # — sqlc could not have typed them, and internal/store carried the previous
+      # contract's shape until this line was added.
+      - "db/migrations/0030_notification_retention.up.sql"
+      # 0031 is indexes only: it reshapes notifications_unread_idx for the
+      # grouped badge count and declares no column, so it types nothing here.
     queries: "db/queries"
     gen:
       go:

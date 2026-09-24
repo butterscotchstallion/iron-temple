@@ -28,6 +28,14 @@
   // HeaderBar and must not be what decides whether anybody is counting. Opening
   // the panel therefore draws what the last poll already has, with no spinner
   // for a request that is usually a 304.
+  //
+  // EVERY ROW IS A GROUP. The API folds everything the lifter was told about one
+  // session into a single item — see listNotifications in openapi.yaml — so a row
+  // says "Bob, Cara and 4 others applauded your Push Day" rather than being one
+  // of six rows that each say it once. Three things follow, and they are the only
+  // places this component knows about it: the subject is a phrase rather than a
+  // name, the badge counts rows because the API counts them the same way, and
+  // tapping a row marks everything it folded read.
 
   let open = $state(false);
 
@@ -82,12 +90,55 @@
     return item.actor.displayName || item.actor.username;
   }
 
+  /**
+   * How many people a row names before it starts counting them instead.
+   *
+   * Two, which is where the sentence stops being a sentence: "Bob, Cara and Dan
+   * and 3 others applauded your Push Day" is a list with a number bolted on.
+   * The API sends up to two spare names so this can be raised without touching
+   * the contract.
+   */
+  const NAMED_ACTORS = 2;
+
+  /**
+   * Who a row is about, as one phrase — "Bob", "Bob and Cara", "Bob, Cara and 4
+   * others".
+   *
+   * A row is a GROUP: everything the lifter was told about one session folds
+   * into it, so the subject is plural as soon as two people applauded the same
+   * training. `actor` is the most recent of them and the one whose avatar the
+   * row draws, so it always leads.
+   *
+   * Built as a string rather than as markup so the whole subject can be bold as
+   * one span and the pluralisation is one testable function. Bolding each name
+   * separately would mean "and 4 others" either joining the emphasis for no
+   * reason or breaking it mid-phrase.
+   *
+   * Degrades sensibly if `otherActorNames` is shorter than `actorCount` implies
+   * — which is the ordinary case once a group outgrows the two names the API
+   * sends: the remainder is simply counted.
+   */
+  function subject(item: Notification): string {
+    const named = [name(item), ...(item.otherActorNames ?? [])].slice(
+      0,
+      NAMED_ACTORS,
+    );
+    const rest = item.actorCount - named.length;
+
+    if (rest > 0) {
+      return `${named.join(", ")} and ${rest} ${rest === 1 ? "other" : "others"}`;
+    }
+    // "Bob and Cara", never "Bob, Cara" — a two-item list takes "and".
+    return named.join(" and ");
+  }
+
   function go(item: Notification) {
     const target = href(item);
     if (target === null) return;
-    // Reading THIS one, which is what following it means. Deliberately not
-    // awaited: the navigation is the response to the tap, and the badge is
-    // already down optimistically.
+    // Reading THIS one, which is what following it means — and since a row is a
+    // group, that is everything it folded. Deliberately not awaited: the
+    // navigation is the response to the tap, and the badge is already down
+    // optimistically.
     void markRead(item.id);
     open = false;
     push(target);
@@ -199,7 +250,7 @@
               <Avatar user={item.actor} size={28} />
               <span class="flex min-w-0 flex-1 flex-col gap-0.5">
                 <span class="break-words">
-                  <span class="font-semibold">{name(item)}</span>
+                  <span class="font-semibold">{subject(item)}</span>
                   {summary(item)}
                   {#if item.kind === "reaction" && item.emoji}
                     <span aria-hidden="true">{item.emoji}</span>

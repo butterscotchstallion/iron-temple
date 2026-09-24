@@ -371,6 +371,11 @@ type feedDTO struct {
 
 // notificationDTO is one thing that happened, addressed to the caller.
 //
+// ONE OF THESE IS A GROUP. ListNotificationGroups folds every notification about
+// the same subject into a single row, so this carries the newest member of that
+// group plus the two fields that say what else it folded. ID is that member's
+// id, and marking it read marks the whole group — see markNotificationRead.
+//
 // Almost everything below the actor is a pointer, and that is the kind system
 // carrying a shape the schema cannot: a 'joined' has no session, only a
 // 'reaction' has an emoji, and only a 'comment' or 'reply' has a body. They are
@@ -379,11 +384,27 @@ type feedDTO struct {
 //
 // The actor is a lifterDTO for the reason sessionCommentDTO's author is: every
 // one of these is drawn as somebody's avatar next to somebody's name, which is
-// what that type is for.
+// what that type is for. On a group it is the most recent of them, which is the
+// one whose avatar the row draws.
 type notificationDTO struct {
 	ID    int32     `json:"id"`
 	Kind  string    `json:"kind"`
 	Actor lifterDTO `json:"actor"`
+
+	// ActorCount is how many DISTINCT people this row folds, Actor included, so
+	// it is 1 on a row that folds nothing. Sent unconditionally rather than
+	// omitempty: a client building a sentence needs to know it is 1 rather than
+	// having to treat absent as 1.
+	ActorCount int32 `json:"actorCount"`
+	// OtherActorNames names some of the rest, most recent first, for a row that
+	// wants to say "Bob, Cara and 4 others". Never includes Actor's own name.
+	//
+	// Capped at two, and the cap is a WIRE BUDGET rather than a copy decision —
+	// an install with forty lifters must not put forty names on every row of
+	// every poll. How many to actually say is the client's call, and it can
+	// change its mind without changing this contract. Absent when the row folds
+	// nobody.
+	OtherActorNames []string `json:"otherActorNames,omitempty"`
 
 	SessionID *int32 `json:"sessionId,omitempty"`
 	// SessionOwnerID is usually the caller and deliberately not assumed to be:

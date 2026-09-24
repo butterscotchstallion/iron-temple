@@ -81,12 +81,71 @@ func (s *Server) archiveOldNotifications(ctx context.Context) {
 	}
 }
 
+// maxNamedOthers is how many of a group's other actors ride along on the wire.
+//
+// A WIRE BUDGET, NOT A COPY DECISION. The panel currently says "Bob, Cara and 4
+// others", which needs one of these — the second is headroom so the sentence can
+// change without the contract changing. What it is really here to stop is an
+// install with forty lifters putting forty names on every row of every poll, on
+// the endpoint the header asks for once a minute.
+const maxNamedOthers = 2
+
+// groupActors folds a group's parallel actor arrays into the number of DISTINCT
+// people it represents and the names of the ones the row does not already carry.
+//
+// Both halves of that are the reason this is in Go rather than in the query.
+// Postgres has no DISTINCT for window aggregates — no count(DISTINCT x) OVER w,
+// no array_agg(DISTINCT x) OVER w — so ListNotificationGroups hands back every
+// member's actor id and name in the panel's own order, duplicates included, and
+// the folding happens once, here.
+//
+// Duplicates are real rather than theoretical: one lifter applauding a session
+// with two different emoji is two notifications, and they are one person in the
+// sentence. So the dedupe is BY ID, never by name — two accounts that chose the
+// same display name are two people, and counting them as one would be a quieter
+// bug than it sounds.
+//
+// The representative actor is seeded into the set rather than skipped by
+// position, so the count is 1 even on the arrays a row of one produces and the
+// row's own actor can never be named twice. Which also means this does not
+// depend on the query's ordering to be correct — only on it to be pleasant.
+func groupActors(actorID int32, ids []int32, names []string) (int32, []string) {
+	seen := map[int32]struct{}{actorID: {}}
+	count := int32(1)
+	var others []string
+
+	for i, id := range ids {
+		// Parallel arrays out of one window, so they cannot disagree in length.
+		// Bounded anyway: the alternative to this line is a panic in the header
+		// of every screen.
+		if i >= len(names) {
+			break
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		count++
+		if len(others) < maxNamedOthers {
+			others = append(others, names[i])
+		}
+	}
+
+	return count, others
+}
+
 // listNotifications serves a page of the caller's notifications, newest first,
 // with the unread count over all of them.
 //
 // One request rather than two. The badge and the panel are read on the same
 // schedule by the same component, and splitting the count onto its own endpoint
 // would double the poll to save assembling a page nothing is forced to draw.
+//
+// A PAGE OF GROUPS, and both numbers in the response are counted that way. The
+// query folds every notification about the same subject into one row, so twenty
+// items is twenty things that happened rather than twenty rows that might all be
+// the same thing, and the unread count counts groups so the badge agrees with
+// the list under it. See ListNotificationGroups for why the folding is in SQL.
 func (s *Server) listNotifications(w http.ResponseWriter, r *http.Request) {
 	limit, offset, ok := pageParams(w, r)
 	if !ok {
@@ -96,7 +155,7 @@ func (s *Server) listNotifications(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	caller := userFrom(ctx).ID
 
-	rows, err := s.q.ListNotifications(ctx, store.ListNotificationsParams{
+	rows, err := s.q.ListNotificationGroups(ctx, store.ListNotificationGroupsParams{
 		UserID: caller,
 		Lim:    limit,
 		Off:    offset,
@@ -117,6 +176,7 @@ func (s *Server) listNotifications(w http.ResponseWriter, r *http.Request) {
 	// null.
 	items := make([]notificationDTO, 0, len(rows))
 	for _, row := range rows {
+		actorCount, otherNames := groupActors(row.ActorID, row.ActorIds, row.ActorNames)
 		item := notificationDTO{
 			ID:   row.ID,
 			Kind: row.Kind,
@@ -131,10 +191,15 @@ func (s *Server) listNotifications(w http.ResponseWriter, r *http.Request) {
 				// this is a fact about one thing that happened, not a report on
 				// the actor's training.
 			},
-			// The nullable columns are passed through as they came. Which of
-			// them is populated is decided by Kind, and the DTO's omitempty
-			// tags mean a row on the wire carries only the ones its kind gives
-			// meaning to.
+			// Who else is in this row. 1 and empty on a group of one, which is
+			// most rows on most installs.
+			ActorCount:      actorCount,
+			OtherActorNames: otherNames,
+			// The nullable columns are passed through as they came, and on a
+			// group they belong to its newest member — so a fold of three
+			// comments quotes and links to the most recent one. Which of them is
+			// populated is decided by Kind, and the DTO's omitempty tags mean a
+			// row on the wire carries only the ones its kind gives meaning to.
 			SessionID:      row.SessionID,
 			SessionOwnerID: row.SessionOwnerID,
 			ProgramDayName: row.ProgramDayName,
@@ -171,8 +236,8 @@ func (s *Server) markNotificationsRead(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// markNotificationRead stamps one, for a lifter who followed a notification
-// through to what it was about.
+// markNotificationRead stamps one ROW OF THE PANEL, for a lifter who followed a
+// notification through to what it was about.
 //
 // The other half of "mark all read", and not a decomposition of it. Opening the
 // panel is a glance and must not read anything — that is what makes coming back
@@ -181,8 +246,15 @@ func (s *Server) markNotificationsRead(w http.ResponseWriter, r *http.Request) {
 // the badge was to mark everything read, which buries the rows that have not
 // been looked at.
 //
+// A ROW IS A GROUP, so this marks everything that row folded. The id comes back
+// from listNotifications and is the group's newest member; the query resolves the
+// rest from it, so the grouping rule stays in SQL and the client never has to
+// know what it is. Stamping only that one member would hand the row straight back
+// with its dot still on — a badge that cannot be cleared except by the blunt
+// instrument this endpoint exists to avoid.
+//
 // No ownership check, and that is deliberate rather than missing:
-// MarkNotificationRead scopes on user_id inside the UPDATE, so another
+// MarkNotificationGroupRead scopes on user_id inside the UPDATE, so another
 // account's id matches no row. 204 either way — a 404 would confirm the id
 // exists, and there is nothing useful for a client to do differently.
 func (s *Server) markNotificationRead(w http.ResponseWriter, r *http.Request) {
@@ -193,10 +265,11 @@ func (s *Server) markNotificationRead(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	// The row count is deliberately discarded. "Already read", "not yours" and
-	// "never existed" are all the same answer to the only question the caller
-	// asked, which is for a state rather than for a change.
-	if _, err := s.q.MarkNotificationRead(ctx, store.MarkNotificationReadParams{
+	// The row count is deliberately discarded, and it is a count of the group's
+	// members now rather than 0-or-1. "Already read", "not yours" and "never
+	// existed" are all the same answer to the only question the caller asked,
+	// which is for a state rather than for a change.
+	if _, err := s.q.MarkNotificationGroupRead(ctx, store.MarkNotificationGroupReadParams{
 		ID:     id,
 		UserID: userFrom(ctx).ID,
 	}); err != nil {

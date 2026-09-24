@@ -173,6 +173,95 @@ describe("the panel", () => {
   });
 });
 
+describe("a row that folds several people", () => {
+  // The whole point of the grouping: six lifters applauding one session is one
+  // row that names some of them, not six rows that each say it once. The API
+  // decides what folds; what is under test here is the sentence.
+
+  it("names both people when a row folds two", async () => {
+    seed([
+      testNotification({
+        actor: testLifter({ id: THEM, displayName: "Grace Hopper" }),
+        actorCount: 2,
+        otherActorNames: ["Ada Lovelace"],
+      }),
+    ]);
+    render(NotificationBell);
+    await open();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Grace Hopper and Ada Lovelace"),
+      ).toBeInTheDocument(),
+    );
+    // Still one sentence about one session, not one per person.
+    expect(screen.getByText(/applauded your Workout A/)).toBeInTheDocument();
+  });
+
+  it("counts the rest past the two it names", async () => {
+    seed([
+      testNotification({
+        actor: testLifter({ id: THEM, displayName: "Grace Hopper" }),
+        actorCount: 6,
+        // The API sends at most two spare names however many people are in the
+        // group, so the remainder is arithmetic rather than a longer list.
+        otherActorNames: ["Ada Lovelace", "Katherine Johnson"],
+      }),
+    ]);
+    render(NotificationBell);
+    await open();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Grace Hopper, Ada Lovelace and 4 others"),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it("says one other in the singular", async () => {
+    seed([
+      testNotification({
+        actor: testLifter({ id: THEM, displayName: "Grace Hopper" }),
+        actorCount: 3,
+        otherActorNames: ["Ada Lovelace", "Katherine Johnson"],
+      }),
+    ]);
+    render(NotificationBell);
+    await open();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Grace Hopper, Ada Lovelace and 1 other"),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  // A folded row is still one row of the panel, so it is one unread thing and
+  // one tap. The server marks every notification behind it read from this id.
+  it("marks the whole fold read as one, from the id it was given", async () => {
+    seed(
+      [
+        testNotification({
+          id: 21,
+          sessionId: 42,
+          sessionOwnerId: ME,
+          actorCount: 4,
+          otherActorNames: ["Ada Lovelace"],
+        }),
+      ],
+      1,
+    );
+    render(NotificationBell);
+    await open();
+
+    await fireEvent.click(await screen.findByText(/applauded your/i));
+
+    expect(markNotificationRead).toHaveBeenCalledWith(21);
+    // One, not four: the badge was counting the group rather than its members.
+    await waitFor(() => expect(notifications.unread).toBe(0));
+  });
+});
+
 describe("where a row goes", () => {
   it("sends applause on your own session to your own recap", async () => {
     seed([testNotification({ sessionId: 7, sessionOwnerId: ME })]);

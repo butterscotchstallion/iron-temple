@@ -21,6 +21,12 @@ import {
 // list here too means opening the panel draws what the last poll already
 // fetched instead of showing a spinner for a request that is usually a 304.
 
+// EVERYTHING HERE IS COUNTED IN GROUPS, because the API is. One item is one
+// thing that happened — all the applause on a session, all the conversation on
+// it, everybody who joined — and `unread` counts those same groups, so the badge
+// and the panel can never disagree about how many things are waiting. Nothing in
+// this module folds anything itself; it just never assumes an item is a row.
+
 export const notifications = $state<{
   /** The most recent page, newest first. Empty until the first poll lands. */
   items: Notification[];
@@ -44,6 +50,9 @@ export const notifications = $state<{
  * archive — anything older than this page is answered by the surface the
  * notification was about, which is still there. Paging it would be building a
  * second feed.
+ *
+ * Twenty GROUPS, so this is twenty things that happened. It used to be twenty
+ * notifications, which a single busy session could spend on its own.
  */
 const PAGE = 20;
 
@@ -171,6 +180,10 @@ export async function markAllRead(): Promise<void> {
  *
  * Does nothing for a row already read, so the badge cannot go negative when a
  * lifter opens the same notification twice.
+ *
+ * The badge comes down by exactly one however many notifications the row folded,
+ * which is right on both sides: the server marks the whole group read, and the
+ * server was counting that group as one.
  */
 export async function markRead(id: number): Promise<void> {
   const item = notifications.items.find((n) => n.id === id);
