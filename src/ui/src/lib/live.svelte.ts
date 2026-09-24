@@ -49,6 +49,19 @@ let reconnectAt: ReturnType<typeof setTimeout> | null = null;
 let attempt = 0;
 let stopped = true;
 
+/** What a session watcher is told. `resync` means "you may have missed some". */
+export type SessionEvent = "reaction" | "comment" | "resync";
+
+/**
+ * Who is watching which session.
+ *
+ * REFCOUNTED PER SESSION ID, which matters as soon as two things on one screen
+ * care about the same session: one unmounting must not cancel the other's
+ * feed. The socket learns about a session when the first watcher arrives and
+ * forgets it when the last one leaves.
+ */
+const watchers = new Map<number, Set<(event: SessionEvent) => void>>();
+
 /**
  * Where the socket lives.
  *
@@ -61,6 +74,15 @@ let stopped = true;
 function socketURL(): string {
   const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${scheme}//${window.location.host}${API_BASE_URL}/live`;
+}
+
+/** Tell the server about a session, if there is a server to tell. */
+function send(message: Record<string, unknown>) {
+  // A socket that is not open yet is not an error: every subscription is
+  // re-sent on the next welcome, so anything registered while disconnected is
+  // picked up then rather than lost.
+  if (socket === null || socket.readyState !== WebSocket.OPEN) return;
+  socket.send(JSON.stringify(message));
 }
 
 function clearReconnect() {
@@ -78,9 +100,9 @@ function clearReconnect() {
  * unrecognised frame is a thing to skip, not a failure.
  */
 function receive(raw: string) {
-  let event: { type?: string };
+  let event: { type?: string; sessionId?: number };
   try {
-    event = JSON.parse(raw) as { type?: string };
+    event = JSON.parse(raw) as { type?: string; sessionId?: number };
   } catch {
     return;
   }
@@ -98,14 +120,42 @@ function receive(raw: string) {
       // that happened while this tab was disconnected is picked up here rather
       // than waited for.
       void poll();
+      // The server has no memory of a dead socket's subscriptions, so every
+      // one of them is re-sent — and every watcher is told to resync, because
+      // whatever happened while this tab was away arrived as no frame at all.
+      for (const sessionId of watchers.keys()) {
+        send({ type: "subscribe", sessionId });
+      }
+      announce(null, "resync");
       break;
 
     case "notification":
       void poll();
       break;
 
+    case "reaction":
+    case "comment":
+      if (typeof event.sessionId === "number") {
+        announce(event.sessionId, event.type);
+      }
+      break;
+
     default:
       break;
+  }
+}
+
+/**
+ * Tell watchers. A null session means every watcher, which is what a resync is.
+ */
+function announce(sessionId: number | null, kind: SessionEvent) {
+  const targets =
+    sessionId === null ? [...watchers.values()] : [watchers.get(sessionId)];
+  for (const set of targets) {
+    if (!set) continue;
+    // Copied before iterating: a callback is allowed to unsubscribe, and
+    // mutating the set being walked would skip the next watcher.
+    for (const notify of [...set]) notify(kind);
   }
 }
 
@@ -197,11 +247,48 @@ export function startLive(): () => void {
 }
 
 /**
+ * Watch one session for applause and conversation. Returns a teardown.
+ *
+ * The card that draws a session's reactions and comments is mounted on two
+ * different recap routes and, on a busy screen, possibly twice — so this
+ * refcounts rather than assuming one watcher per session. The first arrival
+ * subscribes, the last departure unsubscribes, and everything in between is
+ * bookkeeping in this map.
+ *
+ * The callback says WHAT KIND of thing happened and nothing else, because the
+ * frame says nothing else: the caller refetches. `resync` arrives on every
+ * (re)connect and means "you may have missed something while we were apart".
+ */
+export function watchSession(
+  sessionId: number,
+  onEvent: (event: SessionEvent) => void,
+): () => void {
+  let set = watchers.get(sessionId);
+  if (!set) {
+    set = new Set();
+    watchers.set(sessionId, set);
+    send({ type: "subscribe", sessionId });
+  }
+  set.add(onEvent);
+
+  return () => {
+    const current = watchers.get(sessionId);
+    if (!current) return;
+    current.delete(onEvent);
+    if (current.size === 0) {
+      watchers.delete(sessionId);
+      send({ type: "unsubscribe", sessionId });
+    }
+  };
+}
+
+/**
  * Forget everything. Called on sign-out beside resetNotifications, so the next
  * account to use this tab does not inherit a socket opened as somebody else.
  */
 export function resetLive(): void {
   stopped = true;
+  watchers.clear();
   clearReconnect();
   if (socket !== null) {
     const ws = socket;

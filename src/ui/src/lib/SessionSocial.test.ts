@@ -28,6 +28,21 @@ vi.mock("./api", async (importOriginal) => ({
   deleteSessionComment,
 }));
 
+// The live socket, faked at the module boundary: this card's job is to
+// subscribe and to refetch what it is told to, and both are observable here
+// without a WebSocket anywhere in sight.
+const stopWatching = vi.hoisted(() => vi.fn());
+const watchSession = vi.hoisted(() => vi.fn());
+vi.mock("./live.svelte", () => ({ watchSession }));
+
+/** Deliver an event to whatever the card subscribed with. */
+function emitSessionEvent(kind: "reaction" | "comment" | "resync") {
+  const handler = watchSession.mock.calls.at(-1)?.[1] as
+    | ((event: string) => void)
+    | undefined;
+  handler?.(kind);
+}
+
 const ME = 1;
 const THEM = 2;
 
@@ -60,6 +75,7 @@ function commentsPage(items: unknown[], total = items.length) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  watchSession.mockReturnValue(stopWatching);
   listSessionReactions.mockResolvedValue({ status: 200, data: [] });
   listSessionComments.mockResolvedValue(commentsPage([]));
   addSessionReaction.mockResolvedValue({ status: 204, data: undefined });
@@ -572,5 +588,85 @@ describe("SessionSocial arriving from a notification", () => {
 
     await waitFor(() => expect(screen.getByText("ordinary")).toBeInTheDocument());
     expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
+  });
+});
+
+describe("SessionSocial while somebody else is looking at the same session", () => {
+  const props = { sessionId: 42, ownerId: THEM };
+
+  it("watches its own session and gives the subscription back", async () => {
+    const { unmount } = render(SessionSocial, props);
+    await waitFor(() => expect(watchSession).toHaveBeenCalledWith(42, expect.any(Function)));
+
+    unmount();
+    expect(stopWatching).toHaveBeenCalled();
+  });
+
+  // Split by kind so a run of applause does not refetch the conversation.
+  it("refetches only the reactions when applause arrives", async () => {
+    render(SessionSocial, props);
+    await waitFor(() => expect(listSessionComments).toHaveBeenCalled());
+    listSessionReactions.mockClear();
+    listSessionComments.mockClear();
+
+    emitSessionEvent("reaction");
+
+    await waitFor(() => expect(listSessionReactions).toHaveBeenCalledTimes(1));
+    expect(listSessionComments).not.toHaveBeenCalled();
+  });
+
+  it("refetches only the comments when one arrives", async () => {
+    render(SessionSocial, props);
+    await waitFor(() => expect(listSessionComments).toHaveBeenCalled());
+    listSessionReactions.mockClear();
+    listSessionComments.mockClear();
+
+    emitSessionEvent("comment");
+
+    await waitFor(() => expect(listSessionComments).toHaveBeenCalledTimes(1));
+    expect(listSessionReactions).not.toHaveBeenCalled();
+  });
+
+  // A gap in the connection is a gap in both lists.
+  it("refetches both on a resync", async () => {
+    render(SessionSocial, props);
+    await waitFor(() => expect(listSessionComments).toHaveBeenCalled());
+    listSessionReactions.mockClear();
+    listSessionComments.mockClear();
+
+    emitSessionEvent("resync");
+
+    await waitFor(() => expect(listSessionReactions).toHaveBeenCalledTimes(1));
+    expect(listSessionComments).toHaveBeenCalledTimes(1);
+  });
+
+  // A live update must not throw away the earlier pages somebody walked back
+  // through, so the refetch asks for as much as is held rather than one page.
+  it("keeps the earlier comments it had already paged in", async () => {
+    listSessionComments.mockResolvedValue(
+      commentsPage([comment({ id: 20, body: "newest" })], 2),
+    );
+    render(SessionSocial, props);
+    await waitFor(() => expect(screen.getByText("newest")).toBeInTheDocument());
+
+    listSessionComments.mockResolvedValue(
+      commentsPage([comment({ id: 10, body: "older" })], 2),
+    );
+    await fireEvent.click(screen.getByRole("button", { name: /1 earlier comment/i }));
+    await waitFor(() => expect(screen.getByText("older")).toBeInTheDocument());
+
+    listSessionComments.mockClear();
+    listSessionComments.mockResolvedValue(
+      commentsPage(
+        [comment({ id: 10, body: "older" }), comment({ id: 20, body: "newest" })],
+        2,
+      ),
+    );
+    emitSessionEvent("comment");
+
+    await waitFor(() =>
+      expect(listSessionComments).toHaveBeenCalledWith(42, { limit: 20 }),
+    );
+    expect(screen.getByText("older")).toBeInTheDocument();
   });
 });
