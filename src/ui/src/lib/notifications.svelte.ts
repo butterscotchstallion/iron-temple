@@ -51,6 +51,20 @@ const PAGE = 20;
 const POLL_MS = 60 * 1000;
 
 /**
+ * How often to ask while something else is watching in real time.
+ *
+ * The poller does not stop when the live socket connects — it becomes a safety
+ * net. A proxy that eats upgrades, a socket the browser has quietly given up
+ * on, a bug in the hub: in every one of those the badge has to keep working,
+ * and five minutes of staleness in a case that should not happen is a better
+ * trade than a badge that silently stops updating.
+ *
+ * Implemented by SKIPPING ticks rather than by rescheduling the interval, so
+ * the teardown and the ownership of the timer stay exactly as they were.
+ */
+const SOCKET_POLL_MS = 5 * 60 * 1000;
+
+/**
  * Floor on how often returning to the tab can trigger a poll, so flicking
  * between tabs is not a request per flick. Copied from version.svelte.ts, which
  * learned it first.
@@ -59,6 +73,29 @@ const REFOCUS_MIN_GAP_MS = 30 * 1000;
 
 let inFlight = false;
 let lastPollAt = 0;
+let liveBacked = false;
+
+/**
+ * Whether something is watching in real time, so this can back off.
+ *
+ * Told from outside rather than discovered, and this module deliberately knows
+ * nothing about WebSockets — which also keeps the dependency pointing one way:
+ * live.svelte.ts imports poll() from here, so an import back would be a cycle.
+ */
+export function setLiveBacked(value: boolean): void {
+  liveBacked = value;
+}
+
+/**
+ * Set when a poll was asked for while one was already running.
+ *
+ * The in-flight guard used to simply DROP that request, which was invisible
+ * while the only caller was a once-a-minute timer and is not now: a burst of
+ * pushes can arrive inside one request, and the last of them would be the one
+ * swallowed — leaving the badge stale until the next tick with nothing to say
+ * it had happened.
+ */
+let dirty = false;
 
 /**
  * Read the panel once.
@@ -69,7 +106,10 @@ let lastPollAt = 0;
  * never throws and never clears what it already had.
  */
 export async function poll(): Promise<void> {
-  if (inFlight) return;
+  if (inFlight) {
+    dirty = true;
+    return;
+  }
   inFlight = true;
   try {
     const result = await listNotifications({ limit: PAGE });
@@ -86,6 +126,12 @@ export async function poll(): Promise<void> {
     // into a request per tab switch.
     lastPollAt = Date.now();
     inFlight = false;
+    // Exactly one catch-up for however many were coalesced: they all asked the
+    // same question, and the answer is a whole page either way.
+    if (dirty) {
+      dirty = false;
+      void poll();
+    }
   }
 }
 
@@ -168,6 +214,8 @@ export async function clearAll(): Promise<void> {
 export function startPolling(): () => void {
   const tick = () => {
     if (document.visibilityState !== "visible") return;
+    // Backed by a socket: this is a safety net, not the mechanism.
+    if (liveBacked && Date.now() - lastPollAt < SOCKET_POLL_MS) return;
     void poll();
   };
 
@@ -199,4 +247,6 @@ export function resetNotifications(): void {
   notifications.unread = 0;
   notifications.loaded = false;
   notifications.failed = false;
+  dirty = false;
+  liveBacked = false;
 }

@@ -175,6 +175,16 @@ func run() error {
 			// own drain is the one worth the ten seconds.
 			_ = metricsSrv.Shutdown(shutdownCtx)
 		}
+		// BEFORE Shutdown, and this ordering is load-bearing.
+		//
+		// http.Server.Shutdown neither closes nor waits on a HIJACKED
+		// connection, which every live WebSocket is. Left to it, each socket is
+		// simply severed as the process exits: the browser sees an abnormal
+		// close and reconnects immediately — into a listener that is already
+		// going away. This sends a proper going-away frame and stops the hub
+		// accepting new upgrades, so a reconnect gets a 503 it can back off on
+		// instead of racing the drain.
+		apiSrv.CloseLiveSockets(shutdownCtx)
 		return srv.Shutdown(shutdownCtx)
 	}
 }

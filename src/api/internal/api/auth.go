@@ -229,6 +229,25 @@ func (s *Server) secureCookies() bool {
 // The UI is same-origin with the API in production (Traefik path-routes /api
 // and preserves Host) and in development (the Vite proxy, which must therefore
 // leave changeOrigin off — see src/ui/vite.config.ts).
+// sameOriginRequest is the rule itself, separated from the middleware because a
+// second place now enforces it at a different moment.
+//
+// THE GET CARVE-OUT BELOW IS NO LONGER UNIVERSAL. A WebSocket handshake is a
+// GET, so sameOrigin skips it — and it carries the session cookie, because a
+// WebSocket handshake does not consult CORS at all and there is no
+// AllowCredentials switch standing between a page and this API. Without a check
+// somewhere, any site a lifter visited could open an authenticated socket in
+// their browser. The live route enforces this function directly; see
+// internal/api/live.go.
+//
+// An absent Origin passes, matching the middleware's own reasoning: non-browser
+// clients (curl, the integration suite, probes) do not send one, and they are
+// not the threat this describes.
+func sameOriginRequest(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	return origin == "" || originMatchesHost(origin, r.Host)
+}
+
 func sameOrigin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -237,8 +256,7 @@ func sameOrigin(next http.Handler) http.Handler {
 			return
 		}
 
-		origin := r.Header.Get("Origin")
-		if origin != "" && !originMatchesHost(origin, r.Host) {
+		if !sameOriginRequest(r) {
 			writeError(w, http.StatusForbidden, "cross_origin", "cross-origin request rejected")
 			return
 		}

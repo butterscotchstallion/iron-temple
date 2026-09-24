@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"gitea.homelab/gitadmin/iron-temple/api/internal/live"
 	"gitea.homelab/gitadmin/iron-temple/api/internal/store"
 )
 
@@ -203,21 +204,32 @@ func (s *Server) addSessionReaction(w http.ResponseWriter, r *http.Request) {
 	// query is :execrows — and it has to be a no-op on the notification too, or
 	// a lifter leaning on a button would fill somebody's panel with one row over
 	// and over.
+	events := s.newLiveEvents()
 	if added > 0 {
-		if err := qtx.CreateReactionNotification(ctx, store.CreateReactionNotificationParams{
+		told, err := qtx.CreateReactionNotification(ctx, store.CreateReactionNotificationParams{
 			ActorID:   caller,
 			SessionID: session.ID,
 			Emoji:     req.Emoji,
-		}); err != nil {
+		})
+		if err != nil {
 			internalError(w)
 			return
 		}
+		// Whom to push to comes back from the query rather than being worked
+		// out again here — the rule for who hears about something lives in SQL
+		// and now says what it decided. Collected, not sent: nothing goes out
+		// until the transaction below has committed.
+		events.notify(told)
+		events.session(live.KindReaction, session.ID)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		internalError(w)
 		return
 	}
+	// AFTER the commit, and deliberately not deferred — a defer would fire on
+	// the rollback path too and announce applause the database does not have.
+	events.publish()
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -270,11 +282,12 @@ func (s *Server) removeSessionReaction(w http.ResponseWriter, r *http.Request) {
 		internalError(w)
 		return
 	}
-	if err := qtx.DeleteReactionNotification(ctx, store.DeleteReactionNotificationParams{
+	untold, err := qtx.DeleteReactionNotification(ctx, store.DeleteReactionNotificationParams{
 		ActorID:   caller,
 		SessionID: session.ID,
 		Emoji:     emoji,
-	}); err != nil {
+	})
+	if err != nil {
 		internalError(w)
 		return
 	}
@@ -283,6 +296,12 @@ func (s *Server) removeSessionReaction(w http.ResponseWriter, r *http.Request) {
 		internalError(w)
 		return
 	}
+	// A withdrawal takes a row out of somebody's panel, so the panel is told —
+	// the same push as an arrival, because "refetch" covers both.
+	events := s.newLiveEvents()
+	events.notify(untold)
+	events.session(live.KindReaction, session.ID)
+	events.publish()
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -438,11 +457,12 @@ func (s *Server) addSessionComment(w http.ResponseWriter, r *http.Request) {
 	// Runs after the insert on purpose. The query reads the session's other
 	// comments to find the thread, and the comment just posted is among them by
 	// then — excluded by id, and its author excluded again by actor.
-	if err := qtx.CreateCommentNotifications(ctx, store.CreateCommentNotificationsParams{
+	told, err := qtx.CreateCommentNotifications(ctx, store.CreateCommentNotificationsParams{
 		ActorID:   caller.ID,
 		SessionID: session.ID,
 		CommentID: row.ID,
-	}); err != nil {
+	})
+	if err != nil {
 		internalError(w)
 		return
 	}
@@ -451,6 +471,11 @@ func (s *Server) addSessionComment(w http.ResponseWriter, r *http.Request) {
 		internalError(w)
 		return
 	}
+	// After the commit, never deferred. See addSessionReaction.
+	events := s.newLiveEvents()
+	events.notify(told)
+	events.session(live.KindComment, session.ID)
+	events.publish()
 
 	// The author is the caller, so it is assembled from the session rather than
 	// re-read. The avatar tag is the one thing that is not on currentUser, and a

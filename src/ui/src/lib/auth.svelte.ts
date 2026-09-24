@@ -8,6 +8,7 @@ import {
 } from "./api";
 import { clearCache } from "./cache.svelte";
 import { resetNotifications } from "./notifications.svelte";
+import { resetLive } from "./live.svelte";
 import { flush } from "./writeQueue.svelte";
 
 // Shared authentication state. A module-level `$state` object rather than a
@@ -114,6 +115,10 @@ export async function signOut(): Promise<void> {
     // own reactive module, not cache entries. Without this the header would
     // keep the previous lifter's unread badge until the next poll.
     resetNotifications();
+    // The socket was opened as the account that is signing out. Closed here
+    // rather than left to App.svelte's effect, so nothing of theirs is still
+    // connected while the next sign-in is being typed.
+    resetLive();
     window.location.hash = "#/";
     await loadMe();
   }

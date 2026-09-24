@@ -22,7 +22,10 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/gorilla/websocket"
+
 	"gitea.homelab/gitadmin/iron-temple/api/internal/auth"
+	"gitea.homelab/gitadmin/iron-temple/api/internal/live"
 	"gitea.homelab/gitadmin/iron-temple/api/internal/metrics"
 	"gitea.homelab/gitadmin/iron-temple/api/internal/racked"
 	"gitea.homelab/gitadmin/iron-temple/api/internal/store"
@@ -61,6 +64,11 @@ type Server struct {
 	// the exposition page is only reachable from the address main.go binds it
 	// to, not from this router.
 	metrics *metrics.Registry
+	// live is every open WebSocket on this process. Always present, like
+	// activity and metrics above and for the same reason: it holds a map and a
+	// mutex, it starts nothing, and a nil check at every publish site is a
+	// worse trade than a hub nobody connects to.
+	live *live.Hub
 }
 
 // NewServer builds a Server over a pgx connection pool. version and environment
@@ -77,6 +85,7 @@ func NewServer(pool *pgxpool.Pool, version, environment string) *Server {
 		reportLoc:   time.UTC,
 		activity:    &activityRunner{},
 		metrics:     metrics.New(version, environment),
+		live:        live.New(live.Options{CheckOrigin: liveOrigin}),
 	}
 	// Pool saturation is the failure this deployment is most likely to hit —
 	// one small pool, a reporter and a sweeper sharing it with request traffic
@@ -93,6 +102,17 @@ func NewServer(pool *pgxpool.Pool, version, environment string) *Server {
 			}
 		})
 	}
+	// A long-lived connection is a gauge, not a request — see observe() for why
+	// the request middleware skips a socket, and this is what replaces the
+	// accounting it skips. Evaluated per scrape, like the pool above.
+	s.metrics.SetLiveSource(func() metrics.LiveStats {
+		stat := s.live.Stats()
+		return metrics.LiveStats{
+			Connections: stat.Connections,
+			Sent:        stat.Sent,
+			Dropped:     stat.Dropped,
+		}
+	})
 	return s
 }
 
@@ -363,6 +383,14 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 		// an account's entire training history to a session still holding a
 		// password somebody else chose is exactly what that gate is for.
 		r.With(s.requireUser, s.blockUntilPasswordChanged).Get("/me/export", s.exportAccount)
+
+		// The live socket, outside the group for a harder version of the
+		// export's reason: jsonETag replaces the writer with a recorder that is
+		// not an http.Hijacker, and an upgrade needs the raw connection — so
+		// inside the group this route could not work at all. Both gates are
+		// repeated because this route inherits nothing. See internal/api/live.go
+		// and docs/live-socket.md.
+		r.With(s.requireUser, s.blockUntilPasswordChanged).Get("/live", s.serveLive)
 	})
 
 	return r
@@ -453,25 +481,60 @@ func jsonETag(next http.Handler) http.Handler {
 // the classic way a metrics endpoint becomes the most expensive thing in a
 // deployment. An unrouted request has no pattern and is folded into a single
 // "unmatched" series by the registry, for the same reason.
+// A WEBSOCKET IS NOT A REQUEST, and this middleware has to say so.
+//
+// The in-flight gauge is held for the handler's whole lifetime and one duration
+// sample is recorded when it returns. For an ordinary request that is exactly
+// right; for a socket a lifter leaves open all day it is two lies — the gauge
+// would count an idle connection as work in flight, and the histogram would get
+// a 43,000-second sample into a bucket set whose largest finite bound is ten.
+// Both would then be wrong for every other route that shares the series.
+//
+// So an upgrade that actually BECAME a socket is skipped, and one that did not
+// is counted as usual. rec.Status() == 0 is the exact discriminator: a
+// successful upgrade hijacks the connection and never writes a status through
+// the wrapper, while a 401 from requireUser, a 403 from the origin check and
+// gorilla's own 400 all do. That keeps handshake FAILURES — the part worth
+// alerting on — fully observable.
+//
+// What replaces the skipped accounting is a connection gauge the hub reports
+// per scrape; see NewServer.
 func (s *Server) observe(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		done := s.metrics.RequestStarted()
+		upgrade := websocket.IsWebSocketUpgrade(r)
+
+		// The gauge is only taken for something that can give it back.
+		var done func(method, route string, status int, d time.Duration)
+		if !upgrade {
+			done = s.metrics.RequestStarted()
+		}
+
 		// chi's wrapper rather than a local one: it preserves Flush and Hijack
 		// through the chain, which a bare struct embedding ResponseWriter would
 		// silently drop.
 		rec := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 
 		defer func() {
+			status := rec.Status()
+			if upgrade && status == 0 {
+				// Hijacked: it became a socket. Nothing to record.
+				return
+			}
 			// A handler that returns without ever writing a header has served
 			// a 200, which is what net/http will send.
-			status := rec.Status()
 			if status == 0 {
 				status = http.StatusOK
 			}
 			// RoutePattern is only populated once routing has happened, which
 			// is why this is read here and not before next.
-			done(r.Method, chi.RouteContext(r.Context()).RoutePattern(), status, time.Since(start))
+			route := chi.RouteContext(r.Context()).RoutePattern()
+			if done != nil {
+				done(r.Method, route, status, time.Since(start))
+				return
+			}
+			// A failed upgrade, which never took the gauge.
+			s.metrics.ObserveRequest(r.Method, route, status, time.Since(start))
 		}()
 
 		next.ServeHTTP(rec, r)

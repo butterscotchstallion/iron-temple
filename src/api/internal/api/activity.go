@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"gitea.homelab/gitadmin/iron-temple/api/internal/activity"
+	"gitea.homelab/gitadmin/iron-temple/api/internal/live"
 	"gitea.homelab/gitadmin/iron-temple/api/internal/store"
 )
 
@@ -425,10 +426,15 @@ func (s *Server) backfillActivity(ctx context.Context, lifters, weeks int) (acti
 		}
 	}
 
-	reactions, comments, err := s.generateRecognition(ctx, s.q, people, time.Time{}, rng)
+	// The manual backfill writes through s.q, so every statement has already
+	// committed by the time this returns — there is no transaction to wait for
+	// and publishing here is publishing after the fact.
+	events := s.newLiveEvents()
+	reactions, comments, err := s.generateRecognition(ctx, s.q, people, time.Time{}, rng, events)
 	if err != nil {
 		return summary, err
 	}
+	events.publish()
 	summary.Reactions = reactions
 	summary.Comments = comments
 	return summary, nil
@@ -548,12 +554,19 @@ func (s *Server) ensureGeneratedAccount(
 	// Seeding a roster of four therefore puts four 'joined' rows in the owner's
 	// panel, one per persona, which is what actually happened. The teardown
 	// takes them back out by cascade when it deletes the accounts.
-	if err := qtx.CreateJoinNotifications(ctx, user.ID); err != nil {
+	told, err := qtx.CreateJoinNotifications(ctx, user.ID)
+	if err != nil {
 		return 0, false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return 0, false, err
 	}
+	// After the commit, never deferred — see liveEvents. A generated lifter
+	// turning up is a real thing on the install and the panel should say so
+	// without waiting for the next poll.
+	events := s.newLiveEvents()
+	events.notify(told)
+	events.publish()
 	return user.ID, true, nil
 }
 
@@ -733,12 +746,23 @@ func (s *Server) generateSessionTx(
 // them can draw at most that many rounds however long the catch-up. Zero means no
 // bound, which is what the manual backfill passes — it generates its own history in
 // one pass and there is nothing older to pile onto.
+// events collects who to push to, and is published by the CALLER after the
+// transaction this runs inside has committed — this function does not own that
+// transaction and so must not announce anything itself. Nil is accepted so a
+// caller with nothing to publish to does not have to invent one.
+//
+// Only notification events are collected here, never session ones. A backfill
+// writes history: nobody has a recap open on a session invented three seconds
+// ago, and the dedupe on liveEvents.users is what keeps a day's worth of
+// generated applause from becoming a burst of frames that evicts every
+// connected client.
 func (s *Server) generateRecognition(
 	ctx context.Context,
 	q *store.Queries,
 	people []simulatedLifter,
 	notBefore time.Time,
 	rng *rand.Rand,
+	events *liveEvents,
 ) (reactions, comments int, err error) {
 	emoji := allowedReactionList()
 
@@ -794,12 +818,16 @@ func (s *Server) generateRecognition(
 				// puts anything in a real lifter's panel on an install nobody
 				// else uses — see notifications.go.
 				if added > 0 {
-					if err := q.CreateReactionNotification(ctx, store.CreateReactionNotificationParams{
+					told, err := q.CreateReactionNotification(ctx, store.CreateReactionNotificationParams{
 						ActorID:   person.userID,
 						SessionID: row.ID,
 						Emoji:     chosen,
-					}); err != nil {
+					})
+					if err != nil {
 						return reactions, comments, err
+					}
+					if events != nil {
+						events.notify(told)
 					}
 				}
 				reactions++
@@ -827,12 +855,16 @@ func (s *Server) generateRecognition(
 				// on, and anybody else already talking on the session hears a
 				// reply — including, on a busy generated session, other
 				// personas.
-				if err := q.CreateCommentNotifications(ctx, store.CreateCommentNotificationsParams{
+				told, err := q.CreateCommentNotifications(ctx, store.CreateCommentNotificationsParams{
 					ActorID:   person.userID,
 					SessionID: row.ID,
 					CommentID: posted.ID,
-				}); err != nil {
+				})
+				if err != nil {
 					return reactions, comments, err
+				}
+				if events != nil {
+					events.notify(told)
 				}
 				commented[row.ID] = true
 				comments++
@@ -964,6 +996,12 @@ func (s *Server) generateRecognitionOnce(
 	// into the "Judi reacted to a session" line it shows the owner.
 	var reacted, commented int
 
+	// The live loop acts on ONE session a tick, slowly, so unlike the bulk
+	// backfill it does collect session events: a lifter may well have that
+	// recap open while a persona applauds it, which is the demo this loop
+	// exists to produce.
+	events := s.newLiveEvents()
+
 	if person.persona.Reacts(rng) {
 		// One draw from the rng, reused by the notification — see the same
 		// local in generateRecognition.
@@ -977,13 +1015,16 @@ func (s *Server) generateRecognitionOnce(
 			return 0, 0, err
 		}
 		if added > 0 {
-			if err := q.CreateReactionNotification(ctx, store.CreateReactionNotificationParams{
+			told, err := q.CreateReactionNotification(ctx, store.CreateReactionNotificationParams{
 				ActorID:   person.userID,
 				SessionID: row.ID,
 				Emoji:     chosen,
-			}); err != nil {
+			})
+			if err != nil {
 				return 0, 0, err
 			}
+			events.notify(told)
+			events.session(live.KindReaction, row.ID)
 		}
 		reacted++
 	}
@@ -996,13 +1037,16 @@ func (s *Server) generateRecognitionOnce(
 			if err != nil {
 				return 0, 0, err
 			}
-			if err := q.CreateCommentNotifications(ctx, store.CreateCommentNotificationsParams{
+			told, err := q.CreateCommentNotifications(ctx, store.CreateCommentNotificationsParams{
 				ActorID:   person.userID,
 				SessionID: row.ID,
 				CommentID: posted.ID,
-			}); err != nil {
+			})
+			if err != nil {
 				return 0, 0, err
 			}
+			events.notify(told)
+			events.session(live.KindComment, row.ID)
 			commented++
 		}
 	}
@@ -1010,6 +1054,8 @@ func (s *Server) generateRecognitionOnce(
 	if err := tx.Commit(ctx); err != nil {
 		return 0, 0, err
 	}
+	// After the commit, never deferred — see liveEvents.
+	events.publish()
 	return reacted, commented, nil
 }
 
@@ -1135,7 +1181,8 @@ func (s *Server) generateActivityForDay(ctx context.Context, day time.Time, lift
 		return
 	}
 
-	summary, err := s.generateOneDay(ctx, qtx, day, people, lifters)
+	events := s.newLiveEvents()
+	summary, err := s.generateOneDay(ctx, qtx, day, people, lifters, events)
 	if err != nil {
 		log.Printf("activity scheduler: generate %s: %v", stamp, err)
 		return
@@ -1153,7 +1200,12 @@ func (s *Server) generateActivityForDay(ctx context.Context, day time.Time, lift
 
 	if err := tx.Commit(ctx); err != nil {
 		log.Printf("activity scheduler: commit %s: %v", stamp, err)
+		return
 	}
+	// After the commit, never deferred — see liveEvents. A day generated
+	// overnight lands in a panel that is open in the morning without the badge
+	// waiting out a poll.
+	events.publish()
 }
 
 // generateOneDay is a backfill narrowed to a single date, writing through the
@@ -1168,12 +1220,16 @@ func (s *Server) generateActivityForDay(ctx context.Context, day time.Time, lift
 // far more often than they lift, so a day whose only activity is two reactions is a
 // realistic day rather than an empty one. It is bounded to a short window of recent
 // sessions — see recognitionWindow.
+// events is filled but not published: this runs inside the caller's
+// transaction, and whoever owns that transaction publishes after committing it.
+// Nil is fine — the manual backfill path builds its own.
 func (s *Server) generateOneDay(
 	ctx context.Context,
 	q *store.Queries,
 	day time.Time,
 	people []simulatedLifter,
 	lifters int,
+	events *liveEvents,
 ) (activitySummaryDTO, error) {
 	var summary activitySummaryDTO
 
@@ -1201,7 +1257,7 @@ func (s *Server) generateOneDay(
 	}
 
 	reactions, comments, err := s.generateRecognition(
-		ctx, q, people, day.Add(-recognitionWindow), rng)
+		ctx, q, people, day.Add(-recognitionWindow), rng, events)
 	if err != nil {
 		return summary, err
 	}

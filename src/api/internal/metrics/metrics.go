@@ -71,6 +71,16 @@ type PoolStats struct {
 	Max      int32
 }
 
+// LiveStats is what the WebSocket hub reports. Declared here rather than taking
+// the hub's type for the reason PoolStats is: this package stays free of
+// dependencies on the rest of the app, and the server adapts one to the other
+// where it registers the source.
+type LiveStats struct {
+	Connections int
+	Sent        uint64
+	Dropped     uint64
+}
+
 // requestKey identifies one series of the request counter.
 type requestKey struct {
 	method string
@@ -124,6 +134,15 @@ type Registry struct {
 	// database to render a page of metrics.
 	poolSource func() PoolStats
 
+	// liveSource is the WebSocket hub, read at scrape time like the pool above.
+	//
+	// A long-lived connection cannot be reported as a request: it would sit in
+	// the in-flight gauge all day and put an hours-long sample into a latency
+	// histogram. The request middleware therefore skips an upgraded socket
+	// entirely (see observe in internal/api), and these are what stand in for
+	// it.
+	liveSource func() LiveStats
+
 	version     string
 	environment string
 	startedAt   time.Time
@@ -150,6 +169,15 @@ func (r *Registry) SetPoolSource(fn func() PoolStats) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.poolSource = fn
+}
+
+// SetLiveSource registers where WebSocket numbers come from. Absent rather than
+// zero when unset, following SetPoolSource: no hub at all and a hub with no
+// connections are different claims.
+func (r *Registry) SetLiveSource(fn func() LiveStats) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.liveSource = fn
 }
 
 // RequestStarted marks a request as in flight. The returned function marks it
@@ -246,6 +274,7 @@ func (r *Registry) Render(w io.Writer) {
 	}
 	inFlight := r.inFlight
 	poolSource := r.poolSource
+	liveSource := r.liveSource
 	version, environment, startedAt := r.version, r.environment, r.startedAt
 	r.mu.Unlock()
 
@@ -289,6 +318,22 @@ func (r *Registry) Render(w io.Writer) {
 
 		writeFamily(&b, "db_pool_max_connections", "Upper bound on connections the pool will open.", "gauge")
 		fmt.Fprintf(&b, "%sdb_pool_max_connections %d\n", namespace, stats.Max)
+	}
+
+	if liveSource != nil {
+		stats := liveSource()
+		writeFamily(&b, "live_connections", "Open WebSocket connections.", "gauge")
+		fmt.Fprintf(&b, "%slive_connections %d\n", namespace, stats.Connections)
+
+		writeFamily(&b, "live_events_sent_total", "Frames handed to a live connection.", "counter")
+		fmt.Fprintf(&b, "%slive_events_sent_total %d\n", namespace, stats.Sent)
+
+		// A nonzero rate here is the alert that the hub's backpressure policy is
+		// firing: a client fell far enough behind to be disconnected. One or two
+		// is a flaky network; a steady rate means something is wrong.
+		writeFamily(&b, "live_connections_dropped_total",
+			"Connections evicted for falling too far behind.", "counter")
+		fmt.Fprintf(&b, "%slive_connections_dropped_total %d\n", namespace, stats.Dropped)
 	}
 
 	var mem runtime.MemStats
