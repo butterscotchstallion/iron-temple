@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen } from "@testing-library/svelte";
+import { render, screen, fireEvent } from "@testing-library/svelte";
 import { tick } from "svelte";
 import StreakCard from "./StreakCard.svelte";
 import { combinedHeat, heatColor, streakHeat } from "./streakHeat";
@@ -148,6 +148,22 @@ describe("StreakCard", () => {
     expect(flames(container)).not.toBeNull();
 
     vi.unstubAllGlobals();
+  });
+
+  it("explains what counts when the help affordance is opened", async () => {
+    render(StreakCard, { streak: 6 });
+
+    // Nothing is said until asked — the card itself stays a reward, not a manual.
+    expect(screen.queryByText(/Sessions, not days/)).toBeNull();
+
+    // Found by its accessible name: an icon-only button with no label is the
+    // failure mode this affordance is most likely to ship with.
+    await fireEvent.click(screen.getByRole("button", { name: /what counts toward a streak/i }));
+
+    // The two misreadings the copy exists to head off: that it counts days, and
+    // that training off the program's schedule breaks it.
+    expect(await screen.findByText(/Sessions, not days/)).toBeTruthy();
+    expect(screen.getByText(/schedule doesn't come into it/)).toBeTruthy();
   });
 
   it("hides the decoration from assistive tech", () => {

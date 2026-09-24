@@ -7,7 +7,9 @@
   // somebody's first workout back reads as mockery — so the caller does not have
   // to guard.
 
+  import * as AlertDialog from "$lib/components/ui/alert-dialog";
   import { Card } from "$lib/components/ui/card";
+  import CircleQuestionMark from "@lucide/svelte/icons/circle-question-mark";
   import Flame from "@lucide/svelte/icons/flame";
   import { prefersReducedMotion } from "./reducedMotion";
   import { STREAK_DISPLAY_THRESHOLD } from "./streak";
@@ -93,55 +95,91 @@
 </script>
 
 {#if streak >= STREAK_DISPLAY_THRESHOLD}
-  <Card
-    class="relative flex flex-col justify-center p-6 text-center"
-    style="--heat-color: {heatColor(h)}; --glow: {round(heat.glow)}; --blaze: {round(
-      heat.blaze,
-    )}; background-color: {wash}; box-shadow: {shadow};"
-    data-testid="streak-card"
-  >
-    {#if heat.ablaze}
-      <!-- Painted before the copy so the copy stays on top: positioned elements
-           paint in DOM order, and the text below is `relative` for that reason.
-           Clipped to the rounded corners by Card's own overflow-hidden. -->
-      <div
-        class="pointer-events-none absolute inset-x-0 bottom-0"
-        style="height: {flameHeight}%; opacity: {flameOpacity};"
-        aria-hidden="true"
-        data-testid="streak-flames"
-      >
+  <AlertDialog.Root>
+    <Card
+      class="relative flex flex-col justify-center p-6 text-center"
+      style="--heat-color: {heatColor(h)}; --glow: {round(heat.glow)}; --blaze: {round(
+        heat.blaze,
+      )}; background-color: {wash}; box-shadow: {shadow};"
+      data-testid="streak-card"
+    >
+      {#if heat.ablaze}
+        <!-- Painted before the copy so the copy stays on top: positioned elements
+             paint in DOM order, and the text below is `relative` for that reason.
+             Clipped to the rounded corners by Card's own overflow-hidden. -->
         <div
-          class="absolute inset-0 origin-bottom {still ? '' : 'animate-flame-lick'}"
-          style="background: {bed}; animation-duration: {duration(3.7)};"
-        ></div>
-        <div
-          class="absolute inset-0 origin-bottom {still ? '' : 'animate-flame-flicker'}"
-          style="background: {tongues}; animation-duration: {duration(2.3)};"
-        ></div>
-      </div>
-    {/if}
-
-    <div class="relative">
-      <p
-        class="flex items-center justify-center gap-2 text-2xl font-black"
-        style="color: var(--heat-color); text-shadow: 0 0 {round(
-          8 + 22 * h,
-        )}px {tint(20 + 45 * h)};"
-      >
-        <Flame
-          class="size-6 {heat.ablaze
-            ? still
-              ? 'scale-110'
-              : 'animate-ember-pulse'
-            : ''}"
-          style={heat.ablaze && !still ? `animation-duration: ${duration(2.9)};` : ""}
+          class="pointer-events-none absolute inset-x-0 bottom-0"
+          style="height: {flameHeight}%; opacity: {flameOpacity};"
           aria-hidden="true"
-        />
-        {streak}-session streak
-      </p>
-      <p class="mt-0.5 text-xs uppercase tracking-[0.3em] text-muted-foreground">
-        Finish every set to keep it alive
-      </p>
-    </div>
-  </Card>
+          data-testid="streak-flames"
+        >
+          <div
+            class="absolute inset-0 origin-bottom {still ? '' : 'animate-flame-lick'}"
+            style="background: {bed}; animation-duration: {duration(3.7)};"
+          ></div>
+          <div
+            class="absolute inset-0 origin-bottom {still ? '' : 'animate-flame-flicker'}"
+            style="background: {tongues}; animation-duration: {duration(2.3)};"
+          ></div>
+        </div>
+      {/if}
+
+      <!-- After the flames in DOM order so it paints over them, and absolutely
+           positioned so it sits in the card's own padding rather than pushing the
+           centred count off centre. Deliberately quiet: the streak is the reward,
+           this is a footnote, and it only brightens when you go looking for it. -->
+      <AlertDialog.Trigger
+        class="absolute right-2 top-2 rounded-full p-1.5 text-muted-foreground/60
+               transition-colors hover:text-foreground focus-visible:outline-none
+               focus-visible:ring-2 focus-visible:ring-ring"
+        aria-label="What counts toward a streak?"
+      >
+        <CircleQuestionMark class="size-4" aria-hidden="true" />
+      </AlertDialog.Trigger>
+
+      <div class="relative">
+        <p
+          class="flex items-center justify-center gap-2 text-2xl font-black"
+          style="color: var(--heat-color); text-shadow: 0 0 {round(
+            8 + 22 * h,
+          )}px {tint(20 + 45 * h)};"
+        >
+          <Flame
+            class="size-6 {heat.ablaze
+              ? still
+                ? 'scale-110'
+                : 'animate-ember-pulse'
+              : ''}"
+            style={heat.ablaze && !still ? `animation-duration: ${duration(2.9)};` : ""}
+            aria-hidden="true"
+          />
+          {streak}-session streak
+        </p>
+        <p class="mt-0.5 text-xs uppercase tracking-[0.3em] text-muted-foreground">
+          Finish every set to keep it alive
+        </p>
+      </div>
+    </Card>
+
+    <!-- The two things a lifter guesses wrong: that a streak is a run of days,
+         and that training off the program's schedule breaks it. Neither is true
+         of this count, so say both rather than restating the subtitle. -->
+    <AlertDialog.Content class="sm:max-w-md">
+      <AlertDialog.Header>
+        <AlertDialog.Title>What counts toward a streak</AlertDialog.Title>
+        <AlertDialog.Description>
+          Sessions, not days. Every workout where you complete each prescribed set
+          adds one, and the run ends the first time a set comes up short.
+          <br /><br />
+          The schedule doesn't come into it. Training on a different day than the
+          program lays out, or fitting a week's workouts in whenever you can, keeps
+          the streak going all the same. Racked counts the calendar side separately,
+          as consecutive weeks with at least one session.
+        </AlertDialog.Description>
+      </AlertDialog.Header>
+      <AlertDialog.Footer>
+        <AlertDialog.Cancel>Got it</AlertDialog.Cancel>
+      </AlertDialog.Footer>
+    </AlertDialog.Content>
+  </AlertDialog.Root>
 {/if}
