@@ -48,6 +48,15 @@ pnpm dev            # http://localhost:5173 (proxies /api -> localhost:8080)
   `changelog.sh --release <last tag>`, so you see what a production build of that
   commit shows instead of an empty panel. To check what the dev server is actually
   serving: `curl -s 'http://localhost:5173/@id/__x00__virtual:iron-temple/changelog'`.
+- `src/lib/ChangelogList.svelte` — the list itself, shared by that panel and the
+  update prompt so one set of notes can't render two ways.
+- `src/lib/version.svelte.ts` — polls `/health` to notice a release landing under
+  an open tab, and fetches `/changelog.json` to say what's in it. That file is the
+  same notes again, emitted into the build output by `changelogVirtualModule()`:
+  the inlined copy describes the build you're *running*, so the build you're being
+  *offered* has to publish its own. Nothing is shown unless the file names the
+  release on offer, which is what keeps a mid-rollout answer from captioning the
+  previous release's notes with the new version. `curl -s localhost:5173/changelog.json`.
 - `src/app.css` — Tailwind import + synthwave `@theme` palette.
 
 ## Testing
@@ -63,7 +72,8 @@ pnpm dev            # http://localhost:5173 (proxies /api -> localhost:8080)
   The API is mocked with `page.route`, so no backend or DB is needed. The one
   exception is the header's changelog, which is compiled into the bundle rather
   than fetched — `e2e/build-with-changelog.sh` plants a fixture for the build and
-  removes it afterwards.
+  removes it afterwards. The update prompt's notes are not an exception: they are
+  fetched at runtime, so `page.route("**/changelog.json", …)` mocks them per test.
 
 ## Notes
 - The generated client is git-ignored and produced from `../api/openapi.yaml`;

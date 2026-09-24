@@ -11,6 +11,9 @@ import { getHealth } from "./api";
 // so the API reporting a new version means new UI assets are being served too.
 // Nothing here is a build-time constant — see startPolling() for why.
 
+/** Release notes for one build, in the shape changelog.json carries them. */
+export type ReleaseNotes = { version: string; entries: string[] };
+
 export const version = $state<{
   /**
    * The version this page load is running against — the first answer /health
@@ -23,11 +26,17 @@ export const version = $state<{
   environment: string;
   /** A version the lifter declined; it must not ask about that one again. */
   dismissed: string;
+  /**
+   * What shipped in the build `latest` names, fetched from the deployed bundle.
+   * Its own `version` field is what makes it safe to show — see loadNotes().
+   */
+  notes: ReleaseNotes;
 }>({
   running: "",
   latest: "",
   environment: "",
   dismissed: "",
+  notes: { version: "", entries: [] },
 });
 
 /** Ask again this often while the tab is in the foreground. */
@@ -39,7 +48,15 @@ const POLL_MS = 5 * 60 * 1000;
  */
 const REFOCUS_MIN_GAP_MS = 60 * 1000;
 
+/**
+ * Where a deployed bundle publishes its own release notes. Emitted into the
+ * build output by changelogVirtualModule() in vite.config.ts, and served with
+ * `Cache-Control: no-cache` (nginx.conf) so this can't come back stale.
+ */
+const CHANGELOG_URL = `${import.meta.env.BASE_URL}changelog.json`;
+
 let inFlight = false;
+let notesInFlight = false;
 let lastPollAt = 0;
 
 /**
@@ -55,10 +72,14 @@ function isDevBuild(v: string): boolean {
 }
 
 /**
- * Whether to offer the update. Reads reactive state, so calling it from a
- * template or a `$derived` re-evaluates when a poll lands.
+ * Whether `candidate` is a release worth offering to whoever is on `running`.
  *
- * Both versions must be known: an unanswered /health leaves `latest` empty, and
+ * Takes the version as an argument rather than reading `latest`, because poll()
+ * has to ask this about an answer it has not published yet — the notes fetch is
+ * triggered from there, and firing it for a version nobody will be offered means
+ * a request per `air` rebuild in development.
+ *
+ * `running` must be known: an unanswered /health leaves it empty, and
  * "" !== "v1.2.3" would otherwise read as a new release every time the API is
  * briefly unreachable.
  *
@@ -71,15 +92,26 @@ function isDevBuild(v: string): boolean {
  * nothing local is deployed. A release never reports "dev", so this cannot
  * suppress a real one.
  */
-export function hasUpdate(): boolean {
+function isOfferable(candidate: string): boolean {
   return (
     version.running !== "" &&
-    version.latest !== "" &&
     !isDevBuild(version.running) &&
-    !isDevBuild(version.latest) &&
-    version.latest !== version.running &&
-    version.latest !== version.dismissed
+    !isDevBuild(candidate) &&
+    candidate !== version.running &&
+    candidate !== version.dismissed
   );
+}
+
+/**
+ * Whether to offer the update. Reads reactive state, so calling it from a
+ * template or a `$derived` re-evaluates when a poll lands.
+ *
+ * The empty check is the other half of isOfferable()'s: an unanswered /health
+ * leaves `latest` empty too, and poll() rejects an empty version before it ever
+ * reaches the store.
+ */
+export function hasUpdate(): boolean {
+  return version.latest !== "" && isOfferable(version.latest);
 }
 
 /**
@@ -90,6 +122,74 @@ export function hasUpdate(): boolean {
  */
 export function dismissUpdate(): void {
   version.dismissed = version.latest;
+}
+
+/**
+ * Fetch what shipped in the build being offered.
+ *
+ * The notes compiled into THIS bundle describe the build that is running, so the
+ * new one's have to come off the wire. The release pipeline builds and repins the
+ * API and UI images at the same tag (release.yml), so by the time /health reports
+ * a new version the UI pods are serving the new changelog.json.
+ *
+ * `version` INSIDE the file is the whole of the safety here. Between the API
+ * rolling and the UI pods finishing — or from behind a cache that kept a copy —
+ * this answers with the previous release's notes, and listing those under "new
+ * version available" is worse than listing nothing. Nothing is stored unless the
+ * file names the release on offer.
+ *
+ * Skipping once we hold notes for the target is also what makes a rejected answer
+ * retry: a mismatch stores nothing, so the next poll asks again and picks them up
+ * when the pods finish rolling. They then land reactively into a dialog that is
+ * already open. An attempt-once flag would instead lose the notes permanently for
+ * exactly the release whose rollout race this is guarding against.
+ *
+ * Failures are swallowed for the reason poll()'s are, and one more: these notes
+ * hang off a dialog that has to appear either way.
+ */
+async function loadNotes(target: string): Promise<void> {
+  if (notesInFlight || version.notes.version === target) return;
+  notesInFlight = true;
+  try {
+    const response = await fetch(CHANGELOG_URL, { cache: "no-cache" });
+    if (!response.ok) return;
+
+    // Parsed defensively, the same way vite.config.ts reads the JSON it writes.
+    // `vite preview` and any pod predating this file fall back to index.html,
+    // which is a 200 of HTML that .json() throws on.
+    const parsed: unknown = await response.json();
+    if (!parsed || typeof parsed !== "object") return;
+    const { version: released, entries } = parsed as Partial<ReleaseNotes>;
+    if (typeof released !== "string" || !Array.isArray(entries)) return;
+
+    // Against `latest` rather than the captured `target`: another release may
+    // have landed while this was in the air, and a file naming THAT one is
+    // current rather than stale.
+    if (released !== version.latest) return;
+    version.notes = {
+      version: released,
+      entries: entries.filter((entry) => typeof entry === "string"),
+    };
+  } catch {
+    // Offline, a pod mid-roll, or a 200 of index.html from an SPA fallback.
+  } finally {
+    notesInFlight = false;
+  }
+}
+
+/**
+ * The notes to show beside the offer, or none. Reads reactive state, so a
+ * `$derived` re-runs when a late answer lands under an open dialog.
+ *
+ * Empty unless they name the exact release on offer. That is a different job
+ * from the check in loadNotes(): that one decides what is worth keeping, this
+ * one decides what is safe to show. A rejected fetch leaves the PREVIOUS
+ * release's notes in the store — decline v2 and then have v3 land while the old
+ * pods are still up, and without this the dialog would caption v2's notes with
+ * v3's version.
+ */
+export function updateNotes(): string[] {
+  return version.notes.version === version.latest ? version.notes.entries : [];
 }
 
 /**
@@ -112,6 +212,14 @@ export async function poll(): Promise<void> {
     // First answer of this page load is the baseline: whatever the API says
     // now is what this bundle was served alongside.
     if (version.running === "") version.running = reported;
+
+    // Deliberately not awaited. A changelog.json that never answers has to cost
+    // nothing but the notes: awaiting it here would hold `latest` back, and with
+    // it hasUpdate(), so a hung request for the decoration would silently
+    // suppress the prompt itself. Capping it with a timer is no escape either —
+    // the e2e suite installs a fake clock (see deferred.svelte.ts), under which
+    // a setTimeout never fires.
+    if (isOfferable(reported)) void loadNotes(reported);
   } catch {
     // Offline, or the API is restarting mid-deploy. Try again next tick.
   } finally {

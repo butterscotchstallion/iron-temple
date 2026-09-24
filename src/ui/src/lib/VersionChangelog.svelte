@@ -1,6 +1,7 @@
 <script lang="ts">
   import { LinkPreview } from "bits-ui";
   import changelog from "virtual:iron-temple/changelog";
+  import ChangelogList from "./ChangelogList.svelte";
 
   // The header's version label, and — when we have release notes for it — a panel
   // listing what shipped in it. Before this the version was inert text: you could
@@ -85,14 +86,7 @@
         <h2 class="text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-primary">
           What's new in {notes.version}
         </h2>
-        <ul class="mt-3 space-y-2 text-sm text-ink/80">
-          {#each notes.entries as entry}
-            <li class="flex gap-2">
-              <span class="select-none text-primary/70" aria-hidden="true">&rsaquo;</span>
-              <span>{entry}</span>
-            </li>
-          {/each}
-        </ul>
+        <ChangelogList entries={notes.entries} class="mt-3" />
       </LinkPreview.Content>
     </LinkPreview.Portal>
   </LinkPreview.Root>
