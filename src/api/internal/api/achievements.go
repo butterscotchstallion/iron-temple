@@ -244,14 +244,41 @@ func (s *Server) refreshCrowns(ctx context.Context) {
 		}
 
 		leaders := make([]int32, 0, len(b.Entries))
-		for _, e := range b.Entries {
-			// Entries are ranked ascending, so the first rank past first ends the
-			// leaders. Compared rather than assumed to be index 0, because ties
-			// mean there can be several and because a board can be empty.
-			if e.Rank != crownRank {
-				break
+		// A BOARD LED AT ZERO AWARDS NOTHING, and this guard is the whole reason
+		// that is true.
+		//
+		// board() lists a lifter whenever the metric is DEFINED for them, which for
+		// sessions-a-week, streak and volume is always — somebody who trained
+		// nothing has a volume of zero and belongs on the board saying so. Ties
+		// share rank 1. Put together, those two correct rules produce an absurd
+		// third: in a month nobody has trained, EVERY account is joint-first on
+		// three boards, so everybody is crowned for doing nothing and each new
+		// reign fans a notification out to every other account — M accounts giving
+		// 3·M·(M−1) rows on the first pass after a deploy.
+		//
+		// Refusing to crown a leader at zero fixes both halves at once. "Top of
+		// Volume — 0 lb" was never a thing worth wearing, and a crown that means
+		// "nobody has trained" is worse than no crown: the whole point of the mark
+		// is that it says somebody did more than anyone else.
+		//
+		// Checked on the first entry because every rank-1 entry shares its value by
+		// definition — rank is assigned BY equal value — so one comparison settles
+		// the board. Leaving `leaders` empty then closes any reign the board was
+		// carrying, which is the correct reading of "nobody leads this".
+		//
+		// Applied to all five boards rather than to the three that can sit at zero:
+		// a 0% attendance or a 0% best improvement is exactly as empty a claim, and
+		// one rule is easier to keep true than three exceptions.
+		if len(b.Entries) > 0 && b.Entries[0].Value > 0 {
+			for _, e := range b.Entries {
+				// Entries are ranked ascending, so the first rank past first ends the
+				// leaders. Compared rather than assumed to be index 0, because ties
+				// mean there can be several.
+				if e.Rank != crownRank {
+					break
+				}
+				leaders = append(leaders, e.Lifter.ID)
 			}
-			leaders = append(leaders, e.Lifter.ID)
 		}
 
 		// Closing before opening is the order things happen in, not a correctness

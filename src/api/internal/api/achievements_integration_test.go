@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/gavv/httpexpect/v2"
 )
@@ -67,23 +68,48 @@ func holdersByMetric(e *httpexpect.Expect) map[string][]int {
 	return out
 }
 
-// leadersByMetric reads the month's boards into metric → sorted rank-1 ids.
+// leadersByMetric reads the month's boards into metric → sorted ids of the
+// lifters who should be crowned.
+//
+// Which is NOT simply the rank-1 rows: a board whose leader is at zero awards
+// nothing, because every idle account ties at zero on three of the five boards and
+// a crown for training nothing is not a crown. The rule is duplicated here rather
+// than read off /achievements, since /achievements is the thing under test.
 func leadersByMetric(e *httpexpect.Expect) map[string][]int {
 	out := map[string][]int{}
 	for _, b := range boards(e, "period", "month").Iter() {
 		obj := b.Object()
 		ids := []int{}
-		for _, entry := range obj.Value("entries").Array().Iter() {
-			row := entry.Object()
-			if int(row.Value("rank").Number().Raw()) != 1 {
-				break
+		entries := obj.Value("entries").Array()
+		if entries.Length().Raw() > 0 &&
+			entries.Value(0).Object().Value("value").Number().Raw() > 0 {
+			for _, entry := range entries.Iter() {
+				row := entry.Object()
+				if int(row.Value("rank").Number().Raw()) != 1 {
+					break
+				}
+				ids = append(ids, int(row.Value("lifter").Object().Value("id").Number().Raw()))
 			}
-			ids = append(ids, int(row.Value("lifter").Object().Value("id").Number().Raw()))
 		}
 		sort.Ints(ids)
 		out[obj.Value("metric").String().Raw()] = ids
 	}
 	return out
+}
+
+// trainOnce logs one heavy set as this lifter, so at least one board has a leader
+// above zero.
+//
+// Needed because of the zero rule above: on an install where nobody has trained
+// this month every board is led at zero, nothing is crowned, and every assertion
+// about a holder would pass by testing nothing.
+func trainOnce(t *testing.T, e *httpexpect.Expect) {
+	t.Helper()
+	_, dayID := firstProgramAndDay(e)
+	session := startSession(t, e, dayID)
+	sessionID := int(session.Value("id").Number().Raw())
+	setID := int(session.Value("sets").Array().Value(0).Object().Value("id").Number().Raw())
+	logSet(e, sessionID, setID, 5, true)
 }
 
 // achievementFor returns one lifter's entry for a slug, or nil if they have none.
@@ -98,6 +124,38 @@ func achievementFor(e *httpexpect.Expect, lifterID int32, slug string) *httpexpe
 		}
 	}
 	return nil
+}
+
+// openReigns is every open reign as "slug/user@held_from" strings, sorted.
+//
+// Read from the table rather than through the API because held_from is the field
+// that matters here and no endpoint exposes it for a reign in progress — and
+// because comparing two whole snapshots is what says a pass changed nothing,
+// which no per-lifter assertion can.
+func openReigns(t *testing.T) []string {
+	t.Helper()
+	rows, err := testPool.Query(context.Background(),
+		`SELECT achievement_slug, user_id, held_from FROM lifter_achievements
+		 WHERE held_until IS NULL ORDER BY achievement_slug, user_id`)
+	if err != nil {
+		t.Fatalf("reading open reigns: %v", err)
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var slug string
+		var user int32
+		var from time.Time
+		if err := rows.Scan(&slug, &user, &from); err != nil {
+			t.Fatalf("scanning a reign: %v", err)
+		}
+		out = append(out, fmt.Sprintf("%s/%d@%s", slug, user, from.UTC().Format(time.RFC3339Nano)))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterating reigns: %v", err)
+	}
+	return out
 }
 
 // openReign reports whether this lifter currently holds this achievement,
@@ -187,9 +245,12 @@ func TestEveryCrownIsListedEvenWhenNobodyHoldsIt(t *testing.T) {
 // a board with three lifters level on rank 1 has three holders, and the sets are
 // compared rather than the counts.
 func TestCrownsGoToExactlyTheLiftersLeadingEachBoard(t *testing.T) {
-	// Two accounts, so the install is not a leaderboard of one.
-	secondLifter(t, "crown-invariant-one")
+	// Two accounts, so the install is not a leaderboard of one, and one of them
+	// trains — otherwise every board is led at zero, nothing is crowned, and the
+	// comparison below holds trivially while testing nothing.
+	_, token := secondLifter(t, "crown-invariant-one")
 	secondLifter(t, "crown-invariant-two")
+	trainOnce(t, expectAs(t, token))
 
 	refreshCrowns(t)
 
@@ -197,6 +258,7 @@ func TestCrownsGoToExactlyTheLiftersLeadingEachBoard(t *testing.T) {
 	want := leadersByMetric(e)
 	got := holdersByMetric(e)
 
+	crowned := 0
 	for metric, leaders := range want {
 		holders, ok := got[metric]
 		if !ok {
@@ -206,6 +268,48 @@ func TestCrownsGoToExactlyTheLiftersLeadingEachBoard(t *testing.T) {
 		if fmt.Sprint(holders) != fmt.Sprint(leaders) {
 			t.Errorf("board %q: crowned %v, leaderboard says %v", metric, holders, leaders)
 		}
+		crowned += len(holders)
+	}
+	// The positive branch was actually reached. Without this the whole test passes
+	// on an install where every board is empty.
+	if crowned == 0 {
+		t.Fatal("nothing was crowned, so the agreement was never tested")
+	}
+}
+
+// A crown says somebody did more than anyone else, so leading at zero earns
+// nothing. Without this rule every idle account is joint-first on three of the
+// five boards — sessions-a-week, streak and volume list a lifter at zero rather
+// than omitting them — which would crown the whole install for training nothing
+// and fan a notification out to every account for each of them.
+func TestABoardLedAtZeroCrownsNobody(t *testing.T) {
+	secondLifter(t, "crown-zero-one")
+	secondLifter(t, "crown-zero-two")
+	refreshCrowns(t)
+
+	e := expect(t)
+	holders := holdersByMetric(e)
+
+	zeroBoards := 0
+	for _, b := range boards(e, "period", "month").Iter() {
+		obj := b.Object()
+		metric := obj.Value("metric").String().Raw()
+		entries := obj.Value("entries").Array()
+		if entries.Length().Raw() == 0 {
+			continue
+		}
+		if entries.Value(0).Object().Value("value").Number().Raw() > 0 {
+			continue
+		}
+		zeroBoards++
+		// The board lists lifters at rank 1 — that part is correct and stays — and
+		// none of them wears anything for it.
+		if got := holders[metric]; len(got) != 0 {
+			t.Errorf("board %q is led at zero but crowned %v", metric, got)
+		}
+	}
+	if zeroBoards == 0 {
+		t.Skip("every board on this install has a leader above zero")
 	}
 }
 
@@ -214,44 +318,27 @@ func TestCrownsGoToExactlyTheLiftersLeadingEachBoard(t *testing.T) {
 // restamping would turn a month on top into hundreds of reigns and make
 // timesHeld a measure of server uptime instead of of winning.
 func TestAPassLeavesARunningReignAlone(t *testing.T) {
-	id, token := secondLifter(t, "crown-reign-stable")
+	_, token := secondLifter(t, "crown-reign-stable")
+	// Somebody has to be above zero or the ledger stays empty and there is no
+	// reign to leave alone.
+	trainOnce(t, expectAs(t, token))
 	refreshCrowns(t)
 
-	e := expect(t)
-	// Whichever crown this account holds — a fresh lifter ties for first on the
-	// boards everybody sits at zero on, which is enough to have a reign at all.
-	slug := ""
-	for _, item := range e.GET("/achievements").Expect().Status(http.StatusOK).
-		JSON().Object().Value("items").Array().Iter() {
-		obj := item.Object()
-		for _, h := range obj.Value("holders").Array().Iter() {
-			if int32(h.Object().Value("id").Number().Raw()) == id {
-				slug = obj.Value("achievement").Object().Value("slug").String().Raw()
-			}
-		}
-		if slug != "" {
-			break
-		}
+	// Every open reign, read from the table rather than through a holder this test
+	// has to identify. Which lifter leads depends on what the rest of the suite has
+	// left behind; that a running reign is untouched does not.
+	before := openReigns(t)
+	if len(before) == 0 {
+		t.Fatal("no reigns were opened, so there is nothing to test")
 	}
-	if slug == "" {
-		t.Skip("this account leads no board on this install")
-	}
-
-	mine := expectAs(t, token)
-	before := achievementFor(mine, id, slug)
-	if before == nil {
-		t.Fatalf("holder has no %s entry on their own profile", slug)
-	}
-	before.Value("heldNow").Boolean().IsTrue()
-	before.Value("timesHeld").Number().IsEqual(1)
-	firstHeld := before.Value("lastHeldFrom").String().Raw()
 
 	// Again, with nothing about the standings changed.
 	testAPI.RefreshCrownsNow(context.Background())
 
-	after := achievementFor(mine, id, slug)
-	after.Value("timesHeld").Number().IsEqual(1)
-	after.Value("lastHeldFrom").String().IsEqual(firstHeld)
+	after := openReigns(t)
+	if fmt.Sprint(after) != fmt.Sprint(before) {
+		t.Errorf("a second pass rewrote the reigns:\n before %v\n after  %v", before, after)
+	}
 }
 
 // Losing a crown CLOSES the reign and keeps it. That is the whole reason the
@@ -345,7 +432,10 @@ func TestRetakingACrownCountsAsecondReign(t *testing.T) {
 // — and the right answer besides: the holder learns it from the crown on their
 // own name, and being told you did the thing you are looking at is noise.
 func TestTakingACrownTellsEverybodyButTheHolder(t *testing.T) {
-	secondLifter(t, "crown-announce")
+	_, token := secondLifter(t, "crown-announce")
+	// Somebody above zero, or the zero rule means no crown is taken and there is
+	// no announcement to assert on.
+	trainOnce(t, expectAs(t, token))
 	refreshCrowns(t)
 
 	ctx := context.Background()

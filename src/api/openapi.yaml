@@ -764,6 +764,13 @@ paths:
         nobody holds is a normal state on a new install, or on a board with no
         entries, so every catalogue entry is listed whether or not anybody has it.
 
+        **A board led at zero crowns nobody.** `/leaderboard` lists a lifter
+        whenever the metric is defined for them, so somebody who trained nothing
+        appears with a volume of zero — and if nobody has trained this month, every
+        account ties for first. A crown says somebody did more than anyone else, so
+        leading at nothing earns nothing. That is the one case where a lifter is
+        rank 1 on `/leaderboard` and has no crown for it, and it is deliberate.
+
         **The answer can be up to an hour stale, and `/leaderboard` cannot.** Who
         leads a board is the most expensive question in this API — a Racked report
         per lifter — so it is answered on a schedule and stored rather than
