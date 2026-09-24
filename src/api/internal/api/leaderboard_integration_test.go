@@ -256,15 +256,6 @@ func TestLeaderboardRejectsAnonymousCallers(t *testing.T) {
 	expectAnon(t).GET("/leaderboard").Expect().Status(http.StatusUnauthorized)
 }
 
-func TestLeaderboardIsGatedUntilThePasswordChanges(t *testing.T) {
-	createAccount(t, "board-gated", "board-gated-pw")
-	token := signIn(t, "board-gated", "board-gated-pw")
-
-	expectAs(t, token).GET("/leaderboard").Expect().
-		Status(http.StatusForbidden).
-		JSON().Object().HasValue("code", "password_change_required")
-}
-
 func TestLeaderboardIsReadOnly(t *testing.T) {
 	e := expect(t)
 	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {

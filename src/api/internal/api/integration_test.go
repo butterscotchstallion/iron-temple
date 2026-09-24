@@ -23,6 +23,7 @@ import (
 
 	appdb "gitea.homelab/gitadmin/iron-temple/api/db"
 	"gitea.homelab/gitadmin/iron-temple/api/internal/api"
+	"gitea.homelab/gitadmin/iron-temple/api/internal/auth"
 )
 
 // baseURL is the /api/v1 root of the test server, set up in TestMain. These
@@ -50,6 +51,22 @@ var primaryToken string
 const (
 	primaryUsername = "primary"
 	primaryPassword = "integration-test-pw"
+
+	// testHashIterations is the PBKDF2 work factor this suite runs the API at,
+	// installed on testAPI in TestMain.
+	//
+	// The shipped factor is 600k, chosen to be slow — about 150ms a hash on the
+	// CI runner. This suite creates and signs in as roughly fifty accounts, and
+	// a `secondLifter` costs four hashes (create, sign in, verify, re-hash), so
+	// it was spending ~2 of its ~2.5 minutes deriving keys. Not one of these
+	// tests is about hashing; they need a password to get past the door and
+	// nothing more. Dropping the factor here took the package from 142s to 29s.
+	//
+	// What this does NOT weaken: internal/auth's own tests leave Iterations
+	// zero and so still exercise the shipped 600k at full cost, and the stored
+	// form names its own factor, so the login and rehash paths under test here
+	// behave identically — they read `i=` out of the hash either way.
+	testHashIterations = 6_000
 )
 
 func TestMain(m *testing.M) {
@@ -78,6 +95,7 @@ func TestMain(m *testing.M) {
 
 	testPool = pool
 	testAPI = api.NewServer(pool, "", "")
+	testAPI.SetHasher(auth.PBKDF2Hasher{Iterations: testHashIterations})
 	srv := httptest.NewServer(testAPI.Router(""))
 	baseURL = srv.URL + "/api/v1"
 

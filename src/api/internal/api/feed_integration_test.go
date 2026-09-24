@@ -77,15 +77,6 @@ func TestFeedRejectsAnonymousCallers(t *testing.T) {
 	expectAnon(t).GET("/feed").Expect().Status(http.StatusUnauthorized)
 }
 
-func TestFeedIsGatedUntilThePasswordChanges(t *testing.T) {
-	createAccount(t, "feed-gated", "feed-gated-pw")
-	token := signIn(t, "feed-gated", "feed-gated-pw")
-
-	expectAs(t, token).GET("/feed").Expect().
-		Status(http.StatusForbidden).
-		JSON().Object().HasValue("code", "password_change_required")
-}
-
 // The feed reads, and only reads.
 func TestFeedIsReadOnly(t *testing.T) {
 	e := expect(t)

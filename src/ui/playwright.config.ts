@@ -23,6 +23,22 @@ const BASE_URL = `http://localhost:${PORT}`;
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
+  // One retry in CI, none locally.
+  //
+  // This is what makes `trace: "on-first-retry"` below mean anything: retries
+  // default to 0, so there was never a first retry, so no trace was ever
+  // recorded — the report uploaded by ui.yml's `if: failure()` step held a
+  // failure and nothing to debug it with. Either the trace setting or the
+  // retries had to move; retries are the cheaper of the two, because a retry
+  // only costs time on a run that has already failed.
+  //
+  // Locally it stays 0, so a flake in front of you is a failure you can see
+  // rather than one the second attempt hides.
+  retries: process.env.CI ? 1 : 0,
+  // `forbidOnly` in CI: a stray test.only() silently shrinks the suite to one
+  // test and still reports green. Failing the run is the only way that gets
+  // noticed before it is merged.
+  forbidOnly: !!process.env.CI,
   use: {
     baseURL: BASE_URL,
     trace: "on-first-retry",

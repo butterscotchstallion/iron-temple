@@ -36,11 +36,11 @@ describe("HeaderBar", () => {
     );
   });
 
-  it("omits the environment suffix when the API doesn't report one", () => {
-    version.environment = "";
-    render(HeaderBar);
-    expect(screen.getByTestId("version")).toHaveTextContent("iron-temple v1.2.3");
-  });
+  // How the label is assembled — the "-production" suffix and its absence — is
+  // VersionChangelog's rule, and VersionChangelog.test.ts asserts both halves of
+  // it against the component that owns it. The case above already shows the
+  // environment reaching the label from this side, so a second copy here only
+  // pins the same formatting in two places.
 
   // The label names the build you are looking at, not the newest one deployed —
   // that's the update prompt's job. Showing `latest` here would claim you were

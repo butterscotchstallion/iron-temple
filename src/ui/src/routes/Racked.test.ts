@@ -193,7 +193,10 @@ beforeEach(() => {
 });
 
 describe("Racked", () => {
-  it("renders the headline and its restatement in objects", async () => {
+  // Headline and sections in one render: both are "the full report painted
+  // everything it should", they assert on the same DOM, and the page is the
+  // most expensive thing this file mounts — see the note above the describe.
+  it("renders the headline and every populated section without touching a null", async () => {
     getRacked.mockResolvedValue({ status: 200, data: fullReport(), headers: new Headers() });
     render(Racked);
 
@@ -201,15 +204,8 @@ describe("Racked", () => {
     expect(screen.getByText("That's 3 school buses.")).toBeInTheDocument();
     expect(screen.getByText("+12% vs the previous month")).toBeInTheDocument();
     expect(screen.getByText("The Grinder")).toBeInTheDocument();
-  });
 
-  it("renders every populated section without touching a null", async () => {
-    getRacked.mockResolvedValue({ status: 200, data: fullReport(), headers: new Headers() });
-    render(Racked);
-
-    await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Most improved" })).toBeInTheDocument(),
-    );
+    expect(screen.getByRole("heading", { name: "Most improved" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Heaviest set" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Fastest session" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Where the weight went" })).toBeInTheDocument();
@@ -221,7 +217,9 @@ describe("Racked", () => {
   });
 
   // The split divides the headline rather than qualifying it, so the page has to
-  // show both halves against the same total the card above it prints.
+  // show both halves against the same total the card above it prints — and the
+  // breakdown below has to agree with it about which lifts were assistance.
+  // One render: same report, same two cards.
   it("breaks the headline volume into main work and assistance", async () => {
     getRacked.mockResolvedValue({ status: 200, data: fullReport(), headers: new Headers() });
     render(Racked);
@@ -231,6 +229,10 @@ describe("Racked", () => {
     expect(split).toHaveTextContent("main lifts");
     expect(split).toHaveTextContent("10%");
     expect(split).toHaveTextContent("across 1 movement");
+
+    expect(screen.getByText("Barbell Curl")).toBeInTheDocument();
+    // One tag, on the one lift that was only ever assistance.
+    expect(screen.getAllByText("assistance")).toHaveLength(1);
   });
 
   // A lifter who does no assistance should not read a line telling them all
@@ -250,18 +252,10 @@ describe("Racked", () => {
     expect(screen.queryByTestId("work-split")).not.toBeInTheDocument();
   });
 
-  it("tags the assistance rows in the volume breakdown", async () => {
-    getRacked.mockResolvedValue({ status: 200, data: fullReport(), headers: new Headers() });
-    render(Racked);
-
-    await waitFor(() => expect(screen.getByText("Barbell Curl")).toBeInTheDocument());
-    // One tag, on the one lift that was only ever assistance.
-    expect(screen.getAllByText("assistance")).toHaveLength(1);
-  });
-
   // The muscle card answers "where the weight went" from the other side: that
   // one ranks the lifts, this one accounts for the body — including the parts of
-  // it that went untouched, which no ranking of lifts can show.
+  // it that went untouched, which no ranking of lifts can show. Both the rows
+  // and the sentence that summarises them are read off one render of one card.
   it("accounts for every muscle group, trained or not", async () => {
     getRacked.mockResolvedValue({ status: 200, data: fullReport(), headers: new Headers() });
     render(Racked);
@@ -273,13 +267,7 @@ describe("Racked", () => {
     // than being dropped or drawn as a very short bar.
     expect(card).toHaveTextContent("Core");
     expect(card).toHaveTextContent("not trained");
-  });
-
-  it("names the untrained groups in a sentence", async () => {
-    getRacked.mockResolvedValue({ status: 200, data: fullReport(), headers: new Headers() });
-    render(Racked);
-
-    const card = await screen.findByTestId("stat-muscles");
+    // And they are named once, in prose, rather than left to be counted.
     expect(card).toHaveTextContent(
       "Nothing logged for back, shoulders, core and other this month",
     );

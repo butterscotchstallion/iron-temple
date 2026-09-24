@@ -23,6 +23,8 @@ func hashWith(t *testing.T, password string, iters int) string {
 }
 
 func TestHashVerifyRoundTrip(t *testing.T) {
+	t.Parallel() // real work factor; overlaps with the other slow cases
+
 	h := PBKDF2Hasher{}
 	encoded, err := h.Hash("correct horse battery staple")
 	if err != nil {
@@ -39,6 +41,8 @@ func TestHashVerifyRoundTrip(t *testing.T) {
 }
 
 func TestHashIsSaltedPerCall(t *testing.T) {
+	t.Parallel() // real work factor; overlaps with the other slow cases
+
 	h := PBKDF2Hasher{}
 	a, err := h.Hash("same password")
 	if err != nil {
@@ -148,7 +152,10 @@ func TestEncodedFormIsSelfDescribing(t *testing.T) {
 // parsing, DummyVerify would return early and hand back a timing oracle for
 // account enumeration — silently, since nothing else depends on it.
 func TestDummyHashIsWellFormed(t *testing.T) {
-	alg, _, salt, key, err := decodePHC(dummyHash)
+	t.Parallel() // real work factor; overlaps with the other slow cases
+
+	h := PBKDF2Hasher{}
+	alg, _, salt, key, err := decodePHC(h.dummyHash())
 	if err != nil {
 		t.Fatalf("the dummy hash no longer parses: %v", err)
 	}
@@ -159,7 +166,70 @@ func TestDummyHashIsWellFormed(t *testing.T) {
 		t.Errorf("dummy hash has %d-byte salt and %d-byte key, want %d and %d",
 			len(salt), len(key), saltLen, keyLen)
 	}
-	if ok, _ := (PBKDF2Hasher{}).Verify("anything", dummyHash); ok {
+	if ok, _ := h.Verify("anything", h.dummyHash()); ok {
 		t.Error("the dummy hash verified against a password")
+	}
+}
+
+// DummyVerify is only a defence if it costs what a real Verify costs. The
+// dummy is built at the hasher's own work factor to guarantee that, so a
+// hasher configured below the shipped default must produce a dummy below it
+// too — otherwise an unknown username would be measurably SLOWER than a known
+// one, which is the same oracle pointing the other way.
+func TestDummyHashMatchesTheHashersWorkFactor(t *testing.T) {
+	t.Parallel()
+
+	for _, h := range []PBKDF2Hasher{{}, {Iterations: 1000}} {
+		_, iters, _, _, err := decodePHC(h.dummyHash())
+		if err != nil {
+			t.Fatalf("dummy hash for %+v does not parse: %v", h, err)
+		}
+		if iters != h.iterations() {
+			t.Errorf("dummy hash for %+v uses i=%d, want %d", h, iters, h.iterations())
+		}
+	}
+}
+
+// The zero value is what production runs, and nothing but a test ever sets
+// Iterations — so "unset means the shipped factor" is the invariant that keeps
+// the seam in export_test.go from being a way to ship a weak hasher.
+func TestZeroValueHashesAtTheShippedWorkFactor(t *testing.T) {
+	t.Parallel() // real work factor; overlaps with the other slow cases
+
+	encoded, err := PBKDF2Hasher{}.Hash("pw")
+	if err != nil {
+		t.Fatalf("Hash: %v", err)
+	}
+	_, iters, _, _, err := decodePHC(encoded)
+	if err != nil {
+		t.Fatalf("decodePHC: %v", err)
+	}
+	if iters != pbkdf2Iterations {
+		t.Errorf("the zero-value hasher wrote i=%d, want %d", iters, pbkdf2Iterations)
+	}
+}
+
+// A configured work factor has to reach the stored hash, or the integration
+// suite would be paying full price while believing it was not.
+func TestConfiguredIterationsReachTheStoredHash(t *testing.T) {
+	t.Parallel()
+
+	h := PBKDF2Hasher{Iterations: 1000}
+	encoded, err := h.Hash("pw")
+	if err != nil {
+		t.Fatalf("Hash: %v", err)
+	}
+	if !strings.HasPrefix(encoded, "$"+algPBKDF2+"$i=1000$") {
+		t.Errorf("encoded = %q, want an i=1000 hash", encoded)
+	}
+	// It must still round-trip, and must not immediately ask to be rehashed —
+	// the floor Verify measures against is this hasher's factor, not the
+	// package default.
+	ok, needsRehash := h.Verify("pw", encoded)
+	if !ok {
+		t.Error("Verify rejected the password it just hashed")
+	}
+	if needsRehash {
+		t.Error("a hash at this hasher's own work factor should not need rehashing")
 	}
 }

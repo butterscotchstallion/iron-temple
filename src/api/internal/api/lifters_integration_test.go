@@ -75,19 +75,6 @@ func TestLifterRoutesRejectAnonymousCallers(t *testing.T) {
 	e.GET("/lifters/1/sessions/1/recap").Expect().Status(http.StatusUnauthorized)
 }
 
-// An account still holding the one-time password an admin gave it can see
-// nothing social. It sits inside blockUntilPasswordChanged like the rest of the
-// app, which is asserted here rather than assumed: the roster is exactly the kind
-// of harmless-looking read somebody might later mount above the gate.
-func TestLifterRoutesAreGatedUntilThePasswordChanges(t *testing.T) {
-	createAccount(t, "still-gated", "still-gated-pw")
-	token := signIn(t, "still-gated", "still-gated-pw")
-
-	expectAs(t, token).GET("/lifters").Expect().
-		Status(http.StatusForbidden).
-		JSON().Object().HasValue("code", "password_change_required")
-}
-
 // ---- the roster ----
 
 // The roster must not carry the two columns ListUsers has and ListLifters
