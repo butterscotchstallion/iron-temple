@@ -151,10 +151,43 @@ Two rules are enforced by tests rather than by care, because both are easy to br
 by eye:
 
 - **No phrase in two voices.** The sets are long enough that an accidental
-  duplicate would be hard to spot.
+  duplicate would be hard to spot. Applies across all three sets below, so a phrase
+  cannot be both vague and templated either.
 - **No phrase names a lift or a number.** One saying "nice 225" would have to agree
   with the session it hangs off, and one that did not would be the most obvious
   tell in the whole simulation. Keep new phrases vague.
+
+### Some comments name the program or a lift
+
+About **one comment in four** (`activity.MentionChance`) names something off the
+session it is landing on — "I keep meaning to try StrongLifts 5x5", "no hiding on
+Deadlift" — instead of vague approval. Specific is what makes a feed read like
+people who looked at what they were commenting on; *always* specific is a mail
+merge, which is worse than vague, so the rest stay general.
+
+That does not loosen the rule above, it satisfies it from the other side. The rule
+was never "be vague", it was **never assert anything you were not told**. A phrase
+in `voices` is written blind — nobody had the session in view — so it can only
+safely be vague. A phrase in `programVoices` or `exerciseVoices` carries one `%s`,
+and the name that fills it is read off the session being commented on, so it cannot
+disagree with it.
+
+The material comes from `sessionMention` in `internal/api/activity.go`, and **a
+persona may only name what the feed already showed it**:
+
+- The program name is the one `ListFeedSessions` returned, which is **already masked**
+  for this viewer. Where the masking fired, nothing is named — `Custom program` is a
+  placeholder, not a programme, and admiring one by that name is both a tell and a lie.
+- The lifts come from `ListMentionableSessionExercises`, which drops **custom
+  exercises** (they belong to the lifter who made them, and `ListExercises` hides
+  other people's) and lifts that were **not actually performed**. A generated comment
+  is readable by the whole install, so naming a private exercise would be the feed's
+  program-masking leak one surface further on.
+
+The lookup costs a query, so it is only paid for the comments that are going to use
+it: `MentionsSomething` is asked *before* the Mention is built. An empty Mention is
+not an error — it means there was nothing safe to say — and the persona falls back
+to its vague voice, as it does for a name too long to read as a sentence.
 
 ## What it does not do
 

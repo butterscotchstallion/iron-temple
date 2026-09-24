@@ -1,6 +1,7 @@
 package activity
 
 import (
+	"fmt"
 	"math/rand"
 	"regexp"
 	"slices"
@@ -22,7 +23,9 @@ func samePersona(a, b Persona) bool {
 		a.Grit == b.Grit &&
 		a.Sociability == b.Sociability &&
 		a.Chattiness == b.Chattiness &&
-		slices.Equal(a.voice, b.voice)
+		slices.Equal(a.voice, b.voice) &&
+		slices.Equal(a.programVoice, b.programVoice) &&
+		slices.Equal(a.exerciseVoice, b.exerciseVoice)
 }
 
 // A fixed source, so every assertion below is about the decision logic rather
@@ -374,22 +377,35 @@ func TestSetRepsHandlesATinyTarget(t *testing.T) {
 
 // ---- what they say ----
 
+// A session worth talking about, for the tests that need one. Named after real
+// seeded data (migration 0012) rather than "Program A", because the templates have
+// to read as English against a name of this shape.
+func someSession() Mention {
+	return Mention{
+		Program:   "Madcow 5x5",
+		Exercises: []string{"Barbell Row", "Bench Press", "Squat"},
+	}
+}
+
 // Every persona always has something to say, and it is always acceptable to the
-// API — which rejects a blank body and caps the length.
+// API — which rejects a blank body and caps the length. True whether they are being
+// vague or naming the session, so both are driven through the same assertions.
 func TestEveryPersonaSaysSomethingAcceptable(t *testing.T) {
 	rng := fixed()
-	for _, p := range Roster(MaxRoster) {
-		for range 100 {
-			got := p.Comment(rng)
-			if got == "" {
-				t.Fatalf("%s returned an empty comment, which the API rejects as blank", p.Username)
-			}
-			// Counted in runes, the same way maxCommentBody counts.
-			if len([]rune(got)) > 256 {
-				t.Errorf("%s said something longer than the API accepts: %q", p.Username, got)
-			}
-			if got != strings.TrimSpace(got) {
-				t.Errorf("%s said %q, which is not trimmed and would be stored untidy", p.Username, got)
+	for _, m := range []Mention{{}, someSession()} {
+		for _, p := range Roster(MaxRoster) {
+			for range 100 {
+				got := p.Comment(m, rng)
+				if got == "" {
+					t.Fatalf("%s returned an empty comment, which the API rejects as blank", p.Username)
+				}
+				// Counted in runes, the same way maxCommentBody counts.
+				if len([]rune(got)) > 256 {
+					t.Errorf("%s said something longer than the API accepts: %q", p.Username, got)
+				}
+				if got != strings.TrimSpace(got) {
+					t.Errorf("%s said %q, which is not trimmed and would be stored untidy", p.Username, got)
+				}
 			}
 		}
 	}
@@ -402,10 +418,13 @@ func TestEveryPersonaSaysSomethingAcceptable(t *testing.T) {
 // several people. No phrase may belong to two personas, and the sets are long
 // enough that an accidental duplicate is easy to introduce and hard to spot by eye,
 // so it is asserted rather than trusted.
+// The templated sets are held to the same rule as the vague ones — two personas
+// sharing "big fan of %s" is the same tell as two sharing "nice one" — and the three
+// pools are checked against each OTHER, so a phrase cannot be both.
 func TestNoTwoPersonasShareAPhrase(t *testing.T) {
 	owner := map[string]string{}
 	for _, p := range Roster(MaxRoster) {
-		for _, phrase := range p.voice {
+		for _, phrase := range slices.Concat(p.voice, p.programVoice, p.exerciseVoice) {
 			if first, seen := owner[phrase]; seen {
 				t.Errorf("%q belongs to both %s and %s", phrase, first, p.Username)
 				continue
@@ -425,7 +444,7 @@ func TestAPersonaOnlySaysItsOwnLines(t *testing.T) {
 			own[phrase] = true
 		}
 		for range 200 {
-			if got := p.Comment(rng); !own[got] {
+			if got := p.Comment(Mention{}, rng); !own[got] {
 				t.Fatalf("%s said %q, which is not in its own voice", p.Username, got)
 			}
 		}
@@ -455,33 +474,208 @@ func TestVoicesAreLargeEnoughToNotRepeat(t *testing.T) {
 	}
 }
 
-// Nothing may name a lift or a number. A comment saying "nice 225" would have to
-// agree with the session it hangs off, and one that did not would be the most
-// obvious tell in the simulation — so this is a rule about the DATA being
-// plausible, not about tidiness.
+// No phrase written in this package may name a lift or a number. A comment saying
+// "nice 225" would have to agree with the session it hangs off, and one that did not
+// would be the most obvious tell in the simulation — so this is a rule about the
+// DATA being plausible, not about tidiness.
+//
+// It covers the templates too, minus their `%s`. What goes INTO the placeholder is
+// exempt, and that is the whole distinction the templates rest on: a lift name that
+// came off the session cannot disagree with it, and one this file wrote could.
 func TestNoPhraseNamesALiftOrANumber(t *testing.T) {
 	// Word-boundary matched, not substring. A naive Contains flags "impressive"
 	// for "press" and "tomorrow" for "row", which would make this test reject
 	// perfectly good English.
 	lifts := regexp.MustCompile(`(?i)\b(squat|bench|deadlift|press|row|curl|lunge|chin|dip)\b`)
 	for _, p := range Roster(MaxRoster) {
-		for _, phrase := range p.voice {
-			if lifts.MatchString(phrase) {
+		for _, phrase := range slices.Concat(p.voice, p.programVoice, p.exerciseVoice) {
+			bare := strings.ReplaceAll(phrase, "%s", "")
+			if lifts.MatchString(bare) {
 				t.Errorf("%s says %q, which names a lift", p.Username, phrase)
 			}
-			if strings.ContainsAny(phrase, "0123456789") {
+			if strings.ContainsAny(bare, "0123456789") {
 				t.Errorf("%s says %q, which contains a number", p.Username, phrase)
 			}
 		}
 	}
 }
 
-// A Persona built by hand has no voice, which only happens in a test. It must
-// still produce something, because the API rejects a blank comment.
+// ---- naming the session ----
+
+// Every template takes exactly one name and nothing else.
+//
+// Two placeholders would be formatted with one argument and produce "%!s(MISSING)"
+// in a comment a lifter reads; none would silently ignore the Mention and leave the
+// caller's lookup paid for nothing. Neither is a compile error, and neither is
+// obvious by eye in a list of sixty-four strings.
+func TestEveryTemplateTakesExactlyOneName(t *testing.T) {
+	verbs := regexp.MustCompile(`%[^%]`)
+	for _, p := range Roster(MaxRoster) {
+		for _, phrase := range slices.Concat(p.programVoice, p.exerciseVoice) {
+			if got := verbs.FindAllString(phrase, -1); len(got) != 1 || got[0] != "%s" {
+				t.Errorf("%s has template %q, want exactly one %%s, got %v", p.Username, phrase, got)
+			}
+		}
+	}
+}
+
+// THE RULE THE WHOLE FEATURE RESTS ON: a specific comment may only name what it was
+// handed.
+//
+// The caller vets the Mention — the feed's masked program name is dropped, and
+// another lifter's custom exercises never reach it — so a persona inventing a name,
+// or reaching into the material for a DIFFERENT session, would publish something the
+// reader was never shown. Asserted over the whole roster rather than spot-checked,
+// because it is a privacy property and not a wording one.
+func TestASpecificCommentOnlyNamesWhatItWasGiven(t *testing.T) {
+	m := someSession()
+	rng := fixed()
+	for _, p := range Roster(MaxRoster) {
+		// Every sentence this persona could legitimately produce for this session:
+		// its own templates, each filled with one name out of the Mention. Anything
+		// else is either an invented name or another persona's line.
+		allowed := map[string]bool{}
+		for _, phrase := range p.voice {
+			allowed[phrase] = true
+		}
+		for _, tmpl := range p.programVoice {
+			allowed[fmt.Sprintf(tmpl, m.Program)] = true
+		}
+		for _, tmpl := range p.exerciseVoice {
+			for _, lift := range m.Exercises {
+				allowed[fmt.Sprintf(tmpl, lift)] = true
+			}
+		}
+		for range 300 {
+			if got := p.Comment(m, rng); !allowed[got] {
+				t.Fatalf("%s said %q, which names something it was never given", p.Username, got)
+			}
+		}
+	}
+}
+
+// Given something nameable, a persona names it. The "shouldn't always do this" part
+// is MentionsSomething's job, one level up — Comment being reliably specific when it
+// is handed material is what makes that the only place the frequency is decided.
+func TestAMentionIsAlwaysUsedWhenThereIsOne(t *testing.T) {
+	m := someSession()
+	rng := fixed()
+	for _, p := range Roster(MaxRoster) {
+		for range 100 {
+			got := p.Comment(m, rng)
+			if !strings.Contains(got, m.Program) && !containsAny(got, m.Exercises) {
+				t.Fatalf("%s was handed %v and said %q, naming none of it", p.Username, m, got)
+			}
+		}
+	}
+}
+
+// Both kinds get used. A persona that only ever talked about the programme would say
+// four things all week, since a lifter runs one programme and trains a dozen lifts.
+func TestBothTheProgramAndTheLiftsGetNamed(t *testing.T) {
+	m := someSession()
+	rng := fixed()
+	p := Roster(MaxRoster)[0]
+	var programs, exercises int
+	for range 400 {
+		if got := p.Comment(m, rng); strings.Contains(got, m.Program) {
+			programs++
+		} else if containsAny(got, m.Exercises) {
+			exercises++
+		}
+	}
+	if programs == 0 || exercises == 0 {
+		t.Errorf("over 400 comments: %d named the program, %d named a lift, want both",
+			programs, exercises)
+	}
+}
+
+// Nothing safe to name means vague approval, not silence and not a half-formatted
+// sentence. This is the common case on a session whose program the viewer was never
+// shown and whose lifts are all somebody's custom ones.
+func TestAnEmptyMentionFallsBackToTheVagueVoice(t *testing.T) {
+	rng := fixed()
+	for _, p := range Roster(MaxRoster) {
+		own := map[string]bool{}
+		for _, phrase := range p.voice {
+			own[phrase] = true
+		}
+		// Blank and whitespace-only names are the same as absent: a stored name
+		// that is all spaces would otherwise format into "big  ".
+		empty := []Mention{
+			{},
+			{Exercises: []string{}},
+			{Program: "  ", Exercises: []string{"", " "}},
+		}
+		for _, m := range empty {
+			for range 100 {
+				if got := p.Comment(m, rng); !own[got] {
+					t.Fatalf("%s given %v said %q, which is not one of its vague lines", p.Username, m, got)
+				}
+			}
+		}
+	}
+}
+
+// A name long enough to make the sentence absurd is declined rather than truncated.
+// Program names are free text, and half a programme name followed by "is honest
+// work" reads worse than saying nothing specific at all.
+func TestAnAbsurdlyLongNameIsNotUsed(t *testing.T) {
+	rng := fixed()
+	p := Roster(MaxRoster)[0]
+	own := map[string]bool{}
+	for _, phrase := range p.voice {
+		own[phrase] = true
+	}
+	m := Mention{Program: strings.Repeat("long ", 60)}
+	for range 100 {
+		if got := p.Comment(m, rng); !own[got] {
+			t.Fatalf("a %d-character program name produced %q", len(m.Program), got)
+		}
+	}
+}
+
+// A Persona built by hand has neither a voice nor templates, which only happens in a
+// test. It must still produce something, because the API rejects a blank comment —
+// including when it is handed a Mention it has no template to put in.
 func TestAVoicelessPersonaStillSaysSomething(t *testing.T) {
-	if got := (Persona{}).Comment(fixed()); got == "" {
+	if got := (Persona{}).Comment(Mention{}, fixed()); got == "" {
 		t.Error("a persona with no voice returned an empty comment")
 	}
+	if got := (Persona{}).Comment(someSession(), fixed()); got == "" {
+		t.Error("a persona with no templates returned an empty comment for a mention")
+	}
+}
+
+// Specific comments are a seasoning, not the dish — see MentionChance. Asserted as a
+// band rather than a number, since this is a property of a random draw.
+func TestMentioningIsOccasional(t *testing.T) {
+	rng := fixed()
+	const runs = 20000
+	var specific int
+	for range runs {
+		if MentionsSomething(rng) {
+			specific++
+		}
+	}
+	rate := float64(specific) / runs
+	if rate < MentionChance-0.02 || rate > MentionChance+0.02 {
+		t.Errorf("named something in %.3f of comments, want about %.2f", rate, MentionChance)
+	}
+	// The two ends are the failure modes worth naming: never specific is the
+	// feature not shipping, always specific is the mail merge it must not become.
+	if rate == 0 || rate > 0.5 {
+		t.Errorf("rate %.3f is outside anything that reads as a person", rate)
+	}
+}
+
+func containsAny(s string, names []string) bool {
+	for _, n := range names {
+		if strings.Contains(s, n) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestEmojiComesFromTheCallersAllowlist(t *testing.T) {

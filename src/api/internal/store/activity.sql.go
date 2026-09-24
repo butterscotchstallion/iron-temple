@@ -312,6 +312,59 @@ func (q *Queries) ListGeneratedActivityCandidates(ctx context.Context, usernames
 	return items, nil
 }
 
+const listMentionableSessionExercises = `-- name: ListMentionableSessionExercises :many
+SELECT DISTINCT e.name
+FROM session_sets ss
+JOIN exercises e ON e.id = ss.exercise_id
+WHERE ss.session_id = $1::int
+  AND ss.actual_reps > 0
+  AND e.created_by_user_id IS NULL
+ORDER BY e.name
+`
+
+// ListMentionableSessionExercises is the lifts in one session that a persona may
+// name out loud in a comment.
+//
+// Two filters, and both of them are the point.
+//
+// created_by_user_id IS NULL keeps it to the SHARED library. A custom exercise
+// belongs to the lifter who made it, and ListExercises hides other people's — so a
+// persona saying "good work on the Zercher shrug" would publish a name the rest of
+// the install has no access to, which is the leak the feed's program masking already
+// exists to prevent. Same class of bug, one surface further on: a generated comment
+// is readable by everybody.
+//
+// actual_reps > 0 keeps it to lifts actually PERFORMED. A session carries a set per
+// prescribed lift from the moment it is created, so without this a persona could
+// admire work the lifter skipped — the kind of disagreement with the session it hangs
+// off that makes the simulation obvious.
+//
+// Unscoped by viewer, unlike most reads here, because there is nothing left to scope:
+// what survives both filters is a global exercise name in a session already listed to
+// this persona by ListFeedSessions.
+//
+// DISTINCT and ordered by name: a lift with five sets is one thing to talk about, and
+// a stable order keeps a run reproducible from its seed.
+func (q *Queries) ListMentionableSessionExercises(ctx context.Context, sessionID int32) ([]string, error) {
+	rows, err := q.db.Query(ctx, listMentionableSessionExercises, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		items = append(items, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSessionsCommentedOnBy = `-- name: ListSessionsCommentedOnBy :many
 SELECT DISTINCT session_id FROM session_comments WHERE user_id = $1::int
 `

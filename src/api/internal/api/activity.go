@@ -833,7 +833,17 @@ func (s *Server) generateRecognition(
 				reactions++
 			}
 			if person.persona.Comments(rng) && !commented[row.ID] {
-				body := person.persona.Comment(rng)
+				// Looked up only for the comments that are going to name something
+				// — a query per generated comment, on a backfill that writes
+				// hundreds, would be paid three times over for nothing.
+				var mention activity.Mention
+				if activity.MentionsSomething(rng) {
+					mention, err = sessionMention(ctx, q, row)
+					if err != nil {
+						return reactions, comments, err
+					}
+				}
+				body := person.persona.Comment(mention, rng)
 				// The same two rules addSessionComment applies: trimmed, non-blank,
 				// within the cap. Persona.Comment cannot produce a body that fails
 				// them and is tested not to, so this is a belt on a brace — but the
@@ -872,6 +882,40 @@ func (s *Server) generateRecognition(
 		}
 	}
 	return reactions, comments, nil
+}
+
+// sessionMention is what a persona may name out loud about one feed row.
+//
+// The privacy rule for generated comments lives here, and it is a single idea: a
+// persona may only say what the feed already told it. Everything a lifter can read
+// on a feed card is fair game; nothing else is, because a comment is published to
+// the whole install and would outlive the card.
+//
+// So the program name is taken from the row, which ListFeedSessions has ALREADY
+// masked for this viewer — and where that masking fired, nothing is named at all.
+// maskedProgramName is a placeholder, not a programme: "I keep meaning to try Custom
+// program" is both a tell and a lie. The lifts come from a query that drops anything
+// custom for the same reason, so an id is never resolved to a name this viewer could
+// not otherwise see.
+//
+// An error is returned rather than swallowed, exactly as every other query in these
+// loops does. Flavour text is not worth failing a backfill for, but a failure here
+// means the database is unhappy and the next write is about to fail anyway — and a
+// generator that quietly carried on would report a clean run over a broken one.
+func sessionMention(
+	ctx context.Context, q *store.Queries, row store.ListFeedSessionsRow,
+) (activity.Mention, error) {
+	mention := activity.Mention{}
+	if row.ProgramName != maskedProgramName {
+		mention.Program = row.ProgramName
+	}
+
+	lifts, err := q.ListMentionableSessionExercises(ctx, row.ID)
+	if err != nil {
+		return activity.Mention{}, err
+	}
+	mention.Exercises = lifts
+	return mention, nil
 }
 
 // runActivity is the live loop.
@@ -1029,7 +1073,16 @@ func (s *Server) generateRecognitionOnce(
 		reacted++
 	}
 	if person.persona.Comments(rng) {
-		body := person.persona.Comment(rng)
+		// Same two-step as the bulk path: decide whether to be specific, and only
+		// then go and find out what there is to be specific about.
+		var mention activity.Mention
+		if activity.MentionsSomething(rng) {
+			mention, err = sessionMention(ctx, q, row)
+			if err != nil {
+				return 0, 0, err
+			}
+		}
+		body := person.persona.Comment(mention, rng)
 		if body != "" && len([]rune(body)) <= maxCommentBody {
 			posted, err := q.AddSessionComment(ctx, store.AddSessionCommentParams{
 				SessionID: row.ID, UserID: person.userID, Body: body,

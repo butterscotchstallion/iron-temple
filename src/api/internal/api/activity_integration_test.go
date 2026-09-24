@@ -491,6 +491,117 @@ func TestActivityBackfillGivesEachLifterItsOwnVoice(t *testing.T) {
 	t.Logf("%d comments across 6 lifters, %d shared phrases", total, shared)
 }
 
+// A COMMENT THAT NAMES SOMETHING MUST NAME SOMETHING THAT IS ACTUALLY THERE.
+//
+// The unit tests prove a persona only says what its Mention held; this proves the
+// runner builds that Mention from the session the comment lands on. Those are
+// different bugs — handing the mention for the previous row, or resolving an
+// exercise id against the wrong session, would leave every unit test green while
+// publishing "no hiding on Deadlift" under a session with no deadlift in it.
+//
+// Asserted over the rows a real backfill wrote, in SQL, because the claim is about
+// agreement between two tables rather than about wording.
+func TestActivityBackfillOnlyNamesThingsInTheSession(t *testing.T) {
+	tearDownActivity(t)
+	expect(t).POST("/admin/activity/backfill").
+		WithJSON(map[string]any{"lifters": 6, "weeks": 12}).
+		Expect().Status(http.StatusOK)
+
+	ctx := context.Background()
+
+	// The feed's placeholder for a program the viewer was never shown. It is not a
+	// programme, so a persona admiring one by that name is both a tell and a lie.
+	//
+	// Spelled out rather than read from maskedProgramName: this suite is an external
+	// test package, and the constant is unexported. It is the same string the feed
+	// query and internal/api already repeat, and the same thing keeps them in step —
+	// a test that fails if it drifts.
+	const masking = "Custom program"
+	var masked int
+	if err := testPool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM session_comments WHERE body LIKE '%' || $1 || '%'`,
+		masking).Scan(&masked); err != nil {
+		t.Fatalf("count masked mentions: %v", err)
+	}
+	if masked != 0 {
+		t.Errorf("%d comments name %q, which is a placeholder rather than a program", masked, masking)
+	}
+
+	// A comment naming a program must be on a session logged against it. The
+	// NOT EXISTS is a containment guard, not redundancy: "StrongLifts 5x5" is a
+	// substring of "StrongLifts 5x5 Lite", so a comment correctly naming the
+	// longer one matches the shorter one's row too.
+	var wrongProgram int
+	err := testPool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM session_comments c
+		JOIN programs p ON c.body LIKE '%' || p.name || '%'
+		WHERE NOT EXISTS (
+			SELECT 1 FROM sessions s
+			JOIN program_days pd ON pd.id = s.program_day_id
+			JOIN programs own ON own.id = pd.program_id
+			WHERE s.id = c.session_id
+			  AND own.name LIKE '%' || p.name || '%')`).Scan(&wrongProgram)
+	if err != nil {
+		t.Fatalf("count program mentions: %v", err)
+	}
+	if wrongProgram != 0 {
+		t.Errorf("%d comments name a program their session is not on", wrongProgram)
+	}
+
+	// The same for lifts, against the ones actually performed — a set logged at
+	// zero reps is work nobody did, and admiring it would disagree with the recap
+	// the comment hangs off. Custom exercises are excluded from the join because a
+	// persona is never offered one; if a generated comment ever named another
+	// lifter's private exercise, the check above it would not see it, so:
+	var privateLift int
+	if err := testPool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM session_comments c
+		JOIN exercises e ON e.created_by_user_id IS NOT NULL
+		                AND c.body LIKE '%' || e.name || '%'`).Scan(&privateLift); err != nil {
+		t.Fatalf("count private lift mentions: %v", err)
+	}
+	if privateLift != 0 {
+		t.Errorf("%d comments name a custom exercise, which is private to its owner", privateLift)
+	}
+
+	var wrongLift int
+	if err := testPool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM session_comments c
+		JOIN exercises e ON e.created_by_user_id IS NULL
+		                AND c.body LIKE '%' || e.name || '%'
+		WHERE NOT EXISTS (
+			SELECT 1 FROM session_sets ss
+			JOIN exercises own ON own.id = ss.exercise_id
+			WHERE ss.session_id = c.session_id
+			  AND ss.actual_reps > 0
+			  AND own.name LIKE '%' || e.name || '%')`).Scan(&wrongLift); err != nil {
+		t.Fatalf("count lift mentions: %v", err)
+	}
+	if wrongLift != 0 {
+		t.Errorf("%d comments name a lift that was not performed in their session", wrongLift)
+	}
+
+	// And some comment has to have named something, or all four checks above pass
+	// on a corpus of nothing but vague approval.
+	var specific int
+	if err := testPool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM session_comments c
+		WHERE EXISTS (SELECT 1 FROM programs p WHERE c.body LIKE '%' || p.name || '%')
+		   OR EXISTS (SELECT 1 FROM exercises e
+		              WHERE e.created_by_user_id IS NULL
+		                AND c.body LIKE '%' || e.name || '%')`).Scan(&specific); err != nil {
+		t.Fatalf("count specific comments: %v", err)
+	}
+	if specific == 0 {
+		t.Fatal("no generated comment named a program or a lift, so nothing was tested")
+	}
+	t.Logf("%d comments named something specific", specific)
+}
+
 // A GENERATED ACCOUNT MUST NOT BE ABLE TO SIGN IN.
 //
 // Those accounts hold a real hash of a password that is a constant in this
