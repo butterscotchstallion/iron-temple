@@ -36,6 +36,10 @@ const SPEC_STAMP = fileURLToPath(
 // Release notes for the running build, baked in at build time. CI writes the JSON
 // (see .gitea/workflows/release.yml); locally we derive it from git.
 const CHANGELOG_MODULE = "virtual:iron-temple/changelog";
+// The same notes again, as a file in the build output. The module above is for
+// the build that's running; this one is how a build tells the PREVIOUS one what
+// it contains — see loadNotes() in src/lib/version.svelte.ts.
+const CHANGELOG_ASSET = "changelog.json";
 const CHANGELOG_JSON = fileURLToPath(new URL("./changelog.generated.json", import.meta.url));
 const CHANGELOG_SCRIPT = fileURLToPath(new URL("../../scripts/changelog.sh", import.meta.url));
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -257,24 +261,68 @@ function gitRefDirs(): string[] {
 }
 
 /**
- * Serve the release notes to the app as `virtual:iron-temple/changelog`.
+ * Publish the release notes twice: inlined into the bundle as
+ * `virtual:iron-temple/changelog`, and written to the build output as
+ * `changelog.json`.
  *
- * A virtual module rather than a generated file on disk: nothing needs to be
- * committed, gitignored, or regenerated before `svelte-check` and vitest can
- * resolve the import, and the data is inlined into the bundle at build time so
- * the panel costs no request at runtime.
+ * The module is what the header panel reads (VersionChangelog.svelte). A virtual
+ * module rather than a generated file on disk: nothing needs to be committed,
+ * gitignored, or regenerated before `svelte-check` and vitest can resolve the
+ * import, and the data is inlined at build time so the panel costs no request at
+ * runtime.
+ *
+ * The file exists because the module can only ever describe the build it was
+ * compiled into — which is the build you are ALREADY RUNNING. A tab that has been
+ * open since before a release has no way to say what is in the release it is being
+ * offered. Once the new pod is serving, its changelog.json is that answer, and the
+ * update prompt fetches it (src/lib/version.svelte.ts).
+ *
+ * Both come from one readChangelog() call per build, because the whole point is
+ * that the panel and the prompt cannot disagree about what shipped.
  */
 function changelogVirtualModule(): Plugin {
   const resolvedId = `\0${CHANGELOG_MODULE}`;
 
+  // Populated on build only. load() and generateBundle() each want the notes,
+  // and readChangelog() shells out to changelog.sh — calling it twice would mean
+  // two independent answers that could differ, which is exactly what this plugin
+  // exists to prevent. Deliberately NOT cached on serve: the invalidation below
+  // works by making load() run again, so a cache there would freeze the panel.
+  let built: Changelog | undefined;
+  let isBuild = false;
+  const changelog = () => {
+    if (!isBuild) return readChangelog();
+    built ??= readChangelog();
+    return built;
+  };
+
+  // Where the file lands, honouring `base` so the served path and the path the
+  // dev middleware answers cannot drift apart if one is ever configured.
+  let assetPath = `/${CHANGELOG_ASSET}`;
+
   return {
     name: "iron-temple:changelog",
+    configResolved(config) {
+      isBuild = config.command === "build";
+      assetPath = `${config.base}${CHANGELOG_ASSET}`;
+    },
     resolveId(id) {
       return id === CHANGELOG_MODULE ? resolvedId : null;
     },
     load(id) {
       if (id !== resolvedId) return null;
-      return `export default ${JSON.stringify(readChangelog())};`;
+      return `export default ${JSON.stringify(changelog())};`;
+    },
+    // `fileName` rather than `name`: `name` is a source name that goes through
+    // assetFileNames and comes back fingerprinted under assets/, which is useless
+    // to a bundle that has to guess the URL. fileName is written verbatim, so the
+    // path stays the one version.svelte.ts asks for.
+    generateBundle() {
+      this.emitFile({
+        type: "asset",
+        fileName: CHANGELOG_ASSET,
+        source: JSON.stringify(changelog()),
+      });
     },
     // Recompute when the checkout moves. load() runs once and Vite caches the
     // result for the life of the dev server, so without this the panel is
@@ -284,6 +332,27 @@ function changelogVirtualModule(): Plugin {
     // server is restarted. Nobody restarts a dev server to check a changelog,
     // so it just reads as broken.
     configureServer(server) {
+      // Serve the same file the build emits, so dev and production agree about
+      // what lives at this path. Nothing in dev actually fetches it — isDevBuild()
+      // in version.svelte.ts excludes `dev-<sha>` on both sides of the comparison,
+      // so the prompt never opens there — but without this the SPA fallback answers
+      // with index.html and a 200, which is a far more confusing thing to find on
+      // the end of a curl than the notes themselves.
+      //
+      // Registered here in the body rather than in a returned post-hook so it runs
+      // BEFORE vite's history fallback, and matched by exact path rather than
+      // `use(path, ...)` because connect matches prefixes and strips them.
+      server.middlewares.use((req, res, next) => {
+        if ((req.url ?? "").split("?")[0] !== assetPath) return next();
+        res.setHeader("Content-Type", "application/json");
+        // Matches the header nginx.conf sets in production.
+        res.setHeader("Cache-Control", "no-cache");
+        // Computed per request, not at registration: this hook also runs under
+        // vitest (which starts vite in middleware mode), where readChangelog()
+        // short-circuits to empty rather than shelling out to git.
+        res.end(JSON.stringify(changelog()));
+      });
+
       const dirs = gitRefDirs();
       if (dirs.length === 0) return;
 

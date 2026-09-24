@@ -1163,12 +1163,34 @@ async function routeHealth(page: import("@playwright/test").Page, versions: stri
 }
 
 /**
+ * Serve the new build's release notes, the way a rolled-over UI pod would.
+ *
+ * Unlike the header panel — whose notes are compiled into the bundle, which is
+ * why build-with-changelog.sh exists — these are fetched at runtime, so a test
+ * can simply name them. The fetch is not clock-driven, so the frozen clock in
+ * deployUnderTab() doesn't hold it up.
+ */
+async function routeChangelog(
+  page: import("@playwright/test").Page,
+  version: string,
+  entries: string[],
+) {
+  await page.route("**/changelog.json", (route) => route.fulfill({ json: { version, entries } }));
+}
+
+/**
  * Deploy a new version under an already-open tab, and wait for the prompt.
  *
  * The clock is frozen only long enough to jump the five-minute poll interval —
  * waiting it out for real is not an option — and then handed straight back with
  * resume(), so the dialog's own open/close behaviour runs on ordinary time
  * rather than on timers this test has to remember to advance.
+ *
+ * Deliberately leaves changelog.json alone. The build under test carries
+ * v9.9.9's notes (build-with-changelog.sh), so an unrouted fetch answers with a
+ * version that isn't the one on offer — which is exactly the production case of
+ * the API rolling ahead of the UI pods, and the prompt has to stay silent about
+ * what's in the release. Tests that want notes call routeChangelog() themselves.
  */
 async function deployUnderTab(page: import("@playwright/test").Page) {
   await routeHealth(page, ["v1.0.0", "v2.0.0"]);
@@ -1192,6 +1214,13 @@ test("offers a new version, and stops asking once it's declined", async ({ page 
   await expect(prompt).toContainText("v2.0.0");
   await expect(prompt).toContainText("every set you've logged is already saved");
 
+  // The bundle this is served from carries v9.9.9's notes, not v2.0.0's, so the
+  // fetch answers for the wrong release and the prompt says nothing about what
+  // shipped. That is the rollout window — API ahead of the UI pods — in a real
+  // browser, and describing v9.9.9's contents as v2.0.0's would be worse than
+  // describing nothing.
+  await expect(prompt).not.toContainText("What's new");
+
   // The header keeps naming the build actually on screen, not the new one.
   await expect(page.getByTestId("version")).toContainText("iron-temple v1.0.0");
 
@@ -1202,6 +1231,32 @@ test("offers a new version, and stops asking once it's declined", async ({ page 
   // put it back up, or every five minutes becomes an interruption.
   await page.clock.fastForward("06:00");
   await expect(prompt).toBeHidden();
+});
+
+// The point of fetching them rather than baking them in: the notes describe the
+// build being OFFERED, which this bundle has no way of knowing about itself.
+test("lists what shipped in the version it is offering", async ({ page }) => {
+  await deployUnderTab(page);
+  await routeChangelog(page, "v2.0.0", [
+    "feat(ui): show the release notes in the update prompt (abc1234)",
+    "fix(api): stop 500ing on a program with no days (def5678)",
+  ]);
+
+  await page.goto("/");
+  await expect(page.getByTestId("version")).toContainText("iron-temple v1.0.0");
+
+  const prompt = page.getByTestId("update-prompt");
+  await page.clock.runFor("06:00");
+  await page.clock.resume();
+
+  await expect(prompt).toBeVisible();
+  await expect(prompt).toContainText("What's new in v2.0.0");
+  await expect(prompt).toContainText("show the release notes in the update prompt");
+  await expect(prompt).toContainText("stop 500ing on a program with no days");
+
+  // The header still describes the build on screen, which is the OTHER set of
+  // notes — v9.9.9's, from the bundle. The two panels must not be confused.
+  await expect(page.getByTestId("version")).toContainText("iron-temple v1.0.0");
 });
 
 test("loads the new version when the update is accepted", async ({ page }) => {

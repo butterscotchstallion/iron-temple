@@ -2,8 +2,9 @@
   import Download from "@lucide/svelte/icons/download";
   import * as AlertDialog from "$lib/components/ui/alert-dialog";
   import { Button } from "$lib/components/ui/button";
-  import { version, hasUpdate, dismissUpdate } from "./version.svelte";
+  import { version, hasUpdate, dismissUpdate, updateNotes } from "./version.svelte";
   import { whenIdle } from "./pendingWrites.svelte";
+  import ChangelogList from "./ChangelogList.svelte";
 
   // "A new version is available — load it?" A static bundle behind nginx has no
   // way to update itself, so without this a lifter can sit on a build for days
@@ -26,6 +27,14 @@
   // The gap between pressing the button and the page going away, which exists
   // only for as long as a write is still settling.
   let updating = $state(false);
+
+  // What shipped in the build on offer, so "Load it?" is a question with enough
+  // information to answer. Fetched from the deployed bundle rather than baked in
+  // — this one only knows what's in itself — so it can arrive a moment after the
+  // dialog does, or not at all. `$derived` because of the former, `{#if}` in the
+  // markup because of the latter.
+  const notes = $derived(updateNotes());
+  const notesId = $props.id();
 
   // Raise the dialog when a poll finds a newer build. Not a two-way binding on
   // hasUpdate(): the lifter closing it must not un-deploy the release, so the
@@ -71,6 +80,24 @@
         Loading it reloads the app.
       </AlertDialog.Description>
     </AlertDialog.Header>
+
+    {#if notes.length > 0}
+      <!-- Capped in viewport units: AlertDialog.Content sets no max-height and is
+           centred with -translate-y-1/2, so a release with a long list of notes
+           would push "Load it" off the bottom of a landscape phone. Containing
+           the overscroll stops a flick that reaches the end of this list from
+           scrolling the page underneath the dialog. -->
+      <section aria-labelledby={notesId} class="max-h-[35vh] overflow-y-auto overscroll-contain">
+        <!-- Worded exactly as the header panel's heading, so the two places that
+             show release notes read as one feature rather than two. h3 because
+             AlertDialog.Title renders a div with role="heading" aria-level="2",
+             so this is the level below it and the outline stays in order. -->
+        <h3 id={notesId} class="text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-primary">
+          What's new in {version.latest}
+        </h3>
+        <ChangelogList entries={notes} class="mt-3" />
+      </section>
+    {/if}
 
     <p class="text-sm text-muted-foreground">
       Your workout is safe: every set you've logged is already saved, and the

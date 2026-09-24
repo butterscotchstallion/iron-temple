@@ -20,6 +20,7 @@ beforeEach(() => {
   version.latest = "";
   version.environment = "";
   version.dismissed = "";
+  version.notes = { version: "", entries: [] };
   resetPendingWrites();
 });
 
@@ -145,5 +146,65 @@ describe("UpdatePrompt", () => {
 
     version.latest = "v1.4.0";
     await waitFor(() => expect(dialog()).toBeInTheDocument());
+  });
+
+  // What's actually in the build being offered, so "Load it?" is answerable. The
+  // notes are fetched from the deployed bundle (version.svelte.ts owns that);
+  // here they're set directly, the same way the versions are.
+  describe("release notes", () => {
+    const notes = (v: string, entries: string[]) => {
+      version.notes = { version: v, entries };
+    };
+
+    it("lists what shipped in the offered build", async () => {
+      deployed("v1.2.3", "v1.3.0");
+      notes("v1.3.0", ["feat(ui): list programs (abc1234)", "fix(api): empty day (def5678)"]);
+      render(UpdatePrompt);
+
+      await waitFor(() => expect(dialog()).toBeInTheDocument());
+      expect(screen.getByRole("heading", { name: /What's new in v1\.3\.0/ })).toBeInTheDocument();
+      expect(dialog()).toHaveTextContent("feat(ui): list programs (abc1234)");
+      expect(dialog()).toHaveTextContent("fix(api): empty day (def5678)");
+    });
+
+    // The whole point of the version field in changelog.json: during a rollout
+    // the pods can still be serving the PREVIOUS build's notes, and captioning
+    // those with the new version would misdescribe what's being offered.
+    it("says nothing about the release when the notes are for another one", async () => {
+      deployed("v1.2.3", "v1.3.0");
+      notes("v1.2.3", ["feat(ui): this shipped last time (abc1234)"]);
+      render(UpdatePrompt);
+
+      await waitFor(() => expect(dialog()).toBeInTheDocument());
+      expect(dialog()).not.toHaveTextContent("What's new");
+      expect(dialog()).not.toHaveTextContent("this shipped last time");
+    });
+
+    // Not awaited by poll(), so the dialog can be up before they land — and a
+    // rejected fetch retries, which can be minutes later with it still open.
+    it("picks up notes that arrive after it is already open", async () => {
+      deployed("v1.2.3", "v1.3.0");
+      render(UpdatePrompt);
+
+      await waitFor(() => expect(dialog()).toBeInTheDocument());
+      expect(dialog()).not.toHaveTextContent("What's new");
+
+      notes("v1.3.0", ["feat(ui): arrived late (abc1234)"]);
+      await waitFor(() => expect(dialog()).toHaveTextContent("feat(ui): arrived late (abc1234)"));
+    });
+
+    // The notes are decoration on a dialog whose job is the reload. With none —
+    // an unreachable changelog.json, or a pod mid-roll — it has to be exactly the
+    // dialog it was before they existed.
+    it("is unchanged when there are none", async () => {
+      deployed("v1.2.3", "v1.3.0");
+      render(UpdatePrompt);
+
+      await waitFor(() => expect(dialog()).toBeInTheDocument());
+      expect(dialog()).not.toHaveTextContent("What's new");
+      expect(dialog()).toHaveTextContent("v1.3.0");
+      expect(dialog()).toHaveTextContent(/every set you've logged is already saved/i);
+      expect(loadButton()).toBeInTheDocument();
+    });
   });
 });
