@@ -11,6 +11,45 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const archiveOldNotifications = `-- name: ArchiveOldNotifications :execrows
+
+UPDATE notifications
+SET archived_at = now()
+WHERE created_at < now() - make_interval(days => $1::int)
+  AND archived_at IS NULL
+`
+
+// ---- retention ----
+// ArchiveOldNotifications takes the rows nobody can reach any more out of sight.
+//
+// Why this exists: the generated-activity scheduler (0025) applauds and comments
+// as its personas every day, and each of those raises a row in a real lifter's
+// panel. Nothing ever read the old ones — the panel holds one page and offers no
+// way back past it — so without this the table grows at a steady rate forever
+// and every read pays for rows no surface can show.
+//
+// ARCHIVES RATHER THAN DELETES, which is the decision 0030 records at length.
+// What happened on this install stays in the database; it just stops being in
+// anybody's way. Deleting would throw that away to save an index entry the
+// partial indexes do not even hold.
+//
+// The window is a parameter rather than a literal so the caller owns the policy
+// and the tests can archive something without waiting a month for it.
+//
+// Already-archived rows are excluded so a second pass writes nothing rather than
+// moving every archived_at forward — the same reason MarkNotificationsRead
+// restricts itself to unread rows. What archived_at records is when a row LEFT,
+// and a sweeper running hourly must not keep rewriting that.
+//
+// :execrows so the sweeper can log what actually moved.
+func (q *Queries) ArchiveOldNotifications(ctx context.Context, olderThanDays int32) (int64, error) {
+	result, err := q.db.Exec(ctx, archiveOldNotifications, olderThanDays)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const clearNotifications = `-- name: ClearNotifications :exec
 DELETE FROM notifications WHERE user_id = $1::int
 `
@@ -29,6 +68,7 @@ SELECT COUNT(*)::bigint AS total
 FROM notifications
 WHERE user_id = $1::int
   AND read_at IS NULL
+  AND archived_at IS NULL
 `
 
 // CountUnreadNotifications is the badge.
@@ -143,6 +183,7 @@ WHERE s.id = $3::int
       AND n.actor_id = $1::int
       AND n.session_id = $3::int
       AND n.emoji = $2::text
+      AND n.archived_at IS NULL
   )
 `
 
@@ -162,7 +203,8 @@ type CreateReactionNotificationParams struct {
 // call without repeating that rule.
 //
 // Sessions predating 0005 have no owner and quietly notify nobody.
-// ONE ROW PER (recipient, actor, session, emoji), EVER. The NOT EXISTS below
+//
+// ONE LIVE ROW PER (recipient, actor, session, emoji). The NOT EXISTS below
 // and the read_at guard on DeleteReactionNotification are one mechanism and
 // have to be read together.
 //
@@ -178,6 +220,13 @@ type CreateReactionNotificationParams struct {
 // still unseen, and the re-applause finds the row already there and adds
 // nothing. Once it HAS been read, the row stays put and every later cycle is
 // silent.
+//
+// LIVE rows only, which matters once 0030's sweeper starts archiving. Without
+// that predicate an applause from two months ago — long since archived and
+// invisible to everybody — would go on suppressing the notification for the
+// same applause given again today, and the lifter would simply never be told.
+// An archived notification is not news anybody still has; a fresh tap after it
+// is gone is.
 func (q *Queries) CreateReactionNotification(ctx context.Context, arg CreateReactionNotificationParams) error {
 	_, err := q.db.Exec(ctx, createReactionNotification, arg.ActorID, arg.Emoji, arg.SessionID)
 	return err
@@ -252,6 +301,7 @@ LEFT JOIN sessions s ON s.id = n.session_id
 LEFT JOIN program_days pd ON pd.id = s.program_day_id
 LEFT JOIN session_comments c ON c.id = n.comment_id
 WHERE n.user_id = $1::int
+  AND n.archived_at IS NULL
 ORDER BY n.created_at DESC, n.id DESC
 LIMIT $3 OFFSET $2
 `
@@ -353,6 +403,7 @@ SET read_at = now()
 WHERE id = $1::int
   AND user_id = $2::int
   AND read_at IS NULL
+  AND archived_at IS NULL
 `
 
 type MarkNotificationReadParams struct {
@@ -386,6 +437,7 @@ UPDATE notifications
 SET read_at = now()
 WHERE user_id = $1::int
   AND read_at IS NULL
+  AND archived_at IS NULL
 `
 
 // ---- the two buttons ----

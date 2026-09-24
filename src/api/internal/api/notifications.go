@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"log"
 	"net/http"
 
 	"gitea.homelab/gitadmin/iron-temple/api/internal/store"
@@ -36,6 +38,48 @@ import (
 // every poll where nothing has changed — which on a household install is nearly
 // all of them. Nothing here is expensive enough to need more than that, and the
 // two indexes 0026 adds are what keep it that way.
+
+// notificationRetentionDays is how long a notification stays in the panel.
+//
+// A month, which is the window this app already thinks in — Racked opens on the
+// month, and "did anybody say anything about my training recently" has the same
+// horizon. Long enough that nothing a lifter might still want to find is taken
+// away, short enough that the live table stays small on an install where the
+// generated-activity scheduler adds to it daily.
+//
+// A constant rather than an environment variable. Nothing else in this app is
+// tuned that way, and a knob nobody turns is a knob that goes untested — if this
+// ever needs to differ per install, it belongs in the settings table 0025
+// already established rather than in the process's environment.
+const notificationRetentionDays = 30
+
+// archiveOldNotifications is the retention pass, run from the session sweeper.
+//
+// It hangs off that loop rather than owning one because it is the same kind of
+// work for the same reason: nothing depends on it for correctness, and it exists
+// so a table does not grow without bound. Two cheap statements on one hourly
+// ticker beats a second ticker.
+//
+// No claim table either, unlike the daily generator. That one claims because a
+// day must be generated AT MOST ONCE and a duplicate would invent training that
+// never happened; this is idempotent — a second pass finds nothing left to
+// archive — so two replicas racing costs one wasted UPDATE and nothing else.
+//
+// Errors are logged and swallowed. A failed sweep is retried an hour later by
+// construction, and there is nobody to tell.
+func (s *Server) archiveOldNotifications(ctx context.Context) {
+	archived, err := s.q.ArchiveOldNotifications(ctx, notificationRetentionDays)
+	if err != nil {
+		log.Printf("notification archive: %v", err)
+		return
+	}
+	// Only when something moved. An hourly no-op is the steady state and does
+	// not need a line in the log every hour to say so.
+	if archived > 0 {
+		log.Printf("notification archive: %d older than %d days",
+			archived, notificationRetentionDays)
+	}
+}
 
 // listNotifications serves a page of the caller's notifications, newest first,
 // with the unread count over all of them.

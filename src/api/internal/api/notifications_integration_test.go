@@ -1,9 +1,11 @@
 package api_test
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/gavv/httpexpect/v2"
 )
@@ -637,4 +639,165 @@ func TestWithdrawingApplauseKeepsANotificationAlreadyRead(t *testing.T) {
 	}
 	// The applause itself is gone — only the telling of it survives.
 	reactions(expectAs(t, ownerToken), sessionID).IsEmpty()
+}
+
+// ---- retention ----
+
+// archiveNow runs the retention pass over everything, which is what a window of
+// zero days means: created_at < now(). The real sweeper passes thirty.
+func archiveNow(t *testing.T) {
+	t.Helper()
+	if _, err := testAPI.ArchiveNotificationsForTest(context.Background(), 0); err != nil {
+		t.Fatalf("archive notifications: %v", err)
+	}
+}
+
+// An archived notification leaves the panel and the badge. It is still in the
+// database — that is the whole point of archiving rather than deleting — but
+// nothing a lifter can reach shows it.
+func TestArchivedNotificationsLeaveThePanel(t *testing.T) {
+	sessionID, ownerToken := otherLiftersSession(t, "notify-archive-panel")
+	owner := expectAs(t, ownerToken)
+
+	expect(t).POST(fmt.Sprintf("/sessions/%d/reactions", sessionID)).
+		WithJSON(map[string]any{"emoji": "💪"}).
+		Expect().Status(http.StatusNoContent)
+
+	if got := matching(owner, "reaction", sessionID); got != 1 {
+		t.Fatalf("before archiving: got %d notifications, want 1", got)
+	}
+	unreadBefore := unreadCount(owner)
+
+	archiveNow(t)
+
+	if got := matching(owner, "reaction", sessionID); got != 0 {
+		t.Errorf("after archiving: got %d notifications in the panel, want 0", got)
+	}
+	// And out of the badge, which is a second predicate on a second index.
+	if got := unreadCount(owner); got >= unreadBefore {
+		t.Errorf("unread count %d after archiving, want below %d", got, unreadBefore)
+	}
+
+	// Still there. Archiving is not a delete, and this is the assertion that
+	// says so — the row a rollback would bring back.
+	var archived int
+	err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM notifications
+		 WHERE session_id = $1 AND kind = 'reaction' AND archived_at IS NOT NULL`,
+		sessionID).Scan(&archived)
+	if err != nil {
+		t.Fatalf("count archived: %v", err)
+	}
+	if archived != 1 {
+		t.Errorf("archived rows in the database: got %d, want 1", archived)
+	}
+}
+
+// The pass is idempotent: a second run finds nothing left and does not move the
+// stamp on what it archived the first time. archived_at records when a row LEFT,
+// and the sweeper runs hourly forever.
+func TestArchivingTwiceLeavesTheStampAlone(t *testing.T) {
+	sessionID, _ := otherLiftersSession(t, "notify-archive-twice")
+
+	expect(t).POST(fmt.Sprintf("/sessions/%d/reactions", sessionID)).
+		WithJSON(map[string]any{"emoji": "🔥"}).
+		Expect().Status(http.StatusNoContent)
+
+	archiveNow(t)
+	var first time.Time
+	ctx := context.Background()
+	if err := testPool.QueryRow(ctx,
+		"SELECT archived_at FROM notifications WHERE session_id = $1 AND kind = 'reaction'",
+		sessionID).Scan(&first); err != nil {
+		t.Fatalf("read archived_at: %v", err)
+	}
+
+	moved, err := testAPI.ArchiveNotificationsForTest(ctx, 0)
+	if err != nil {
+		t.Fatalf("second archive pass: %v", err)
+	}
+	if moved != 0 {
+		t.Errorf("second pass moved %d rows, want 0", moved)
+	}
+
+	var second time.Time
+	if err := testPool.QueryRow(ctx,
+		"SELECT archived_at FROM notifications WHERE session_id = $1 AND kind = 'reaction'",
+		sessionID).Scan(&second); err != nil {
+		t.Fatalf("re-read archived_at: %v", err)
+	}
+	if !second.Equal(first) {
+		t.Errorf("archived_at moved from %v to %v on a second pass", first, second)
+	}
+}
+
+// A recent notification is not touched, which is the other half of a retention
+// window meaning anything.
+func TestRecentNotificationsSurviveTheRetentionWindow(t *testing.T) {
+	sessionID, ownerToken := otherLiftersSession(t, "notify-archive-recent")
+	owner := expectAs(t, ownerToken)
+
+	expect(t).POST(fmt.Sprintf("/sessions/%d/reactions", sessionID)).
+		WithJSON(map[string]any{"emoji": "👏"}).
+		Expect().Status(http.StatusNoContent)
+
+	// The real window. Everything this suite writes is seconds old.
+	if _, err := testAPI.ArchiveNotificationsForTest(context.Background(), 30); err != nil {
+		t.Fatalf("archive notifications: %v", err)
+	}
+
+	if got := matching(owner, "reaction", sessionID); got != 1 {
+		t.Errorf("a notification from a moment ago was archived: got %d, want 1", got)
+	}
+}
+
+// "Mark all read" must not reach rows the panel never showed. Without the same
+// predicate on that UPDATE it would silently stamp the archive, which is both
+// pointless work and a lie about when those were read.
+func TestMarkingAllReadSkipsTheArchive(t *testing.T) {
+	sessionID, ownerToken := otherLiftersSession(t, "notify-archive-markall")
+	owner := expectAs(t, ownerToken)
+
+	expect(t).POST(fmt.Sprintf("/sessions/%d/reactions", sessionID)).
+		WithJSON(map[string]any{"emoji": "🎉"}).
+		Expect().Status(http.StatusNoContent)
+	archiveNow(t)
+
+	owner.POST("/notifications/read").Expect().Status(http.StatusNoContent)
+
+	var readAt *time.Time
+	if err := testPool.QueryRow(context.Background(),
+		"SELECT read_at FROM notifications WHERE session_id = $1 AND kind = 'reaction'",
+		sessionID).Scan(&readAt); err != nil {
+		t.Fatalf("read read_at: %v", err)
+	}
+	if readAt != nil {
+		t.Errorf("an archived notification was stamped read at %v", *readAt)
+	}
+}
+
+// The trap in combining archiving with the reaction dedupe: an archived
+// notification must not go on suppressing a fresh one. Applause given again
+// after the old telling of it has aged out is news the lifter has not had.
+func TestArchivedApplauseDoesNotSuppressANewNotification(t *testing.T) {
+	sessionID, ownerToken := otherLiftersSession(t, "notify-archive-redupe")
+	owner := expectAs(t, ownerToken)
+	path := fmt.Sprintf("/sessions/%d/reactions", sessionID)
+
+	expect(t).POST(path).WithJSON(map[string]any{"emoji": "💪"}).
+		Expect().Status(http.StatusNoContent)
+	archiveNow(t)
+	if got := matching(owner, "reaction", sessionID); got != 0 {
+		t.Fatalf("after archiving: got %d in the panel, want 0", got)
+	}
+
+	// Withdraw and applaud again, which is a genuinely new reaction.
+	expect(t).DELETE(path).WithQuery("emoji", "💪").
+		Expect().Status(http.StatusNoContent)
+	expect(t).POST(path).WithJSON(map[string]any{"emoji": "💪"}).
+		Expect().Status(http.StatusNoContent)
+
+	if got := matching(owner, "reaction", sessionID); got != 1 {
+		t.Errorf("applause after the archive told nobody: got %d, want 1", got)
+	}
 }
