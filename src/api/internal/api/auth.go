@@ -202,6 +202,7 @@ func (s *Server) StartSessionSweeper(ctx context.Context, every time.Duration) {
 				if _, err := s.q.DeleteExpiredUserSessions(ctx); err != nil {
 					log.Printf("session sweep: %v", err)
 				}
+				s.archiveOldNotifications(ctx)
 				s.logins.Sweep()
 				s.comments.Sweep()
 			}

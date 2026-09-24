@@ -360,3 +360,19 @@ func setsFor(bySession map[int32][]exportSessionSetDTO, id int32) []exportSessio
 func (s *Server) GenerateDueActivityForTest(ctx context.Context) {
 	s.generateDueActivity(ctx)
 }
+
+// ArchiveNotificationsForTest runs the retention pass with a caller-chosen
+// window.
+//
+// Exported for the integration suite for the same reason the generator's shim
+// above is: the thing worth testing is what the pass does to a row, and the
+// alternative is a test that waits thirty days. The window is a parameter here
+// and a constant at the real call site (notificationRetentionDays), so a test
+// can archive something written a moment ago without that constant having to
+// become configurable for anybody else's benefit.
+//
+// Named ForTest so it is obvious at a glance that nothing in the app calls it;
+// the sweeper uses the unexported method.
+func (s *Server) ArchiveNotificationsForTest(ctx context.Context, olderThanDays int32) (int64, error) {
+	return s.q.ArchiveOldNotifications(ctx, olderThanDays)
+}

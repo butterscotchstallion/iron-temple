@@ -54,6 +54,7 @@ LEFT JOIN sessions s ON s.id = n.session_id
 LEFT JOIN program_days pd ON pd.id = s.program_day_id
 LEFT JOIN session_comments c ON c.id = n.comment_id
 WHERE n.user_id = sqlc.arg('user_id')::int
+  AND n.archived_at IS NULL
 ORDER BY n.created_at DESC, n.id DESC
 LIMIT sqlc.arg('lim') OFFSET sqlc.arg('off');
 
@@ -65,7 +66,8 @@ LIMIT sqlc.arg('lim') OFFSET sqlc.arg('off');
 SELECT COUNT(*)::bigint AS total
 FROM notifications
 WHERE user_id = sqlc.arg('user_id')::int
-  AND read_at IS NULL;
+  AND read_at IS NULL
+  AND archived_at IS NULL;
 
 -- ---- the two buttons ----
 
@@ -78,7 +80,8 @@ WHERE user_id = sqlc.arg('user_id')::int
 UPDATE notifications
 SET read_at = now()
 WHERE user_id = sqlc.arg('user_id')::int
-  AND read_at IS NULL;
+  AND read_at IS NULL
+  AND archived_at IS NULL;
 
 -- MarkNotificationRead is one row, for a lifter who followed a notification
 -- through to the thing it was about.
@@ -97,7 +100,8 @@ UPDATE notifications
 SET read_at = now()
 WHERE id = sqlc.arg('id')::int
   AND user_id = sqlc.arg('user_id')::int
-  AND read_at IS NULL;
+  AND read_at IS NULL
+  AND archived_at IS NULL;
 
 -- ClearNotifications is "clear all", and it deletes.
 --
@@ -105,6 +109,36 @@ WHERE id = sqlc.arg('id')::int
 -- these rows, so a cleared notification stays gone.
 -- name: ClearNotifications :exec
 DELETE FROM notifications WHERE user_id = sqlc.arg('user_id')::int;
+
+-- ---- retention ----
+
+-- ArchiveOldNotifications takes the rows nobody can reach any more out of sight.
+--
+-- Why this exists: the generated-activity scheduler (0025) applauds and comments
+-- as its personas every day, and each of those raises a row in a real lifter's
+-- panel. Nothing ever read the old ones — the panel holds one page and offers no
+-- way back past it — so without this the table grows at a steady rate forever
+-- and every read pays for rows no surface can show.
+--
+-- ARCHIVES RATHER THAN DELETES, which is the decision 0030 records at length.
+-- What happened on this install stays in the database; it just stops being in
+-- anybody's way. Deleting would throw that away to save an index entry the
+-- partial indexes do not even hold.
+--
+-- The window is a parameter rather than a literal so the caller owns the policy
+-- and the tests can archive something without waiting a month for it.
+--
+-- Already-archived rows are excluded so a second pass writes nothing rather than
+-- moving every archived_at forward — the same reason MarkNotificationsRead
+-- restricts itself to unread rows. What archived_at records is when a row LEFT,
+-- and a sweeper running hourly must not keep rewriting that.
+--
+-- :execrows so the sweeper can log what actually moved.
+-- name: ArchiveOldNotifications :execrows
+UPDATE notifications
+SET archived_at = now()
+WHERE created_at < now() - make_interval(days => sqlc.arg('older_than_days')::int)
+  AND archived_at IS NULL;
 
 -- ---- writing ----
 
@@ -117,7 +151,8 @@ DELETE FROM notifications WHERE user_id = sqlc.arg('user_id')::int;
 -- call without repeating that rule.
 --
 -- Sessions predating 0005 have no owner and quietly notify nobody.
--- ONE ROW PER (recipient, actor, session, emoji), EVER. The NOT EXISTS below
+--
+-- ONE LIVE ROW PER (recipient, actor, session, emoji). The NOT EXISTS below
 -- and the read_at guard on DeleteReactionNotification are one mechanism and
 -- have to be read together.
 --
@@ -133,6 +168,13 @@ DELETE FROM notifications WHERE user_id = sqlc.arg('user_id')::int;
 -- still unseen, and the re-applause finds the row already there and adds
 -- nothing. Once it HAS been read, the row stays put and every later cycle is
 -- silent.
+--
+-- LIVE rows only, which matters once 0030's sweeper starts archiving. Without
+-- that predicate an applause from two months ago — long since archived and
+-- invisible to everybody — would go on suppressing the notification for the
+-- same applause given again today, and the lifter would simply never be told.
+-- An archived notification is not news anybody still has; a fresh tap after it
+-- is gone is.
 -- name: CreateReactionNotification :exec
 INSERT INTO notifications (user_id, actor_id, kind, session_id, emoji)
 SELECT s.user_id,
@@ -155,6 +197,7 @@ WHERE s.id = sqlc.arg('session_id')::int
       AND n.actor_id = sqlc.arg('actor_id')::int
       AND n.session_id = sqlc.arg('session_id')::int
       AND n.emoji = sqlc.arg('emoji')::text
+      AND n.archived_at IS NULL
   );
 
 -- DeleteReactionNotification withdraws the notification along with the
