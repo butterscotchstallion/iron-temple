@@ -100,7 +100,22 @@
     }
   }
 
+  /**
+   * What to call the row's representative actor.
+   *
+   * "You" when it is the caller, which only `crown` can reach: it is the one kind
+   * whose recipient may be its own actor, because your own achievement is the thing
+   * you most want a record of. Every other kind filters the actor out of the
+   * recipients, so this branch is unreachable for them.
+   *
+   * Known limitation, stated rather than hidden: in a group that folds YOUR crown
+   * together with a followed lifter's, your display name can still appear among
+   * `otherActorNames` — that field carries names and no ids, so there is nothing
+   * here to compare. Fixing it properly means widening the wire, and the common
+   * case is a group of one.
+   */
   function name(item: Notification): string {
+    if (item.actor.id === auth.me?.id) return "You";
     return item.actor.displayName || item.actor.username;
   }
 

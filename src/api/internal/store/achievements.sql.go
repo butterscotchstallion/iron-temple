@@ -54,7 +54,12 @@ SELECT u.id,
        'crown'::text,
        $2::text
 FROM users u
-WHERE u.id <> $1::int
+WHERE u.id = $1::int
+   OR EXISTS (
+     SELECT 1 FROM follows f
+     WHERE f.followee_id = $1::int
+       AND f.follower_id = u.id
+   )
 RETURNING user_id
 `
 
@@ -64,18 +69,33 @@ type CreateCrownNotificationsParams struct {
 }
 
 // ---- notifications ----
-// CreateCrownNotifications tells everybody else that a crown changed hands.
+// CreateCrownNotifications tells the lifter who took a crown, and anybody who
+// follows them.
 //
-// Modelled on CreateJoinNotifications, which is the other kind whose subject is a
-// person rather than a session, and which fans out to the whole install the same
-// way.
+// THIS USED TO GO TO THE WHOLE INSTALL AND NOT TO THE HOLDER, and the reversal is
+// deliberate enough to record rather than quietly overwrite. The old comment argued
+// that "a notification saying you did the thing you are looking at is noise", which
+// was true while the crown reached everybody else and the holder had the ornament on
+// their own name to learn from. It stopped being true the moment the panel became
+// yours-and-the-people-you-chose: a lifter who follows nobody would have had a
+// feature that never once spoke to them.
 //
-// THE HOLDER IS NOT TOLD, and that is the table's rule rather than a choice made
-// here: notifications.actor_id is NOT NULL and every insert filters the actor out
-// of the recipients. It also happens to be the right product answer — the lifter
-// who took the crown learns it from the crown on their own name, which is what
-// the feature is for, and a notification saying "you did the thing you are
-// looking at" is noise.
+// So the rule is now the two audiences that have a reason to care. The holder,
+// always — it is their achievement, and the row is what survives a missed toast and
+// what opens the achievement dialog. And their followers, because following is the
+// install's way of saying "tell me about this person".
+//
+// NOTE WHAT THIS BREAKS, in the table's own terms: notifications.actor_id is
+// NOT NULL and 0026 wrote that every insert filters the actor out of the
+// recipients, "because being told about your own applause is noise". That holds for
+// applause and no longer holds here — this is the first kind whose recipient may be
+// its own actor. The column is nullable-free and unconstrained, so nothing in the
+// schema had to change, but a reader of 0026 should know one kind now disagrees
+// with it.
+//
+// Everybody else on the install is told nothing. That is not a visibility rule —
+// every crown stays on the leaderboard and beside every name, exactly as before —
+// it is only about what gets pushed. See 0033.
 //
 // No session, no comment, no emoji. achievement_slug is this kind's subject, and
 // it is what lets the panel name WHICH board was won.

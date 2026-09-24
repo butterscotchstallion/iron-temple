@@ -40,6 +40,14 @@ import (
 // a general claim: it is the reason a filter is absent, so anyone adding one is
 // changing this premise rather than fixing an omission.
 //
+// THE PREMISE IS INTACT, AND FOLLOWS DO NOT CHANGE IT. 0033 added a follow table
+// and the roster now reports whether the caller follows each row — but nothing has
+// become unreadable. Every profile, session, board and crown is exactly as visible
+// as it was, and the roster still lists everybody including the owner. A follow
+// decides what the install PUSHES at a lifter, not what they may go and look at;
+// the paragraph above is about the second, and this is the first. If a read here
+// ever does grow a predicate, that will be the premise change this warns about.
+//
 // # WHY THE STATISTICS ARE NOT RECOMPUTED
 //
 // buildRacked and buildSessionRecap already take the user as a parameter rather
@@ -65,7 +73,13 @@ func (s *Server) lifterFromPath(
 		notFound(w, "lifter not found")
 		return store.GetLifterRow{}, false
 	}
-	row, err := s.q.GetLifter(r.Context(), id)
+	// The caller rides along so the row can say whether they follow this lifter.
+	// Most callers of this helper want only the existence check and discard it;
+	// getLifter is the one that draws a Follow button from it.
+	row, err := s.q.GetLifter(r.Context(), store.GetLifterParams{
+		ID:       id,
+		ViewerID: userFrom(r.Context()).ID,
+	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		notFound(w, "lifter not found")
 		return store.GetLifterRow{}, false
@@ -79,7 +93,7 @@ func (s *Server) lifterFromPath(
 
 // listLifters serves the roster: everyone on this install, oldest account first.
 func (s *Server) listLifters(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.q.ListLifters(r.Context())
+	rows, err := s.q.ListLifters(r.Context(), userFrom(r.Context()).ID)
 	if err != nil {
 		internalError(w)
 		return
@@ -90,6 +104,10 @@ func (s *Server) listLifters(w http.ResponseWriter, r *http.Request) {
 	// null and a client should not have to treat null and [] as the same answer.
 	lifters := make([]lifterDTO, 0, len(rows))
 	for _, row := range rows {
+		// Copied to a local before its address is taken. Correct as `&row.Is…`
+		// under per-iteration loop variables too, but the local says so without
+		// the reader having to know which Go version this is.
+		following := row.IsFollowing
 		lifters = append(lifters, lifterDTO{
 			ID:            row.ID,
 			Username:      row.Username,
@@ -98,6 +116,7 @@ func (s *Server) listLifters(w http.ResponseWriter, r *http.Request) {
 			HasAvatar:     row.AvatarEtag != "",
 			AvatarEtag:    row.AvatarEtag,
 			LastTrainedOn: dateToString(row.LastTrainedOn),
+			Following:     &following,
 		})
 	}
 	writeJSON(w, http.StatusOK, lifters)
@@ -120,6 +139,11 @@ func (s *Server) getLifter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The profile is the other surface that draws a Follow button, so it reports the
+	// same field the roster does — users.sql keeps the two queries' column lists in
+	// step precisely so this cannot be filled on one path and left nil on the other.
+	following := row.IsFollowing
+
 	writeJSON(w, http.StatusOK, lifterProfileDTO{
 		lifterDTO: lifterDTO{
 			ID:            row.ID,
@@ -129,6 +153,7 @@ func (s *Server) getLifter(w http.ResponseWriter, r *http.Request) {
 			HasAvatar:     row.AvatarEtag != "",
 			AvatarEtag:    row.AvatarEtag,
 			LastTrainedOn: dateToString(row.LastTrainedOn),
+			Following:     &following,
 		},
 		CurrentProgramID: row.CurrentProgramID,
 		SessionCount:     totals.Total,

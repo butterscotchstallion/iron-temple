@@ -186,6 +186,12 @@ func TestMigrateAppliesSchemaAndSeed(t *testing.T) {
 	// see the migration on why inventing a held_from would be fiction — so a
 	// fresh install has no crowns until the first sweeper pass.
 	assertCount(t, sqlDB, "SELECT count(*) FROM lifter_achievements", 0)
+
+	// 0033 ships empty too, and for a different reason worth pinning: nothing is
+	// lost without a backfill, because a lifter with no follows still hears about
+	// their own achievements. A seeded mutual-follow graph would be a migration
+	// deciding who trains with whom.
+	assertCount(t, sqlDB, "SELECT count(*) FROM follows", 0)
 }
 
 func assertRest(t *testing.T, db *sql.DB, name string, want int) {
