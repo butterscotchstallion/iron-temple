@@ -200,11 +200,21 @@ SELECT u.id,
              SELECT 1 FROM session_sets ss
              WHERE ss.session_id = s.id AND ss.actual_reps > 0
            )
-       )::date AS last_trained_on
+       )::date AS last_trained_on,
+       EXISTS (
+         SELECT 1 FROM follows f
+         WHERE f.followee_id = u.id
+           AND f.follower_id = $1::int
+       ) AS is_following
 FROM users u
 LEFT JOIN user_avatars ua ON ua.user_id = u.id
-WHERE u.id = $1
+WHERE u.id = $2
 `
+
+type GetLifterParams struct {
+	ViewerID int32 `json:"viewer_id"`
+	ID       int32 `json:"id"`
+}
 
 type GetLifterRow struct {
 	ID               int32       `json:"id"`
@@ -214,13 +224,16 @@ type GetLifterRow struct {
 	AvatarEtag       string      `json:"avatar_etag"`
 	CurrentProgramID *int32      `json:"current_program_id"`
 	LastTrainedOn    pgtype.Date `json:"last_trained_on"`
+	IsFollowing      bool        `json:"is_following"`
 }
 
 // GetLifter is one row of the roster above, for the profile page.
 //
 // Same column list and the same reasoning about what is left out, so the two
 // cannot disagree about what one lifter may know about another — if a column is
-// ever added to one of these, it belongs in both or in neither.
+// ever added to one of these, it belongs in both or in neither. is_following is the
+// most recent test of that rule and it obeyed it: both surfaces draw a Follow
+// button, so both had to be able to say whether it is already pressed.
 //
 // Not GetUser, which returns the administrative columns. Reusing it and simply
 // declining to copy those into the DTO would work today and is the arrangement
@@ -232,8 +245,8 @@ type GetLifterRow struct {
 // current_program_id rides along because the profile names what this lifter is
 // currently running. It is a program id, not a prescription — shared data that
 // every account can already read through /programs.
-func (q *Queries) GetLifter(ctx context.Context, id int32) (GetLifterRow, error) {
-	row := q.db.QueryRow(ctx, getLifter, id)
+func (q *Queries) GetLifter(ctx context.Context, arg GetLifterParams) (GetLifterRow, error) {
+	row := q.db.QueryRow(ctx, getLifter, arg.ViewerID, arg.ID)
 	var i GetLifterRow
 	err := row.Scan(
 		&i.ID,
@@ -243,6 +256,7 @@ func (q *Queries) GetLifter(ctx context.Context, id int32) (GetLifterRow, error)
 		&i.AvatarEtag,
 		&i.CurrentProgramID,
 		&i.LastTrainedOn,
+		&i.IsFollowing,
 	)
 	return i, err
 }
@@ -418,7 +432,12 @@ SELECT u.id,
              SELECT 1 FROM session_sets ss
              WHERE ss.session_id = s.id AND ss.actual_reps > 0
            )
-       )::date AS last_trained_on
+       )::date AS last_trained_on,
+       EXISTS (
+         SELECT 1 FROM follows f
+         WHERE f.followee_id = u.id
+           AND f.follower_id = $1::int
+       ) AS is_following
 FROM users u
 LEFT JOIN user_avatars ua ON ua.user_id = u.id
 ORDER BY u.created_at, u.id
@@ -431,6 +450,7 @@ type ListLiftersRow struct {
 	AvatarColor   string      `json:"avatar_color"`
 	AvatarEtag    string      `json:"avatar_etag"`
 	LastTrainedOn pgtype.Date `json:"last_trained_on"`
+	IsFollowing   bool        `json:"is_following"`
 }
 
 // ListLifters is the social roster: every account on this install, as one
@@ -480,8 +500,16 @@ type ListLiftersRow struct {
 // LEFT, because most accounts never upload anything, and COALESCE so "no
 // avatar" arrives as an empty string rather than a NULL every caller would have
 // to branch on.
-func (q *Queries) ListLifters(ctx context.Context) ([]ListLiftersRow, error) {
-	rows, err := q.db.Query(ctx, listLifters)
+//
+// is_following is whether the CALLER follows this row, which is the one column here
+// that is not a fact about the lifter at all — it is a fact about the reader's
+// relationship to them, which is why it needs viewer_id and why it is the only
+// thing on this roster that differs between two people looking at it. A correlated
+// EXISTS for last_trained_on's reason: at a handful of accounts the planner runs it
+// once per row against the primary key and the cost is nothing, where a LEFT JOIN
+// would fan a lifter out per follower and the grouping would have to put it back.
+func (q *Queries) ListLifters(ctx context.Context, viewerID int32) ([]ListLiftersRow, error) {
+	rows, err := q.db.Query(ctx, listLifters, viewerID)
 	if err != nil {
 		return nil, err
 	}
@@ -496,6 +524,7 @@ func (q *Queries) ListLifters(ctx context.Context) ([]ListLiftersRow, error) {
 			&i.AvatarColor,
 			&i.AvatarEtag,
 			&i.LastTrainedOn,
+			&i.IsFollowing,
 		); err != nil {
 			return nil, err
 		}

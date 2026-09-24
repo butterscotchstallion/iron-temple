@@ -4,6 +4,7 @@
   import { Card } from "$lib/components/ui/card";
   import Avatar from "../lib/Avatar.svelte";
   import LifterName from "../lib/LifterName.svelte";
+  import FollowButton from "../lib/FollowButton.svelte";
   import { auth } from "../lib/auth.svelte";
   import { formatLongDate } from "../lib/date";
   import { listLifters, type Lifter } from "../lib/api";
@@ -75,11 +76,15 @@
     {:else}
       <ul class="flex flex-col divide-y divide-border/60">
         {#each lifters as lifter (lifter.id)}
-          <li>
+          <!-- The row is a flex container with the link as its growing child,
+               rather than one anchor wrapping everything. A <button> inside an
+               <a> is invalid markup and its click bubbles into the navigation,
+               so the Follow control has to be the link's sibling. -->
+          <li class="flex items-center gap-2">
             <a
               href={`/lifters/${lifter.id}`}
               use:link
-              class="-mx-2 flex items-center gap-3 rounded-md px-2 py-3 transition hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              class="-mx-2 flex min-w-0 flex-1 items-center gap-3 rounded-md px-2 py-3 transition hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
               <Avatar user={lifter} size={40} />
               <span class="flex min-w-0 flex-col">
@@ -94,6 +99,20 @@
                 </span>
               </span>
             </a>
+            <!-- Not on your own row. You cannot follow yourself and your own
+                 achievements already reach you, so the control would refuse
+                 every press — the same call SessionSocial makes about applauding
+                 your own workout. `following` is absent on a Lifter that did not
+                 come from this endpoint, so `=== true` rather than a truthiness
+                 test that would read undefined as a deliberate false. -->
+            {#if lifter.id !== auth.me?.id}
+              <FollowButton
+                {lifter}
+                size="sm"
+                following={lifter.following === true}
+                onChange={(next) => (lifter.following = next)}
+              />
+            {/if}
           </li>
         {/each}
       </ul>

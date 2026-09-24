@@ -116,3 +116,57 @@ describe("Lifters", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 });
+
+// The roster is where a lifter follows the two or three people they train with, so
+// the control is per row rather than only on a profile.
+describe("following from the roster", () => {
+  it("offers a follow button for everybody but you", async () => {
+    render(Lifters);
+    await waitFor(() => expect(screen.getByText("Grace Hopper")).toBeInTheDocument());
+
+    expect(
+      screen.getByRole("button", { name: "Follow Grace Hopper" }),
+    ).toBeInTheDocument();
+    // Not on your own row: you cannot follow yourself, and your own achievements
+    // already reach you.
+    expect(
+      screen.queryByRole("button", { name: "Follow Ada Lovelace" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the ones already followed as followed", async () => {
+    listLifters.mockResolvedValue({
+      status: 200,
+      data: [me, { ...trained, following: true }],
+    });
+    render(Lifters);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Unfollow Grace Hopper" }),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  // `following` is absent on a Lifter that did not come from this endpoint, and
+  // absent has to read as "not following" rather than throwing or drawing nothing.
+  it("treats an absent following flag as not following", async () => {
+    render(Lifters);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Follow Grace Hopper" }),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  // The row used to be one anchor wrapping everything, which cannot hold a button.
+  // Both halves still have to work: the name navigates, the button does not.
+  it("keeps the row a link to the profile", async () => {
+    render(Lifters);
+    await waitFor(() => expect(screen.getByText("Grace Hopper")).toBeInTheDocument());
+
+    const link = screen.getByRole("link", { name: /Grace Hopper/ });
+    expect(link).toHaveAttribute("href", "#/lifters/2");
+    expect(link.querySelector("button")).toBeNull();
+  });
+});

@@ -56,6 +56,9 @@ sql:
       # is DML sqlc ignores. Every query in achievements.sql needs the two tables
       # declared, and the notifications fan-out needs the new column.
       - "db/migrations/0032_achievements.up.sql"
+      # 0033 declares follows, which the crown fan-out reads and which the roster
+      # and the profile each test with an EXISTS. Nothing can be typed without it.
+      - "db/migrations/0033_follows.up.sql"
     queries: "db/queries"
     gen:
       go:

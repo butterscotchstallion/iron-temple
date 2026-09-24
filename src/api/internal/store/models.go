@@ -28,6 +28,12 @@ type Exercise struct {
 	RestSeconds     int32              `json:"rest_seconds"`
 }
 
+type Follow struct {
+	FolloweeID int32              `json:"followee_id"`
+	FollowerID int32              `json:"follower_id"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
 type GeneratedActivityRun struct {
 	Day         pgtype.Date        `json:"day"`
 	Sessions    int32              `json:"sessions"`

@@ -230,6 +230,14 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 					r.Get("/baselines", s.listBaselines)
 					r.Put("/baselines/{exerciseId}", s.setBaseline)
 					r.Delete("/baselines/{exerciseId}", s.clearBaseline)
+
+					// Whose achievements the caller hears about. Here rather
+					// than under /lifters BECAUSE it writes: that subtree is
+					// read-only by construction and must stay that way, and
+					// the resource being written is the caller's own list.
+					// See the header in follows.go.
+					r.Post("/following/{lifterId}", s.followLifter)
+					r.Delete("/following/{lifterId}", s.unfollowLifter)
 				})
 			})
 

@@ -427,79 +427,100 @@ func TestRetakingACrownCountsAsecondReign(t *testing.T) {
 
 // ---- what the install is told ----
 
-// A crown is announced to everybody EXCEPT the lifter who took it. That is the
-// notifications table's rule — the actor is always filtered out of the recipients
-// — and the right answer besides: the holder learns it from the crown on their
-// own name, and being told you did the thing you are looking at is noise.
-func TestTakingACrownTellsEverybodyButTheHolder(t *testing.T) {
-	_, token := secondLifter(t, "crown-announce")
-	// Somebody above zero, or the zero rule means no crown is taken and there is
-	// no announcement to assert on.
-	trainOnce(t, expectAs(t, token))
+// A crown reaches the lifter who took it and anybody following them, and nobody
+// else.
+//
+// THIS TEST USED TO ASSERT THE OPPOSITE — "everybody except the holder", counted as
+// accounts-1 — and the reversal is the point of 0033 rather than a loosening of an
+// assertion. Two things changed at once: the holder is now told, because their own
+// achievement is the thing they most want a record of, and everybody else is not,
+// because a crown taken by somebody you have never spoken to is noise.
+//
+// Driven through the API for the follow and read straight from the table for the
+// recipients, because the panel is per-caller and this is a claim about all three
+// of them at once.
+func TestTakingACrownTellsTheHolderAndTheirFollowers(t *testing.T) {
+	holderID, holderToken := secondLifter(t, "crown-fanout-holder")
+	followerID, followerToken := secondLifter(t, "crown-fanout-follower")
+	strangerID, _ := secondLifter(t, "crown-fanout-stranger")
+
+	// The follower asks to hear about the holder. The stranger does not.
+	expectAs(t, followerToken).POST(fmt.Sprintf("/me/following/%d", holderID)).
+		Expect().Status(http.StatusNoContent)
+
+	// Somebody above zero, or the zero rule means no crown is taken at all.
+	trainOnce(t, expectAs(t, holderToken))
 	refreshCrowns(t)
 
 	ctx := context.Background()
-
-	// NOBODY is told about their own. Asserted across every crown the pass raised
-	// rather than for one account, because this is the table's invariant and one
-	// escaping row is the whole failure.
-	//
-	// Note what this is NOT: "the holder received no crown notification at all".
-	// A lifter is told when SOMEBODY ELSE takes a crown, which is the point of the
-	// notification — so the pair to count is (recipient = actor), not the
-	// recipient alone.
-	var toThemselves int
-	if err := testPool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM notifications WHERE kind = 'crown' AND user_id = actor_id`).
-		Scan(&toThemselves); err != nil {
-		t.Fatalf("counting self-notifications: %v", err)
-	}
-	if toThemselves != 0 {
-		t.Fatalf("%d lifters were told about their own crown", toThemselves)
+	told := func(recipient int32) int {
+		var n int
+		if err := testPool.QueryRow(ctx,
+			`SELECT COUNT(*) FROM notifications
+			 WHERE kind = 'crown' AND actor_id = $1 AND user_id = $2`,
+			holderID, recipient).Scan(&n); err != nil {
+			t.Fatalf("counting crowns told to %d: %v", recipient, err)
+		}
+		return n
 	}
 
-	// And the fan-out reaches EVERYBODY else. One crown means one row per other
-	// account on the install — the same rule CreateJoinNotifications applies —
-	// so a per-crown recipient count that is short means somebody was skipped.
-	var accounts int
-	if err := testPool.QueryRow(ctx, "SELECT COUNT(*) FROM users").Scan(&accounts); err != nil {
-		t.Fatalf("counting accounts: %v", err)
+	// The holder, which is the half that used to be missing.
+	if told(holderID) == 0 {
+		t.Error("the lifter who took the crown was not told about it")
 	}
-	rows, err := testPool.Query(ctx,
-		`SELECT actor_id, achievement_slug, COUNT(*)
-		 FROM notifications WHERE kind = 'crown'
-		 GROUP BY actor_id, achievement_slug`)
-	if err != nil {
-		t.Fatalf("grouping crown notifications: %v", err)
+	// Their follower, which is what following is for.
+	if told(followerID) == 0 {
+		t.Error("a follower was not told about the crown they asked to hear about")
 	}
-	defer rows.Close()
+	// And nobody else. This is the assertion the old install-wide fan-out would
+	// have failed.
+	if n := told(strangerID); n != 0 {
+		t.Errorf("a lifter following nobody was told about %d crowns", n)
+	}
+}
 
-	announced := 0
-	for rows.Next() {
-		var actor int32
-		var slug *string
-		var told int
-		if err := rows.Scan(&actor, &slug, &told); err != nil {
-			t.Fatalf("scanning: %v", err)
-		}
-		announced++
-		// Every row names its board, so the panel can say which one was won.
-		if slug == nil {
-			t.Errorf("a crown taken by %d names no board", actor)
-		}
-		if told != accounts-1 {
-			t.Errorf("crown %v by %d reached %d lifters, want %d",
-				slug, actor, told, accounts-1)
-		}
+// Unfollowing stops the next one. Asserted separately from the fan-out above
+// because it is the other direction of the same rule, and because a follow that
+// cannot be undone is a worse feature than none.
+func TestUnfollowingStopsHearingAboutCrowns(t *testing.T) {
+	holderID, holderToken := secondLifter(t, "crown-unfollow-holder")
+	followerID, followerToken := secondLifter(t, "crown-unfollow-follower")
+
+	follower := expectAs(t, followerToken)
+	path := fmt.Sprintf("/me/following/%d", holderID)
+	follower.POST(path).Expect().Status(http.StatusNoContent)
+	follower.DELETE(path).Expect().Status(http.StatusNoContent)
+
+	trainOnce(t, expectAs(t, holderToken))
+	refreshCrowns(t)
+
+	var n int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM notifications
+		 WHERE kind = 'crown' AND actor_id = $1 AND user_id = $2`,
+		holderID, followerID).Scan(&n); err != nil {
+		t.Fatalf("counting: %v", err)
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("iterating: %v", err)
+	if n != 0 {
+		t.Errorf("an unfollowed lifter's crown still reached %d rows", n)
 	}
-	// The pass opened reigns on an install with several accounts, so it must have
-	// announced something — an assertion loop that ran zero times would pass while
-	// saying nothing.
-	if announced == 0 {
-		t.Fatal("the pass opened no reigns, so nothing here was tested")
+}
+
+// Every crown row names its board, whoever it reached — that is what lets the panel
+// say which one was won rather than "took a crown".
+func TestEveryCrownNotificationNamesItsBoard(t *testing.T) {
+	_, token := secondLifter(t, "crown-names-board")
+	trainOnce(t, expectAs(t, token))
+	refreshCrowns(t)
+
+	var withoutSlug int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM notifications
+		 WHERE kind = 'crown' AND achievement_slug IS NULL`).Scan(&withoutSlug); err != nil {
+		t.Fatalf("counting: %v", err)
+	}
+	if withoutSlug != 0 {
+		t.Errorf("%d crown notifications name no board", withoutSlug)
 	}
 }
 

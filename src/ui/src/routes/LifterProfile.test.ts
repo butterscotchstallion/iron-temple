@@ -2,7 +2,8 @@ import { render, screen, waitFor } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import LifterProfile from "./LifterProfile.svelte";
 import type { LifterProfile as Profile } from "../lib/api";
-import { testLifter, testRackedReport } from "../lib/testFixtures";
+import { auth } from "../lib/auth.svelte";
+import { testLifter, testRackedReport, testUser } from "../lib/testFixtures";
 
 // A render test for the profile, which earns its place the way Racked.test.ts
 // does: the page is assembled from two requests that can fail independently, and
@@ -247,5 +248,50 @@ describe("LifterProfile sessions", () => {
       expect(screen.getByText("Lifetime volume")).toBeInTheDocument();
     });
     expect(screen.queryByTestId("lifter-sessions")).toBeNull();
+  });
+});
+
+// The other surface that draws the Follow control, and the one where the follow
+// state arrives free — it rides on the profile response the page already fetches.
+describe("following from the profile", () => {
+  beforeEach(() => {
+    auth.me = testUser({ id: 1 });
+    auth.loaded = true;
+  });
+
+  it("offers to follow a lifter it does not follow", async () => {
+    render(LifterProfile, { params: { id: "2" } });
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Follow Grace Hopper" }),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it("shows one already followed as followed", async () => {
+    getLifter.mockResolvedValue({ status: 200, data: profile({ following: true }) });
+    render(LifterProfile, { params: { id: "2" } });
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Unfollow Grace Hopper" }),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  // Not on your own profile: you cannot follow yourself, and a control that always
+  // refuses is worse than no control.
+  it("offers nothing on your own profile", async () => {
+    getLifter.mockResolvedValue({
+      status: 200,
+      data: profile({ id: 1, displayName: "Ada Lovelace" }),
+    });
+    render(LifterProfile, { params: { id: "1" } });
+
+    await waitFor(() =>
+      expect(screen.getByText("Ada Lovelace")).toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("button", { name: /^Follow/ })).not.toBeInTheDocument();
   });
 });

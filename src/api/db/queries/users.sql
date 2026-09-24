@@ -95,6 +95,14 @@ ORDER BY created_at, id;
 -- LEFT, because most accounts never upload anything, and COALESCE so "no
 -- avatar" arrives as an empty string rather than a NULL every caller would have
 -- to branch on.
+--
+-- is_following is whether the CALLER follows this row, which is the one column here
+-- that is not a fact about the lifter at all — it is a fact about the reader's
+-- relationship to them, which is why it needs viewer_id and why it is the only
+-- thing on this roster that differs between two people looking at it. A correlated
+-- EXISTS for last_trained_on's reason: at a handful of accounts the planner runs it
+-- once per row against the primary key and the cost is nothing, where a LEFT JOIN
+-- would fan a lifter out per follower and the grouping would have to put it back.
 -- name: ListLifters :many
 SELECT u.id,
        u.username,
@@ -109,7 +117,12 @@ SELECT u.id,
              SELECT 1 FROM session_sets ss
              WHERE ss.session_id = s.id AND ss.actual_reps > 0
            )
-       )::date AS last_trained_on
+       )::date AS last_trained_on,
+       EXISTS (
+         SELECT 1 FROM follows f
+         WHERE f.followee_id = u.id
+           AND f.follower_id = sqlc.arg('viewer_id')::int
+       ) AS is_following
 FROM users u
 LEFT JOIN user_avatars ua ON ua.user_id = u.id
 ORDER BY u.created_at, u.id;
@@ -118,7 +131,9 @@ ORDER BY u.created_at, u.id;
 --
 -- Same column list and the same reasoning about what is left out, so the two
 -- cannot disagree about what one lifter may know about another — if a column is
--- ever added to one of these, it belongs in both or in neither.
+-- ever added to one of these, it belongs in both or in neither. is_following is the
+-- most recent test of that rule and it obeyed it: both surfaces draw a Follow
+-- button, so both had to be able to say whether it is already pressed.
 --
 -- Not GetUser, which returns the administrative columns. Reusing it and simply
 -- declining to copy those into the DTO would work today and is the arrangement
@@ -145,7 +160,12 @@ SELECT u.id,
              SELECT 1 FROM session_sets ss
              WHERE ss.session_id = s.id AND ss.actual_reps > 0
            )
-       )::date AS last_trained_on
+       )::date AS last_trained_on,
+       EXISTS (
+         SELECT 1 FROM follows f
+         WHERE f.followee_id = u.id
+           AND f.follower_id = sqlc.arg('viewer_id')::int
+       ) AS is_following
 FROM users u
 LEFT JOIN user_avatars ua ON ua.user_id = u.id
 WHERE u.id = sqlc.arg('id');
