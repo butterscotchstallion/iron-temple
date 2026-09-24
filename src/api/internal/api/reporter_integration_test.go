@@ -315,15 +315,20 @@ func TestReporterSendsOneRecapPerPeriod(t *testing.T) {
 	}
 
 	// A second pass must be silent: the sent row is what stops a duplicate.
+	//
+	// Run synchronously rather than through StartRackedReporter. The assertion
+	// is a negative, so waiting on a background goroutine can only be done by
+	// sleeping for longer than a pass takes — and if the pass were merely slow,
+	// or never ran at all, the test would pass for the wrong reason. Returning
+	// from the pass is the signal, and it costs milliseconds instead of two
+	// seconds. StartRackedReporter's own behaviour is covered above and by
+	// TestReporterIsInertWithoutAMailer.
 	before := spy.count()
 	cancel()
-	ctx2, cancel2 := context.WithCancel(context.Background())
-	defer cancel2()
 	srv2 := api.NewServer(testPool, "test", "test")
 	srv2.SetMailer(racked.NewMailer(spy.srv.URL, "alerts@homelab.local"))
-	srv2.StartRackedReporter(ctx2, time.Hour)
+	srv2.SendDueReportsNow(context.Background())
 
-	time.Sleep(2 * time.Second)
 	if got := spy.count(); got != before {
 		t.Fatalf("a second pass sent %d more recaps, want 0", got-before)
 	}
@@ -357,6 +362,13 @@ func TestReporterRecordsARelayFailure(t *testing.T) {
 // The reporter does nothing at all without a mailer, which is how the setting
 // that disables recaps is expressed — and why the rest of the suite, which
 // constructs servers freely, never sends mail.
+//
+// Stated as "the recap is still outstanding afterwards" rather than "no row
+// exists yet". Both catch a broken guard, but only the first says why it
+// matters: a mailer-less process must LEAVE the work for one that can do it,
+// not consume it. It is also the version that can be checked without a sleep —
+// the second server's pass is synchronous, and a claim from the first server
+// would have had to happen before it for the recap to go missing.
 func TestReporterIsInertWithoutAMailer(t *testing.T) {
 	skipWithoutDB(t)
 	userID := newReportUser(t, "nomailer")
@@ -367,7 +379,6 @@ func TestReporterIsInertWithoutAMailer(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	srv.StartRackedReporter(ctx, time.Hour)
-	time.Sleep(time.Second)
 
 	var claimed int
 	err := testPool.QueryRow(context.Background(),
@@ -377,6 +388,16 @@ func TestReporterIsInertWithoutAMailer(t *testing.T) {
 	}
 	if claimed != 0 {
 		t.Fatalf("a server with no mailer claimed %d recaps", claimed)
+	}
+
+	// And the recap really is still there to be sent.
+	spy := newRelaySpy(t, http.StatusOK)
+	withMailer := api.NewServer(testPool, "test", "test")
+	withMailer.SetMailer(racked.NewMailer(spy.srv.URL, "alerts@homelab.local"))
+	withMailer.SendDueReportsNow(context.Background())
+
+	if spy.forUser("Nomailer") == nil {
+		t.Fatal("the recap a mailer-less server left behind was never sent")
 	}
 }
 

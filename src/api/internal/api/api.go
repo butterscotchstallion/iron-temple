@@ -37,7 +37,11 @@ type Server struct {
 	q           *store.Queries
 	version     string
 	environment string
-	hasher      auth.PBKDF2Hasher
+	// hasher is the interface, not the concrete type, so the test binary can
+	// swap in the same implementation at a cheap work factor — see
+	// export_test.go. Production never sets it to anything but the zero
+	// PBKDF2Hasher NewServer installs below.
+	hasher auth.Hasher
 	// logins brakes password guessing. In-process state, so it is per-replica —
 	// see the type's doc for why that is the right trade here.
 	logins *auth.RateLimiter
@@ -80,6 +84,7 @@ func NewServer(pool *pgxpool.Pool, version, environment string) *Server {
 		q:           store.New(pool),
 		version:     version,
 		environment: environment,
+		hasher:      auth.PBKDF2Hasher{},
 		logins:      auth.NewRateLimiter(auth.DefaultAttempts, auth.DefaultWindow),
 		comments:    auth.NewRateLimiter(maxCommentsPerWindow, commentWindow),
 		reportLoc:   time.UTC,

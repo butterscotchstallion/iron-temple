@@ -29,6 +29,12 @@ type Hasher interface {
 	// was produced by a weaker parameter set and should be replaced.
 	// A malformed or unrecognised encoded value is a non-match, not an error.
 	Verify(password, encoded string) (ok, needsRehash bool)
+	// DummyVerify burns the work a real Verify would, against a hash that
+	// cannot match. The login handler calls it for an unknown username, so an
+	// implementation that skipped the work would reintroduce the timing oracle
+	// it exists to close — which is why it belongs in the interface rather
+	// than only on the concrete type.
+	DummyVerify(password string)
 }
 
 // PBKDF2 parameters.
@@ -60,24 +66,47 @@ const (
 var ErrHashFailed = errors.New("auth: could not hash password")
 
 // PBKDF2Hasher implements Hasher with PBKDF2-HMAC-SHA256. The zero value is
-// ready to use.
-type PBKDF2Hasher struct{}
+// the production hasher: it works at pbkdf2Iterations.
+type PBKDF2Hasher struct {
+	// Iterations overrides the work factor Hash writes, and the floor Verify
+	// measures a stored hash against. Zero — the only value production ever
+	// uses — means pbkdf2Iterations.
+	//
+	// It exists for tests, and specifically for the API integration suite,
+	// which creates and signs in as ~50 accounts. At the real work factor that
+	// is ~265 deliberately-slow hashes and about 80% of the suite's runtime,
+	// spent proving nothing about hashing — every one of those tests is about
+	// something else, and needs a password only to get through the door.
+	// internal/auth's own tests leave this zero, so the shipped work factor is
+	// still exercised at full cost by the package that owns it.
+	Iterations int
+}
 
 // compile-time check that the implementation satisfies the interface.
 var _ Hasher = PBKDF2Hasher{}
 
+// iterations is the work factor this hasher writes. Read through here rather
+// than off the field directly, so "unset means production" is stated once.
+func (h PBKDF2Hasher) iterations() int {
+	if h.Iterations <= 0 {
+		return pbkdf2Iterations
+	}
+	return h.Iterations
+}
+
 // Hash produces "$pbkdf2-sha256$i=<iters>$<salt-b64>$<key-b64>" with a fresh
 // random salt.
-func (PBKDF2Hasher) Hash(password string) (string, error) {
+func (h PBKDF2Hasher) Hash(password string) (string, error) {
 	salt := make([]byte, saltLen)
 	if _, err := rand.Read(salt); err != nil {
 		return "", fmt.Errorf("%w: %v", ErrHashFailed, err)
 	}
-	key, err := pbkdf2Key(password, salt, pbkdf2Iterations, keyLen)
+	iters := h.iterations()
+	key, err := pbkdf2Key(password, salt, iters, keyLen)
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrHashFailed, err)
 	}
-	return encodePHC(algPBKDF2, pbkdf2Iterations, salt, key), nil
+	return encodePHC(algPBKDF2, iters, salt, key), nil
 }
 
 // pbkdf2Key is the single call site for the KDF, so Hash and Verify cannot
@@ -92,7 +121,7 @@ func pbkdf2Key(password string, salt []byte, iters, length int) ([]byte, error) 
 // iteration count, wrong password — returns (false, false). A caller cannot
 // distinguish "this row is corrupt" from "wrong password", which is the right
 // answer for a login endpoint.
-func (PBKDF2Hasher) Verify(password, encoded string) (ok, needsRehash bool) {
+func (h PBKDF2Hasher) Verify(password, encoded string) (ok, needsRehash bool) {
 	alg, iters, salt, want, err := decodePHC(encoded)
 	if err != nil || alg != algPBKDF2 {
 		return false, false
@@ -106,20 +135,31 @@ func (PBKDF2Hasher) Verify(password, encoded string) (ok, needsRehash bool) {
 	}
 	// Only an authenticated caller learns that their stored parameters are
 	// stale, so this leaks nothing to an attacker guessing passwords.
-	return true, iters < pbkdf2Iterations || len(salt) < saltLen || len(want) < keyLen
+	return true, iters < h.iterations() || len(salt) < saltLen || len(want) < keyLen
 }
 
 // DummyVerify burns roughly the same CPU as a real Verify against a hash that
 // cannot match. Login calls it when the username is unknown, so the response
 // time does not reveal whether an account exists.
 func (h PBKDF2Hasher) DummyVerify(password string) {
-	h.Verify(password, dummyHash)
+	h.Verify(password, h.dummyHash())
 }
 
 // dummyHash is a syntactically valid PHC string over a fixed salt. Its plaintext
 // is unknown and irrelevant — it exists only to make DummyVerify do the work.
-const dummyHash = "$pbkdf2-sha256$i=600000$AAAAAAAAAAAAAAAAAAAAAA$" +
-	"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+//
+// Built at this hasher's own work factor rather than fixed at the shipped one:
+// the property DummyVerify is defending is that an unknown username costs the
+// same as a known one, and that is a claim about whatever factor Hash is
+// currently writing. A constant would hold only while the two happened to
+// agree, and would leave a test hasher paying the full price for the one code
+// path the tests take most.
+// Goes through encodePHC like every other hash, so there is still exactly one
+// definition of the stored form — the previous constant spelled it out a second
+// time, and a change to the encoding would have left this one behind.
+func (h PBKDF2Hasher) dummyHash() string {
+	return encodePHC(algPBKDF2, h.iterations(), make([]byte, saltLen), make([]byte, keyLen))
+}
 
 // b64 is the unpadded encoding PHC strings conventionally use; padding would
 // collide with the "=" already used inside the parameter field.

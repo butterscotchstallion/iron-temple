@@ -19,7 +19,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"gitea.homelab/gitadmin/iron-temple/api/internal/auth"
 	"gitea.homelab/gitadmin/iron-temple/api/internal/store"
 )
 
@@ -686,9 +685,3 @@ const defaultDumbbellStepLb = 5
 // not told" — where the columns are three. Only reached when the row cannot be
 // read at all; the query itself already COALESCEs.
 const defaultEquipmentStepLb = 5
-
-// compile-time guard: auth.Hasher must keep satisfying what the handlers use.
-var _ interface {
-	Hash(string) (string, error)
-	Verify(string, string) (bool, bool)
-} = auth.PBKDF2Hasher{}
