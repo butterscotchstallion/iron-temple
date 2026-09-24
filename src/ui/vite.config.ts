@@ -503,6 +503,31 @@ export default defineConfig({
     // jsdom so we can render components; globals for testing-library auto-cleanup.
     environment: "jsdom",
     globals: true,
+    // Run each test file in its own VM context inside a reused worker, rather
+    // than in its own freshly-forked process.
+    //
+    // Standing up a jsdom is the single most expensive thing this suite does —
+    // far more than the assertions. Under the default `forks` pool it happens
+    // once per FILE: 88 files, ~143s, 53% of the run. vmThreads builds the
+    // environment once per worker and gives each file a fresh VM context on
+    // top of it, so per-file isolation is kept and the setup is amortised.
+    // Measured on the same machine: 294s -> 131s, all 1385 tests passing.
+    //
+    // NOT `isolate: false`, which Vitest also suggests in that hint and which
+    // is the cheaper-looking option. It shares one module registry and one
+    // document across every file in a worker; tried here, it failed 99 tests in
+    // src/routes alone on leaked state. The isolation is load-bearing.
+    pool: "vmThreads",
+    // Keep transformed modules on disk (node_modules/.vite, already ignored)
+    // instead of recompiling every .svelte and .ts on each run.
+    //
+    // Compiling the component graph is ~14% of a cold run and ~1% of a warm
+    // one: 108s -> 87s here. That is a local-development win specifically —
+    // watch mode and the repeated `pnpm test:unit` of the preflight gate — and
+    // it does nothing in CI, which starts from a fresh checkout every time. It
+    // costs nothing there either; a cold run with this on is the same length as
+    // a run without it, so there is no reason to make it conditional.
+    fsModuleCache: true,
     setupFiles: ["./vitest-setup.ts"],
     include: ["src/**/*.{test,spec}.ts"],
     coverage: {
