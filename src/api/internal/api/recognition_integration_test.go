@@ -37,9 +37,29 @@ func reactions(e *httpexpect.Expect, sessionID int) *httpexpect.Array {
 		Expect().Status(http.StatusOK).JSON().Array()
 }
 
+// commentPage is the whole response: a page of the conversation plus the count
+// of the whole thread.
+func commentPage(e *httpexpect.Expect, sessionID int, query ...any) *httpexpect.Object {
+	req := e.GET(fmt.Sprintf("/sessions/%d/comments", sessionID))
+	for i := 0; i+1 < len(query); i += 2 {
+		req = req.WithQuery(fmt.Sprint(query[i]), query[i+1])
+	}
+	return req.Expect().Status(http.StatusOK).JSON().Object()
+}
+
+// comments is the rows alone, which is what most assertions here care about.
 func comments(e *httpexpect.Expect, sessionID int) *httpexpect.Array {
-	return e.GET(fmt.Sprintf("/sessions/%d/comments", sessionID)).
-		Expect().Status(http.StatusOK).JSON().Array()
+	return commentPage(e, sessionID).Value("items").Array()
+}
+
+// commentBodies reads a page in the order it came back, so a test can assert
+// the ordering rather than only the membership.
+func commentBodies(e *httpexpect.Expect, sessionID int, query ...any) []string {
+	out := []string{}
+	for _, item := range commentPage(e, sessionID, query...).Value("items").Array().Iter() {
+		out = append(out, item.Object().Value("body").String().Raw())
+	}
+	return out
 }
 
 // ---- the trap ----
@@ -418,4 +438,136 @@ func TestRecognitionCascadesWhenASessionGoes(t *testing.T) {
 			t.Errorf("%s left %d orphaned rows after the session was deleted", table, left)
 		}
 	}
+}
+
+// ---- paging a conversation ----
+
+// The conversation is paged from the newest end and rendered from the oldest,
+// which is the one thing about this endpoint that could be got backwards. A
+// lifter opening a session with a long thread on it wants its last few lines —
+// including the one a notification just told them about — not its first.
+func TestCommentsPageFromTheNewestEnd(t *testing.T) {
+	sessionID, _ := otherLiftersSession(t, "comment-paging-subject")
+	_, talkerToken := secondLifter(t, "comment-paging-talker")
+	talker := expectAs(t, talkerToken)
+
+	// Five, well under the per-account rate limit, and posted one at a time so
+	// their created_at order is the order below.
+	for _, body := range []string{"one", "two", "three", "four", "five"} {
+		talker.POST(fmt.Sprintf("/sessions/%d/comments", sessionID)).
+			WithJSON(map[string]any{"body": body}).
+			Expect().Status(http.StatusCreated)
+	}
+
+	// The default page is the whole thread here, still oldest-first.
+	if got := commentBodies(talker, sessionID); !equalStrings(got, []string{"one", "two", "three", "four", "five"}) {
+		t.Fatalf("unpaged conversation read %v, want it oldest-first", got)
+	}
+
+	// A short page takes the NEWEST two and hands them back in reading order.
+	page := commentPage(talker, sessionID, "limit", 2)
+	page.HasValue("total", 5)
+	if got := commentBodies(talker, sessionID, "limit", 2); !equalStrings(got, []string{"four", "five"}) {
+		t.Fatalf("first page read %v, want the newest two oldest-first", got)
+	}
+
+	// Offset walks UP the thread, into the older part.
+	if got := commentBodies(talker, sessionID, "limit", 2, "offset", 2); !equalStrings(got, []string{"two", "three"}) {
+		t.Fatalf("second page read %v, want the next two older ones", got)
+	}
+	if got := commentBodies(talker, sessionID, "limit", 2, "offset", 4); !equalStrings(got, []string{"one"}) {
+		t.Fatalf("last page read %v, want the oldest comment alone", got)
+	}
+}
+
+// total counts the thread rather than the page, which is what lets a surface
+// say how much is above what it is showing.
+func TestCommentTotalCountsTheWholeThread(t *testing.T) {
+	sessionID, _ := otherLiftersSession(t, "comment-total-subject")
+	_, token := secondLifter(t, "comment-total-talker")
+	talker := expectAs(t, token)
+
+	commentPage(talker, sessionID).HasValue("total", 0)
+	for range 3 {
+		talker.POST(fmt.Sprintf("/sessions/%d/comments", sessionID)).
+			WithJSON(map[string]any{"body": "said something"}).
+			Expect().Status(http.StatusCreated)
+	}
+
+	page := commentPage(talker, sessionID, "limit", 1)
+	page.HasValue("total", 3)
+	page.Value("items").Array().Length().IsEqual(1)
+}
+
+func TestCommentPageRejectsAnImpossibleLimit(t *testing.T) {
+	sessionID, _ := otherLiftersSession(t, "comment-bad-limit")
+	expect(t).GET(fmt.Sprintf("/sessions/%d/comments", sessionID)).
+		WithQuery("limit", 0).
+		Expect().Status(http.StatusBadRequest)
+}
+
+// ---- the throttle ----
+
+// Posting is the one write a signed-in account can repeat freely, and every one
+// of them lands in somebody else's panel. The limit is deliberately far above
+// conversation speed, so this test has to work at it.
+//
+// Acts as its own fresh lifter: the budget is per account, and spending the
+// primary's here would strand every later test in this package that posts a
+// comment as the owner.
+func TestCommentFloodIsThrottled(t *testing.T) {
+	sessionID, _ := otherLiftersSession(t, "comment-flood-subject")
+	_, token := secondLifter(t, "comment-flood-talker")
+	talker := expectAs(t, token)
+
+	// The first one must land, or this test would pass against an endpoint that
+	// refused everything.
+	talker.POST(fmt.Sprintf("/sessions/%d/comments", sessionID)).
+		WithJSON(map[string]any{"body": "first"}).
+		Expect().Status(http.StatusCreated)
+
+	// Bounded rather than while(true): a broken limiter should fail this test,
+	// not hang the suite.
+	throttled := false
+	for i := range 60 {
+		status := talker.POST(fmt.Sprintf("/sessions/%d/comments", sessionID)).
+			WithJSON(map[string]any{"body": fmt.Sprintf("flood %d", i)}).
+			Expect().Raw().StatusCode
+		if status == http.StatusTooManyRequests {
+			throttled = true
+			break
+		}
+		if status != http.StatusCreated {
+			t.Fatalf("comment %d answered %d, want 201 or 429", i, status)
+		}
+	}
+	if !throttled {
+		t.Fatal("posted 61 comments in a row without ever being throttled")
+	}
+
+	// The refusal names itself, so a client can say something better than
+	// "couldn't post that".
+	talker.POST(fmt.Sprintf("/sessions/%d/comments", sessionID)).
+		WithJSON(map[string]any{"body": "one more"}).
+		Expect().Status(http.StatusTooManyRequests).
+		JSON().Object().HasValue("code", "too_many_comments")
+
+	// The budget is per account, so somebody else is unaffected — the property
+	// that keeps one noisy lifter from silencing the install.
+	_, otherToken := secondLifter(t, "comment-flood-bystander")
+	expectAs(t, otherToken).POST(fmt.Sprintf("/sessions/%d/comments", sessionID)).
+		WithJSON(map[string]any{"body": "still allowed"}).
+		Expect().Status(http.StatusCreated)
+}
+
+func equalStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }

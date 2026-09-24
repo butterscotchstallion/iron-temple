@@ -16,11 +16,13 @@ import { testLifter, testNotification, testUser } from "./testFixtures";
 
 const listNotifications = vi.hoisted(() => vi.fn());
 const markNotificationsRead = vi.hoisted(() => vi.fn());
+const markNotificationRead = vi.hoisted(() => vi.fn());
 const clearNotifications = vi.hoisted(() => vi.fn());
 vi.mock("./api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./api")>()),
   listNotifications,
   markNotificationsRead,
+  markNotificationRead,
   clearNotifications,
 }));
 
@@ -62,6 +64,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   served([]);
   markNotificationsRead.mockResolvedValue({ status: 204, data: undefined });
+  markNotificationRead.mockResolvedValue({ status: 204, data: undefined });
   clearNotifications.mockResolvedValue({ status: 204, data: undefined });
   auth.me = testUser({ id: ME });
   auth.loaded = true;
@@ -290,5 +293,140 @@ describe("polling", () => {
     expect(notifications.items).toHaveLength(1);
     expect(notifications.unread).toBe(1);
     expect(notifications.failed).toBe(true);
+  });
+});
+
+describe("following a notification", () => {
+  // Reading THIS one, which is what following it means. The blunt "mark all
+  // read" buries the rows that have not been looked at, so before this the
+  // badge could only be cleared by losing track of what was new.
+  it("marks the row read and drops the badge by one", async () => {
+    seed(
+      [
+        testNotification({
+          id: 11,
+          kind: "reaction",
+          sessionId: 42,
+          sessionOwnerId: ME,
+        }),
+        testNotification({ id: 12, kind: "joined" }),
+      ],
+      2,
+    );
+    render(NotificationBell);
+    await open();
+
+    await fireEvent.click(await screen.findByText(/applauded your/i));
+
+    expect(markNotificationRead).toHaveBeenCalledWith(11);
+    await waitFor(() => expect(notifications.unread).toBe(1));
+  });
+
+  // A row already read costs no request — otherwise opening the same
+  // notification twice would take the badge below what is actually unread.
+  it("asks nothing for a row that was already read", async () => {
+    seed(
+      [
+        testNotification({
+          id: 11,
+          kind: "reaction",
+          sessionId: 42,
+          sessionOwnerId: ME,
+          readAt: "2026-03-17T18:00:00Z",
+        }),
+      ],
+      0,
+    );
+    render(NotificationBell);
+    await open();
+
+    await fireEvent.click(await screen.findByText(/applauded your/i));
+
+    expect(markNotificationRead).not.toHaveBeenCalled();
+    expect(notifications.unread).toBe(0);
+  });
+
+  // The deep link. Without it the lifter lands at the top of a long recap whose
+  // conversation is the last card, hunting for a sentence they were just shown.
+  it("points a comment at the comment, not just the page", async () => {
+    seed([
+      testNotification({
+        id: 13,
+        kind: "comment",
+        sessionId: 42,
+        sessionOwnerId: ME,
+        commentId: 99,
+        commentBody: "strong sets",
+      }),
+    ]);
+    render(NotificationBell);
+    await open();
+
+    await fireEvent.click(await screen.findByText(/commented on your/i));
+
+    expect(push).toHaveBeenCalledWith("/sessions/42/recap?comment=99");
+  });
+
+  // A reply reaches you about somebody else's workout, so it routes to the
+  // owner-scoped recap — and carries the anchor there too.
+  it("routes a reply to the session's owner with the anchor", async () => {
+    seed([
+      testNotification({
+        id: 14,
+        kind: "reply",
+        sessionId: 42,
+        sessionOwnerId: THEM,
+        commentId: 7,
+        commentBody: "agreed",
+      }),
+    ]);
+    render(NotificationBell);
+    await open();
+
+    await fireEvent.click(await screen.findByText(/also replied/i));
+
+    expect(push).toHaveBeenCalledWith("/lifters/2/sessions/42/recap?comment=7");
+  });
+
+  // A reaction has no comment to point at, so the link stays bare rather than
+  // carrying a parameter the recap would have to know to ignore.
+  it("leaves a reaction's link without an anchor", async () => {
+    seed([
+      testNotification({
+        id: 15,
+        kind: "reaction",
+        sessionId: 42,
+        sessionOwnerId: ME,
+      }),
+    ]);
+    render(NotificationBell);
+    await open();
+
+    await fireEvent.click(await screen.findByText(/applauded your/i));
+
+    expect(push).toHaveBeenCalledWith("/sessions/42/recap");
+  });
+
+  // A reply about a session with no owner — one predating accounts — has no
+  // recap route to build. Such a row used to look identical to a live one and
+  // simply do nothing when tapped, which reads as a broken panel.
+  it("draws a row that leads nowhere as inert", async () => {
+    seed([
+      testNotification({
+        id: 16,
+        kind: "reply",
+        sessionId: 42,
+        sessionOwnerId: undefined,
+        commentBody: "orphaned",
+      }),
+    ]);
+    render(NotificationBell);
+    await open();
+
+    const row = await screen.findByText(/also replied/i);
+    await fireEvent.click(row);
+
+    expect(push).not.toHaveBeenCalled();
+    expect(markNotificationRead).not.toHaveBeenCalled();
   });
 });

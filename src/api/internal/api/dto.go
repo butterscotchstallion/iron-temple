@@ -342,6 +342,22 @@ type sessionCommentDTO struct {
 	CreatedAt string    `json:"createdAt"`
 }
 
+// sessionCommentListDTO is a page of a conversation.
+//
+// It HAS a total, unlike feedDTO, and the difference is what the surface needs
+// to say. A feed pages until a short page stops it and never has to announce
+// how much is left; a conversation showing its last twenty lines wants to offer
+// "17 earlier comments", and a short page cannot count the ones above it.
+//
+// Items are oldest-first even though Offset counts back from the newest — see
+// ListSessionComments for why the two ends differ.
+type sessionCommentListDTO struct {
+	Items  []sessionCommentDTO `json:"items"`
+	Total  int64               `json:"total"`
+	Limit  int32               `json:"limit"`
+	Offset int32               `json:"offset"`
+}
+
 // feedDTO is a page of the feed.
 //
 // No total, unlike sessionListDTO. "How many sessions have the others ever
@@ -378,7 +394,11 @@ type notificationDTO struct {
 	SessionOwnerID *int32  `json:"sessionOwnerId,omitempty"`
 	ProgramDayName *string `json:"programDayName,omitempty"`
 	Emoji          *string `json:"emoji,omitempty"`
-	CommentBody    *string `json:"commentBody,omitempty"`
+	// CommentID is which comment, so a client can take the lifter to the
+	// sentence rather than to the page holding it. The recap a notification
+	// points at is long and the conversation is the last card on it.
+	CommentID   *int32  `json:"commentId,omitempty"`
+	CommentBody *string `json:"commentBody,omitempty"`
 
 	CreatedAt string `json:"createdAt"`
 	// ReadAt is absent while unread, which is the state the badge counts.

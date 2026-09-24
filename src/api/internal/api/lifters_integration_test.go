@@ -51,6 +51,7 @@ func TestLifterRoutesAreReadOnly(t *testing.T) {
 		"/lifters",
 		fmt.Sprintf("/lifters/%d", id),
 		fmt.Sprintf("/lifters/%d/racked", id),
+		fmt.Sprintf("/lifters/%d/sessions", id),
 		fmt.Sprintf("/lifters/%d/sessions/%d/recap", id, sessionID),
 	}
 	for _, path := range paths {
@@ -70,6 +71,7 @@ func TestLifterRoutesRejectAnonymousCallers(t *testing.T) {
 	e.GET("/lifters").Expect().Status(http.StatusUnauthorized)
 	e.GET("/lifters/1").Expect().Status(http.StatusUnauthorized)
 	e.GET("/lifters/1/racked").Expect().Status(http.StatusUnauthorized)
+	e.GET("/lifters/1/sessions").Expect().Status(http.StatusUnauthorized)
 	e.GET("/lifters/1/sessions/1/recap").Expect().Status(http.StatusUnauthorized)
 }
 
@@ -326,4 +328,129 @@ func TestLifterSessionRecapRefusesAMismatchedPair(t *testing.T) {
 func primaryUserID(e *httpexpect.Expect) int {
 	return int(e.GET("/me").Expect().Status(http.StatusOK).
 		JSON().Object().Value("id").Number().Raw())
+}
+
+// ---- one lifter's history, read by another ----
+
+// lifterSessions reads another lifter's history as the caller.
+func lifterSessions(e *httpexpect.Expect, lifterID int32, query ...any) *httpexpect.Object {
+	req := e.GET(fmt.Sprintf("/lifters/%d/sessions", lifterID))
+	for i := 0; i+1 < len(query); i += 2 {
+		req = req.WithQuery(fmt.Sprint(query[i]), query[i+1])
+	}
+	return req.Expect().Status(http.StatusOK).JSON().Object()
+}
+
+// The endpoint that makes a profile somewhere to go. Before it, the only route
+// to another lifter's recap — the screen where one lifter applauds another —
+// was the feed, which is everybody's sessions interleaved.
+func TestLifterSessionsListTheirHistory(t *testing.T) {
+	id, e := ownLifter(t, "their-history")
+	_, dayID := makeProgram(t, id, "Their History Program", false)
+	logCleanSession(t, e, dayID)
+
+	page := lifterSessions(expect(t), id)
+	items := page.Value("items").Array()
+	items.Length().IsEqual(1)
+
+	row := items.Value(0).Object()
+	row.HasValue("programDayName", "Day One")
+	// The lifts ride along, keyed on the LIFTER rather than on the caller —
+	// passing the reader's id to ListSessionExerciseWeights would silently
+	// return nothing and every session would claim to be empty.
+	row.Value("exercises").Array().Length().IsEqual(1)
+	row.Value("exercises").Array().Value(0).Object().HasValue("exerciseName", "Squat")
+	row.Value("volumeLb").Number().Gt(0)
+
+	// Totals cover the lifter's whole history, which is the same promise
+	// GET /sessions makes and the same figures their profile reports.
+	page.HasValue("total", 1)
+	page.Value("totalVolumeLb").Number().Gt(0)
+}
+
+// The two ids in this handler are whose sessions these are and who is reading.
+// Confusing them would serve the caller their own history under somebody else's
+// name, which is the bug this asserts against.
+func TestLifterSessionsAreNotTheCallersOwn(t *testing.T) {
+	subjectID, subject := ownLifter(t, "history-subject")
+	// Shared, so this test is about WHOSE history rather than about masking —
+	// which TestLifterSessionsMaskAPrivateProgramName owns.
+	_, subjectDay := makeProgram(t, subjectID, "Subject Program", true)
+	logCleanSession(t, subject, subjectDay)
+
+	readerID, reader := ownLifter(t, "history-reader")
+	_, readerDay := makeProgram(t, readerID, "Reader Program", true)
+	logCleanSession(t, reader, readerDay)
+
+	// The reader asks about the subject and gets the subject's one session —
+	// not their own, which is what swapping the two ids would serve.
+	items := lifterSessions(reader, subjectID).Value("items").Array()
+	items.Length().IsEqual(1)
+	items.Value(0).Object().HasValue("programName", "Subject Program")
+
+	// And the reader's own history is still their own.
+	mine := lifterSessions(reader, readerID).Value("items").Array()
+	mine.Length().IsEqual(1)
+	mine.Value(0).Object().HasValue("programName", "Reader Program")
+}
+
+// A private program's name is masked for a viewer who was never shown it, the
+// same way the feed masks it. This is the second read in the app that hands a
+// lifter a fact about a program they cannot open, and it leaks by exactly the
+// same route.
+func TestLifterSessionsMaskAPrivateProgramName(t *testing.T) {
+	id, e := ownLifter(t, "private-program-history")
+	_, dayID := makeProgram(t, id, "Nobody Else's Business", false)
+	logCleanSession(t, e, dayID)
+
+	// The owner reads their own and sees the real name.
+	lifterSessions(e, id).Value("items").Array().
+		Value(0).Object().HasValue("programName", "Nobody Else's Business")
+
+	// A stranger gets the category, not the name — and the DAY name is
+	// deliberately not masked, because what somebody trained is the point of
+	// these screens.
+	row := lifterSessions(expect(t), id).Value("items").Array().Value(0).Object()
+	row.HasValue("programName", "Custom program")
+	row.HasValue("programDayName", "Day One")
+}
+
+// Sharing it makes the name legible again, from the same predicate the program
+// endpoints use.
+func TestLifterSessionsShowASharedProgramName(t *testing.T) {
+	id, e := ownLifter(t, "shared-program-history")
+	programID, dayID := makeProgram(t, id, "Everybody's Business", true)
+	logCleanSession(t, e, dayID)
+
+	lifterSessions(expect(t), id).Value("items").Array().
+		Value(0).Object().HasValue("programName", "Everybody's Business")
+
+	// And un-sharing it takes the name back.
+	setShared(t, programID, false)
+	lifterSessions(expect(t), id).Value("items").Array().
+		Value(0).Object().HasValue("programName", "Custom program")
+}
+
+// An account that has never logged a rep has an empty history rather than a
+// missing one, and it serializes as [] so a surface branches on length.
+func TestLifterSessionsAreEmptyForANewAccount(t *testing.T) {
+	id, _ := ownLifter(t, "never-trained-history")
+
+	page := lifterSessions(expect(t), id)
+	page.Value("items").Array().IsEmpty()
+	page.HasValue("total", 0)
+}
+
+// An id that names nobody is an answer, not an empty report — the same reason
+// lifterFromPath exists at all.
+func TestLifterSessionsForAnUnknownLifterAreNotFound(t *testing.T) {
+	expect(t).GET("/lifters/99999999/sessions").
+		Expect().Status(http.StatusNotFound)
+}
+
+func TestLifterSessionsRejectAnImpossibleLimit(t *testing.T) {
+	id, _ := ownLifter(t, "history-bad-limit")
+	expect(t).GET(fmt.Sprintf("/lifters/%d/sessions", id)).
+		WithQuery("limit", 101).
+		Expect().Status(http.StatusBadRequest)
 }

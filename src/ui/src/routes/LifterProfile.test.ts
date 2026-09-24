@@ -12,11 +12,35 @@ import { testLifter, testRackedReport } from "../lib/testFixtures";
 
 const getLifter = vi.hoisted(() => vi.fn());
 const getLifterRacked = vi.hoisted(() => vi.fn());
+const listLifterSessions = vi.hoisted(() => vi.fn());
 vi.mock("../lib/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/api")>()),
   getLifter,
   getLifterRacked,
+  listLifterSessions,
 }));
+
+/** One row of somebody's history, as the session list draws it. */
+function session(over: Record<string, unknown> = {}) {
+  return {
+    id: 7,
+    programId: 1,
+    programName: "Starting Strength",
+    programDayId: 10,
+    programDayName: "Workout A",
+    performedOn: "2026-03-17",
+    setCount: 15,
+    completedSetCount: 15,
+    volumeLb: 8450,
+    isOver: true,
+    exercises: [],
+    ...over,
+  };
+}
+
+function history(items: unknown[], total = items.length) {
+  return { status: 200, data: { items, total, totalVolumeLb: 250_000, limit: 10, offset: 0 } };
+}
 
 function profile(overrides: Partial<Profile> = {}): Profile {
   return {
@@ -36,6 +60,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   getLifter.mockResolvedValue({ status: 200, data: profile() });
   getLifterRacked.mockResolvedValue({ status: 200, data: busyMonth });
+  listLifterSessions.mockResolvedValue(history([]));
 });
 
 describe("LifterProfile", () => {
@@ -138,5 +163,89 @@ describe("LifterProfile", () => {
       expect(screen.getByText(/hasn't trained yet/)).toBeInTheDocument();
     });
     expect(screen.queryByText(/1970/)).not.toBeInTheDocument();
+  });
+});
+
+// The section that turns this page from a summary into somewhere to go. Until
+// it existed the only route to another lifter's recap — the screen where one
+// lifter applauds another — was the feed.
+describe("LifterProfile sessions", () => {
+  it("lists their training", async () => {
+    listLifterSessions.mockResolvedValue(
+      history([session({ id: 7, programDayName: "Workout A" })]),
+    );
+    render(LifterProfile, { params: { id: "2" } });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("lifter-sessions")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Workout A/)).toBeInTheDocument();
+    expect(listLifterSessions).toHaveBeenCalledWith(2, { limit: 10 });
+  });
+
+  // Every row goes to the OWNER-scoped recap. A reader-scoped link would name a
+  // session the server will not hand over, because /sessions/{id} is scoped to
+  // the caller.
+  it("links each row to that lifter's recap", async () => {
+    listLifterSessions.mockResolvedValue(history([session({ id: 7 })]));
+    render(LifterProfile, { params: { id: "2" } });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("lifter-sessions")).toBeInTheDocument();
+    });
+    const link = screen
+      .getAllByRole("link")
+      .find((a) => a.getAttribute("href")?.includes("/sessions/7"));
+    expect(link).toHaveAttribute("href", "#/lifters/2/sessions/7/recap");
+  });
+
+  // An account that has never logged a rep gets no section at all — the two
+  // lifetime cards above already say so, and an empty heading would be noise.
+  it("draws nothing for a lifter who has never trained", async () => {
+    listLifterSessions.mockResolvedValue(history([]));
+    render(LifterProfile, { params: { id: "2" } });
+
+    await waitFor(() => {
+      expect(screen.getByText("Lifetime volume")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("lifter-sessions")).toBeNull();
+  });
+
+  it("offers more only while there are more", async () => {
+    listLifterSessions.mockResolvedValue(history([session({ id: 7 })], 3));
+    render(LifterProfile, { params: { id: "2" } });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Load more" })).toBeInTheDocument();
+    });
+  });
+
+  it("pages from where the list has got to", async () => {
+    listLifterSessions.mockResolvedValue(history([session({ id: 7 })], 2));
+    render(LifterProfile, { params: { id: "2" } });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Load more" })).toBeInTheDocument();
+    });
+
+    listLifterSessions.mockResolvedValue(
+      history([session({ id: 6, programDayName: "Workout B" })], 2),
+    );
+    (await screen.findByRole("button", { name: "Load more" })).click();
+
+    await waitFor(() => {
+      expect(listLifterSessions).toHaveBeenLastCalledWith(2, { limit: 10, offset: 1 });
+    });
+  });
+
+  // The history is allowed to fail on its own, like the statistics above it:
+  // the identity and the lifetime totals have arrived and are worth showing.
+  it("stands the section down when the history cannot be read", async () => {
+    listLifterSessions.mockResolvedValue({ status: 500, data: undefined });
+    render(LifterProfile, { params: { id: "2" } });
+
+    await waitFor(() => {
+      expect(screen.getByText("Lifetime volume")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("lifter-sessions")).toBeNull();
   });
 });

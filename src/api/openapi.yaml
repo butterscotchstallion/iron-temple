@@ -608,10 +608,11 @@ paths:
       description: >
         Drops the unread count to zero and leaves the list alone.
 
-        A POST to a sub-resource rather than a PATCH on each notification: this
-        is the only read operation the panel offers, there is no per-row control
-        to back one, and "mark the ones I just looked at" is a single gesture
-        the client should not have to decompose into N requests.
+        A POST to a sub-resource rather than a PATCH on each notification, and
+        it is not the same gesture as the one below. "I have looked at the
+        panel" is one act, and a client should not have to decompose it into N
+        requests; marking one row read is the other act, and it is what
+        following a notification through to the thing it describes means.
 
         Idempotent, and only stamps rows that are still unread — so a second tap
         writes nothing rather than moving every timestamp forward. `readAt` is
@@ -619,6 +620,38 @@ paths:
       responses:
         "204":
           description: All read, or already were
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /notifications/{notificationId}/read:
+    parameters:
+      - $ref: "#/components/parameters/NotificationId"
+    post:
+      tags: [notifications]
+      operationId: markNotificationRead
+      summary: Mark one read
+      description: >
+        Stamps a single notification, for the case the bulk endpoint above
+        cannot express: a lifter who opens one row, reads the comment it was
+        about, and comes back to a panel still holding the two they have not
+        looked at.
+
+        Without this the only way to clear the badge was to mark everything
+        read, which buries the rows that had not been seen — so following a
+        notification and reading its subject left the count exactly where it
+        was.
+
+        Scoped to the caller inside the statement, not by a check around it: a
+        notification belonging to another account matches no row, which is why
+        there is no 403 here. Answering 404 would confirm the id exists.
+
+        Idempotent and 204 whether or not a row moved, like withdrawing
+        applause — the caller asked for a state, and the state holds either way.
+      responses:
+        "204":
+          description: Read, or already was, or was never the caller's
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
 
@@ -984,6 +1017,65 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RackedReport"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /lifters/{lifterId}/sessions:
+    parameters:
+      - $ref: "#/components/parameters/LifterId"
+    get:
+      tags: [lifters]
+      operationId: listLifterSessions
+      summary: What another lifter has been training
+      description: >
+        `GET /sessions` pointed at somebody else: the same history, the same
+        definition of a session that logged something, most recent first.
+
+        This is what makes a lifter's profile somewhere to go rather than
+        somewhere to look. Until it existed the only route to
+        `GET /lifters/{lifterId}/sessions/{sessionId}/recap` — the screen where
+        one lifter applauds another — was the feed, which is everybody's
+        sessions mixed together and paged; finding a particular lifter's
+        Tuesday meant paging past everyone else's week.
+
+        ONE DIFFERENCE from the caller's own history, and it is the reason this
+        is not simply `GET /sessions` with an id. A program's name is masked to
+        `Custom program` when the program is private and this caller was never
+        shown it, exactly as the feed masks it. What somebody LIFTED is what
+        these screens are for; the plan behind it is not. The workout's own name
+        is never masked — a card is about the day, and a day name says what was
+        trained rather than what plan is being followed.
+
+        Totals cover the lifter's whole history rather than the page, which is
+        the same promise `GET /sessions` makes, and they are the same two
+        figures the profile already reports.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Paginated history for that lifter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionList"
         "400":
           $ref: "#/components/responses/BadRequest"
         "404":
@@ -2124,15 +2216,44 @@ paths:
 
         Each comment arrives with its author, which is the only way one is ever
         rendered.
+
+        PAGED FROM THE NEWEST END, WHICH IS NOT THE END IT READS FROM. `offset`
+        counts backwards from the most recent comment, and the page that comes
+        back is then ordered oldest-first for rendering. So offset 0 is the
+        tail of the conversation — the part somebody opening a session wants —
+        and paging walks up into the older part, which is the direction anybody
+        catching up on a thread scrolls.
+
+        `total` is every comment on the session, so a client can say how many
+        are still above the page it is showing. Unlike the feed there IS one,
+        because "17 earlier comments" is a sentence worth writing and a short
+        page cannot say it.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          required: false
+          description: How far back from the newest comment to start.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
       responses:
         "200":
           description: The comments
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/SessionComment"
+                $ref: "#/components/schemas/SessionCommentList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/NotFound"
         "401":
@@ -2349,6 +2470,17 @@ components:
         The id of the prescription ROW — a lift on a particular day — not of the
         exercise. `/exercises/{exerciseId}` elsewhere in this spec means a
         movement in the library, which is a different thing.
+      schema:
+        type: integer
+        format: int64
+    NotificationId:
+      name: notificationId
+      in: path
+      required: true
+      description: >
+        A row in the caller's own panel. Nothing checks that it is theirs before
+        the statement runs — the statement itself is scoped to them, so an id
+        belonging to somebody else simply matches nothing.
       schema:
         type: integer
         format: int64
@@ -2835,6 +2967,27 @@ components:
           type: string
           format: date-time
 
+    SessionCommentList:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          description: >
+            One page, ordered OLDEST FIRST for rendering even though `offset`
+            counts back from the newest. See the endpoint.
+          items:
+            $ref: "#/components/schemas/SessionComment"
+        total:
+          type: integer
+          description: >
+            Every comment on the session, not just this page — so a client can
+            say how many are still above what it is showing.
+        limit:
+          type: integer
+        offset:
+          type: integer
+
     SessionCommentRequest:
       type: object
       required: [body]
@@ -2998,6 +3151,17 @@ components:
         emoji:
           $ref: "#/components/schemas/ReactionEmoji"
           description: Present on `reaction` and nothing else.
+        commentId:
+          type: integer
+          format: int64
+          description: >
+            Which comment, on `comment` and `reply`. Present so a client can
+            take the lifter to the comment rather than to the page it is on —
+            the recap a notification points at is long, the conversation is the
+            last card on it, and arriving at the top to scroll and hunt for a
+            sentence you were just shown is not being taken anywhere.
+
+            Absent on `reaction` and `joined`, which have no comment to point at.
         commentBody:
           type: string
           description: >

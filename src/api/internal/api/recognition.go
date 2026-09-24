@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
@@ -62,6 +64,23 @@ var allowedReactions = map[string]bool{
 // comment of 256 emoji is accepted instead of refused for being 1 KB. The column
 // is plain TEXT; this is the only place the limit lives.
 const maxCommentBody = 256
+
+// How many comments one account may post per window.
+//
+// Posting is the only write a signed-in account can repeat without limit, and
+// every one of them puts a row in somebody else's panel — so the thing being
+// bounded is not load, it is how much of another lifter's attention one account
+// can spend. Set where a conversation never reaches it: twenty in five minutes
+// is faster than anybody talks about a workout, and slow enough that a script
+// cannot fill a panel.
+//
+// Not a moderation tool. On a box shared by a household there is nobody to
+// appeal to, and the answer to somebody being unpleasant is the account, not the
+// rate.
+const (
+	maxCommentsPerWindow = 20
+	commentWindow        = 5 * time.Minute
+)
 
 // sessionForRecognition resolves the {sessionId} path parameter to a session and
 // its owner, writing the 404 itself. ok=false means the caller should stop.
@@ -273,14 +292,50 @@ type sessionCommentRequest struct {
 	Body string `json:"body"`
 }
 
-// listSessionComments serves a session's conversation, oldest first.
+// commentRateKey namespaces the limiter's map by what the key MEANS.
+//
+// The login limiter keys on "address|username" and this one keys on an account
+// id. They are separate limiters today, so nothing can collide — the prefix is
+// here so that stays true if anybody ever merges them, since "17" is a
+// perfectly plausible username.
+func commentRateKey(userID int32) string {
+	return "comment|" + strconv.FormatInt(int64(userID), 10)
+}
+
+// listSessionComments serves a page of a session's conversation, oldest first.
+//
+// PAGED FROM THE NEWEST END AND RENDERED FROM THE OLDEST, which is the one
+// surprising thing about this endpoint: offset counts back from the most recent
+// comment, so offset 0 is the tail of the thread. That is the part somebody
+// opening a session wants, and it is the part a notification points at. Paging
+// the other way would open a forty-comment session at a conversation whose last
+// line — the one they were told about — is twenty rows below the fold.
+//
+// Total covers the whole thread so a surface can say how much is above the page
+// it is drawing. That is why this list has one where the feed does not: "17
+// earlier comments" is a sentence worth writing, and a short page cannot count
+// what it did not return.
 func (s *Server) listSessionComments(w http.ResponseWriter, r *http.Request) {
 	session, ok := s.sessionForRecognition(w, r)
 	if !ok {
 		return
 	}
+	limit, offset, ok := pageParams(w, r)
+	if !ok {
+		return
+	}
 
-	rows, err := s.q.ListSessionComments(r.Context(), session.ID)
+	ctx := r.Context()
+	rows, err := s.q.ListSessionComments(ctx, store.ListSessionCommentsParams{
+		SessionID: session.ID,
+		Lim:       limit,
+		Off:       offset,
+	})
+	if err != nil {
+		internalError(w)
+		return
+	}
+	total, err := s.q.CountSessionComments(ctx, session.ID)
 	if err != nil {
 		internalError(w)
 		return
@@ -303,7 +358,9 @@ func (s *Server) listSessionComments(w http.ResponseWriter, r *http.Request) {
 			CreatedAt: timestamptzToString(row.CreatedAt),
 		})
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, sessionCommentListDTO{
+		Items: out, Total: total, Limit: limit, Offset: offset,
+	})
 }
 
 // addSessionComment posts one.
@@ -337,6 +394,19 @@ func (s *Server) addSessionComment(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	caller := userFrom(ctx)
+
+	// Checked after the body is validated, so a blank comment is told it is
+	// blank rather than silently costing a post. Keyed on the account and not on
+	// the address: this bounds what one lifter can do, and unlike login there is
+	// no anonymous caller here to rotate anything.
+	//
+	// Consume rather than Allow — see the note on the method. An accepted
+	// comment is exactly what this counts.
+	if !s.comments.Consume(commentRateKey(caller.ID)) {
+		writeError(w, http.StatusTooManyRequests, "too_many_comments",
+			"you're posting faster than this install allows; try again in a few minutes")
+		return
+	}
 
 	// One transaction, as the reaction path does it. A comment that reached
 	// nobody is worse here than there: applause is ambient, but a comment is

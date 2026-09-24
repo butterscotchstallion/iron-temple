@@ -1,6 +1,7 @@
 import {
   clearNotifications as clearNotificationsRequest,
   listNotifications,
+  markNotificationRead as markNotificationReadRequest,
   markNotificationsRead as markNotificationsReadRequest,
   type Notification,
 } from "./api";
@@ -106,6 +107,35 @@ export async function markAllRead(): Promise<void> {
   );
   await markNotificationsReadRequest();
   await poll();
+}
+
+/**
+ * Mark one read, for a lifter who followed a notification through to what it
+ * was about.
+ *
+ * The other half of `markAllRead`, not a decomposition of it. Opening the panel
+ * is a glance and deliberately reads nothing — that is what lets somebody come
+ * back to what was new — but following a row to the comment it quotes is
+ * exactly the act of having read that one. Without this the only way to clear a
+ * badge was the blunt one, which buries the rows that have not been looked at.
+ *
+ * Optimistic and safe for the same reason `markAllRead` is: the worst case is a
+ * dot that comes back on the next poll, and the API records when a notification
+ * was FIRST read, so a retry cannot move the stamp.
+ *
+ * Does nothing for a row already read, so the badge cannot go negative when a
+ * lifter opens the same notification twice.
+ */
+export async function markRead(id: number): Promise<void> {
+  const item = notifications.items.find((n) => n.id === id);
+  if (!item || item.readAt) return;
+
+  const stamp = new Date().toISOString();
+  notifications.unread = Math.max(0, notifications.unread - 1);
+  notifications.items = notifications.items.map((n) =>
+    n.id === id ? { ...n, readAt: stamp } : n,
+  );
+  await markNotificationReadRequest(id);
 }
 
 /**

@@ -185,7 +185,11 @@ func (s *Server) slideSession(ctx context.Context, row store.GetUserSessionRow) 
 //
 // Nothing depends on it for correctness — GetUserSession filters on expires_at,
 // so an expired row is already dead — it exists so the table and the rate
-// limiter's map do not grow without bound over the life of the deployment.
+// limiters' maps do not grow without bound over the life of the deployment.
+//
+// Both limiters are swept here rather than each owning a ticker. They have the
+// same problem (a map keyed by something a caller chooses) and the same
+// answer, and one loop doing two cheap map walks is not worth a second.
 func (s *Server) StartSessionSweeper(ctx context.Context, every time.Duration) {
 	go func() {
 		t := time.NewTicker(every)
@@ -199,6 +203,7 @@ func (s *Server) StartSessionSweeper(ctx context.Context, every time.Duration) {
 					log.Printf("session sweep: %v", err)
 				}
 				s.logins.Sweep()
+				s.comments.Sweep()
 			}
 		}
 	}()

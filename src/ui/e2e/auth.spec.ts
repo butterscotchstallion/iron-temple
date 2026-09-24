@@ -77,8 +77,11 @@ async function mockCommon(page: import("@playwright/test").Page) {
   await page.route("**/api/v1/sessions/*/reactions**", (route) =>
     route.fulfill({ json: [] }),
   );
+  // A PAGE plus the thread's total, not a bare array: the card reads `total` to
+  // decide whether to offer "show N earlier comments", and an array here leaves
+  // it reading `.items` off undefined.
   await page.route("**/api/v1/sessions/*/comments**", (route) =>
-    route.fulfill({ json: [] }),
+    route.fulfill({ json: { items: [], total: 0, limit: 20, offset: 0 } }),
   );
 
   // The feed card on Home, and the roster the account menu links to.
@@ -86,12 +89,25 @@ async function mockCommon(page: import("@playwright/test").Page) {
     route.fulfill({ json: { items: [], limit: 20, offset: 0 } }),
   );
   await page.route("**/api/v1/lifters", (route) => route.fulfill({ json: [] }));
+  // Its own registration because the one above carries no trailing wildcard and
+  // therefore matches only the collection — not /lifters/1, and not this.
+  await page.route("**/api/v1/lifters/*/sessions**", (route) =>
+    route.fulfill({
+      json: { items: [], total: 0, totalVolumeLb: 0, limit: 20, offset: 0 },
+    }),
+  );
 
   // The header bell. This file signs in partway through — see the login test —
   // and the poll starts the moment /me comes back with an account, so it is
   // reached here too even though nothing in this file looks at the bell.
   await page.route("**/api/v1/notifications**", (route) =>
     route.fulfill({ json: { items: [], limit: 20, offset: 0, unreadCount: 0 } }),
+  );
+  // AFTER the wildcard above, which would otherwise claim this and answer a
+  // 204-shaped write with a list object. Same trap as the two session
+  // sub-resources above, same fix: Playwright's last matching route wins.
+  await page.route("**/api/v1/notifications/*/read", (route) =>
+    route.fulfill({ status: 204, body: "" }),
   );
 
   // The two the Astroturfing screen reads on mount. Idle and switched off, which

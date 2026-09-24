@@ -80,6 +80,25 @@ SET read_at = now()
 WHERE user_id = sqlc.arg('user_id')::int
   AND read_at IS NULL;
 
+-- MarkNotificationRead is one row, for a lifter who followed a notification
+-- through to the thing it was about.
+--
+-- SCOPED TO THE CALLER INSIDE THE STATEMENT, which is the whole access control.
+-- There is no separate "is this yours" read for a handler to forget, and no 403
+-- to write: a notification belonging to somebody else matches no row and the
+-- answer is the same 204 as marking one that was already read. Reporting 404
+-- would confirm the id exists, which is a question this endpoint has no reason
+-- to answer.
+--
+-- Restricted to unread rows for the reason MarkNotificationsRead is: read_at is
+-- when a notification was FIRST read, and a second tap must not move it.
+-- name: MarkNotificationRead :execrows
+UPDATE notifications
+SET read_at = now()
+WHERE id = sqlc.arg('id')::int
+  AND user_id = sqlc.arg('user_id')::int
+  AND read_at IS NULL;
+
 -- ClearNotifications is "clear all", and it deletes.
 --
 -- See 0026 for why there is no cleared_at to set instead. Nothing rebuilds
@@ -98,6 +117,22 @@ DELETE FROM notifications WHERE user_id = sqlc.arg('user_id')::int;
 -- call without repeating that rule.
 --
 -- Sessions predating 0005 have no owner and quietly notify nobody.
+-- ONE ROW PER (recipient, actor, session, emoji), EVER. The NOT EXISTS below
+-- and the read_at guard on DeleteReactionNotification are one mechanism and
+-- have to be read together.
+--
+-- A repeat tap of the same emoji is already a no-op — session_reactions' primary
+-- key settles it, and the handler only calls this when the insert actually
+-- recorded something. What this guards is the other shape: applaud, withdraw,
+-- applaud again. Each of those is a genuine new reaction, so each used to mint a
+-- fresh notification at the top of the panel, which is how one lifter idly
+-- toggling a button becomes somebody else's unread count climbing.
+--
+-- With both halves in place the worst a toggler can do is move one row's unread
+-- mark on and off: the withdrawal retracts the notification only while it is
+-- still unseen, and the re-applause finds the row already there and adds
+-- nothing. Once it HAS been read, the row stays put and every later cycle is
+-- silent.
 -- name: CreateReactionNotification :exec
 INSERT INTO notifications (user_id, actor_id, kind, session_id, emoji)
 SELECT s.user_id,
@@ -112,7 +147,15 @@ SELECT s.user_id,
 FROM sessions s
 WHERE s.id = sqlc.arg('session_id')::int
   AND s.user_id IS NOT NULL
-  AND s.user_id <> sqlc.arg('actor_id')::int;
+  AND s.user_id <> sqlc.arg('actor_id')::int
+  AND NOT EXISTS (
+    SELECT 1 FROM notifications n
+    WHERE n.kind = 'reaction'
+      AND n.user_id = s.user_id
+      AND n.actor_id = sqlc.arg('actor_id')::int
+      AND n.session_id = sqlc.arg('session_id')::int
+      AND n.emoji = sqlc.arg('emoji')::text
+  );
 
 -- DeleteReactionNotification withdraws the notification along with the
 -- applause.
@@ -123,15 +166,28 @@ WHERE s.id = sqlc.arg('session_id')::int
 -- does — the recipient is whoever owns the session, which is not a free
 -- variable — so naming user_id as well would add nothing.
 --
--- Deliberately unconditional about what it finds: withdrawing applause that was
--- never given removes nothing and reports nothing, exactly as
+-- Deliberately unconditional about WHETHER IT FINDS ANYTHING: withdrawing
+-- applause that was never given removes nothing and reports nothing, exactly as
 -- RemoveSessionReaction does.
+--
+-- It is not unconditional about read_at, though, and that is the half of the
+-- pairing described on CreateReactionNotification above. An unread notification
+-- is retracted, because nobody has been told yet and the withdrawal is still
+-- private. A notification that has ALREADY BEEN READ stays: it records that
+-- somebody applauded, which is a thing that happened, and deleting it deletes a
+-- row the recipient has seen — from their point of view a notification silently
+-- vanishing between one poll and the next, with nothing to explain it.
+--
+-- The applause itself is gone either way. This is only about whether the
+-- telling of it is also taken back, and it can only honestly be taken back
+-- before it lands.
 -- name: DeleteReactionNotification :exec
 DELETE FROM notifications
 WHERE kind = 'reaction'
   AND actor_id = sqlc.arg('actor_id')::int
   AND session_id = sqlc.arg('session_id')::int
-  AND emoji = sqlc.arg('emoji')::text;
+  AND emoji = sqlc.arg('emoji')::text
+  AND read_at IS NULL;
 
 -- CreateCommentNotifications fans one comment out to everybody it concerns.
 --

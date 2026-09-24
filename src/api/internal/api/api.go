@@ -38,6 +38,12 @@ type Server struct {
 	// logins brakes password guessing. In-process state, so it is per-replica —
 	// see the type's doc for why that is the right trade here.
 	logins *auth.RateLimiter
+	// comments brakes the one write a signed-in account can repeat freely. Its
+	// own limiter rather than a shared one because the two count different
+	// things — logins count failures, this counts posts (see Consume) — and
+	// because a key here is a user id where a key there is an address and a
+	// username, so one map would hold two namespaces and hope they never meet.
+	comments *auth.RateLimiter
 	// reportLoc is the zone the Racked recap reads clock times in. Dates are
 	// stored as dates and need no zone; session start times are instants, and
 	// "you are an early riser" is a claim about local mornings.
@@ -67,6 +73,7 @@ func NewServer(pool *pgxpool.Pool, version, environment string) *Server {
 		version:     version,
 		environment: environment,
 		logins:      auth.NewRateLimiter(auth.DefaultAttempts, auth.DefaultWindow),
+		comments:    auth.NewRateLimiter(maxCommentsPerWindow, commentWindow),
 		reportLoc:   time.UTC,
 		activity:    &activityRunner{},
 		metrics:     metrics.New(version, environment),
@@ -247,6 +254,11 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 				r.Get("/notifications", s.listNotifications)
 				r.Delete("/notifications", s.clearNotifications)
 				r.Post("/notifications/read", s.markNotificationsRead)
+				// One row, for a lifter who followed a notification through to
+				// what it was about. Registered after the collection's own
+				// /read above, which chi would not confuse in any case — the
+				// two patterns differ in their first segment.
+				r.Post("/notifications/{notificationId}/read", s.markNotificationRead)
 
 				// One lifter reading another. Every route is a GET, and that is
 				// load-bearing rather than incidental: the id in these paths
@@ -257,6 +269,7 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 					r.Get("/", s.listLifters)
 					r.Get("/{lifterId}", s.getLifter)
 					r.Get("/{lifterId}/racked", s.getLifterRacked)
+					r.Get("/{lifterId}/sessions", s.getLifterSessions)
 					r.Get("/{lifterId}/sessions/{sessionId}/recap", s.getLifterSessionRecap)
 				})
 

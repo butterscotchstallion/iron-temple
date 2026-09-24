@@ -136,6 +136,106 @@ func (s *Server) getLifter(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// getLifterSessions serves another lifter's history — listSessions, pointed
+// elsewhere.
+//
+// This is what makes a profile somewhere to go. Before it, the only route to
+// getLifterSessionRecap — the screen where one lifter applauds another — was the
+// feed, which is everybody's sessions interleaved and paged.
+//
+// TWO USER IDS, and keeping them apart is the point. The lifter from the path
+// scopes the rows; the caller decides only whether a private program's name is
+// legible. The query takes both and uses the second in a CASE and nowhere else,
+// so a viewer cannot widen what they are shown by being the viewer — see
+// ListLifterSessions.
+//
+// The per-exercise weights are keyed on the LIFTER, not on the caller.
+// ListSessionExerciseWeights is scoped by user id like everything else in
+// sessions.go, and passing the caller's here would silently return nothing: the
+// page would draw, every session would claim to have no lifts in it, and nothing
+// would look like an error.
+func (s *Server) getLifterSessions(w http.ResponseWriter, r *http.Request) {
+	row, ok := s.lifterFromPath(w, r)
+	if !ok {
+		return
+	}
+	limit, offset, ok := pageParams(w, r)
+	if !ok {
+		return
+	}
+
+	ctx := r.Context()
+	rows, err := s.q.ListLifterSessions(ctx, store.ListLifterSessionsParams{
+		LifterID: row.ID,
+		ViewerID: userFrom(ctx).ID,
+		Lim:      limit,
+		Off:      offset,
+	})
+	if err != nil {
+		internalError(w)
+		return
+	}
+
+	// The lifter's whole history rather than this page, which is the same
+	// promise GET /sessions makes — and the same two figures getLifter above
+	// already reports, from the same query, so a profile and its session list
+	// cannot disagree about how much somebody has lifted.
+	totals, err := s.q.SessionTotals(ctx, store.SessionTotalsParams{UserID: row.ID})
+	if err != nil {
+		internalError(w)
+		return
+	}
+
+	ids := make([]int32, 0, len(rows))
+	for _, session := range rows {
+		ids = append(ids, session.ID)
+	}
+	weightsBySession := make(map[int32][]sessionExerciseWeightDTO, len(rows))
+	if len(ids) > 0 {
+		weights, err := s.q.ListSessionExerciseWeights(ctx, store.ListSessionExerciseWeightsParams{
+			SessionIds: ids, UserID: row.ID,
+		})
+		if err != nil {
+			internalError(w)
+			return
+		}
+		for _, wt := range weights {
+			weightsBySession[wt.SessionID] = append(weightsBySession[wt.SessionID], sessionExerciseWeightDTO{
+				ExerciseName: wt.ExerciseName,
+				Sets:         wt.SetCount,
+				Reps:         wt.Reps,
+				WeightLb:     numericToFloat(wt.WeightLb),
+			})
+		}
+	}
+
+	items := make([]sessionSummaryDTO, 0, len(rows))
+	for _, session := range rows {
+		exercises := weightsBySession[session.ID]
+		if exercises == nil {
+			exercises = []sessionExerciseWeightDTO{}
+		}
+		items = append(items, sessionSummaryDTO{
+			ID:                session.ID,
+			ProgramID:         session.ProgramID,
+			ProgramName:       session.ProgramName,
+			ProgramDayID:      session.ProgramDayID,
+			ProgramDayName:    session.ProgramDayName,
+			PerformedOn:       dateToString(session.PerformedOn),
+			SetCount:          session.SetCount,
+			CompletedSetCount: session.CompletedSetCount,
+			VolumeLb:          numericToFloat(session.VolumeLb),
+			IsOver:            session.IsOver,
+			Exercises:         exercises,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, sessionListDTO{
+		Items: items, Total: totals.Total, TotalVolumeLb: numericToFloat(totals.VolumeLb),
+		Limit: limit, Offset: offset,
+	})
+}
+
 // getLifterRacked serves another lifter's Racked report — getRacked, pointed
 // elsewhere.
 func (s *Server) getLifterRacked(w http.ResponseWriter, r *http.Request) {

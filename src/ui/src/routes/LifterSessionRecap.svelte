@@ -10,6 +10,7 @@
   import RecapLiftTable from "../lib/RecapLiftTable.svelte";
   import MuscleVolumeBars from "../lib/MuscleVolumeBars.svelte";
   import SessionSocial from "../lib/SessionSocial.svelte";
+  import { markedCommentId } from "../lib/commentAnchor";
   import { formatLongDate } from "../lib/date";
   import { formatVolume } from "../lib/volume";
   import type { RecapLiftRow, RecapPRRow } from "../lib/recap";
@@ -39,6 +40,9 @@
 
   const lifterId = $derived(Number(params.lifterId));
   const sessionId = $derived(Number(params.sessionId));
+
+  // Which comment a notification sent this lifter here to read, if any.
+  const markedComment = $derived(markedCommentId());
 
   let recap = $state<SessionRecap | null>(null);
   let lifterName = $state("");
@@ -187,6 +191,10 @@
     <!-- Applaud it and say something. ownerId is the lifter in the URL, which is
          somebody else by construction on this route — so the buttons are live
          here, where on your own recap they stand down. -->
-    <SessionSocial sessionId={recap.session.sessionId} ownerId={lifterId} />
+    <SessionSocial
+      sessionId={recap.session.sessionId}
+      ownerId={lifterId}
+      highlightCommentId={markedComment}
+    />
   </div>
 {/if}

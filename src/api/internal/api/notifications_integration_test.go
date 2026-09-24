@@ -419,6 +419,7 @@ func TestNotificationsRejectAnonymous(t *testing.T) {
 	anon := expectAnon(t)
 	anon.GET("/notifications").Expect().Status(http.StatusUnauthorized)
 	anon.POST("/notifications/read").Expect().Status(http.StatusUnauthorized)
+	anon.POST("/notifications/1/read").Expect().Status(http.StatusUnauthorized)
 	anon.DELETE("/notifications").Expect().Status(http.StatusUnauthorized)
 }
 
@@ -436,6 +437,204 @@ func TestNotificationsAreGatedUntilThePasswordChanges(t *testing.T) {
 		JSON().Object().Value("code").String().IsEqual("password_change_required")
 	gated.POST("/notifications/read").Expect().Status(http.StatusForbidden).
 		JSON().Object().Value("code").String().IsEqual("password_change_required")
+	gated.POST("/notifications/1/read").Expect().Status(http.StatusForbidden).
+		JSON().Object().Value("code").String().IsEqual("password_change_required")
 	gated.DELETE("/notifications").Expect().Status(http.StatusForbidden).
 		JSON().Object().Value("code").String().IsEqual("password_change_required")
+}
+
+// ---- reading one ----
+
+// findNotification returns the newest of the caller's notifications of a kind
+// that names this session, failing the test if there is none.
+//
+// By (kind, session) rather than by position, for the reason the file header
+// gives: the panel this reads may already hold whatever the rest of the suite
+// left in it.
+func findNotification(t *testing.T, e *httpexpect.Expect, kind string, sessionID int) *httpexpect.Object {
+	t.Helper()
+	for _, item := range notificationsFor(e, "limit", 100).Iter() {
+		obj := item.Object()
+		if obj.Value("kind").String().Raw() != kind {
+			continue
+		}
+		session := obj.Raw()["sessionId"]
+		if session != nil && int(session.(float64)) == sessionID {
+			return obj
+		}
+	}
+	t.Fatalf("no %s notification for session %d", kind, sessionID)
+	return nil
+}
+
+func markRead(e *httpexpect.Expect, id int) {
+	e.POST(fmt.Sprintf("/notifications/%d/read", id)).
+		Expect().Status(http.StatusNoContent)
+}
+
+// Following one notification through to what it was about reads THAT one, and
+// leaves the rows the lifter has not looked at still marked unread. Before this
+// endpoint the only way to clear a badge was to mark everything read, which
+// buried exactly the notifications worth keeping.
+func TestMarkingOneNotificationReadLeavesTheOthers(t *testing.T) {
+	sessionID, ownerToken := otherLiftersSession(t, "notify-read-one")
+	owner := expectAs(t, ownerToken)
+	_, otherToken := secondLifter(t, "notify-read-one-actor")
+
+	// Two notifications on the same session, from two different lifters.
+	expect(t).POST(fmt.Sprintf("/sessions/%d/reactions", sessionID)).
+		WithJSON(map[string]any{"emoji": "💪"}).
+		Expect().Status(http.StatusNoContent)
+	expectAs(t, otherToken).POST(fmt.Sprintf("/sessions/%d/comments", sessionID)).
+		WithJSON(map[string]any{"body": "good work"}).
+		Expect().Status(http.StatusCreated)
+
+	unreadBefore := unreadCount(owner)
+	reaction := findNotification(t, owner, "reaction", sessionID)
+	reaction.NotContainsKey("readAt")
+	reactionID := int(reaction.Value("id").Number().Raw())
+
+	markRead(owner, reactionID)
+
+	// Exactly one row moved, not the panel.
+	if got := unreadCount(owner); got != unreadBefore-1 {
+		t.Fatalf("unread count %d after reading one, want %d", got, unreadBefore-1)
+	}
+	findNotification(t, owner, "reaction", sessionID).ContainsKey("readAt")
+	findNotification(t, owner, "comment", sessionID).NotContainsKey("readAt")
+}
+
+// Idempotent, and readAt is when it was FIRST read — a second tap must not move
+// the timestamp forward.
+func TestMarkingOneNotificationReadTwiceKeepsTheFirstStamp(t *testing.T) {
+	sessionID, ownerToken := otherLiftersSession(t, "notify-read-twice")
+	owner := expectAs(t, ownerToken)
+
+	expect(t).POST(fmt.Sprintf("/sessions/%d/reactions", sessionID)).
+		WithJSON(map[string]any{"emoji": "🔥"}).
+		Expect().Status(http.StatusNoContent)
+
+	id := int(findNotification(t, owner, "reaction", sessionID).Value("id").Number().Raw())
+	markRead(owner, id)
+	first := findNotification(t, owner, "reaction", sessionID).Value("readAt").String().Raw()
+
+	markRead(owner, id)
+	if got := findNotification(t, owner, "reaction", sessionID).Value("readAt").String().Raw(); got != first {
+		t.Fatalf("readAt moved from %q to %q on a second read", first, got)
+	}
+}
+
+// Somebody else's notification is not the caller's to read. The UPDATE is scoped
+// to the caller, so this is a no-op rather than a 403 — and deliberately not a
+// 404, which would confirm the id exists.
+func TestMarkingSomebodyElsesNotificationDoesNothing(t *testing.T) {
+	sessionID, ownerToken := otherLiftersSession(t, "notify-read-foreign")
+	owner := expectAs(t, ownerToken)
+
+	expect(t).POST(fmt.Sprintf("/sessions/%d/reactions", sessionID)).
+		WithJSON(map[string]any{"emoji": "👏"}).
+		Expect().Status(http.StatusNoContent)
+
+	id := int(findNotification(t, owner, "reaction", sessionID).Value("id").Number().Raw())
+	before := unreadCount(owner)
+
+	// The actor tries to read the notification they caused.
+	expect(t).POST(fmt.Sprintf("/notifications/%d/read", id)).
+		Expect().Status(http.StatusNoContent)
+
+	if got := unreadCount(owner); got != before {
+		t.Fatalf("owner's unread count moved from %d to %d on somebody else's read", before, got)
+	}
+	findNotification(t, owner, "reaction", sessionID).NotContainsKey("readAt")
+}
+
+// A notification for a row that never existed is the same 204. Nothing about
+// this endpoint distinguishes "not yours" from "not there".
+func TestMarkingAnUnknownNotificationReadIsAccepted(t *testing.T) {
+	expect(t).POST("/notifications/99999999/read").
+		Expect().Status(http.StatusNoContent)
+}
+
+// ---- the deep link ----
+
+// commentId is what lets a client take the lifter to the sentence rather than
+// to the page it is on.
+func TestCommentNotificationCarriesItsCommentId(t *testing.T) {
+	sessionID, ownerToken := otherLiftersSession(t, "notify-comment-id")
+	owner := expectAs(t, ownerToken)
+
+	posted := expect(t).POST(fmt.Sprintf("/sessions/%d/comments", sessionID)).
+		WithJSON(map[string]any{"body": "which comment was this"}).
+		Expect().Status(http.StatusCreated).JSON().Object()
+	commentID := int(posted.Value("id").Number().Raw())
+
+	findNotification(t, owner, "comment", sessionID).
+		HasValue("commentId", commentID)
+}
+
+// A reaction has no comment to point at, and says so by absence rather than by
+// a zero a client would have to know to ignore.
+func TestReactionNotificationCarriesNoCommentId(t *testing.T) {
+	sessionID, ownerToken := otherLiftersSession(t, "notify-reaction-no-comment-id")
+	owner := expectAs(t, ownerToken)
+
+	expect(t).POST(fmt.Sprintf("/sessions/%d/reactions", sessionID)).
+		WithJSON(map[string]any{"emoji": "💪"}).
+		Expect().Status(http.StatusNoContent)
+
+	findNotification(t, owner, "reaction", sessionID).NotContainsKey("commentId")
+}
+
+// ---- the toggle ----
+
+// Applaud, withdraw, applaud again. Each cycle is a genuine new reaction, and
+// each one used to mint a fresh notification at the top of the owner's panel —
+// which is how one lifter idly toggling a button becomes somebody else's unread
+// count climbing.
+func TestTogglingApplauseDoesNotStackNotifications(t *testing.T) {
+	sessionID, ownerToken := otherLiftersSession(t, "notify-applause-toggle")
+	owner := expectAs(t, ownerToken)
+	path := fmt.Sprintf("/sessions/%d/reactions", sessionID)
+
+	before := matching(owner, "reaction", sessionID)
+
+	for range 5 {
+		expect(t).POST(path).WithJSON(map[string]any{"emoji": "🎉"}).
+			Expect().Status(http.StatusNoContent)
+		expect(t).DELETE(path).WithQuery("emoji", "🎉").
+			Expect().Status(http.StatusNoContent)
+	}
+	expect(t).POST(path).WithJSON(map[string]any{"emoji": "🎉"}).
+		Expect().Status(http.StatusNoContent)
+
+	// One row for one applause, however many times the button was pressed.
+	if got := matching(owner, "reaction", sessionID); got != before+1 {
+		t.Fatalf("after five toggles: got %d notifications, want %d", got, before+1)
+	}
+}
+
+// Withdrawing applause retracts the notification only while it is still unseen.
+// Once the owner has read it, the row stays: it records something that
+// happened, and deleting it would be a notification vanishing between one poll
+// and the next with nothing to explain it.
+func TestWithdrawingApplauseKeepsANotificationAlreadyRead(t *testing.T) {
+	sessionID, ownerToken := otherLiftersSession(t, "notify-read-then-withdraw")
+	owner := expectAs(t, ownerToken)
+	path := fmt.Sprintf("/sessions/%d/reactions", sessionID)
+
+	expect(t).POST(path).WithJSON(map[string]any{"emoji": "👏"}).
+		Expect().Status(http.StatusNoContent)
+
+	before := matching(owner, "reaction", sessionID)
+	id := int(findNotification(t, owner, "reaction", sessionID).Value("id").Number().Raw())
+	markRead(owner, id)
+
+	expect(t).DELETE(path).WithQuery("emoji", "👏").
+		Expect().Status(http.StatusNoContent)
+
+	if got := matching(owner, "reaction", sessionID); got != before {
+		t.Fatalf("a read notification went with the applause: got %d, want %d", got, before)
+	}
+	// The applause itself is gone — only the telling of it survives.
+	reactions(expectAs(t, ownerToken), sessionID).IsEmpty()
 }

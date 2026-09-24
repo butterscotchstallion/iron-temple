@@ -60,6 +60,36 @@ func (l *RateLimiter) Allow(key string) bool {
 	return w.count < l.limit
 }
 
+// Consume takes one unit of budget for key and reports whether there was any to
+// take. It is Allow and Fail in one step, and the difference from that pair is
+// the whole reason it exists.
+//
+// Allow deliberately does not spend: a correct password must not be spendable by
+// somebody else guessing at the same account, so only failures count. A rate
+// limit on an action that SUCCEEDS is the opposite shape — every accepted
+// comment is one the author chose to post, and if success were free the limit
+// would never bind on the only thing it is meant to bound.
+//
+// So: guessing is limited by how often you get it wrong, and posting is limited
+// by how often you do it. One counter, two policies, and the caller picks by
+// which method it reaches for.
+func (l *RateLimiter) Consume(key string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	now := l.now()
+	w, ok := l.attempts[key]
+	if !ok || !now.Before(w.resetAt) {
+		l.attempts[key] = &window{count: 1, resetAt: now.Add(l.period)}
+		return true
+	}
+	if w.count >= l.limit {
+		return false
+	}
+	w.count++
+	return true
+}
+
 // Fail records a failed attempt against key.
 func (l *RateLimiter) Fail(key string) {
 	l.mu.Lock()

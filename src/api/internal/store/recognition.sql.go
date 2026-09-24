@@ -75,6 +75,26 @@ func (q *Queries) AddSessionReaction(ctx context.Context, arg AddSessionReaction
 	return result.RowsAffected(), nil
 }
 
+const countSessionComments = `-- name: CountSessionComments :one
+SELECT COUNT(*)::bigint AS total
+FROM session_comments
+WHERE session_id = $1::int
+`
+
+// CountSessionComments is how many there are in total, so a surface showing the
+// tail of a conversation can say how much of it is above the fold.
+//
+// Separate from the list rather than a window function over it, because the
+// list returns a page and this counts the thread: a COUNT(*) OVER () would be
+// computed per returned row and would still be wrong on an empty page, where
+// there are no rows to carry it.
+func (q *Queries) CountSessionComments(ctx context.Context, sessionID int32) (int64, error) {
+	row := q.db.QueryRow(ctx, countSessionComments, sessionID)
+	var total int64
+	err := row.Scan(&total)
+	return total, err
+}
+
 const deleteSessionComment = `-- name: DeleteSessionComment :execrows
 DELETE FROM session_comments WHERE id = $1
 `
@@ -125,9 +145,21 @@ SELECT c.id,
 FROM session_comments c
 JOIN users u ON u.id = c.user_id
 LEFT JOIN user_avatars ua ON ua.user_id = u.id
-WHERE c.session_id = $1::int
+WHERE c.id IN (
+    SELECT p.id
+    FROM session_comments p
+    WHERE p.session_id = $1::int
+    ORDER BY p.created_at DESC, p.id DESC
+    LIMIT $3 OFFSET $2
+)
 ORDER BY c.created_at, c.id
 `
+
+type ListSessionCommentsParams struct {
+	SessionID int32 `json:"session_id"`
+	Off       int32 `json:"off"`
+	Lim       int32 `json:"lim"`
+}
 
 type ListSessionCommentsRow struct {
 	ID          int32              `json:"id"`
@@ -151,8 +183,21 @@ type ListSessionCommentsRow struct {
 // Oldest first, unlike every other list in this schema. A conversation reads
 // downwards — a reply under the thing it replies to — where a history reads
 // newest first because the recent session is the one you want.
-func (q *Queries) ListSessionComments(ctx context.Context, sessionID int32) ([]ListSessionCommentsRow, error) {
-	rows, err := q.db.Query(ctx, listSessionComments, sessionID)
+//
+// SELECTED FROM ONE END AND ORDERED FROM THE OTHER, which is the only subtle
+// thing here. The inner query takes the NEWEST page — that is what offset counts
+// back through — and the outer ORDER BY turns it the right way up for reading.
+// Paging from the oldest end instead would mean a lifter opening a session with
+// forty comments on it lands at the beginning of a conversation whose last line
+// is the one they were told about.
+//
+// The subquery selects ids only, so the joins that decorate a comment with its
+// author run over one page rather than over the whole thread.
+//
+// Until this was paged it was the one unbounded list in the app, and the
+// generated-activity scheduler adds comments to sessions every day.
+func (q *Queries) ListSessionComments(ctx context.Context, arg ListSessionCommentsParams) ([]ListSessionCommentsRow, error) {
+	rows, err := q.db.Query(ctx, listSessionComments, arg.SessionID, arg.Off, arg.Lim)
 	if err != nil {
 		return nil, err
 	}

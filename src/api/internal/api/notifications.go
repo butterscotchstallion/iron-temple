@@ -95,6 +95,7 @@ func (s *Server) listNotifications(w http.ResponseWriter, r *http.Request) {
 			SessionOwnerID: row.SessionOwnerID,
 			ProgramDayName: row.ProgramDayName,
 			Emoji:          row.Emoji,
+			CommentID:      row.CommentID,
 			CommentBody:    row.CommentBody,
 			CreatedAt:      timestamptzToString(row.CreatedAt),
 			// Empty while unread, and omitempty drops it — which is the same
@@ -120,6 +121,41 @@ func (s *Server) listNotifications(w http.ResponseWriter, r *http.Request) {
 func (s *Server) markNotificationsRead(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if err := s.q.MarkNotificationsRead(ctx, userFrom(ctx).ID); err != nil {
+		internalError(w)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// markNotificationRead stamps one, for a lifter who followed a notification
+// through to what it was about.
+//
+// The other half of "mark all read", and not a decomposition of it. Opening the
+// panel is a glance and must not read anything — that is what makes coming back
+// to what was new possible — but following a row to the comment it quotes is
+// exactly the act of having read that one. Without this the only way to clear
+// the badge was to mark everything read, which buries the rows that have not
+// been looked at.
+//
+// No ownership check, and that is deliberate rather than missing:
+// MarkNotificationRead scopes on user_id inside the UPDATE, so another
+// account's id matches no row. 204 either way — a 404 would confirm the id
+// exists, and there is nothing useful for a client to do differently.
+func (s *Server) markNotificationRead(w http.ResponseWriter, r *http.Request) {
+	id, ok := idParam(r, "notificationId")
+	if !ok {
+		badRequest(w, "notificationId must be a positive integer")
+		return
+	}
+
+	ctx := r.Context()
+	// The row count is deliberately discarded. "Already read", "not yours" and
+	// "never existed" are all the same answer to the only question the caller
+	// asked, which is for a state rather than for a change.
+	if _, err := s.q.MarkNotificationRead(ctx, store.MarkNotificationReadParams{
+		ID:     id,
+		UserID: userFrom(ctx).ID,
+	}); err != nil {
 		internalError(w)
 		return
 	}
