@@ -1,5 +1,5 @@
 import { render, screen, waitFor, fireEvent } from "@testing-library/svelte";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import NotificationBell from "./NotificationBell.svelte";
 import { auth } from "./auth.svelte";
 import { notifications, poll } from "./notifications.svelte";
@@ -24,12 +24,14 @@ const listNotifications = vi.hoisted(() => vi.fn());
 const markNotificationsRead = vi.hoisted(() => vi.fn());
 const markNotificationRead = vi.hoisted(() => vi.fn());
 const clearNotifications = vi.hoisted(() => vi.fn());
+const getNotificationGroupMembers = vi.hoisted(() => vi.fn());
 vi.mock("./api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./api")>()),
   listNotifications,
   markNotificationsRead,
   markNotificationRead,
   clearNotifications,
+  getNotificationGroupMembers,
 }));
 
 const push = vi.hoisted(() => vi.fn());
@@ -72,6 +74,12 @@ beforeEach(() => {
   markNotificationsRead.mockResolvedValue({ status: 204, data: undefined });
   markNotificationRead.mockResolvedValue({ status: 204, data: undefined });
   clearNotifications.mockResolvedValue({ status: 204, data: undefined });
+  // One member by default — a crown row that folds only itself, which is the
+  // common case. Tests that care about cycling supply their own list.
+  getNotificationGroupMembers.mockResolvedValue({
+    status: 200,
+    data: { items: [crownRow()] },
+  });
   auth.me = testUser({ id: ME });
   auth.loaded = true;
   // The module's state outlives any one component, which is the point of it —
@@ -85,6 +93,23 @@ beforeEach(() => {
 afterEach(() => {
   notifications.items = [];
   notifications.unread = 0;
+});
+
+// This file grew a dialog, so it inherits UpdatePrompt.test.ts's teardown race.
+//
+// bits-ui's body-scroll-lock resets the document's styles on a TIMER scheduled
+// when the dialog unmounts. The last test's cleanup leaves one pending with
+// nothing after it, and if vitest tears the jsdom environment down first it fires
+// into a world with no `document` — which fails the whole run on an unhandled
+// error while every test still reports as passing, because none of them did
+// anything wrong.
+//
+// It is a race, so it turns on machine speed: the sandbox wins it and CI, being
+// slower, does not. Waiting here removes it rather than making it rarer.
+// Deliberately afterAll and not afterEach — see that file for why unmounting by
+// hand between tests trades this for a pile of derived_inert warnings.
+afterAll(async () => {
+  await new Promise((resolve) => setTimeout(resolve, 100));
 });
 
 /** Open the panel and wait for it to draw. */
@@ -339,19 +364,21 @@ describe("where a row goes", () => {
     await waitFor(() => expect(push).toHaveBeenCalledWith("/lifters/2"));
   });
 
-  // A crown row is news about a BOARD, so it goes to the standings rather than to
-  // the lifter — the reader's own place on that board is what they want next, and
-  // the leaderboard names the holder anyway.
-  it("sends a crown to the leaderboard", async () => {
+  // A crown goes NOWHERE, and that is the point of it: the row folds every crown
+  // on the install, so no single route could show them all. It opens a dialog
+  // instead, and navigating is something the reader chooses from in there.
+  it("takes a crown to a dialog rather than a route", async () => {
     seed([crownRow()]);
     render(NotificationBell);
     await open();
 
     // "a crown" rather than "the crown on …": no catalogue is seeded in this
-    // block, and where a row goes must not depend on whether the board's name
-    // has arrived.
+    // block, and what a row DOES must not depend on whether the board's name has
+    // arrived.
     await fireEvent.click(await screen.findByText(/took a crown/));
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/leaderboard"));
+
+    await waitFor(() => expect(screen.getByTestId("achievement-dialog")).toBeInTheDocument());
+    expect(push).not.toHaveBeenCalled();
   });
 });
 
@@ -395,6 +422,78 @@ describe("a crown", () => {
     await open();
 
     expect(await screen.findByText(/took a crown/)).toBeInTheDocument();
+  });
+});
+
+// The panel's half of the dialog: opening it, filling it, and marking the row
+// read for having looked. What the dialog then DRAWS is AchievementDialog's own
+// test — this one stops at the seam.
+describe("opening a crown", () => {
+  beforeEach(() => {
+    achievements.items = [testAchievementHolders()];
+    achievements.loaded = true;
+  });
+  afterEach(() => resetAchievements());
+
+  /** Open the panel and click the crown row. */
+  async function openCrown() {
+    render(NotificationBell);
+    await open();
+    await fireEvent.click(await screen.findByText(/took the crown/));
+  }
+
+  it("asks for the row's members and shows them", async () => {
+    seed([crownRow()]);
+    await openCrown();
+
+    await waitFor(() => expect(getNotificationGroupMembers).toHaveBeenCalledWith(90));
+    expect(await screen.findByText(/Grace Hopper/)).toBeInTheDocument();
+  });
+
+  // Opening this IS reading it — the same call following a row makes, and the
+  // group it names is everything the row folded.
+  it("marks the group read", async () => {
+    seed([crownRow()], 1);
+    await openCrown();
+
+    await waitFor(() => expect(markNotificationRead).toHaveBeenCalledWith(90));
+  });
+
+  // The tap has to be answered immediately. A modal that appears a request later
+  // reads as a dead row, so the dialog opens first and fills in.
+  it("opens before the members have landed", async () => {
+    let release: (v: unknown) => void = () => {};
+    getNotificationGroupMembers.mockReturnValue(
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+    );
+    seed([crownRow()]);
+    await openCrown();
+
+    expect(await screen.findByTestId("achievement-dialog")).toBeInTheDocument();
+
+    release({ status: 200, data: { items: [crownRow()] } });
+    await waitFor(() => expect(screen.getByText(/Grace Hopper/)).toBeInTheDocument());
+  });
+
+  // A failure leaves the dialog standing and saying so. Raising a banner over a
+  // panel somebody may be reading mid-set is the wrong trade for an ornament.
+  it("survives a members request that fails", async () => {
+    getNotificationGroupMembers.mockResolvedValue({ status: 500, data: {} });
+    seed([crownRow()]);
+    await openCrown();
+
+    expect(await screen.findByTestId("achievement-dialog")).toBeInTheDocument();
+    expect(await screen.findByText(/isn't here any more/)).toBeInTheDocument();
+  });
+
+  it("goes to the standings from inside the dialog", async () => {
+    seed([crownRow()]);
+    await openCrown();
+
+    await fireEvent.click(await screen.findByRole("button", { name: "Leaderboard" }));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/leaderboard"));
   });
 });
 

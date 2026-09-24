@@ -951,3 +951,196 @@ func TestArchivedApplauseDoesNotSuppressANewNotification(t *testing.T) {
 		t.Errorf("applause after the archive told nobody: got %d, want 1", got)
 	}
 }
+
+// ---- unfolding a row ----
+//
+// The panel's rows are groups, and a group says less than it knows: a row carries
+// its newest member's subject, and for a crown it withholds even that unless the
+// whole group agrees on one board. These cover the endpoint that hands the rest
+// back.
+//
+// Driven with reactions wherever possible, because two lifters applauding one
+// session is the cheapest group to build and the rule under test is not
+// crown-specific. The crown case gets its own test for the field that only it
+// carries.
+
+// members reads the expansion of one row.
+func members(e *httpexpect.Expect, id int) *httpexpect.Array {
+	return e.GET(fmt.Sprintf("/notifications/%d/members", id)).
+		Expect().Status(http.StatusOK).
+		JSON().Object().Value("items").Array()
+}
+
+// A row that folds three applause unfolds into three notifications. This is the
+// whole point of the endpoint: the panel can only name two of those lifters and
+// says "and 1 other" for the rest.
+func TestUnfoldingARowReturnsEveryNotificationItFolded(t *testing.T) {
+	sessionID, ownerToken := otherLiftersSession(t, "notify-members-fold")
+	owner := expectAs(t, ownerToken)
+
+	// Three different lifters, so the group folds three rows rather than one
+	// lifter's three emoji.
+	for _, name := range []string{"members-a", "members-b"} {
+		_, token := secondLifter(t, name)
+		expectAs(t, token).POST(fmt.Sprintf("/sessions/%d/reactions", sessionID)).
+			WithJSON(map[string]any{"emoji": "💪"}).
+			Expect().Status(http.StatusNoContent)
+	}
+	expect(t).POST(fmt.Sprintf("/sessions/%d/reactions", sessionID)).
+		WithJSON(map[string]any{"emoji": "🔥"}).
+		Expect().Status(http.StatusNoContent)
+
+	row := findNotification(t, owner, "reaction", sessionID)
+	rowID := int(row.Value("id").Number().Raw())
+	// The row itself reports folding three people, which is what the expansion
+	// has to agree with.
+	row.Value("actorCount").Number().IsEqual(3)
+
+	items := members(owner, rowID)
+	items.Length().IsEqual(3)
+	for _, item := range items.Iter() {
+		obj := item.Object()
+		obj.Value("kind").String().IsEqual("reaction")
+		obj.Value("sessionId").Number().IsEqual(sessionID)
+		// A member folds nobody, which is exactly what these two report.
+		obj.Value("actorCount").Number().IsEqual(1)
+		obj.NotContainsKey("otherActorNames")
+	}
+}
+
+// The representative is one of the members, not a header above them. A client
+// paging through the expansion has to see the row it opened.
+func TestUnfoldingARowIncludesTheRowItself(t *testing.T) {
+	sessionID, ownerToken := otherLiftersSession(t, "notify-members-self")
+	owner := expectAs(t, ownerToken)
+	expect(t).POST(fmt.Sprintf("/sessions/%d/reactions", sessionID)).
+		WithJSON(map[string]any{"emoji": "💪"}).
+		Expect().Status(http.StatusNoContent)
+
+	row := findNotification(t, owner, "reaction", sessionID)
+	rowID := int(row.Value("id").Number().Raw())
+
+	items := members(owner, rowID)
+	items.Length().IsEqual(1)
+	items.Value(0).Object().Value("id").Number().IsEqual(rowID)
+}
+
+// Newest first, the panel's own order, so a client numbering the members "1 of 3"
+// counts them the way the row listed them.
+func TestUnfoldedMembersArriveNewestFirst(t *testing.T) {
+	sessionID, ownerToken := otherLiftersSession(t, "notify-members-order")
+	owner := expectAs(t, ownerToken)
+	_, otherToken := secondLifter(t, "members-order-second")
+
+	expect(t).POST(fmt.Sprintf("/sessions/%d/reactions", sessionID)).
+		WithJSON(map[string]any{"emoji": "💪"}).
+		Expect().Status(http.StatusNoContent)
+	expectAs(t, otherToken).POST(fmt.Sprintf("/sessions/%d/reactions", sessionID)).
+		WithJSON(map[string]any{"emoji": "🔥"}).
+		Expect().Status(http.StatusNoContent)
+
+	row := findNotification(t, owner, "reaction", sessionID)
+	items := members(owner, int(row.Value("id").Number().Raw()))
+	items.Length().IsEqual(2)
+
+	var ids []int
+	for _, item := range items.Iter() {
+		ids = append(ids, int(item.Object().Value("id").Number().Raw()))
+	}
+	if ids[0] < ids[1] {
+		t.Errorf("members arrived oldest first: %v", ids)
+	}
+}
+
+// A crown group spans BOARDS, which is the case the endpoint exists for. The row
+// withholds the board because naming one of several would be a claim the group
+// does not support; every member names its own.
+func TestUnfoldingACrownRowNamesEveryBoard(t *testing.T) {
+	_, token := secondLifter(t, "notify-members-crown")
+	// Somebody above zero, or the zero rule means no crown is taken at all.
+	trainOnce(t, expectAs(t, token))
+	refreshCrowns(t)
+
+	// Read as the primary account, which is told about crowns it did not take.
+	mine := expect(t)
+	var rowID int
+	for _, item := range notificationsFor(mine, "limit", 100).Iter() {
+		obj := item.Object()
+		if obj.Value("kind").String().Raw() == "crown" {
+			rowID = int(obj.Value("id").Number().Raw())
+			break
+		}
+	}
+	if rowID == 0 {
+		t.Skip("no crown reached this account on this install")
+	}
+
+	items := members(mine, rowID)
+	items.Length().Ge(1)
+	for _, item := range items.Iter() {
+		obj := item.Object()
+		obj.Value("kind").String().IsEqual("crown")
+		// NEVER withheld on a member, unlike on the row: a single notification's
+		// board is not in doubt.
+		obj.Value("achievementSlug").String().NotEmpty()
+		// A crown has no session, which is why they all fold into one row.
+		obj.NotContainsKey("sessionId")
+	}
+}
+
+// ---- who may unfold what ----
+
+// Another account's row is a 404, not a 403 and not somebody else's data. The
+// same answer an id that names nothing gets, so this cannot be used to discover
+// which ids exist.
+func TestUnfoldingSomebodyElsesRowIsNotFound(t *testing.T) {
+	sessionID, ownerToken := otherLiftersSession(t, "notify-members-theirs")
+	owner := expectAs(t, ownerToken)
+	expect(t).POST(fmt.Sprintf("/sessions/%d/reactions", sessionID)).
+		WithJSON(map[string]any{"emoji": "💪"}).
+		Expect().Status(http.StatusNoContent)
+
+	// Theirs, read by the lifter who caused it rather than the one it was sent to.
+	row := findNotification(t, owner, "reaction", sessionID)
+	rowID := int(row.Value("id").Number().Raw())
+
+	expect(t).GET(fmt.Sprintf("/notifications/%d/members", rowID)).
+		Expect().Status(http.StatusNotFound)
+}
+
+func TestUnfoldingAnUnknownRowIsNotFound(t *testing.T) {
+	expect(t).GET("/notifications/99999999/members").
+		Expect().Status(http.StatusNotFound)
+}
+
+// An archived id cannot have come from the panel, so it resolves no group —
+// matching MarkNotificationGroupRead, which refuses to stamp through one.
+func TestUnfoldingAnArchivedRowIsNotFound(t *testing.T) {
+	sessionID, ownerToken := otherLiftersSession(t, "notify-members-archived")
+	owner := expectAs(t, ownerToken)
+	expect(t).POST(fmt.Sprintf("/sessions/%d/reactions", sessionID)).
+		WithJSON(map[string]any{"emoji": "💪"}).
+		Expect().Status(http.StatusNoContent)
+
+	row := findNotification(t, owner, "reaction", sessionID)
+	rowID := int(row.Value("id").Number().Raw())
+	archiveNow(t)
+
+	owner.GET(fmt.Sprintf("/notifications/%d/members", rowID)).
+		Expect().Status(http.StatusNotFound)
+}
+
+func TestUnfoldingRejectsAnonymousCallers(t *testing.T) {
+	expectAnon(t).GET("/notifications/1/members").
+		Expect().Status(http.StatusUnauthorized)
+}
+
+func TestUnfoldingIsGatedUntilThePasswordChanges(t *testing.T) {
+	const username = "notify-members-gated"
+	const password = "notify-members-gated-pw"
+	createAccount(t, username, password)
+	gated := expectAs(t, signIn(t, username, password))
+
+	gated.GET("/notifications/1/members").Expect().Status(http.StatusForbidden).
+		JSON().Object().Value("code").String().IsEqual("password_change_required")
+}

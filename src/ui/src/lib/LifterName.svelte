@@ -22,6 +22,7 @@
     lifter,
     class: className = "",
     crownSize = "size-3.5",
+    crowns: showCrowns = true,
   }: {
     lifter: NamedUser;
     class?: string;
@@ -31,6 +32,16 @@
      * lost or overbearing in the other.
      */
     crownSize?: string;
+    /**
+     * Whether to draw them at all.
+     *
+     * For a surface that is ITSELF about a crown — the achievement dialog — where
+     * decorating the name would repeat the heading above it and, on a lifter who
+     * leads three boards, add two crowns the card is not talking about. The name's
+     * `displayName || username` fallback is still worth centralising there, which
+     * is why that surface uses this component rather than the raw expression.
+     */
+    crowns?: boolean;
   } = $props();
 
   const name = $derived(lifter.displayName || lifter.username);
@@ -43,7 +54,7 @@
   // Read synchronously from a map that is built once per load, so a feed of
   // thirty names costs thirty lookups rather than thirty scans. See
   // achievements.svelte.ts.
-  const crowns = $derived(crownsFor(lifter.id));
+  const crowns = $derived(showCrowns ? crownsFor(lifter.id) : []);
 </script>
 
 <span class="inline-flex min-w-0 items-baseline gap-1">

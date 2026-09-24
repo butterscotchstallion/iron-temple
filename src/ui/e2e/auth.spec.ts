@@ -116,6 +116,10 @@ async function mockCommon(page: import("@playwright/test").Page) {
   await page.route("**/api/v1/notifications/*/read", (route) =>
     route.fulfill({ status: 204, body: "" }),
   );
+  // Same placement and the same reason as the read stub above.
+  await page.route("**/api/v1/notifications/*/members", (route) =>
+    route.fulfill({ json: { items: [] } }),
+  );
   // The crowns, polled by App.svelte on the same terms as the bell above and
   // reached here for the same reason: this file signs in partway through, and the
   // poll starts the moment /me comes back with an account.

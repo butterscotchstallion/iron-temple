@@ -1,4 +1,9 @@
-import { getAchievements, type Achievement, type AchievementHolders } from "./api";
+import {
+  getAchievements,
+  type Achievement,
+  type AchievementHolders,
+  type Lifter,
+} from "./api";
 
 // Who is wearing what, for every lifter on the install at once.
 //
@@ -70,6 +75,42 @@ const NONE: Achievement[] = [];
 export function crownsFor(lifterId: number | undefined): Achievement[] {
   if (lifterId === undefined) return NONE;
   return byLifter.get(lifterId) ?? NONE;
+}
+
+/**
+ * The whole catalogue entry for one slug, or null if it is unknown.
+ *
+ * Wanted by any surface that has a slug and needs more than the label — the
+ * achievement dialog draws the description off this. Returns null before the
+ * catalogue has loaded, so callers fall back rather than render a blank.
+ */
+export function achievementBySlug(slug: string | undefined): Achievement | null {
+  if (!slug) return null;
+  for (const entry of achievements.items) {
+    if (entry.achievement.slug === slug) return entry.achievement;
+  }
+  return null;
+}
+
+/**
+ * Who holds one achievement RIGHT NOW — the reverse of `crownsFor`.
+ *
+ * The achievement dialog is why this exists. A crown notification is an event
+ * that may be hours old, so "Grace took this" needs a second sentence saying
+ * whether it is still hers, and answering that means asking who holds it now.
+ *
+ * Several holders is ordinary: tied figures share rank 1 and everybody on it is
+ * crowned. An empty list means nobody holds it — which after a month where nobody
+ * trained is the honest answer, since a board led at zero crowns nobody.
+ */
+const NO_HOLDERS: Lifter[] = [];
+
+export function holdersOf(slug: string | undefined): Lifter[] {
+  if (!slug) return NO_HOLDERS;
+  for (const entry of achievements.items) {
+    if (entry.achievement.slug === slug) return entry.holders;
+  }
+  return NO_HOLDERS;
 }
 
 /**

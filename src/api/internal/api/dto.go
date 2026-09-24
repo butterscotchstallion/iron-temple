@@ -527,6 +527,16 @@ type notificationListDTO struct {
 	UnreadCount int64             `json:"unreadCount"`
 }
 
+// notificationMemberListDTO is one row of the panel, unfolded.
+//
+// No limit, offset or total, unlike notificationListDTO. This is not a page of
+// anything — it is the whole of one group, which the caller has already been told
+// the size of by the row they opened. Handing back a page of a row's own contents
+// would be a list the client could not reconcile with the sentence above it.
+type notificationMemberListDTO struct {
+	Items []notificationDTO `json:"items"`
+}
+
 type avatarDTO struct {
 	Etag string `json:"etag"`
 }

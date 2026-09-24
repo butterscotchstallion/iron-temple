@@ -15,7 +15,8 @@
     notifications,
     poll,
   } from "./notifications.svelte";
-  import type { Notification } from "./api";
+  import AchievementDialog from "./AchievementDialog.svelte";
+  import { getNotificationGroupMembers, type Notification } from "./api";
 
   // The header's notification bell, and the panel behind it.
   //
@@ -58,10 +59,10 @@
    */
   function href(item: Notification): string | null {
     if (item.kind === "joined") return `/lifters/${item.actor.id}`;
-    // The standings, not the lifter. A crown row is news about a board — the
-    // reader's own place on it is the thing they will want next — and the
-    // leaderboard names the holder anyway.
-    if (item.kind === "crown") return "/leaderboard";
+    // A crown goes nowhere: it opens a dialog instead, because the row folds
+    // every crown on the install and a route could only ever show one of them.
+    // The leaderboard is still one press away, from inside that dialog.
+    if (item.kind === "crown") return null;
     if (item.sessionId === undefined) return null;
 
     // Which comment, appended so the recap can scroll to the sentence rather
@@ -146,6 +147,10 @@
   }
 
   function go(item: Notification) {
+    if (expandable(item)) {
+      void expand(item);
+      return;
+    }
     const target = href(item);
     if (target === null) return;
     // Reading THIS one, which is what following it means — and since a row is a
@@ -168,6 +173,78 @@
    */
   function navigable(item: Notification): boolean {
     return href(item) !== null;
+  }
+
+  /**
+   * Whether a row opens a dialog rather than going somewhere.
+   *
+   * Only `crown` today. It exists because the row folds every crown on the
+   * install and no single route could show them all — see AchievementDialog.
+   */
+  function expandable(item: Notification): boolean {
+    return item.kind === "crown";
+  }
+
+  /**
+   * Whether a row does ANYTHING when tapped.
+   *
+   * Split from `navigable` when crowns stopped navigating. The two were the same
+   * question until then, and conflating them would have made the crown row inert:
+   * `disabled` keys off this, and a row that leads nowhere because it opens a
+   * dialog is not a row that does nothing.
+   */
+  function interactive(item: Notification): boolean {
+    return navigable(item) || expandable(item);
+  }
+
+  // ---- the achievement dialog ----
+
+  let detailOpen = $state(false);
+  let detail = $state<Notification[]>([]);
+  let detailLoading = $state(false);
+
+  /**
+   * Suppress the menu's focus-return, for the dialog path only.
+   *
+   * DropdownMenu.Content hands focus back to the bell when it closes. Closing the
+   * panel and opening a dialog in the same tick can land that AFTER the dialog has
+   * autofocused, leaving an open dialog with focus outside it — which traps a
+   * keyboard reader behind a modal they cannot reach. Flagged rather than always
+   * prevented, so the rows that navigate keep returning focus to the bell as they
+   * always have.
+   */
+  let keepFocus = $state(false);
+
+  /**
+   * Open the dialog on one folded row.
+   *
+   * Marks the group read, because opening this IS reading it — the same call
+   * following a row makes, and for the same reason. The panel closes first so
+   * there is one layer rather than two stacked scroll locks.
+   *
+   * The dialog is opened BEFORE the members land, with `loading` set: the tap has
+   * to be answered immediately, and a modal that appears a request later reads as
+   * a dead row. A failure leaves it open with nothing in it, which the dialog says
+   * plainly rather than raising a banner over a panel somebody may be reading
+   * mid-set.
+   */
+  async function expand(item: Notification) {
+    void markRead(item.id);
+    keepFocus = true;
+    open = false;
+    detail = [];
+    detailLoading = true;
+    detailOpen = true;
+
+    const result = await getNotificationGroupMembers(item.id);
+    detailLoading = false;
+    if (result.status === 200) detail = result.data.items;
+    keepFocus = false;
+  }
+
+  function toLeaderboard() {
+    detailOpen = false;
+    push("/leaderboard");
   }
 
   // Opening is not reading. The two buttons are the whole point of storing
@@ -217,6 +294,11 @@
       sideOffset={8}
       align="end"
       class="z-50 flex max-h-[26rem] w-80 flex-col rounded-md border border-border/60 bg-card shadow-lg shadow-black/40"
+      onCloseAutoFocus={(e) => {
+        // Only when a dialog is taking over — see keepFocus. Returning focus to
+        // the bell is right for every other way this closes.
+        if (keepFocus) e.preventDefault();
+      }}
     >
       <div
         class="flex items-center justify-between gap-2 border-b border-border/60 px-3 py-2"
@@ -253,10 +335,10 @@
       <div class="overflow-y-auto p-1">
         {#if items.length > 0}
           {#each items as item (item.id)}
-            {@const leadsSomewhere = navigable(item)}
+            {@const acts = interactive(item)}
             <DropdownMenu.Item
-              class={leadsSomewhere ? itemClass : inertItemClass}
-              disabled={!leadsSomewhere}
+              class={acts ? itemClass : inertItemClass}
+              disabled={!acts}
               onSelect={() => go(item)}
               closeOnSelect={false}
             >
@@ -315,3 +397,15 @@
     </DropdownMenu.Content>
   </DropdownMenu.Portal>
 </DropdownMenu.Root>
+
+<!-- OUTSIDE the menu, deliberately. DropdownMenu.Content is presence-gated, so
+     everything inside it is unmounted the moment the panel closes — and this
+     dialog is opened BY closing the panel. Nested, it would be destroyed on the
+     same tick it appeared. ExerciseCard.svelte carries the same warning for the
+     same reason. -->
+<AchievementDialog
+  bind:open={detailOpen}
+  items={detail}
+  loading={detailLoading}
+  onLeaderboard={toLeaderboard}
+/>
