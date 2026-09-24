@@ -541,6 +541,15 @@ paths:
         The caller's notifications, newest first, with the unread count over all
         of them rather than over this page.
 
+        GROUPED: one item per thing that happened, not per notification. All the
+        applause on one session is one item naming the people who gave it, and so
+        is all the conversation on one session and everybody who joined the gym.
+        `limit` therefore counts things that happened, which is the point — a page
+        of twenty was easy to spend saying the same sentence twenty times, and the
+        generated-activity scheduler manufactures exactly that shape daily. See
+        `Notification` for what an item carries and `unreadCount` for why the
+        badge counts the same way.
+
         This is the endpoint the header polls, so it is built to be asked
         repeatedly and answered cheaply: it is a GET under the authenticated
         group, which means the ETag middleware serves a 304 whenever nothing has
@@ -642,10 +651,17 @@ paths:
       operationId: markNotificationRead
       summary: Mark one read
       description: >
-        Stamps a single notification, for the case the bulk endpoint above
+        Stamps a single item of the list, for the case the bulk endpoint above
         cannot express: a lifter who opens one row, reads the comment it was
         about, and comes back to a panel still holding the two they have not
         looked at.
+
+        AN ITEM IS A GROUP, so this marks every notification that item folds.
+        Send back the `id` the list gave you — the group's most recent member —
+        and the server resolves the rest from it, so a client never has to know
+        what the grouping rule is. Marking only that one member would hand the
+        item straight back unread, which is a badge that could only be cleared by
+        the bulk endpoint this one exists to avoid.
 
         Without this the only way to clear the badge was to mark everything
         read, which buries the rows that had not been seen — so following a
@@ -653,8 +669,9 @@ paths:
         was.
 
         Scoped to the caller inside the statement, not by a check around it: a
-        notification belonging to another account matches no row, which is why
-        there is no 403 here. Answering 404 would confirm the id exists.
+        notification belonging to another account matches no row, and neither
+        does the group it would have named, which is why there is no 403 here.
+        Answering 404 would confirm the id exists.
 
         Idempotent and 204 whether or not a row moved, like withdrawing
         applause — the caller asked for a state, and the state holds either way.
@@ -3106,8 +3123,14 @@ components:
         unreadCount:
           type: integer
           description: >
-            How many of the caller's notifications are unread — ALL of them, not
-            just the ones on this page.
+            How many unread ITEMS the caller has — ALL of them, not just the ones
+            on this page.
+
+            Counted in the same groups `items` is built from, so it agrees with
+            what a client draws: twelve applause on one session are one item and
+            therefore one unread thing. A badge reading 12 above a single row, and
+            dropping to 0 when that row is opened, would look like a bug rather
+            than like the one thing it did.
 
             It rides on the list response rather than living at its own endpoint
             because the client needs both on the same schedule: the badge is the
@@ -3118,9 +3141,22 @@ components:
 
     Notification:
       type: object
-      required: [id, kind, actor, createdAt]
+      required: [id, kind, actor, actorCount, createdAt]
       description: >
         One thing that happened, addressed to the caller.
+
+        ONE OF THESE IS A GROUP. Everything the caller was told about the same
+        subject folds into a single item: all the applause on one session, all
+        the comments on one session, everybody who joined the gym. `actorCount`
+        says how many people it folds, and it is 1 on an item that folds nobody —
+        which is most of them.
+
+        Every other field describes the group's MOST RECENT member. So `id` is
+        that member's id, `createdAt` is when it arrived (which is what the list
+        is sorted by, so a group returns to the top when somebody adds to it),
+        and a fold of three comments quotes and links to the newest of the three.
+        The rest are not lost — they are on the session this item points at,
+        which is where a conversation lives.
 
         The optional fields are optional BY KIND rather than by chance, and a
         client should switch on `kind` rather than testing them for presence:
@@ -3129,14 +3165,43 @@ components:
         id:
           type: integer
           format: int64
+          description: >
+            The most recent notification in the group, and the id to send to
+            `POST /notifications/{notificationId}/read` — which marks the whole
+            group, because this item is the whole group.
         kind:
           $ref: "#/components/schemas/NotificationKind"
         actor:
           $ref: "#/components/schemas/Lifter"
           description: >
-            Who did it. Never the caller — every notification is about somebody
-            else's action, and the queries filter the actor out of their own
-            recipients.
+            Who did it — the most recent of them on a group, which is the one
+            whose avatar the row draws.
+
+            Never the caller: every notification is about somebody else's action,
+            and the queries filter the actor out of their own recipients.
+        actorCount:
+          type: integer
+          description: >
+            How many DISTINCT people this item folds, `actor` included. 1 on an
+            item that folds nobody.
+
+            Distinct people rather than notifications, which is not the same
+            number: one lifter can applaud a session with two different emoji,
+            and that is two notifications and one person to name.
+        otherActorNames:
+          type: array
+          items:
+            type: string
+          description: >
+            Display names of some of the others, most recent first, so a client
+            can say "Bob, Cara and 4 others" without a request per person. Never
+            includes `actor`'s own name, and absent when this item folds nobody.
+
+            CAPPED AT TWO, and the cap is a wire budget rather than a copy
+            decision — an install with forty lifters must not put forty names on
+            every row of a poll that happens once a minute. How many to actually
+            say is the client's, and `actorCount` is what it counts the remainder
+            from.
         sessionId:
           type: integer
           format: int64
@@ -3192,6 +3257,12 @@ components:
           description: >
             When the caller first read it, absent while unread. A timestamp
             rather than a flag because it costs the same and answers "when".
+
+            On a group it is present only once EVERY member has been read, and is
+            then the latest of those stamps. Reporting the newest member's own
+            timestamp instead would let a group with an older unread member show
+            as read while still being counted by `unreadCount` — the one
+            disagreement between the badge and the list that must not exist.
 
     NotificationKind:
       type: string
