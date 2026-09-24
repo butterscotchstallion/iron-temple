@@ -5,8 +5,13 @@ name: Go Lint & Test
 # set — go.mod tidy check, golangci-lint, govulncheck, gosec, test+coverage —
 # adapted for this repo: a single vendored module, and `go test -short` because the
 # integration tests use Testcontainers (no container runtime on the host executor).
-# The static checks and the test run are two parallel jobs rather than one serial
-# one; see the note on `lint`.
+#
+# ONE job does the lint and the tests, deliberately. Splitting them into two was
+# tried (PR #253) and measured SLOWER: the act host executor runs at most two
+# non-trivial jobs at a time, and the backend and frontend jobs already saturate
+# that. More jobs bought no parallelism and each one paid its own checkout and
+# setup again. With the slot count fixed, the only thing that helps is doing less
+# total work — which is what removing the `go vet` step below does.
 #
 # Required-status-check safety: this workflow always triggers on every branch push
 # (NO `on.paths` filter) so its `result` gate always reports a commit status. Branch
@@ -65,23 +70,8 @@ jobs:
             '^(src/api/|\.gitea/workflows/go\.yml$|\.gitea/scripts/|\.gitea/ci/postgres\.yaml$)')
           echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
 
-  # Static analysis: tidiness, golangci-lint, govulncheck, gosec. The TEST run is a
-  # separate job below, not three more steps here.
-  #
-  # They were serial, and they were the two longest things in the workflow — 102s of
-  # lint and 123s of `go test -race`, one after the other. Splitting them is nearly
-  # free because they cannot share a build cache anyway: -race compiles every package
-  # instrumented, into a different cache key than the plain build these linters use.
-  # Measured from a fully cold cache, `go test -short -race` is 142s on its own and
-  # 111s after a plain `go vet` has run, so parallelising duplicates ~31s of
-  # type-checking and removes ~120s of waiting.
-  #
-  # `go vet ./...` used to run here as its own step. It is gone: .golangci.yml enables
-  # the govet linter, which runs the same passes over the same tree. Cold, `vet` +
-  # `golangci-lint` is 111s and `golangci-lint` alone is 101s — so vet was not doing
-  # 68s of extra checking, it was paying 68s of the compile golangci-lint then reused.
-  lint:
-    name: Go Lint
+  go:
+    name: Go Build & Test
     needs: changes
     if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
@@ -158,7 +148,7 @@ jobs:
       #
       # NOW the build cache goes too, for a plainer reason: it is slower than not
       # having it. From run #2964's logs the entry was 2875 MB, and restoring it took
-      # 6m of the lint/test job and 5m of the integration job — the same 2.87 GB pulled
+      # 6m of the `go` job and 5m of the integration job — the same 2.87 GB pulled
       # twice per push. Measured against that, a completely cold `go vet ./...` plus
       # `go test -short -race ./...` is 199s, and the integration job's compile-plus-
       # run is 121s, each leaving a cache of 286-611 MB. The restore cost more than
@@ -230,10 +220,14 @@ jobs:
             exit 1
           fi
 
-      # golangci-lint is baked on PATH; uses the committed src/api/.golangci.yml (v2),
-      # whose enabled linters include govet — so this is also what checks the tree the
-      # removed `go vet` step used to. It reads the committed vendor/ automatically and
-      # fails on inconsistent vendoring for the same reason vet did.
+      # No `go vet` step: .golangci.yml enables the govet linter, so the run below
+      # makes the same passes over the same tree, and reads vendor/ the same way.
+      # It was not doing 68s of extra checking — it was paying 68s of a compile
+      # golangci-lint then reused. Cold, `vet` + `golangci-lint` is 111s against
+      # `golangci-lint` alone at 101s. preflight.sh drops its matching gate too, so
+      # a local pass still means the same set of checks as a CI pass.
+      #
+      # golangci-lint is baked on PATH; uses the committed src/api/.golangci.yml (v2).
       # --allow-parallel-runners: the host executor may run two jobs in one pod, whose
       # shared cache lock otherwise fails the second. retry-etxtbsy guards the shared-FS
       # exec race.
@@ -247,52 +241,6 @@ jobs:
       # (never a real finding — it keys on the fault signature).
       - name: gosec
         run: bash "$GITHUB_WORKSPACE/.gitea/scripts/retry-gosec" gosec -severity medium -confidence medium ./...
-
-      - name: Notify on failure
-        if: failure()
-        working-directory: ${{ github.workspace }}
-        env:
-          WORKFLOW: "${{ github.workflow }} / ${{ github.job }}"
-          REPO: ${{ github.repository }}
-          BRANCH: ${{ github.ref_name }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          SHA: ${{ github.sha }}
-        run: ./scripts/ci-notify.sh
-
-  # The unit tests, under the race detector. Runs alongside `lint` — see the note on
-  # that job for why splitting them costs almost nothing.
-  test:
-    name: Go Test
-    needs: changes
-    if: needs.changes.outputs.relevant == 'true'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: src/api
-    env:
-      GOTOOLCHAIN: local
-      # Same job-scoped module cache as `lint`; see the note there. Nothing in this
-      # job reads it — the module is vendored — but a shared ~/go/pkg/mod is what
-      # poisoned these jobs once before, and pointing it somewhere disposable costs
-      # nothing.
-      GOMODCACHE: ${{ runner.temp }}/gomodcache
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          fetch-depth: 0
-
-      # Same merge preview as `lint` — the tests have to run against the merge result
-      # too, or they certify a tree that never ships.
-      - name: Merge main into the head under test
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          REF_NAME: ${{ github.ref_name }}
-        run: bash "$GITHUB_WORKSPACE/.gitea/scripts/merge-base-branch" "$EVENT_NAME" "$REF_NAME"
-
-      - name: Use the baked Go toolchain
-        run: |
-          echo "/usr/local/go/bin" >> "$GITHUB_PATH"
-          /usr/local/go/bin/go version
 
       # -short skips the Testcontainers integration tests (they need a container runtime
       # the host executor lacks); the pure unit tests still run with the race detector.
@@ -323,7 +271,7 @@ jobs:
   # schema change from the sandbox, which is precisely the drift a generator exists
   # to prevent. CI has the proxy, so it can hold the line the sandbox can't.
   #
-  # Independent of the lint and test jobs (only `needs: changes`): it's cheap, needs no
+  # Independent of the `go` job (only `needs: changes`): it's cheap, needs no
   # database, and a mismatch here is worth reporting even when lint is failing.
   sqlc:
     name: Verify generated store
@@ -356,7 +304,7 @@ jobs:
           /usr/local/go/bin/go version
 
       # Cache the compiled binary so the dep graph is built once per version bump,
-      # not once per push — same pattern as the gosec cache in the `lint` job.
+      # not once per push — same pattern as the gosec cache in the `go` job.
       - name: Cache sqlc
         id: cache-sqlc
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
@@ -402,27 +350,16 @@ jobs:
           SHA: ${{ github.sha }}
         run: ./scripts/ci-notify.sh
 
-  # DB-backed API tests. `needs: [lint, test]` gates them on the cheaper jobs above —
-  # no point provisioning a Postgres pod and running the integration suite if the
-  # linters or the unit tests already failed. (When those skip as irrelevant, this
-  # skips too.) It was one `needs: go` before those two were split; naming both keeps
-  # the gate exactly as strict, and it now opens sooner, because lint and test finish
-  # in parallel rather than end to end.
-  #
-  # This gate is still the backend's critical path: lint+test, then this. Dropping it
-  # would let the pod come up immediately and take another ~150s off a green push, at
-  # the cost of provisioning one on a push that was going to fail anyway. Left in place
-  # for now — the split already adds two jobs to a SHARED host executor, and running
-  # four backend jobs at once is the thing most likely to make these numbers worse
-  # rather than better. Worth revisiting once the split's effect has been measured.
-  #
+  # DB-backed API tests. `needs: go` gates them on the fast job above — no point
+  # provisioning a Postgres pod and running the integration suite if lint/vet/gosec or
+  # the unit tests already failed. (When `go` is skipped as irrelevant, this skips too.)
   # The tests use Testcontainers locally, but the host-executor runner has no container
   # runtime, so this provisions a throwaway Postgres *pod*, points TEST_DATABASE_URL at
   # it, runs the non-short suite, and always reaps the pod. Requires the companion
   # homelab-gitops NetworkPolicy (runner <-> the CI Postgres pod on 5432).
   integration:
     name: API Integration Tests
-    needs: [lint, test]
+    needs: go
     runs-on: ubuntu-latest
     env:
       GOTOOLCHAIN: local
@@ -448,7 +385,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Same merge preview as the jobs above — the integration suite has to run
+      # Same merge preview as the `go` job — the integration suite has to run
       # against the merge result too, or it certifies a tree that never ships.
       - name: Merge main into the head under test
         env:
@@ -461,7 +398,7 @@ jobs:
           echo "/usr/local/go/bin" >> "$GITHUB_PATH"
           /usr/local/go/bin/go version
 
-      # No build-cache restore here either — same reasoning as the `lint` job above,
+      # No build-cache restore here either — same reasoning as the `go` job above,
       # and this job made the case even more bluntly: it restored the same 2875 MB
       # entry for 5 minutes in order to compile and run two packages, which from a
       # completely cold cache takes 121s end to end.
@@ -517,18 +454,18 @@ jobs:
   # THIS the required status check in branch protection.
   result:
     name: Go Lint & Test
-    needs: [changes, lint, test, sqlc, integration]
+    needs: [changes, go, sqlc, integration]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Require backend jobs to pass
         run: |
           set -euo pipefail
-          echo "changes=${{ needs.changes.result }} lint=${{ needs.lint.result }} test=${{ needs.test.result }} sqlc=${{ needs.sqlc.result }} integration=${{ needs.integration.result }}"
+          echo "changes=${{ needs.changes.result }} go=${{ needs.go.result }} sqlc=${{ needs.sqlc.result }} integration=${{ needs.integration.result }}"
           if [ "${{ needs.changes.result }}" != "success" ]; then
             echo "::error::change-detection job did not succeed"; exit 1
           fi
-          for r in "${{ needs.lint.result }}" "${{ needs.test.result }}" "${{ needs.sqlc.result }}" "${{ needs.integration.result }}"; do
+          for r in "${{ needs.go.result }}" "${{ needs.sqlc.result }}" "${{ needs.integration.result }}"; do
             case "$r" in
               success|skipped) ;;
               *) echo "::error::backend checks did not pass ($r)"; exit 1 ;;
