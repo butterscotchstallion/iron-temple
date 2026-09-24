@@ -24,6 +24,7 @@
   import RecapEarned from "../lib/RecapEarned.svelte";
   import MuscleVolumeBars from "../lib/MuscleVolumeBars.svelte";
   import SessionSocial from "../lib/SessionSocial.svelte";
+  import { markedCommentId } from "../lib/commentAnchor";
   import { formatPercent, formatWeighIn } from "../lib/racked";
   import { takeHandedSession } from "../lib/recapHandoff";
   import { localRecap } from "../lib/localRecap";
@@ -53,6 +54,9 @@
 
   let { params }: { params?: { id?: string } } = $props();
   const sessionId = $derived(Number(params?.id ?? 0));
+
+  // Which comment a notification sent this lifter here to read, if any.
+  const markedComment = $derived(markedCommentId());
 
   let recap = $state<SessionRecap | null>(null);
   let local = $state<ReturnType<typeof localRecap> | null>(null);
@@ -306,7 +310,11 @@
          ownerId is the reader: this route only ever shows their own session, so
          the reaction buttons stand down and the counts show instead. -->
     {#if recap}
-      <SessionSocial sessionId={recap.session.sessionId} ownerId={auth.me?.id ?? null} />
+      <SessionSocial
+        sessionId={recap.session.sessionId}
+        ownerId={auth.me?.id ?? null}
+        highlightCommentId={markedComment}
+      />
     {/if}
 
     <div class="flex flex-wrap gap-2">

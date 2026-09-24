@@ -102,6 +102,19 @@ RETURNING id, session_id, user_id, body, created_at;
 -- Oldest first, unlike every other list in this schema. A conversation reads
 -- downwards — a reply under the thing it replies to — where a history reads
 -- newest first because the recent session is the one you want.
+--
+-- SELECTED FROM ONE END AND ORDERED FROM THE OTHER, which is the only subtle
+-- thing here. The inner query takes the NEWEST page — that is what offset counts
+-- back through — and the outer ORDER BY turns it the right way up for reading.
+-- Paging from the oldest end instead would mean a lifter opening a session with
+-- forty comments on it lands at the beginning of a conversation whose last line
+-- is the one they were told about.
+--
+-- The subquery selects ids only, so the joins that decorate a comment with its
+-- author run over one page rather than over the whole thread.
+--
+-- Until this was paged it was the one unbounded list in the app, and the
+-- generated-activity scheduler adds comments to sessions every day.
 -- name: ListSessionComments :many
 SELECT c.id,
        c.session_id,
@@ -115,8 +128,26 @@ SELECT c.id,
 FROM session_comments c
 JOIN users u ON u.id = c.user_id
 LEFT JOIN user_avatars ua ON ua.user_id = u.id
-WHERE c.session_id = sqlc.arg('session_id')::int
+WHERE c.id IN (
+    SELECT p.id
+    FROM session_comments p
+    WHERE p.session_id = sqlc.arg('session_id')::int
+    ORDER BY p.created_at DESC, p.id DESC
+    LIMIT sqlc.arg('lim') OFFSET sqlc.arg('off')
+)
 ORDER BY c.created_at, c.id;
+
+-- CountSessionComments is how many there are in total, so a surface showing the
+-- tail of a conversation can say how much of it is above the fold.
+--
+-- Separate from the list rather than a window function over it, because the
+-- list returns a page and this counts the thread: a COUNT(*) OVER () would be
+-- computed per returned row and would still be wrong on an empty page, where
+-- there are no rows to carry it.
+-- name: CountSessionComments :one
+SELECT COUNT(*)::bigint AS total
+FROM session_comments
+WHERE session_id = sqlc.arg('session_id')::int;
 
 -- GetSessionComment reads one comment's owning session and author, which is what
 -- a delete has to know before it is allowed: the author may remove their own, and

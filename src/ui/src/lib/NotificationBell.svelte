@@ -10,6 +10,7 @@
   import {
     clearAll,
     markAllRead,
+    markRead,
     notifications,
     poll,
   } from "./notifications.svelte";
@@ -49,11 +50,17 @@
   function href(item: Notification): string | null {
     if (item.kind === "joined") return `/lifters/${item.actor.id}`;
     if (item.sessionId === undefined) return null;
+
+    // Which comment, appended so the recap can scroll to the sentence rather
+    // than dropping the lifter at the top of a long page with the conversation
+    // as its last card. A reaction has none and gets a bare recap link.
+    const anchor = item.commentId === undefined ? "" : `?comment=${item.commentId}`;
+
     if (item.sessionOwnerId === auth.me?.id) {
-      return `/sessions/${item.sessionId}/recap`;
+      return `/sessions/${item.sessionId}/recap${anchor}`;
     }
     if (item.sessionOwnerId === undefined) return null;
-    return `/lifters/${item.sessionOwnerId}/sessions/${item.sessionId}/recap`;
+    return `/lifters/${item.sessionOwnerId}/sessions/${item.sessionId}/recap${anchor}`;
   }
 
   /** The sentence a row reads as. The actor's name is drawn separately. */
@@ -78,8 +85,25 @@
   function go(item: Notification) {
     const target = href(item);
     if (target === null) return;
+    // Reading THIS one, which is what following it means. Deliberately not
+    // awaited: the navigation is the response to the tap, and the badge is
+    // already down optimistically.
+    void markRead(item.id);
     open = false;
     push(target);
+  }
+
+  /**
+   * Whether a row leads anywhere.
+   *
+   * Almost all of them do. The exception is a `reply` about a session with no
+   * owner — one predating accounts and never adopted — which has no recap route
+   * to build. Such a row used to look identical to a live one and simply do
+   * nothing when tapped, which reads as a broken panel rather than as a row
+   * that is only a statement.
+   */
+  function navigable(item: Notification): boolean {
+    return href(item) !== null;
   }
 
   // Opening is not reading. The two buttons are the whole point of storing
@@ -94,6 +118,12 @@
 
   const itemClass =
     "flex w-full cursor-pointer items-start gap-2 rounded-sm px-2 py-2 text-left text-sm text-foreground outline-none transition data-highlighted:bg-primary data-highlighted:text-primary-foreground";
+
+  // The same row without the affordances: no pointer, no highlight on hover or
+  // arrow-key focus. It still draws in full, because what it SAYS is worth
+  // reading even though there is nowhere to go.
+  const inertItemClass =
+    "flex w-full items-start gap-2 rounded-sm px-2 py-2 text-left text-sm text-foreground outline-none";
 </script>
 
 <DropdownMenu.Root bind:open>
@@ -159,8 +189,10 @@
       <div class="overflow-y-auto p-1">
         {#if items.length > 0}
           {#each items as item (item.id)}
+            {@const leadsSomewhere = navigable(item)}
             <DropdownMenu.Item
-              class={itemClass}
+              class={leadsSomewhere ? itemClass : inertItemClass}
+              disabled={!leadsSomewhere}
               onSelect={() => go(item)}
               closeOnSelect={false}
             >

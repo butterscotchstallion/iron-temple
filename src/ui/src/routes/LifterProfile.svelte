@@ -12,11 +12,15 @@
   import { formatLongDate } from "../lib/date";
   import { muscleGroupLabel } from "../lib/library";
   import { formatVolume } from "../lib/volume";
+  import SessionCards from "../lib/SessionCards.svelte";
+  import { Button } from "$lib/components/ui/button";
   import {
     getLifter,
     getLifterRacked,
+    listLifterSessions,
     type LifterProfile,
     type RackedReport,
+    type SessionSummary,
   } from "../lib/api";
 
   // One lifter, as seen by another.
@@ -34,6 +38,17 @@
   let report = $state<RackedReport | null>(null);
   let loading = $state(true);
   let failed = $state(false);
+
+  // Their training, which is what turns this page from a summary into somewhere
+  // to go. Every row links to that session's recap — the screen where one
+  // lifter applauds another — which until now was reachable only through the
+  // feed, where finding a particular lifter's Tuesday meant paging past
+  // everybody else's week.
+  const SESSION_PAGE = 10;
+  let sessions = $state<SessionSummary[]>([]);
+  let sessionTotal = $state(0);
+  let loadingMore = $state(false);
+  const hasMore = $derived(sessions.length < sessionTotal);
   // Tracked apart from `failed`: a 404 is a different answer from a network
   // problem, and "no such lifter" is not something a retry button can fix.
   let missing = $state(false);
@@ -69,7 +84,30 @@
     if (stats.status === 200) {
       report = stats.data;
     }
+
+    // Their history, on the same terms as the statistics above: a failure here
+    // stands the section down rather than failing the page, because the
+    // identity and the lifetime totals have already arrived and are worth
+    // showing.
+    const history = await listLifterSessions(id, { limit: SESSION_PAGE });
+    if (history.status === 200) {
+      sessions = history.data.items;
+      sessionTotal = history.data.total;
+    }
     loading = false;
+  }
+
+  async function loadMore() {
+    if (loadingMore || !hasMore) return;
+    loadingMore = true;
+    const result = await listLifterSessions(id, {
+      limit: SESSION_PAGE,
+      offset: sessions.length,
+    });
+    loadingMore = false;
+    if (result.status !== 200) return;
+    sessions = [...sessions, ...result.data.items];
+    sessionTotal = result.data.total;
   }
 
   const name = $derived(profile?.displayName || profile?.username || "");
@@ -256,6 +294,27 @@
           {name} hasn't logged anything this month.
         </p>
       </Card>
+    {/if}
+
+    <!-- Their sessions. Below the month's statistics because those answer "how
+         are they training", and this answers "what did they do" — the question
+         you follow into a recap. Absent entirely for an account that has never
+         logged a rep: the two cards above already say so. -->
+    {#if sessions.length > 0}
+      <div data-testid="lifter-sessions" class="flex flex-col gap-3">
+        <h3 class="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+          Their training
+        </h3>
+        <SessionCards {sessions} lifterId={id} />
+
+        {#if hasMore}
+          <div class="flex justify-center">
+            <Button variant="outline" onclick={loadMore} disabled={loadingMore}>
+              {loadingMore ? "Loading…" : "Load more"}
+            </Button>
+          </div>
+        {/if}
+      </div>
     {/if}
   </div>
 {/if}

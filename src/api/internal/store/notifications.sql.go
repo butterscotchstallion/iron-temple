@@ -136,6 +136,14 @@ FROM sessions s
 WHERE s.id = $3::int
   AND s.user_id IS NOT NULL
   AND s.user_id <> $1::int
+  AND NOT EXISTS (
+    SELECT 1 FROM notifications n
+    WHERE n.kind = 'reaction'
+      AND n.user_id = s.user_id
+      AND n.actor_id = $1::int
+      AND n.session_id = $3::int
+      AND n.emoji = $2::text
+  )
 `
 
 type CreateReactionNotificationParams struct {
@@ -154,6 +162,22 @@ type CreateReactionNotificationParams struct {
 // call without repeating that rule.
 //
 // Sessions predating 0005 have no owner and quietly notify nobody.
+// ONE ROW PER (recipient, actor, session, emoji), EVER. The NOT EXISTS below
+// and the read_at guard on DeleteReactionNotification are one mechanism and
+// have to be read together.
+//
+// A repeat tap of the same emoji is already a no-op — session_reactions' primary
+// key settles it, and the handler only calls this when the insert actually
+// recorded something. What this guards is the other shape: applaud, withdraw,
+// applaud again. Each of those is a genuine new reaction, so each used to mint a
+// fresh notification at the top of the panel, which is how one lifter idly
+// toggling a button becomes somebody else's unread count climbing.
+//
+// With both halves in place the worst a toggler can do is move one row's unread
+// mark on and off: the withdrawal retracts the notification only while it is
+// still unseen, and the re-applause finds the row already there and adds
+// nothing. Once it HAS been read, the row stays put and every later cycle is
+// silent.
 func (q *Queries) CreateReactionNotification(ctx context.Context, arg CreateReactionNotificationParams) error {
 	_, err := q.db.Exec(ctx, createReactionNotification, arg.ActorID, arg.Emoji, arg.SessionID)
 	return err
@@ -165,6 +189,7 @@ WHERE kind = 'reaction'
   AND actor_id = $1::int
   AND session_id = $2::int
   AND emoji = $3::text
+  AND read_at IS NULL
 `
 
 type DeleteReactionNotificationParams struct {
@@ -182,9 +207,21 @@ type DeleteReactionNotificationParams struct {
 // does — the recipient is whoever owns the session, which is not a free
 // variable — so naming user_id as well would add nothing.
 //
-// Deliberately unconditional about what it finds: withdrawing applause that was
-// never given removes nothing and reports nothing, exactly as
+// Deliberately unconditional about WHETHER IT FINDS ANYTHING: withdrawing
+// applause that was never given removes nothing and reports nothing, exactly as
 // RemoveSessionReaction does.
+//
+// It is not unconditional about read_at, though, and that is the half of the
+// pairing described on CreateReactionNotification above. An unread notification
+// is retracted, because nobody has been told yet and the withdrawal is still
+// private. A notification that has ALREADY BEEN READ stays: it records that
+// somebody applauded, which is a thing that happened, and deleting it deletes a
+// row the recipient has seen — from their point of view a notification silently
+// vanishing between one poll and the next, with nothing to explain it.
+//
+// The applause itself is gone either way. This is only about whether the
+// telling of it is also taken back, and it can only honestly be taken back
+// before it lands.
 func (q *Queries) DeleteReactionNotification(ctx context.Context, arg DeleteReactionNotificationParams) error {
 	_, err := q.db.Exec(ctx, deleteReactionNotification, arg.ActorID, arg.SessionID, arg.Emoji)
 	return err
@@ -308,6 +345,39 @@ func (q *Queries) ListNotifications(ctx context.Context, arg ListNotificationsPa
 		return nil, err
 	}
 	return items, nil
+}
+
+const markNotificationRead = `-- name: MarkNotificationRead :execrows
+UPDATE notifications
+SET read_at = now()
+WHERE id = $1::int
+  AND user_id = $2::int
+  AND read_at IS NULL
+`
+
+type MarkNotificationReadParams struct {
+	ID     int32 `json:"id"`
+	UserID int32 `json:"user_id"`
+}
+
+// MarkNotificationRead is one row, for a lifter who followed a notification
+// through to the thing it was about.
+//
+// SCOPED TO THE CALLER INSIDE THE STATEMENT, which is the whole access control.
+// There is no separate "is this yours" read for a handler to forget, and no 403
+// to write: a notification belonging to somebody else matches no row and the
+// answer is the same 204 as marking one that was already read. Reporting 404
+// would confirm the id exists, which is a question this endpoint has no reason
+// to answer.
+//
+// Restricted to unread rows for the reason MarkNotificationsRead is: read_at is
+// when a notification was FIRST read, and a second tap must not move it.
+func (q *Queries) MarkNotificationRead(ctx context.Context, arg MarkNotificationReadParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markNotificationRead, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const markNotificationsRead = `-- name: MarkNotificationsRead :exec

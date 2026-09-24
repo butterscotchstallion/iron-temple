@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
   import Trash2 from "@lucide/svelte/icons/trash-2";
@@ -7,6 +7,7 @@
   import Loading from "./skeleton/Loading.svelte";
   import Skeleton from "./skeleton/Skeleton.svelte";
   import { auth } from "./auth.svelte";
+  import { prefersReducedMotion } from "./reducedMotion";
   import {
     addSessionComment,
     addSessionReaction,
@@ -31,7 +32,21 @@
   // Mounted below the recap rather than folded into it, because the recap is built
   // to be answerable from memory with a dead network and this is not. If the
   // requests below fail the recap above them is unaffected.
-  let { sessionId, ownerId }: { sessionId: number; ownerId: number | null } = $props();
+  //
+  // highlightCommentId is a deep link: a notification said "Ada commented on
+  // your Workout A", and this is which comment she left. The recap routes read
+  // it off the query string and hand it down rather than this component reading
+  // the URL, because the two recap screens are different routes and the one
+  // that knows which is which is the route.
+  let {
+    sessionId,
+    ownerId,
+    highlightCommentId = null,
+  }: {
+    sessionId: number;
+    ownerId: number | null;
+    highlightCommentId?: number | null;
+  } = $props();
 
   // The emoji come from the generated client rather than a list written here, so
   // the buttons cannot offer one the server would reject.
@@ -42,6 +57,25 @@
   let body = $state("");
   let posting = $state(false);
   let error = $state<string | null>(null);
+
+  // How much of a conversation this card holds at once.
+  //
+  // The endpoint pages from the NEWEST end — offset counts back from the most
+  // recent comment — so the first page is the tail of the thread, which is
+  // what somebody opening a session wants and what a notification points at.
+  // Paging walks upwards into the older part.
+  const COMMENT_PAGE = 20;
+
+  // Every comment on the session, not just the ones held here, so the control
+  // below can say how many are above them.
+  let commentTotal = $state(0);
+  let loadingEarlier = $state(false);
+  const earlierCount = $derived(Math.max(0, commentTotal - comments.length));
+
+  // Which comment to mark when it lands. Cleared once it has been, so the
+  // highlight is a one-off arrival cue and not a permanent decoration — and so
+  // that posting a comment afterwards does not re-scroll the page.
+  let marked = $state<number | null>(null);
 
   // The two actions that used to run silently.
   //
@@ -85,8 +119,70 @@
     if (result.status === 200) reactions = result.data;
   }
   async function loadComments() {
-    const result = await listSessionComments(sessionId);
-    if (result.status === 200) comments = result.data;
+    const result = await listSessionComments(sessionId, { limit: COMMENT_PAGE });
+    if (result.status === 200) {
+      comments = result.data.items;
+      commentTotal = result.data.total;
+    }
+  }
+
+  /**
+   * Fetch the page above the one held, and put it on top.
+   *
+   * Prepended rather than appended: what comes back is OLDER than everything
+   * already on screen, and the list reads downwards. Offset is the number of
+   * comments already held, which is exactly how far back from the newest the
+   * next page starts.
+   *
+   * Returns whether anything arrived, so the deep-link walk below can stop.
+   */
+  async function loadEarlier(): Promise<boolean> {
+    if (loadingEarlier || earlierCount === 0) return false;
+    loadingEarlier = true;
+    const result = await listSessionComments(sessionId, {
+      limit: COMMENT_PAGE,
+      offset: comments.length,
+    });
+    loadingEarlier = false;
+
+    if (result.status !== 200) {
+      error = "Couldn't load the earlier comments.";
+      return false;
+    }
+    commentTotal = result.data.total;
+    if (result.data.items.length === 0) return false;
+    comments = [...result.data.items, ...comments];
+    return true;
+  }
+
+  /**
+   * Bring the comment a notification pointed at into view, paging back to find
+   * it if it is above the first page.
+   *
+   * Bounded rather than "until found": a thread long enough to need ten pages
+   * means something else is wrong, and a loop that cannot terminate on a
+   * missing id would spin. A comment that has since been deleted simply is not
+   * there, and this gives up quietly — the lifter still gets the conversation.
+   */
+  async function revealMarked(id: number) {
+    for (let page = 0; page < 10; page += 1) {
+      if (comments.some((c) => c.id === id)) break;
+      if (!(await loadEarlier())) break;
+    }
+    if (!comments.some((c) => c.id === id)) return;
+
+    marked = id;
+    // After the row exists in the DOM. tick() is Svelte's own "the update has
+    // been applied", which is the only honest moment to look the node up.
+    await tick();
+    const node = document.getElementById(`comment-${id}`);
+    if (!node) return;
+    node.scrollIntoView({
+      // Respected rather than assumed: this is a movement somebody did not ask
+      // for, which is exactly the kind the preference is about.
+      behavior: prefersReducedMotion() ? "auto" : "smooth",
+      block: "center",
+    });
   }
 
   async function toggle(emoji: ReactionEmoji) {
@@ -124,14 +220,15 @@
     posting = false;
 
     if (result.status !== 201) {
-      // The server names the reason — too long, blank — which is more use than a
-      // generic failure.
+      // The server names the reason — too long, blank, or posting faster than
+      // the install allows — which is more use than a generic failure.
       error = result.data?.message ?? "Couldn't post that.";
       return;
     }
     // Appended rather than refetched: the list is oldest-first, so a new comment
     // belongs at the end, and the response is the row.
     comments = [...comments, result.data];
+    commentTotal += 1;
     body = "";
   }
 
@@ -146,6 +243,10 @@
       return;
     }
     comments = comments.filter((c) => c.id !== comment.id);
+    // The total counts the thread, so removing a row from the page has to take
+    // it off the count as well — otherwise "1 earlier comment" appears for one
+    // that was just deleted.
+    commentTotal = Math.max(0, commentTotal - 1);
   }
 
   // The author may remove their own; the install's owner may remove any. Mirrors
@@ -167,9 +268,16 @@
     // height once rather than twice. A failure still clears it — the emoji
     // buttons are usable with no counts behind them, and a permanent shimmer
     // would be a worse lie than a zero.
-    void Promise.all([loadReactions(), loadComments()]).finally(() => {
-      loaded = true;
-    });
+    void Promise.all([loadReactions(), loadComments()])
+      .finally(() => {
+        loaded = true;
+      })
+      .then(() => {
+        // After `loaded`, deliberately. The comment rows do not exist in the
+        // DOM until the placeholder is replaced, so there is nothing to scroll
+        // to before this point.
+        if (highlightCommentId !== null) return revealMarked(highlightCommentId);
+      });
   });
 </script>
 
@@ -240,10 +348,32 @@
     {/if}
 
     <!-- Comments -->
+    {#if earlierCount > 0}
+      <!-- Only offered when there is something above the page. The count is of
+           the whole thread, which is why the endpoint returns a total: a short
+           page cannot say how much it left behind. -->
+      <button
+        type="button"
+        onclick={() => void loadEarlier()}
+        disabled={loadingEarlier}
+        aria-busy={loadingEarlier}
+        class="self-start rounded-md px-1 py-0.5 text-xs font-semibold text-primary transition hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-60"
+      >
+        {loadingEarlier
+          ? "Loading…"
+          : `Show ${earlierCount} earlier comment${earlierCount === 1 ? "" : "s"}`}
+      </button>
+    {/if}
+
     {#if comments.length > 0}
       <ul class="flex flex-col divide-y divide-border/60">
         {#each comments as comment (comment.id)}
-          <li class="flex items-start gap-2.5 py-2.5">
+          <li
+            id={`comment-${comment.id}`}
+            class="flex items-start gap-2.5 py-2.5 {marked === comment.id
+              ? 'animate-none rounded-md bg-primary/10 ring-1 ring-primary/40'
+              : ''}"
+          >
             <Avatar user={comment.author} size={28} />
             <div class="min-w-0 flex-1">
               <p class="flex items-baseline gap-2">

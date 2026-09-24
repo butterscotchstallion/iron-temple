@@ -46,10 +46,22 @@ function comment(over: Partial<SessionComment> = {}): SessionComment {
   };
 }
 
+/**
+ * The comments endpoint answers with a PAGE plus the thread's total, not a bare
+ * array — `total` is what lets the card offer "show N earlier comments".
+ *
+ * `total` defaults to what was passed, which is the ordinary case: everything
+ * fits on one page and there is nothing above it. A test about paging passes a
+ * larger one on purpose.
+ */
+function commentsPage(items: unknown[], total = items.length) {
+  return { status: 200, data: { items, total, limit: 20, offset: 0 } };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   listSessionReactions.mockResolvedValue({ status: 200, data: [] });
-  listSessionComments.mockResolvedValue({ status: 200, data: [] });
+  listSessionComments.mockResolvedValue(commentsPage([]));
   addSessionReaction.mockResolvedValue({ status: 204, data: undefined });
   removeSessionReaction.mockResolvedValue({ status: 204, data: undefined });
   deleteSessionComment.mockResolvedValue({ status: 204, data: undefined });
@@ -189,7 +201,7 @@ describe("SessionSocial comments", () => {
   const props = { sessionId: 42, ownerId: THEM };
 
   it("lists them with their authors", async () => {
-    listSessionComments.mockResolvedValue({ status: 200, data: [comment()] });
+    listSessionComments.mockResolvedValue(commentsPage([comment()]));
     render(SessionSocial, props);
 
     await waitFor(() => {
@@ -258,13 +270,10 @@ describe("SessionSocial comments", () => {
   });
 
   it("offers a remove button on your own comment only", async () => {
-    listSessionComments.mockResolvedValue({
-      status: 200,
-      data: [
+    listSessionComments.mockResolvedValue(commentsPage([
         comment({ id: 1, author: testLifter({ id: ME }), body: "mine" }),
         comment({ id: 2, author: testLifter({ id: THEM }), body: "theirs" }),
-      ],
-    });
+      ]));
     render(SessionSocial, props);
 
     await waitFor(() => {
@@ -276,13 +285,10 @@ describe("SessionSocial comments", () => {
   // The install's owner may remove any. This is the only moderation the app has.
   it("offers remove on every comment to the install's owner", async () => {
     auth.me = testUser({ id: ME, isAdmin: true });
-    listSessionComments.mockResolvedValue({
-      status: 200,
-      data: [
+    listSessionComments.mockResolvedValue(commentsPage([
         comment({ id: 1, author: testLifter({ id: THEM }), body: "theirs" }),
         comment({ id: 2, author: testLifter({ id: 3 }), body: "somebody else's" }),
-      ],
-    });
+      ]));
     render(SessionSocial, props);
 
     await waitFor(() => {
@@ -292,10 +298,7 @@ describe("SessionSocial comments", () => {
   });
 
   it("drops a removed comment from the list", async () => {
-    listSessionComments.mockResolvedValue({
-      status: 200,
-      data: [comment({ id: 7, author: testLifter({ id: ME }), body: "regrettable" })],
-    });
+    listSessionComments.mockResolvedValue(commentsPage([comment({ id: 7, author: testLifter({ id: ME }), body: "regrettable" })]));
     render(SessionSocial, props);
 
     await waitFor(() => {
@@ -311,10 +314,7 @@ describe("SessionSocial comments", () => {
 
   it("keeps the comment when removing it fails", async () => {
     deleteSessionComment.mockResolvedValue({ status: 500, data: undefined });
-    listSessionComments.mockResolvedValue({
-      status: 200,
-      data: [comment({ id: 7, author: testLifter({ id: ME }), body: "still here" })],
-    });
+    listSessionComments.mockResolvedValue(commentsPage([comment({ id: 7, author: testLifter({ id: ME }), body: "still here" })]));
     render(SessionSocial, props);
 
     await waitFor(() => {
@@ -428,10 +428,7 @@ describe("SessionSocial while a write is in flight", () => {
     deleteSessionComment.mockReturnValue(
       new Promise((resolve) => (finishDelete = resolve)),
     );
-    listSessionComments.mockResolvedValue({
-      status: 200,
-      data: [comment({ id: 7, author: testLifter({ id: ME }), body: "regrettable" })],
-    });
+    listSessionComments.mockResolvedValue(commentsPage([comment({ id: 7, author: testLifter({ id: ME }), body: "regrettable" })]));
     render(SessionSocial, props);
 
     await waitFor(() => {
@@ -447,5 +444,133 @@ describe("SessionSocial while a write is in flight", () => {
       expect(screen.queryByText("regrettable")).not.toBeInTheDocument();
     });
     expect(deleteSessionComment).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("SessionSocial paging a long conversation", () => {
+  const props = { sessionId: 42, ownerId: THEM };
+
+  // The endpoint pages from the NEWEST end, so the first page is the tail of
+  // the thread — the part somebody opening a session wants, and the part a
+  // notification points at. The control walks upwards into the older part.
+  it("offers the earlier comments when there are more than a page", async () => {
+    listSessionComments.mockResolvedValue(
+      commentsPage([comment({ id: 20, body: "most recent" })], 4),
+    );
+    render(SessionSocial, props);
+
+    await waitFor(() => {
+      expect(screen.getByText("most recent")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: /3 earlier comments/i })).toBeInTheDocument();
+  });
+
+  it("says it in the singular for exactly one", async () => {
+    listSessionComments.mockResolvedValue(
+      commentsPage([comment({ id: 20, body: "most recent" })], 2),
+    );
+    render(SessionSocial, props);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: /1 earlier comment$/i }),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("stays quiet when the whole thread is already on screen", async () => {
+    listSessionComments.mockResolvedValue(commentsPage([comment({ body: "all of it" })]));
+    render(SessionSocial, props);
+
+    await waitFor(() => {
+      expect(screen.getByText("all of it")).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("button", { name: /earlier comment/i })).toBeNull();
+  });
+
+  // Prepended, not appended: what comes back is OLDER than what is on screen,
+  // and the list reads downwards.
+  it("puts the earlier page above the one already held", async () => {
+    listSessionComments.mockResolvedValue(
+      commentsPage([comment({ id: 20, body: "newest" })], 2),
+    );
+    render(SessionSocial, props);
+    await waitFor(() => expect(screen.getByText("newest")).toBeInTheDocument());
+
+    listSessionComments.mockResolvedValue(
+      commentsPage([comment({ id: 10, body: "older" })], 2),
+    );
+    await fireEvent.click(screen.getByRole("button", { name: /1 earlier comment/i }));
+
+    await waitFor(() => expect(screen.getByText("older")).toBeInTheDocument());
+    // Offset is how many are already held, which is how far back from the
+    // newest the next page starts.
+    expect(listSessionComments).toHaveBeenLastCalledWith(42, { limit: 20, offset: 1 });
+
+    const bodies = screen
+      .getAllByText(/newest|older/)
+      .map((node) => node.textContent);
+    expect(bodies).toEqual(["older", "newest"]);
+  });
+});
+
+describe("SessionSocial arriving from a notification", () => {
+  const props = { sessionId: 42, ownerId: THEM };
+
+  beforeEach(() => {
+    // jsdom implements no layout, so this is not there to be called for real —
+    // only to be observed.
+    Element.prototype.scrollIntoView = vi.fn();
+  });
+
+  it("brings the comment it was sent to into view", async () => {
+    listSessionComments.mockResolvedValue(
+      commentsPage([
+        comment({ id: 1, body: "first" }),
+        comment({ id: 2, body: "the one" }),
+      ]),
+    );
+    render(SessionSocial, { ...props, highlightCommentId: 2 });
+
+    await waitFor(() => expect(screen.getByText("the one")).toBeInTheDocument());
+    await waitFor(() => expect(Element.prototype.scrollIntoView).toHaveBeenCalled());
+  });
+
+  // Above the first page, so the card has to walk back through the thread
+  // before it can point at anything.
+  it("pages back to find a comment older than the first page", async () => {
+    listSessionComments.mockResolvedValueOnce(
+      commentsPage([comment({ id: 9, body: "recent" })], 2),
+    );
+    listSessionComments.mockResolvedValueOnce(
+      commentsPage([comment({ id: 3, body: "buried" })], 2),
+    );
+    render(SessionSocial, { ...props, highlightCommentId: 3 });
+
+    await waitFor(() => expect(screen.getByText("buried")).toBeInTheDocument());
+    expect(listSessionComments).toHaveBeenCalledTimes(2);
+  });
+
+  // A comment deleted since the notification was raised simply is not there.
+  // The lifter still gets the conversation rather than a spinner or an error.
+  it("gives up quietly when the comment is gone", async () => {
+    listSessionComments.mockResolvedValue(
+      commentsPage([comment({ id: 1, body: "still here" })]),
+    );
+    render(SessionSocial, { ...props, highlightCommentId: 404 });
+
+    await waitFor(() => expect(screen.getByText("still here")).toBeInTheDocument());
+    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  // The ordinary visit, which is most of them.
+  it("scrolls nowhere when no comment was named", async () => {
+    listSessionComments.mockResolvedValue(
+      commentsPage([comment({ id: 1, body: "ordinary" })]),
+    );
+    render(SessionSocial, props);
+
+    await waitFor(() => expect(screen.getByText("ordinary")).toBeInTheDocument());
+    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
   });
 });

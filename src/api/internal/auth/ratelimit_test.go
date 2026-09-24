@@ -127,3 +127,86 @@ func TestConcurrentUseIsRaceFree(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// ---- Consume ----
+
+// Consume spends budget on SUCCESS, which is the opposite of the Allow/Fail
+// pair above and the reason it is a separate method. A limit on posting must
+// count the posts; a limit on guessing must count only the wrong guesses.
+func TestConsumeSpendsOnEveryCall(t *testing.T) {
+	l, _ := newTestLimiter(3, time.Minute)
+
+	for i := range 3 {
+		if !l.Consume("ada") {
+			t.Fatalf("call %d refused before the limit was reached", i+1)
+		}
+	}
+	if l.Consume("ada") {
+		t.Error("a fourth call was allowed past a limit of 3")
+	}
+}
+
+// The budget is per key, so one noisy account cannot silence another.
+func TestConsumeIsPerKey(t *testing.T) {
+	l, _ := newTestLimiter(1, time.Minute)
+
+	if !l.Consume("ada") {
+		t.Fatal("ada's first call was refused")
+	}
+	if l.Consume("ada") {
+		t.Error("ada's second call was allowed past a limit of 1")
+	}
+	if !l.Consume("grace") {
+		t.Error("grace was refused because ada had spent her own budget")
+	}
+}
+
+// The window is fixed rather than sliding: once it passes, the count starts
+// again from nothing.
+func TestConsumeRecoversAfterTheWindow(t *testing.T) {
+	l, advance := newTestLimiter(2, time.Minute)
+
+	l.Consume("ada")
+	l.Consume("ada")
+	if l.Consume("ada") {
+		t.Fatal("a third call inside the window was allowed past a limit of 2")
+	}
+
+	advance(time.Minute + time.Second)
+	if !l.Consume("ada") {
+		t.Error("the window passed and the budget did not come back")
+	}
+}
+
+// Consume and Fail share one counter, which is what makes a single limiter
+// usable for either policy — and what a future caller mixing them would need to
+// know.
+func TestConsumeSharesItsCounterWithFail(t *testing.T) {
+	l, _ := newTestLimiter(2, time.Minute)
+
+	l.Fail("ada")
+	if !l.Consume("ada") {
+		t.Fatal("the second unit of budget was refused")
+	}
+	if l.Consume("ada") {
+		t.Error("a third unit was allowed past a limit of 2")
+	}
+}
+
+// Sweep drops an expired window, which is what keeps the map from growing once
+// per distinct key forever. The sweeper runs it for both limiters.
+func TestConsumeWindowIsSwept(t *testing.T) {
+	l, advance := newTestLimiter(1, time.Minute)
+
+	l.Consume("ada")
+	l.Sweep()
+	if len(l.attempts) != 1 {
+		t.Fatalf("a live window was swept: %d entries left", len(l.attempts))
+	}
+
+	advance(time.Minute + time.Second)
+	l.Sweep()
+	if len(l.attempts) != 0 {
+		t.Errorf("an expired window survived the sweep: %d entries left", len(l.attempts))
+	}
+}

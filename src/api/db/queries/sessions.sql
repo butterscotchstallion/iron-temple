@@ -115,6 +115,61 @@ HAVING COUNT(ss.id) FILTER (WHERE ss.actual_reps > 0) > 0
 ORDER BY s.performed_on DESC, s.id DESC
 LIMIT sqlc.arg('lim') OFFSET sqlc.arg('off');
 
+-- ListLifterSessions is ListSessions pointed at somebody else.
+--
+-- Two user ids, and confusing them is the bug this query exists to avoid.
+-- lifter_id is WHOSE sessions these are and scopes the rows; viewer_id is who is
+-- READING and decides only whether a program's name is legible to them. The
+-- second one can never widen the first — it appears nowhere in the WHERE.
+--
+-- Everything else is ListSessions verbatim: the same columns, the same volume_lb
+-- definition, the same is_over expression, the same HAVING and the same order. A
+-- lifter's history read by somebody else must not count a session their own
+-- history does not, or value one differently, because the two screens link to
+-- the same recap.
+--
+-- No program_id filter, unlike ListSessions. Filtering another lifter's history
+-- by program is not a question any surface asks, and the narg would be a
+-- parameter every caller passes NULL for.
+--
+-- The masking CASE is ListFeedSessions', inline for the same reason and kept in
+-- step with maskedProgramName in internal/api. This is the second read in the
+-- app that hands a lifter a fact about a program they have no access to, and it
+-- leaks by exactly the same route: a session on a private program, listed to
+-- somebody who was never shown it. pd.name is deliberately NOT masked — see the
+-- longer note on ListFeedSessions for why a day name is a far weaker signal.
+-- name: ListLifterSessions :many
+SELECT s.id,
+       s.program_day_id,
+       pd.name AS program_day_name,
+       p.id    AS program_id,
+       CASE WHEN p.created_by_user_id IS NULL
+                 OR p.is_shared
+                 OR p.created_by_user_id = sqlc.arg('viewer_id')::int
+                 OR EXISTS (SELECT 1 FROM sessions vs
+                            JOIN program_days vpd ON vpd.id = vs.program_day_id
+                            WHERE vpd.program_id = p.id
+                              AND vs.user_id = sqlc.arg('viewer_id')::int)
+            THEN p.name
+            ELSE 'Custom program'
+       END AS program_name,
+       s.performed_on,
+       COUNT(ss.id)                              AS set_count,
+       COUNT(ss.id) FILTER (WHERE ss.completed)  AS completed_set_count,
+       COALESCE(SUM(ss.actual_reps * ss.weight_lb), 0)::numeric AS volume_lb,
+       (s.finished_at IS NOT NULL
+        OR s.created_at < now() - INTERVAL '12 hours')::bool AS is_over
+FROM sessions s
+JOIN program_days pd ON pd.id = s.program_day_id
+JOIN programs p ON p.id = pd.program_id
+LEFT JOIN session_sets ss ON ss.session_id = s.id
+WHERE s.user_id = sqlc.arg('lifter_id')::int
+GROUP BY s.id, pd.name, p.id, p.name, p.created_by_user_id, p.is_shared
+-- Only sessions with at least one logged rep count as "started".
+HAVING COUNT(ss.id) FILTER (WHERE ss.actual_reps > 0) > 0
+ORDER BY s.performed_on DESC, s.id DESC
+LIMIT sqlc.arg('lim') OFFSET sqlc.arg('off');
+
 -- SessionTotals returns the two figures that describe a whole history rather
 -- than one page of it: how many sessions match the filter, and how much weight
 -- they moved between them. They are one query and not two because they must
