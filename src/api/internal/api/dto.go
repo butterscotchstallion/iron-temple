@@ -1075,6 +1075,10 @@ type rackedReportDTO struct {
 	Attendance rackedAttendanceDTO  `json:"attendance"`
 	PRs        []rackedPRDTO        `json:"prs"`
 	Milestones []rackedMilestoneDTO `json:"milestones"`
+	// UpcomingMilestones is the only forward-looking field in this report.
+	// Everything else is a reading of what happened; this is what there is to aim
+	// at. Never nil, and short or empty rather than padded.
+	UpcomingMilestones []rackedUpcomingMilestoneDTO `json:"upcomingMilestones"`
 
 	HeaviestSet *rackedSetHighlightDTO `json:"heaviestSet"`
 	// FastestSession is nil when nothing in the period was finished by hand — an
@@ -1245,6 +1249,26 @@ type rackedMilestoneDTO struct {
 	PerformedOn  string  `json:"performedOn"`
 	Label        string  `json:"label"`
 	ValueLb      float64 `json:"valueLb"`
+	ExerciseID   int32   `json:"exerciseId"`
+	ExerciseName string  `json:"exerciseName"`
+}
+
+// rackedUpcomingMilestoneDTO is a threshold the lifter has not reached yet.
+//
+// Not a variant of rackedMilestoneDTO, deliberately. That type is shared with the
+// session recap, and the two are different facts: a crossed threshold has a date
+// and a value, an uncrossed one has a target and a distance. Folding them together
+// would put a nullable date on one endpoint and a nullable target on the other,
+// and leave every client working out which half it had been handed.
+//
+// CurrentLb and TargetLb are both sent rather than the remainder, so a surface can
+// draw a bar without reconstructing the denominator — and so "20 lb to go" and the
+// bar behind it cannot disagree.
+type rackedUpcomingMilestoneDTO struct {
+	Kind         string  `json:"kind"`
+	Label        string  `json:"label"`
+	TargetLb     float64 `json:"targetLb"`
+	CurrentLb    float64 `json:"currentLb"`
 	ExerciseID   int32   `json:"exerciseId"`
 	ExerciseName string  `json:"exerciseName"`
 }

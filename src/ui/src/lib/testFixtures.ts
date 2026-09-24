@@ -23,6 +23,7 @@ import type {
   Notification,
   ProgramSummary,
   RackedReport,
+  RackedUpcomingMilestone,
   SessionRecap,
   User,
 } from "./api";
@@ -220,6 +221,27 @@ export function testLifterAchievement(
 }
 
 /**
+ * One threshold not yet reached, defaulting to a plate rung 20 lb away.
+ *
+ * A plate rather than a volume rung because it is the one with a lift attached, so
+ * a renderer that drops the exercise name fails here rather than passing on the
+ * kind that has none.
+ */
+export function testUpcomingMilestone(
+  overrides: Partial<RackedUpcomingMilestone> = {},
+): RackedUpcomingMilestone {
+  return {
+    kind: "plate",
+    label: "First 225 lb Squat",
+    targetLb: 225,
+    currentLb: 205,
+    exerciseId: 1,
+    exerciseName: "Squat",
+    ...overrides,
+  };
+}
+
+/**
  * A session recap with every optional field absent — a first workout, which has
  * no pace, no previous session and no lift with a delta.
  *
@@ -371,6 +393,10 @@ export function testRackedReport(overrides: Partial<RackedReport> = {}): RackedR
     },
     prs: [],
     milestones: [],
+    // Empty by default, like prs and milestones: what a lifter is closing in on is
+    // the thing under test wherever it matters, and a fixture that arrived with a
+    // rung would hide the nothing-to-chase case.
+    upcomingMilestones: [],
     heaviestSet: null,
     fastestSession: null,
     deloads: [],

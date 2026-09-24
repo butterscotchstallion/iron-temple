@@ -1457,6 +1457,16 @@ const rackedMarch: RackedReport = {
       exerciseName: "Squat",
     },
   ],
+  upcomingMilestones: [
+    {
+      kind: "plate",
+      label: "First 275 lb Squat",
+      targetLb: 275,
+      currentLb: 225,
+      exerciseId: 1,
+      exerciseName: "Squat",
+    },
+  ],
   heaviestSet: {
     performedOn: "2026-03-16",
     exerciseId: 1,

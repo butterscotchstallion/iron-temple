@@ -30,6 +30,7 @@
     alt,
     title = "Share your recap",
     subtitle,
+    shareTitle = "Racked",
   }: {
     open?: boolean;
     content: ShareCardContent;
@@ -39,6 +40,14 @@
     alt: string;
     title?: string;
     subtitle: string;
+    /**
+     * What the OS share sheet calls it — NOT this dialog's own heading.
+     *
+     * Separate from `title` because they are read in different places by different
+     * people: "Share your recap" is an instruction to the sender, and this is what
+     * the receiving app is told the thing is.
+     */
+    shareTitle?: string;
   } = $props();
 
   type Status = "rendering" | "ready" | "failed";
@@ -119,7 +128,7 @@
     try {
       // A dismissed share sheet comes back as "cancelled" — the dialog stays up
       // so the image is still there to try again.
-      if ((await shareOrDownload(file)) !== "cancelled") open = false;
+      if ((await shareOrDownload(file, shareTitle)) !== "cancelled") open = false;
     } catch {
       problem = "Couldn't share the image.";
     } finally {

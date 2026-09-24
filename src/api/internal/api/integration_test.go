@@ -1127,6 +1127,94 @@ func TestRackedEmptyPeriodIsAValidReport(t *testing.T) {
 	rep.Value("hours").Array().Length().IsEqual(24)
 	rep.Value("archetype").Object().HasValue("name", "")
 	rep.Value("comparison").Object().HasValue("count", 0)
+
+	// Present and empty rather than absent. A lifter who trained nothing in 1970 is
+	// closing in on nothing — including the first tonnage rung, because zero
+	// progress is not progress — and the field still has to be there for a client
+	// that branches on length.
+	rep.Value("upcomingMilestones").Array().IsEmpty()
+}
+
+// ---- what is still ahead ----
+
+// The forward-looking field, checked where it crosses the wire. It is computed from
+// the same baseline the records are, so a report that is right in internal/racked
+// and absent from the JSON is still nothing on screen.
+func TestRackedNamesWhatTheLifterIsClosingIn(t *testing.T) {
+	_, token := secondLifter(t, "racked-upcoming")
+	lifter := expectAs(t, token)
+
+	// One heavy single, so the lift has a best above zero and a rung above it.
+	_, dayID := firstProgramAndDay(lifter)
+	session := startSession(t, lifter, dayID)
+	sessionID := int(session.Value("id").Number().Raw())
+	first := session.Value("sets").Array().Value(0).Object()
+	setID := int(first.Value("id").Number().Raw())
+	exerciseID := int(first.Value("exerciseId").Number().Raw())
+	logSetAt(lifter, sessionID, setID, 1, 205, true)
+
+	rungs := lifter.GET("/racked").Expect().Status(http.StatusOK).
+		JSON().Object().Value("upcomingMilestones").Array()
+	rungs.Length().Gt(0)
+
+	var plate *httpexpect.Object
+	for _, item := range rungs.Iter() {
+		obj := item.Object()
+		// Every entry carries both ends, so a client can draw a bar without
+		// reconstructing the denominator.
+		obj.Value("targetLb").Number().Gt(obj.Value("currentLb").Number().Raw())
+		if int(obj.Value("exerciseId").Number().Raw()) == exerciseID {
+			plate = obj
+		}
+	}
+	if plate == nil {
+		t.Fatalf("the lift just performed has no rung in %v", rungs.Raw())
+	}
+	// 205 lb sits between the 185 and 225 rungs.
+	plate.Value("kind").String().IsEqual("plate")
+	plate.Value("targetLb").Number().IsEqual(225)
+	plate.Value("currentLb").Number().IsEqual(205)
+	plate.Value("label").String().Contains("225")
+
+	// NEAREST FIRST BY FRACTION, which is the ordering a surface showing only the
+	// top entry depends on. Asserted as a property over the whole list rather than
+	// on a known winner, since what else this install has lifted is not this test's
+	// business.
+	var previous float64 = 2
+	for _, item := range rungs.Iter() {
+		obj := item.Object()
+		fraction := obj.Value("currentLb").Number().Raw() / obj.Value("targetLb").Number().Raw()
+		if fraction > previous {
+			t.Errorf("rungs are out of order: %v followed %v", fraction, previous)
+		}
+		previous = fraction
+	}
+}
+
+// A lift carrying no weight claims no rung. Migration 0023 seeds five banded and
+// bodyweight movements at 0 lb on purpose, and "95 lb to go" on a banded hip
+// abduction is a category error rather than a goal.
+func TestRackedClaimsNoRungForALiftCarryingNoWeight(t *testing.T) {
+	_, token := secondLifter(t, "racked-upcoming-zero")
+	lifter := expectAs(t, token)
+
+	_, dayID := firstProgramAndDay(lifter)
+	session := startSession(t, lifter, dayID)
+	sessionID := int(session.Value("id").Number().Raw())
+	first := session.Value("sets").Array().Value(0).Object()
+	setID := int(first.Value("id").Number().Raw())
+	exerciseID := int(first.Value("exerciseId").Number().Raw())
+	// Reps at no weight: real logged work that moved nothing.
+	logSetAt(lifter, sessionID, setID, 5, 0, true)
+
+	rungs := lifter.GET("/racked").Expect().Status(http.StatusOK).
+		JSON().Object().Value("upcomingMilestones").Array()
+	for _, item := range rungs.Iter() {
+		obj := item.Object()
+		if int(obj.Value("exerciseId").Number().Raw()) == exerciseID {
+			t.Fatalf("a 0 lb lift claimed a rung: %v", obj.Raw())
+		}
+	}
 }
 
 // The audit fixes, checked where they cross the wire rather than only in

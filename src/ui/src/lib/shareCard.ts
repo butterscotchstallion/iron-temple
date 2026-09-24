@@ -268,7 +268,11 @@ export function shareCardLayout(content: ShareCardContent): ShareCardLayout {
   heights.push({ kind: "header", y: 0, height: header });
 
   if (content.archetype) heights.push({ kind: "archetype", y: 0, height: M.archetype });
-  heights.push({ kind: "tiles", y: 0, height: M.tiles });
+  // Conditional like every other block. It used to be unconditional, which was
+  // true of the only two cards that existed — both always supply four tiles — and
+  // a trap for the third: an empty array reserved a row of space and then had
+  // paintTiles divide the width by zero.
+  if (content.tiles.length > 0) heights.push({ kind: "tiles", y: 0, height: M.tiles });
   if (content.lifts.length > 0) {
     heights.push({
       kind: "lifts",

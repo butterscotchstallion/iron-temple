@@ -3,8 +3,14 @@ import type { Options as ConfettiOptions } from "canvas-confetti";
 import { prefersReducedMotion } from "./reducedMotion";
 
 /**
- * Confetti, on the two occasions the app has to celebrate: a set that beats a
- * record, and the recap of a finished workout.
+ * Confetti, on the three occasions the app has to celebrate: a set that beats a
+ * record, the recap of a finished workout, and taking a crown.
+ *
+ * The third is the odd one out and worth knowing about. The first two happen where
+ * the lifter is already looking — mid-set, or on the recap they were just handed —
+ * while a crown is noticed by a poll the shell owns, so it can land on any screen
+ * and is paired with a toast rather than with a banner the route draws. See
+ * achievements.svelte.ts.
  *
  * canvas-confetti is physics that only runs when something goes right, so it is
  * fetched at the first celebration rather than carried in either route's chunk.
