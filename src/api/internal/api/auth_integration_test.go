@@ -239,6 +239,31 @@ func TestProtectedEndpointsRequireASession(t *testing.T) {
 	}
 }
 
+// The same shape one layer up: a session is not enough while the account still
+// carries the one-time password an admin issued it. Such an account can see
+// nothing social. Every route below sits inside blockUntilPasswordChanged, which
+// is asserted rather than assumed — the roster in particular is exactly the kind
+// of harmless-looking read somebody might later mount above the gate.
+//
+// A table here rather than a copy beside each route's own tests. The gate is
+// middleware — it does not know which handler it is standing in front of — so
+// three identically-shaped tests in three files were asserting one behaviour
+// three times, each paying for its own account, and each able to go stale on
+// its own. The cost of adding a route to this list is one line; the cost of
+// remembering to write the test in its file was the reason to have the list.
+func TestSocialEndpointsAreGatedUntilThePasswordChanges(t *testing.T) {
+	createAccount(t, "still-gated", "still-gated-pw")
+	token := signIn(t, "still-gated", "still-gated-pw")
+	e := expectAs(t, token)
+
+	for _, path := range []string{"/feed", "/leaderboard", "/lifters"} {
+		t.Run(path, func(t *testing.T) {
+			e.GET(path).Expect().Status(http.StatusForbidden).
+				JSON().Object().HasValue("code", "password_change_required")
+		})
+	}
+}
+
 func TestUnknownSessionCookieIsRejectedAndCleared(t *testing.T) {
 	e := expectAs(t, "this-token-was-never-issued")
 

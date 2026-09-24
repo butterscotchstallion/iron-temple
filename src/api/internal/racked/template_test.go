@@ -269,15 +269,27 @@ func TestRenderEmailBodyweightWithOneWeighIn(t *testing.T) {
 	}
 }
 
-// Most lifters never fill the box in, and their recap should not carry an empty
-// heading for a section with nothing under it.
-func TestRenderEmailOmitsBodyweightWhenThereIsNone(t *testing.T) {
+// An ordinary month — no weigh-ins, no assistance work — must not carry an
+// empty heading for either. Most lifters never fill those boxes in, and a
+// heading with nothing under it reads as a bug in the recap rather than a quiet
+// month.
+//
+// One render, because both claims are about the same email: these were two
+// tests that built the identical report and each grepped it for a different
+// absent string.
+func TestRenderEmailOmitsSectionsWithNothingInThem(t *testing.T) {
 	html, err := RenderEmail("Ada Lovelace", marchReport(t))
 	if err != nil {
 		t.Fatalf("RenderEmail: %v", err)
 	}
-	if strings.Contains(html, "Bodyweight") {
-		t.Fatal("email carries a bodyweight section for a period with no weigh-in")
+	for _, absent := range []struct{ heading, why string }{
+		{"Bodyweight", "a period with no weigh-in"},
+		// "That is not news, it is the default."
+		{"Main lifts", "a lifter with no assistance work"},
+	} {
+		if strings.Contains(html, absent.heading) {
+			t.Errorf("email carries a %q section for %s", absent.heading, absent.why)
+		}
 	}
 }
 
@@ -300,18 +312,6 @@ func TestRenderEmailReportsTheAssistanceSplit(t *testing.T) {
 		if !strings.Contains(html, want) {
 			t.Fatalf("email is missing %q", want)
 		}
-	}
-}
-
-// A lifter who does no assistance should not be told that all of their work was
-// the program's. That is not news, it is the default.
-func TestRenderEmailOmitsTheSplitWithoutAssistance(t *testing.T) {
-	html, err := RenderEmail("Ada Lovelace", marchReport(t))
-	if err != nil {
-		t.Fatalf("RenderEmail: %v", err)
-	}
-	if strings.Contains(html, "Main lifts") {
-		t.Fatal("email states a split for a lifter with no assistance work")
 	}
 }
 
