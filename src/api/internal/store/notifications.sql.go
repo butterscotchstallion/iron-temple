@@ -380,6 +380,28 @@ WITH live AS (
            n.emoji,
            n.created_at,
            n.actor_id,
+           n.achievement_slug,
+           -- Whether the whole group names ONE achievement, which is what
+           -- decides if the row above may be spoken aloud.
+           --
+           -- 'crown' has no session, so 0031's (kind, session_id) key folds every
+           -- crown on the install into a single group — across boards. The
+           -- representative's slug is therefore not the group's the way emoji and
+           -- comment_id are: a row reading "took the crown on Volume" while
+           -- folding four other boards is a specific claim the group does not
+           -- support. So the client is handed the slug and permission to use it,
+           -- and says the unnamed thing when it has one without the other.
+           --
+           -- min = max is how a window asks "are these all the same": Postgres
+           -- has no count(DISTINCT x) OVER w, which is the same gap that puts
+           -- actor deduping in Go. On a group of one it is trivially true, which
+           -- is the common case and the one that gets to name its board.
+           -- IS NOT DISTINCT FROM rather than =, so a group of all-NULLs — every
+           -- other kind — compares equal rather than unknown, and those rows have
+           -- no slug to offer anyway.
+           (min(n.achievement_slug) OVER w
+                IS NOT DISTINCT FROM max(n.achievement_slug) OVER w)::bool
+               AS one_achievement,
            row_number() OVER w AS rn,
            -- Whether anything in the group is still unread, which is both the
            -- panel's dot and what makes the group count towards the badge.
@@ -408,6 +430,8 @@ SELECT g.id,
        g.session_id,
        g.comment_id,
        g.emoji,
+       g.achievement_slug,
+       g.one_achievement,
        g.created_at,
        (CASE WHEN g.has_unread THEN NULL ELSE g.last_read_at END)::timestamptz
            AS read_at,
@@ -439,23 +463,25 @@ type ListNotificationGroupsParams struct {
 }
 
 type ListNotificationGroupsRow struct {
-	ID             int32              `json:"id"`
-	Kind           string             `json:"kind"`
-	SessionID      *int32             `json:"session_id"`
-	CommentID      *int32             `json:"comment_id"`
-	Emoji          *string            `json:"emoji"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	ReadAt         pgtype.Timestamptz `json:"read_at"`
-	ActorIds       []int32            `json:"actor_ids"`
-	ActorNames     []string           `json:"actor_names"`
-	ActorID        int32              `json:"actor_id"`
-	Username       string             `json:"username"`
-	DisplayName    string             `json:"display_name"`
-	AvatarColor    string             `json:"avatar_color"`
-	AvatarEtag     string             `json:"avatar_etag"`
-	SessionOwnerID *int32             `json:"session_owner_id"`
-	ProgramDayName *string            `json:"program_day_name"`
-	CommentBody    *string            `json:"comment_body"`
+	ID              int32              `json:"id"`
+	Kind            string             `json:"kind"`
+	SessionID       *int32             `json:"session_id"`
+	CommentID       *int32             `json:"comment_id"`
+	Emoji           *string            `json:"emoji"`
+	AchievementSlug *string            `json:"achievement_slug"`
+	OneAchievement  bool               `json:"one_achievement"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	ReadAt          pgtype.Timestamptz `json:"read_at"`
+	ActorIds        []int32            `json:"actor_ids"`
+	ActorNames      []string           `json:"actor_names"`
+	ActorID         int32              `json:"actor_id"`
+	Username        string             `json:"username"`
+	DisplayName     string             `json:"display_name"`
+	AvatarColor     string             `json:"avatar_color"`
+	AvatarEtag      string             `json:"avatar_etag"`
+	SessionOwnerID  *int32             `json:"session_owner_id"`
+	ProgramDayName  *string            `json:"program_day_name"`
+	CommentBody     *string            `json:"comment_body"`
 }
 
 // The notification panel, and the writes that fill it.
@@ -578,6 +604,8 @@ func (q *Queries) ListNotificationGroups(ctx context.Context, arg ListNotificati
 			&i.SessionID,
 			&i.CommentID,
 			&i.Emoji,
+			&i.AchievementSlug,
+			&i.OneAchievement,
 			&i.CreatedAt,
 			&i.ReadAt,
 			&i.ActorIds,

@@ -59,6 +59,7 @@ tags:
   - name: users
   - name: admin
   - name: lifters
+  - name: achievements
   - name: recognition
   - name: notifications
   - name: exercises
@@ -743,6 +744,46 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /achievements:
+    get:
+      tags: [achievements]
+      operationId: getAchievements
+      summary: What can be earned, and who is wearing it
+      description: >
+        The whole catalogue with everybody currently holding each entry.
+
+        **This is the read that lets a client draw a crown beside somebody else's
+        name.** Fetch it once, keep it, and consult it per name rendered — it is
+        deliberately not a per-lifter question, because a per-lifter question is a
+        request per row of the feed.
+
+        **`holders` is a list, and an empty one is ordinary.** The leaderboard
+        gives tied figures the same rank, so two lifters genuinely level on a
+        board are both first and both wear the crown; the standings decline to
+        pick between equal figures and neither does this. Equally, an achievement
+        nobody holds is a normal state on a new install, or on a board with no
+        entries, so every catalogue entry is listed whether or not anybody has it.
+
+        **The answer can be up to an hour stale, and `/leaderboard` cannot.** Who
+        leads a board is the most expensive question in this API — a Racked report
+        per lifter — so it is answered on a schedule and stored rather than
+        recomputed per render. The page you go to in order to check the standings
+        tells the truth immediately; the ornament beside a name catches up. If the
+        two disagree, `/leaderboard` is right and this is behind.
+
+        Crowns are decided over the **month**, which is `/leaderboard`'s own
+        default period, so a lifter who follows their crown to the page it came
+        from sees the board that awarded it.
+      responses:
+        "200":
+          description: The catalogue and its current holders
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AchievementList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /admin/activity:
     get:
       tags: [admin]
@@ -1047,6 +1088,43 @@ paths:
                 $ref: "#/components/schemas/RackedReport"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /lifters/{lifterId}/achievements:
+    parameters:
+      - $ref: "#/components/parameters/LifterId"
+    get:
+      tags: [achievements]
+      operationId: getLifterAchievements
+      summary: One lifter's achievements, current and past
+      description: >
+        What this lifter has earned, folded to one entry per achievement with the
+        number of times they have held it.
+
+        **`timesHeld` counts reigns, not hours.** A reign is a continuous stretch
+        of holding something, so a lifter who has been top of a board all month
+        has held it once, and one who has traded it back and forth has held it as
+        many times as they took it back. That is what makes the number worth
+        printing rather than a measure of how long the server has been up.
+
+        **Only what they have actually earned is listed.** An achievement they
+        have never held is absent rather than present-and-empty — `GET
+        /achievements` already carries the full catalogue for a client that wants
+        to draw the ones still to win, and repeating it here would put the whole
+        catalogue on every profile.
+
+        There is no `/me` variant. A lifter's own achievements are the same public
+        facts as anybody else's, and the profile screen already knows its own id.
+      responses:
+        "200":
+          description: This lifter's achievements
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LifterAchievementList"
         "404":
           $ref: "#/components/responses/NotFound"
         "401":
@@ -2933,6 +3011,126 @@ components:
             The thing behind the figure, where there is one — the lift on the
             most-improved board. Absent elsewhere.
 
+    # ---- Achievements ----
+
+    Achievement:
+      type: object
+      required: [slug, kind, label, description]
+      description: >
+        One thing that can be earned. The catalogue half of the feature — what it
+        is called and what it means — held server-side so that the boards and the
+        crowns derived from them cannot drift into describing themselves
+        differently.
+      properties:
+        slug:
+          type: string
+          description: >
+            Stable identifier, and the thing to key an icon off. Survives a
+            reword of the label, which is why it and not the label is what
+            `Notification.achievementSlug` carries.
+        kind:
+          $ref: "#/components/schemas/AchievementKind"
+        metric:
+          type: string
+          description: >
+            Which leaderboard board this crown comes from, matching
+            `LeaderboardBoard.metric`. It is what lets a surface take a lifter
+            from their crown to the board that awarded it. Absent for any kind
+            that is not a board's.
+        label:
+          type: string
+        description:
+          type: string
+          description: What earning this means, in the install's own words.
+
+    AchievementKind:
+      type: string
+      description: >
+        What sort of achievement this is, so a client generates an exhaustive
+        switch and a new sort shows up as a compile error rather than as a blank
+        entry.
+
+        `crown` is held for leading a leaderboard board right now, and it is lost
+        the moment somebody else leads it — it describes a standing rather than
+        something done once. A kind for the done-once sort would behave
+        differently and is deliberately not pretended to exist yet.
+
+        Note that personal records and lifetime milestones are NOT here. They are
+        derived at read time and reported on the Racked report (`RackedPR`,
+        `RackedMilestone`); restating them as achievements would give the install
+        two answers about one history.
+      enum: [crown]
+
+    AchievementHolders:
+      type: object
+      required: [achievement, holders]
+      description: One achievement and everybody currently wearing it.
+      properties:
+        achievement:
+          $ref: "#/components/schemas/Achievement"
+        holders:
+          type: array
+          description: >
+            Never null, and an empty list is ordinary — nobody holds it yet, or
+            the board it comes from has no entries. Several holders is equally
+            ordinary: tied figures share rank 1 and everybody on it is crowned.
+          items:
+            $ref: "#/components/schemas/Lifter"
+
+    AchievementList:
+      type: object
+      required: [items]
+      description: >
+        The whole catalogue with its current holders — the site-wide read a client
+        keeps in order to draw a crown beside any name it renders.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AchievementHolders"
+
+    LifterAchievement:
+      type: object
+      required: [achievement, heldNow, timesHeld, firstHeldFrom, lastHeldFrom]
+      description: One lifter's history with one achievement, folded across reigns.
+      properties:
+        achievement:
+          $ref: "#/components/schemas/Achievement"
+        heldNow:
+          type: boolean
+          description: >
+            Whether a reign is still open, which is what decides whether this is
+            drawn as a possession or as a memory.
+        timesHeld:
+          type: integer
+          description: >
+            How many reigns, not how long. A continuous stretch is one however
+            long it lasts.
+        firstHeldFrom:
+          type: string
+          format: date-time
+          description: When they first took it, ever.
+        lastHeldFrom:
+          type: string
+          format: date-time
+          description: >
+            When the most recent reign began — "since when" for a current holder,
+            "when last" for a lapsed one. Equal to `firstHeldFrom` for a lifter
+            who has held this once. Which of the two to show is decided by
+            `heldNow` rather than by a second request.
+
+    LifterAchievementList:
+      type: object
+      required: [items]
+      description: >
+        One lifter's achievements, current first. Holds only what they have
+        actually earned — see the endpoint for why the unearned ones are absent.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/LifterAchievement"
+
     SessionReaction:
       type: object
       required: [emoji, count, mine]
@@ -3248,6 +3446,22 @@ components:
             Absent if the comment has since been deleted — though in practice
             the notification goes with it, since the row references the comment
             and the reference cascades.
+        achievementSlug:
+          type: string
+          description: >
+            Which achievement, on `crown`. It names the board that was won, so the
+            row can say "took the crown on Week streak" rather than the vaguer
+            thing.
+
+            **Absent when the row folds crowns from more than one board**, which
+            is a state only this kind reaches. A `crown` has no session, and rows
+            fold by (kind, session) — so every crown on the install collapses into
+            one row the way `joined` does. Naming the newest member's board there
+            would be a claim about the group that the group does not support, so
+            the API withholds it. A client that has a `crown` row without this
+            should say the unnamed thing.
+
+            Absent on every other kind, which has no achievement at all.
         createdAt:
           type: string
           format: date-time
@@ -3276,12 +3490,20 @@ components:
         conversation followable by the people in it. A lifter never gets both
         for one comment.
 
+        `crown` is somebody TAKING a crown, and it is the one kind whose subject
+        is neither your session nor your conversation. It goes to everybody except
+        the lifter who took it, which is both the notifications table's rule — the
+        actor is always filtered out of the recipients — and the right answer:
+        the holder learns it from the crown on their own name, and a notification
+        saying "you did the thing you are looking at" is noise. Like `joined` it
+        carries no session, so every crown folds into a single row.
+
         Unlike `ReactionEmoji`, this set is never validated on the way in,
         because it never arrives on the way in: a client cannot raise a
         notification, and every kind is written as a literal by the query that
         fans it out. The database does not constrain the column either — see
         migration 0026 for why.
-      enum: [reaction, comment, reply, joined]
+      enum: [reaction, comment, reply, joined, crown]
       example: reaction
 
     Lifter:

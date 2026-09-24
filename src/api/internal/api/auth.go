@@ -190,8 +190,19 @@ func (s *Server) slideSession(ctx context.Context, row store.GetUserSessionRow) 
 // Both limiters are swept here rather than each owning a ticker. They have the
 // same problem (a map keyed by something a caller chooses) and the same
 // answer, and one loop doing two cheap map walks is not worth a second.
+//
+// The crown reconciler rides along too, and it is the one passenger that is NOT
+// merely housekeeping: a crown exists only because this ran. It is here anyway,
+// rather than owning a ticker, because its cadence is the same and a second loop
+// against the same small pool buys nothing — see refreshCrowns for why hourly is
+// the right resolution for it.
 func (s *Server) StartSessionSweeper(ctx context.Context, every time.Duration) {
 	go func() {
+		// Once before the first tick, so a fresh deploy is not crownless for an
+		// hour. The ledger starts empty after 0032 — see that migration's note on
+		// why the reigns are not backfilled — and this is what fills it.
+		s.refreshCrowns(ctx)
+
 		t := time.NewTicker(every)
 		defer t.Stop()
 		for {
@@ -203,6 +214,7 @@ func (s *Server) StartSessionSweeper(ctx context.Context, every time.Duration) {
 					log.Printf("session sweep: %v", err)
 				}
 				s.archiveOldNotifications(ctx)
+				s.refreshCrowns(ctx)
 				s.logins.Sweep()
 				s.comments.Sweep()
 			}

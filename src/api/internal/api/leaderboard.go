@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"sort"
+	"time"
 
 	"gitea.homelab/gitadmin/iron-temple/api/internal/racked"
 )
@@ -101,20 +103,44 @@ func (s *Server) getLeaderboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := r.Context()
-	lifters, err := s.q.ListLifters(ctx)
+	boards, period, err := s.computeBoards(r.Context(), kind, on, today)
 	if err != nil {
 		internalError(w)
 		return
 	}
 
-	metrics := make([]lifterMetrics, 0, len(lifters))
+	writeJSON(w, http.StatusOK, leaderboardDTO{
+		Period: rackedPeriodToDTO(period),
+		Boards: boards,
+	})
+}
+
+// computeBoards ranks every lifter on the install over one window.
+//
+// Extracted from getLeaderboard for rackedWindow's reason, and it matters more
+// here than there. The crown reconciler (achievements.go) has to agree with this
+// page about who is leading, and the file header's rule is that the install must
+// not hold two answers about one history — a second implementation of "who is
+// top" would be exactly that, and it would show up as a crown beside a name that
+// the leaderboard says belongs to somebody else.
+//
+// The cost described in the file header is this function's. It is called once per
+// request to /leaderboard and once per hourly reconcile, and nowhere else.
+func (s *Server) computeBoards(
+	ctx context.Context, kind racked.PeriodKind, on, today time.Time,
+) ([]leaderboardBoardDTO, racked.Period, error) {
 	var period racked.Period
+
+	lifters, err := s.q.ListLifters(ctx)
+	if err != nil {
+		return nil, period, err
+	}
+
+	metrics := make([]lifterMetrics, 0, len(lifters))
 	for _, row := range lifters {
 		report, err := s.buildRacked(ctx, row.ID, kind, on, today)
 		if err != nil {
-			internalError(w)
-			return
+			return nil, period, err
 		}
 		// Every report covers the same window, so the last one read is as good as
 		// the first. Taken from a report rather than recomputed here so that the
@@ -147,10 +173,7 @@ func (s *Server) getLeaderboard(w http.ResponseWriter, r *http.Request) {
 		metrics = append(metrics, m)
 	}
 
-	writeJSON(w, http.StatusOK, leaderboardDTO{
-		Period: rackedPeriodToDTO(period),
-		Boards: buildBoards(metrics),
-	})
+	return buildBoards(metrics), period, nil
 }
 
 // buildBoards turns one row per lifter into one board per metric.

@@ -17,6 +17,7 @@
   // repeated.
   import UsersRound from "@lucide/svelte/icons/users-round";
   import Avatar from "./Avatar.svelte";
+  import LifterName from "./LifterName.svelte";
   import { auth, signOut } from "./auth.svelte";
 
   // The header's right-hand side: a sign-in link when signed out, and the
@@ -49,9 +50,7 @@
       aria-label="Account menu"
     >
       <Avatar user={auth.me} size={28} />
-      <span class="max-w-[10rem] truncate font-semibold">
-        {auth.me.displayName || auth.me.username}
-      </span>
+      <LifterName lifter={auth.me} class="max-w-[10rem] font-semibold" crownSize="size-3" />
       <ChevronDown class="size-4 opacity-70" aria-hidden="true" />
     </DropdownMenu.Trigger>
 

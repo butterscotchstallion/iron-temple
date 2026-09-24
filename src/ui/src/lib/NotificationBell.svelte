@@ -6,6 +6,7 @@
   import Loading from "./skeleton/Loading.svelte";
   import SkeletonRows from "./skeleton/SkeletonRows.svelte";
   import { auth } from "./auth.svelte";
+  import { achievementLabel } from "./achievements.svelte";
   import { relativeTime } from "./date";
   import {
     clearAll,
@@ -57,6 +58,10 @@
    */
   function href(item: Notification): string | null {
     if (item.kind === "joined") return `/lifters/${item.actor.id}`;
+    // The standings, not the lifter. A crown row is news about a board — the
+    // reader's own place on it is the thing they will want next — and the
+    // leaderboard names the holder anyway.
+    if (item.kind === "crown") return "/leaderboard";
     if (item.sessionId === undefined) return null;
 
     // Which comment, appended so the recap can scroll to the sentence rather
@@ -83,6 +88,14 @@
         return workout ? `also replied on ${workout}` : "also replied on a session";
       case "joined":
         return "joined the gym";
+      case "crown": {
+        // Which board, when the API was willing to say. It withholds the slug
+        // on a row that folded crowns from several boards — see the field's
+        // note — and the catalogue can also simply not have loaded yet, so both
+        // fall through to the unnamed sentence rather than to a blank.
+        const board = achievementLabel(item.achievementSlug);
+        return board ? `took the crown on ${board}` : "took a crown";
+      }
     }
   }
 

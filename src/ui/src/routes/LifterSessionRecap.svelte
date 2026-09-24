@@ -10,11 +10,17 @@
   import RecapLiftTable from "../lib/RecapLiftTable.svelte";
   import MuscleVolumeBars from "../lib/MuscleVolumeBars.svelte";
   import SessionSocial from "../lib/SessionSocial.svelte";
+  import LifterName from "../lib/LifterName.svelte";
   import { markedCommentId } from "../lib/commentAnchor";
   import { formatLongDate } from "../lib/date";
   import { formatVolume } from "../lib/volume";
   import type { RecapLiftRow, RecapPRRow } from "../lib/recap";
-  import { getLifter, getLifterSessionRecap, type SessionRecap } from "../lib/api";
+  import {
+    getLifter,
+    getLifterSessionRecap,
+    type LifterProfile,
+    type SessionRecap,
+  } from "../lib/api";
 
   // Somebody else's session, in review.
   //
@@ -45,7 +51,10 @@
   const markedComment = $derived(markedCommentId());
 
   let recap = $state<SessionRecap | null>(null);
-  let lifterName = $state("");
+  // The lifter themselves rather than their name, so the heading can draw
+  // whatever they are currently wearing beside it. A failure here still costs
+  // only the name.
+  let lifter = $state<LifterProfile | null>(null);
   let loading = $state(true);
   let failed = $state(false);
   let missing = $state(false);
@@ -75,7 +84,7 @@
     // name and not the page.
     const who = await getLifter(lifterId);
     if (who.status === 200) {
-      lifterName = who.data.displayName || who.data.username;
+      lifter = who.data;
     }
     loading = false;
   }
@@ -147,7 +156,7 @@
         {recap.session.programDayName}
       </h2>
       <p class="mt-1 text-sm text-muted-foreground">
-        {#if lifterName}{lifterName} ·
+        {#if lifter}<LifterName {lifter} crownSize="size-3" /> ·
         {/if}{recap.session.programName} · {formatLongDate(recap.session.performedOn)}
       </p>
     </div>

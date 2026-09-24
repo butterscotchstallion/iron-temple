@@ -5,6 +5,7 @@
   import DetailsSection from "../lib/profile/DetailsSection.svelte";
   import PasswordSection from "../lib/profile/PasswordSection.svelte";
   import EquipmentSection from "../lib/profile/EquipmentSection.svelte";
+  import AchievementsSection from "../lib/profile/AchievementsSection.svelte";
   import DataSection from "../lib/profile/DataSection.svelte";
   import { DEFAULT_SECTION, toSection } from "../lib/profile/sections";
   import { auth } from "../lib/auth.svelte";
@@ -53,6 +54,8 @@
       <PasswordSection />
     {:else if section === "equipment"}
       <EquipmentSection me={auth.me} />
+    {:else if section === "achievements"}
+      <AchievementsSection me={auth.me} />
     {:else if section === "data"}
       <DataSection />
     {/if}

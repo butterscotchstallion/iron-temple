@@ -116,6 +116,12 @@ async function mockCommon(page: import("@playwright/test").Page) {
   await page.route("**/api/v1/notifications/*/read", (route) =>
     route.fulfill({ status: 204, body: "" }),
   );
+  // The crowns, polled by App.svelte on the same terms as the bell above and
+  // reached here for the same reason: this file signs in partway through, and the
+  // poll starts the moment /me comes back with an account.
+  await page.route("**/api/v1/achievements**", (route) =>
+    route.fulfill({ json: { items: [] } }),
+  );
 
   // The two the Astroturfing screen reads on mount. Idle and switched off, which
   // is the state that screen's assertions here assume.

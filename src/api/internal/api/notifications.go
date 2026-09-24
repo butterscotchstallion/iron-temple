@@ -211,6 +211,13 @@ func (s *Server) listNotifications(w http.ResponseWriter, r *http.Request) {
 			// wire shape a null would give and is what the client tests.
 			ReadAt: timestamptzToString(row.ReadAt),
 		}
+		// Withheld unless the whole group named ONE achievement. The query
+		// decides that — see its note on why a crown group is the one fold whose
+		// subject is not simply its representative's — and this honours the
+		// answer rather than second-guessing it.
+		if row.OneAchievement {
+			item.AchievementSlug = row.AchievementSlug
+		}
 		items = append(items, item)
 	}
 

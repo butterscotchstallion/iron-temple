@@ -8,6 +8,15 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type Achievement struct {
+	Slug        string  `json:"slug"`
+	Kind        string  `json:"kind"`
+	Metric      *string `json:"metric"`
+	Label       string  `json:"label"`
+	Description string  `json:"description"`
+	SortOrder   int32   `json:"sort_order"`
+}
+
 type Exercise struct {
 	ID              int32              `json:"id"`
 	Name            string             `json:"name"`
@@ -34,17 +43,26 @@ type GeneratedActivitySchedule struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
+type LifterAchievement struct {
+	ID              int32              `json:"id"`
+	UserID          int32              `json:"user_id"`
+	AchievementSlug string             `json:"achievement_slug"`
+	HeldFrom        pgtype.Timestamptz `json:"held_from"`
+	HeldUntil       pgtype.Timestamptz `json:"held_until"`
+}
+
 type Notification struct {
-	ID         int32              `json:"id"`
-	UserID     int32              `json:"user_id"`
-	ActorID    int32              `json:"actor_id"`
-	Kind       string             `json:"kind"`
-	SessionID  *int32             `json:"session_id"`
-	CommentID  *int32             `json:"comment_id"`
-	Emoji      *string            `json:"emoji"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
-	ReadAt     pgtype.Timestamptz `json:"read_at"`
-	ArchivedAt pgtype.Timestamptz `json:"archived_at"`
+	ID              int32              `json:"id"`
+	UserID          int32              `json:"user_id"`
+	ActorID         int32              `json:"actor_id"`
+	Kind            string             `json:"kind"`
+	SessionID       *int32             `json:"session_id"`
+	CommentID       *int32             `json:"comment_id"`
+	Emoji           *string            `json:"emoji"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	ReadAt          pgtype.Timestamptz `json:"read_at"`
+	ArchivedAt      pgtype.Timestamptz `json:"archived_at"`
+	AchievementSlug *string            `json:"achievement_slug"`
 }
 
 type Program struct {

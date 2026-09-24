@@ -4,6 +4,7 @@
   import { Button } from "$lib/components/ui/button";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import Avatar from "./Avatar.svelte";
+  import LifterName from "./LifterName.svelte";
   import Loading from "./skeleton/Loading.svelte";
   import Skeleton from "./skeleton/Skeleton.svelte";
   import { auth } from "./auth.svelte";
@@ -416,9 +417,11 @@
             <Avatar user={comment.author} size={28} />
             <div class="min-w-0 flex-1">
               <p class="flex items-baseline gap-2">
-                <span class="truncate text-sm font-semibold text-foreground">
-                  {comment.author.displayName || comment.author.username}
-                </span>
+                <LifterName
+                  lifter={comment.author}
+                  class="text-sm font-semibold text-foreground"
+                  crownSize="size-3"
+                />
                 <span class="shrink-0 text-xs text-muted-foreground">
                   {saidAt(comment.createdAt)}
                 </span>
