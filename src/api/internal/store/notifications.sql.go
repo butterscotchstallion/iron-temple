@@ -369,6 +369,139 @@ func (q *Queries) DeleteReactionNotification(ctx context.Context, arg DeleteReac
 	return items, nil
 }
 
+const listNotificationGroupMembers = `-- name: ListNotificationGroupMembers :many
+SELECT n.id,
+       n.kind,
+       n.session_id,
+       n.comment_id,
+       n.emoji,
+       n.achievement_slug,
+       n.created_at,
+       n.read_at,
+       u.id AS actor_id,
+       u.username,
+       u.display_name,
+       u.avatar_color,
+       COALESCE(ua.etag, '') AS avatar_etag,
+       s.user_id AS session_owner_id,
+       pd.name   AS program_day_name,
+       c.body    AS comment_body
+FROM notifications n
+JOIN notifications g
+  ON g.id = $1::int
+ AND g.user_id = $2::int
+ AND g.archived_at IS NULL
+ AND n.user_id = g.user_id
+ AND n.kind = g.kind
+ AND n.session_id IS NOT DISTINCT FROM g.session_id
+JOIN users u ON u.id = n.actor_id
+LEFT JOIN user_avatars ua ON ua.user_id = u.id
+LEFT JOIN sessions s ON s.id = n.session_id
+LEFT JOIN program_days pd ON pd.id = s.program_day_id
+LEFT JOIN session_comments c ON c.id = n.comment_id
+WHERE n.archived_at IS NULL
+ORDER BY n.created_at DESC, n.id DESC
+`
+
+type ListNotificationGroupMembersParams struct {
+	ID     int32 `json:"id"`
+	UserID int32 `json:"user_id"`
+}
+
+type ListNotificationGroupMembersRow struct {
+	ID              int32              `json:"id"`
+	Kind            string             `json:"kind"`
+	SessionID       *int32             `json:"session_id"`
+	CommentID       *int32             `json:"comment_id"`
+	Emoji           *string            `json:"emoji"`
+	AchievementSlug *string            `json:"achievement_slug"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	ReadAt          pgtype.Timestamptz `json:"read_at"`
+	ActorID         int32              `json:"actor_id"`
+	Username        string             `json:"username"`
+	DisplayName     string             `json:"display_name"`
+	AvatarColor     string             `json:"avatar_color"`
+	AvatarEtag      string             `json:"avatar_etag"`
+	SessionOwnerID  *int32             `json:"session_owner_id"`
+	ProgramDayName  *string            `json:"program_day_name"`
+	CommentBody     *string            `json:"comment_body"`
+}
+
+// ListNotificationGroupMembers unfolds ONE row of the panel back into the
+// notifications it stands for.
+//
+// # WHY THIS HAS TO EXIST
+//
+// The panel's rows are groups, and a group can only speak for one of its
+// members: ListNotificationGroups carries the rn = 1 row's scalar columns, and
+// for `crown` it withholds even the achievement unless the whole group agrees on
+// one — because naming the newest member's board while folding four others is a
+// claim the group does not support. That is the right call for a one-line row and
+// it leaves the client unable to say what the other members were. This is how it
+// asks.
+//
+// Resolved from the REPRESENTATIVE'S id, which is the id the panel already has.
+// The self-join is MarkNotificationGroupRead's, copied deliberately rather than
+// rewritten: that query turns one id into a group for a write, this one for a
+// read, and the two must agree about what a group is or reading a row would show
+// members that marking it read would miss. IS NOT DISTINCT FROM on session_id is
+// the load-bearing part — 'joined' and 'crown' have no session, and NULLs have to
+// compare equal here exactly as they group equal in the window above.
+//
+// Scoped to the caller through g, so there is no separate "is this yours" check
+// and no 403: another account's id matches no row, an archived id matches no row,
+// and an id that names nothing matches no row. The handler answers all three the
+// same way, which is what keeps this from confirming that an id exists.
+//
+// g is required to be live for MarkNotificationGroupRead's reason: an archived id
+// cannot have come from the panel.
+//
+// Ordered like the panel, so a client paging through the members counts them in
+// the order it listed them. Unbounded, which is safe for the reason the panel's
+// own read is: the retention window (0030) bounds a group at a month of one
+// install's notifications, and the caller has already been shown that this row
+// folds N of them.
+//
+// The LEFT JOINs are the panel's too, so a member comes back as a fully-formed
+// notification rather than a crown-shaped subset — every kind is expandable here,
+// even though only `crown` has a surface that asks today.
+func (q *Queries) ListNotificationGroupMembers(ctx context.Context, arg ListNotificationGroupMembersParams) ([]ListNotificationGroupMembersRow, error) {
+	rows, err := q.db.Query(ctx, listNotificationGroupMembers, arg.ID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListNotificationGroupMembersRow
+	for rows.Next() {
+		var i ListNotificationGroupMembersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Kind,
+			&i.SessionID,
+			&i.CommentID,
+			&i.Emoji,
+			&i.AchievementSlug,
+			&i.CreatedAt,
+			&i.ReadAt,
+			&i.ActorID,
+			&i.Username,
+			&i.DisplayName,
+			&i.AvatarColor,
+			&i.AvatarEtag,
+			&i.SessionOwnerID,
+			&i.ProgramDayName,
+			&i.CommentBody,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listNotificationGroups = `-- name: ListNotificationGroups :many
 
 

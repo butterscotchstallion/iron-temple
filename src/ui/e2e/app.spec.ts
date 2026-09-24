@@ -380,6 +380,12 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/api/v1/notifications/*/read", (route) =>
     route.fulfill({ status: 204, body: "" }),
   );
+  // Also after the wildcard, and for the same reason: it would otherwise answer
+  // this expansion with the panel's own list shape, which carries a limit and an
+  // offset that a row's members do not.
+  await page.route("**/api/v1/notifications/*/members", (route) =>
+    route.fulfill({ json: { items: [] } }),
+  );
 
   // Not reached by any test here, and stubbed anyway: the suite mocks the API to
   // stay self-contained, and an unstubbed route is a real request out to a Go API

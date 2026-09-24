@@ -290,6 +290,11 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 				// /read above, which chi would not confuse in any case — the
 				// two patterns differ in their first segment.
 				r.Post("/notifications/{notificationId}/read", s.markNotificationRead)
+				// The same row, unfolded. Beside the POST above because they
+				// resolve a group from an id the same way — one to stamp every
+				// member, one to read them — and a surface that details a
+				// folded row needs both.
+				r.Get("/notifications/{notificationId}/members", s.getNotificationGroupMembers)
 
 				// One lifter reading another. Every route is a GET, and that is
 				// load-bearing rather than incidental: the id in these paths

@@ -684,6 +684,59 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /notifications/{notificationId}/members:
+    parameters:
+      - $ref: "#/components/parameters/NotificationId"
+    get:
+      tags: [notifications]
+      operationId: getNotificationGroupMembers
+      summary: Unfold one row of the panel
+      description: >
+        The notifications a single item of the list stands for.
+
+        **An item is a group, and a group says less than it knows.** A row carries
+        its newest member's subject, and for `crown` it withholds even that unless
+        every member names the same board — because "took the crown on Volume" on a
+        row that folds four other boards is a claim the group does not support. That
+        makes "Grace and 2 others took crowns" the honest one-line summary, and it
+        leaves the other two unnamed. This is how a surface that wants to detail
+        them asks.
+
+        Send the `id` the list gave you, exactly as you would to
+        `POST /notifications/{notificationId}/read`. Both resolve the group from
+        that one id by the same rule, so a client still never has to know what the
+        grouping rule is.
+
+        **Not paged**, unlike every other list here. This is the whole of one row,
+        whose size the caller has already been shown — handing back a page of a
+        row's own contents would be a list nobody could reconcile with the sentence
+        above it. The bound is the retention window instead.
+
+        Every member is a full `Notification`, so any kind can be unfolded even
+        though only `crown` has a surface that asks today. Two fields differ from
+        how the same type reads in the list: `actorCount` is always 1 and
+        `otherActorNames` is always absent, because a member folds nobody — and
+        `achievementSlug` is never withheld, because a single notification's board
+        is not in doubt.
+
+        A `404` answers every way this fails to resolve — an id that names nothing,
+        one belonging to another account, and one archived out of the panel. They
+        are deliberately indistinguishable, for the reason the endpoint above has no
+        `403`: telling them apart would confirm that somebody else's id exists.
+      responses:
+        "200":
+          description: The members of that row, newest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationMemberList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /leaderboard:
     get:
       tags: [lifters]
@@ -3343,6 +3396,26 @@ components:
             poll already costs. One request answers "is there anything?" and
             "what is it?", and the ETag on this endpoint makes the usual answer
             a 304.
+
+    NotificationMemberList:
+      type: object
+      required: [items]
+      description: >
+        One row of the panel, unfolded into the notifications it stands for,
+        newest first.
+
+        No `limit`, `offset` or total, unlike `NotificationList` — this is not a
+        page of anything. It is the whole of one group, whose size the caller was
+        already told by the row they opened.
+      properties:
+        items:
+          type: array
+          description: >
+            Always at least one: a row the caller can see always folds itself. An
+            empty list is not a state this returns — a group that cannot be
+            resolved is a 404.
+          items:
+            $ref: "#/components/schemas/Notification"
 
     Notification:
       type: object

@@ -229,6 +229,91 @@ func (s *Server) listNotifications(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// getNotificationGroupMembers unfolds one row of the panel into the notifications
+// it stands for.
+//
+// The panel deliberately says less than it knows: a row carries its newest
+// member's subject, and for a crown it withholds even that unless every member
+// agrees on one board. "Grace and 2 others took crowns" is the honest one-line
+// summary and it leaves the other two unnamed, so a surface that wants to detail
+// them asks here.
+//
+// NO PAGING. Every other list in this API takes limit and offset; this one is the
+// expansion of a row the caller is already looking at, bounded by the retention
+// window rather than by a page — and a client that has been told a row folds three
+// things cannot be handed two of them.
+//
+// A 404 covers every way this can fail to resolve: an id that names nothing, one
+// that belongs to another account, and one that has been archived out of the
+// panel. Answering them identically is what keeps the endpoint from confirming
+// that somebody else's notification id exists — the same reasoning
+// MarkNotificationGroupRead gives for having no 403.
+func (s *Server) getNotificationGroupMembers(w http.ResponseWriter, r *http.Request) {
+	id, ok := idParam(r, "notificationId")
+	if !ok {
+		notFound(w, "notification not found")
+		return
+	}
+
+	ctx := r.Context()
+	rows, err := s.q.ListNotificationGroupMembers(ctx, store.ListNotificationGroupMembersParams{
+		ID:     id,
+		UserID: userFrom(ctx).ID,
+	})
+	if err != nil {
+		internalError(w)
+		return
+	}
+	// A live row the caller owns always matches at least itself, so no rows means
+	// the group could not be resolved rather than that it is empty.
+	if len(rows) == 0 {
+		notFound(w, "notification not found")
+		return
+	}
+
+	// One DTO per member, and it is the SAME type the panel's rows use, because a
+	// member is a notification — there is nothing about it that a row of the panel
+	// is not also. This mapping and listNotifications' above have to stay in step;
+	// a field added to one and not the other is a detail dialog that silently says
+	// less than the row it was opened from.
+	//
+	// ActorCount is 1 and OtherActorNames absent on every one of these: a member
+	// folds nobody, which is exactly what those two fields report.
+	//
+	// AchievementSlug is passed through UNCONDITIONALLY, which is the one place
+	// this mapping deliberately differs from the panel's. Up there it is gated on
+	// the group agreeing about which board was won; down here a row is a single
+	// notification, so its board is not in doubt and withholding it would defeat
+	// the only reason a client asked.
+	items := make([]notificationDTO, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, notificationDTO{
+			ID:   row.ID,
+			Kind: row.Kind,
+			Actor: lifterDTO{
+				ID:          row.ActorID,
+				Username:    row.Username,
+				DisplayName: row.DisplayName,
+				AvatarColor: row.AvatarColor,
+				HasAvatar:   row.AvatarEtag != "",
+				AvatarEtag:  row.AvatarEtag,
+			},
+			ActorCount:      1,
+			SessionID:       row.SessionID,
+			SessionOwnerID:  row.SessionOwnerID,
+			ProgramDayName:  row.ProgramDayName,
+			Emoji:           row.Emoji,
+			CommentID:       row.CommentID,
+			CommentBody:     row.CommentBody,
+			AchievementSlug: row.AchievementSlug,
+			CreatedAt:       timestamptzToString(row.CreatedAt),
+			ReadAt:          timestamptzToString(row.ReadAt),
+		})
+	}
+
+	writeJSON(w, http.StatusOK, notificationMemberListDTO{Items: items})
+}
+
 // markNotificationsRead drops the caller's unread count to zero.
 //
 // 204 and idempotent. The query only stamps rows that are still unread, so a
