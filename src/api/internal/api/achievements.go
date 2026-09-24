@@ -214,19 +214,14 @@ func (s *Server) refreshCrowns(ctx context.Context) {
 		}
 	}
 
-	open, err := s.q.ListOpenAchievementReigns(ctx)
-	if err != nil {
-		log.Printf("crown refresh: open reigns: %v", err)
-		return
-	}
-	held := make(map[string]map[int32]bool, len(catalogue))
-	for _, row := range open {
-		if held[row.AchievementSlug] == nil {
-			held[row.AchievementSlug] = map[int32]bool{}
-		}
-		held[row.AchievementSlug][row.UserID] = true
-	}
-
+	// NOTHING IS READ BACK BEFORE WRITING, and that is worth saying out loud
+	// because a diff usually needs a before-picture. This one does not: the two
+	// statements below express the whole comparison in SQL. The close is "end
+	// every open reign on this board except these lifters", which needs no
+	// knowledge of who currently holds it, and the open is an upsert whose
+	// ON CONFLICT is exactly the "already holds it" case. Reading the open reigns
+	// first would be a query per pass whose answer nothing could act on.
+	//
 	// One transaction for the whole pass. The alternative — commit per board —
 	// would let a failure halfway leave two boards reconciled and three not,
 	// which is a state nothing else in the app knows how to interpret and which

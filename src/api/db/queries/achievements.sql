@@ -97,20 +97,12 @@ WHERE la.user_id = sqlc.arg('user_id')::int
 GROUP BY a.slug, a.kind, a.metric, a.label, a.description, a.sort_order
 ORDER BY held_now DESC, a.sort_order, a.slug;
 
--- ListOpenAchievementReigns is the reconciler's view of the world before it
--- changes anything: every reign currently open, as (achievement, lifter) pairs.
---
--- Read in one statement rather than once per board so the diff below is computed
--- against a single consistent snapshot. Same index as the site-wide read.
--- name: ListOpenAchievementReigns :many
-SELECT la.achievement_slug,
-       la.user_id
-FROM lifter_achievements la
-JOIN achievements a ON a.slug = la.achievement_slug
-WHERE la.held_until IS NULL
-ORDER BY a.sort_order, la.user_id;
-
 -- ---- the reconciler's two writes ----
+--
+-- There is deliberately no "read the open reigns first" query to go with these.
+-- Between them they express the whole diff: the close says "everybody except
+-- these" and the open is an upsert, so neither needs a before-picture and a pass
+-- costs two statements per board rather than three.
 
 -- OpenAchievementReign starts a reign, or does nothing if one is already open.
 --

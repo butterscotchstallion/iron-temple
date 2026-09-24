@@ -311,45 +311,6 @@ func (q *Queries) ListLifterAchievements(ctx context.Context, userID int32) ([]L
 	return items, nil
 }
 
-const listOpenAchievementReigns = `-- name: ListOpenAchievementReigns :many
-SELECT la.achievement_slug,
-       la.user_id
-FROM lifter_achievements la
-JOIN achievements a ON a.slug = la.achievement_slug
-WHERE la.held_until IS NULL
-ORDER BY a.sort_order, la.user_id
-`
-
-type ListOpenAchievementReignsRow struct {
-	AchievementSlug string `json:"achievement_slug"`
-	UserID          int32  `json:"user_id"`
-}
-
-// ListOpenAchievementReigns is the reconciler's view of the world before it
-// changes anything: every reign currently open, as (achievement, lifter) pairs.
-//
-// Read in one statement rather than once per board so the diff below is computed
-// against a single consistent snapshot. Same index as the site-wide read.
-func (q *Queries) ListOpenAchievementReigns(ctx context.Context) ([]ListOpenAchievementReignsRow, error) {
-	rows, err := q.db.Query(ctx, listOpenAchievementReigns)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListOpenAchievementReignsRow
-	for rows.Next() {
-		var i ListOpenAchievementReignsRow
-		if err := rows.Scan(&i.AchievementSlug, &i.UserID); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const openAchievementReign = `-- name: OpenAchievementReign :execrows
 
 INSERT INTO lifter_achievements (user_id, achievement_slug)
@@ -364,6 +325,11 @@ type OpenAchievementReignParams struct {
 }
 
 // ---- the reconciler's two writes ----
+//
+// There is deliberately no "read the open reigns first" query to go with these.
+// Between them they express the whole diff: the close says "everybody except
+// these" and the open is an upsert, so neither needs a before-picture and a pass
+// costs two statements per board rather than three.
 // OpenAchievementReign starts a reign, or does nothing if one is already open.
 //
 // The ON CONFLICT is what makes the hourly pass idempotent, and it is what keeps
