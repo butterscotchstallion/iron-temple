@@ -67,6 +67,7 @@ function bareReport(): RackedReport {
     },
     prs: [],
     milestones: [],
+    upcomingMilestones: [],
     heaviestSet: null,
     fastestSession: null,
     deloads: [],

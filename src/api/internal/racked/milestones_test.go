@@ -117,3 +117,174 @@ func TestMilestonesSortedChronologically(t *testing.T) {
 		}
 	}
 }
+
+// ---- what is still ahead ----
+//
+// The forward-looking half. Everything here is about what upcoming() refuses to
+// say as much as what it does: a target it cannot justify is worse than silence,
+// because a lifter who is told they are 95 lb from a banded hip abduction stops
+// reading the section.
+
+func TestUpcomingNamesTheNextVolumeRung(t *testing.T) {
+	// 5 x 5 x 200 = 5,000 lb on top of 96,000 leaves the lifter at 101,000 —
+	// past the 100,000 rung, so the next one up is 250,000.
+	sets := mkSets(1, day(2026, time.March, 2), 1, "Squat", 5, 5, 200)
+	got := upcoming(groupSessions(sets), Baseline{VolumeLb: 96_000}, UpcomingLimit)
+
+	found := false
+	for _, u := range got {
+		if u.Kind != MilestoneVolume {
+			continue
+		}
+		found = true
+		if u.TargetLb != 250_000 {
+			t.Errorf("target = %v, want 250000", u.TargetLb)
+		}
+		// Lifetime to NOW, counting the period — not the baseline it opened on.
+		if u.CurrentLb != 101_000 {
+			t.Errorf("current = %v, want 101000", u.CurrentLb)
+		}
+		if !strings.Contains(u.Label, "250,000") {
+			t.Errorf("label = %q, want a grouped number", u.Label)
+		}
+	}
+	if !found {
+		t.Fatalf("no volume rung in %+v", got)
+	}
+}
+
+func TestUpcomingNamesTheNextPlateRungPerLift(t *testing.T) {
+	sets := mkSets(1, day(2026, time.March, 2), 2, "Bench Press", 1, 5, 205)
+	got := upcoming(groupSessions(sets), Baseline{BestWeight: map[int32]float64{2: 190}}, UpcomingLimit)
+
+	var plate *UpcomingMilestone
+	for i := range got {
+		if got[i].Kind == MilestonePlate {
+			plate = &got[i]
+		}
+	}
+	if plate == nil {
+		t.Fatalf("no plate rung in %+v", got)
+	}
+	if plate.TargetLb != 225 {
+		t.Errorf("target = %v, want 225", plate.TargetLb)
+	}
+	// The period's top set, which beat the baseline's 190.
+	if plate.CurrentLb != 205 {
+		t.Errorf("current = %v, want 205", plate.CurrentLb)
+	}
+	if plate.Label != "First 225 lb Bench Press" {
+		t.Errorf("label = %q", plate.Label)
+	}
+	if plate.ExerciseName != "Bench Press" || plate.ExerciseID != 2 {
+		t.Errorf("lift = %d/%q", plate.ExerciseID, plate.ExerciseName)
+	}
+}
+
+// CLOSEST MEANS FRACTION, NOT POUNDS, and this is the test that pins it. Ranked
+// by pounds remaining the squat's 20 lb would win trivially; the point is that it
+// still wins when measured the way the code actually measures, and that the
+// volume rung — 180,000 lb away but 82% of the way there — is not simply last by
+// construction.
+func TestUpcomingRanksByFractionCompleteNotPoundsRemaining(t *testing.T) {
+	// Squat at 205 of 225 → 91%. Lifetime 820,000 of 1,000,000 → 82%.
+	sets := mkSets(1, day(2026, time.March, 2), 1, "Squat", 1, 1, 205)
+	got := upcoming(groupSessions(sets), Baseline{
+		VolumeLb:   819_795, // + 205 for the single above
+		BestWeight: map[int32]float64{1: 200},
+	}, UpcomingLimit)
+
+	if len(got) < 2 {
+		t.Fatalf("got %+v, want both a plate and a volume rung", got)
+	}
+	if got[0].Kind != MilestonePlate {
+		t.Fatalf("first = %v (%v of %v), want the plate rung",
+			got[0].Kind, got[0].CurrentLb, got[0].TargetLb)
+	}
+	if got[1].Kind != MilestoneVolume {
+		t.Fatalf("second = %v, want the volume rung", got[1].Kind)
+	}
+}
+
+// Migration 0023 seeds five banded and bodyweight movements at 0 lb on purpose.
+// "95 lb to go" on a banded hip abduction is a category error, not a goal.
+func TestUpcomingIgnoresALiftCarryingNoWeight(t *testing.T) {
+	sets := mkSets(1, day(2026, time.March, 2), 9, "Banded Hip Abduction", 3, 20, 0)
+	got := upcoming(groupSessions(sets), Baseline{}, UpcomingLimit)
+
+	for _, u := range got {
+		if u.ExerciseID == 9 {
+			t.Fatalf("a 0 lb lift claimed a rung: %+v", u)
+		}
+	}
+}
+
+// A lift trained heavily in February but not this month is not something the
+// lifter is closing in on, and the baseline knows it only as an id anyway.
+func TestUpcomingOnlyCoversLiftsTrainedInThePeriod(t *testing.T) {
+	sets := mkSets(1, day(2026, time.March, 2), 1, "Squat", 1, 5, 200)
+	got := upcoming(groupSessions(sets), Baseline{
+		BestWeight: map[int32]float64{1: 200, 7: 300}, // 7 never appears in the period
+	}, UpcomingLimit)
+
+	for _, u := range got {
+		if u.ExerciseID == 7 {
+			t.Fatalf("an untrained lift was listed: %+v", u)
+		}
+	}
+}
+
+// Past the top of a ladder there is no next rung, and inventing one would be the
+// only dishonest thing this function could do.
+func TestUpcomingInventsNothingAboveTheTopRung(t *testing.T) {
+	sets := mkSets(1, day(2026, time.March, 2), 1, "Squat", 1, 1, 500)
+	got := upcoming(groupSessions(sets), Baseline{
+		VolumeLb:   30_000_000,
+		BestWeight: map[int32]float64{1: 500},
+	}, UpcomingLimit)
+
+	if len(got) != 0 {
+		t.Fatalf("got %+v, want nothing for a lifter past every rung", got)
+	}
+}
+
+func TestUpcomingIsEmptyForALifterWithNoHistory(t *testing.T) {
+	if got := upcoming(nil, Baseline{}, UpcomingLimit); len(got) != 0 {
+		t.Fatalf("got %+v, want nothing", got)
+	}
+}
+
+// The limit is what keeps "closing in" to a couple of things worth chasing rather
+// than a rung for every lift in the program plus a tonnage mark.
+func TestUpcomingHonoursTheLimit(t *testing.T) {
+	var sets []Set
+	for ex := int32(1); ex <= 5; ex++ {
+		sets = append(sets, mkSets(1, day(2026, time.March, 2), ex,
+			"Lift "+string(rune('A'+ex-1)), 1, 5, 200)...)
+	}
+	got := upcoming(groupSessions(sets), Baseline{VolumeLb: 90_000}, 2)
+	if len(got) != 2 {
+		t.Fatalf("got %d, want 2 — five lifts and a tonnage mark were available", len(got))
+	}
+}
+
+// Two lifts level on fraction must come back in the same order every time. The
+// bests are walked out of a map, and a report that reshuffles between identical
+// requests is one nobody trusts.
+func TestUpcomingIsStableAcrossRunsWhenLiftsTie(t *testing.T) {
+	var sets []Set
+	sets = append(sets, mkSets(1, day(2026, time.March, 2), 3, "Lift C", 1, 5, 200)...)
+	sets = append(sets, mkSets(1, day(2026, time.March, 2), 1, "Lift A", 1, 5, 200)...)
+	sets = append(sets, mkSets(1, day(2026, time.March, 2), 2, "Lift B", 1, 5, 200)...)
+
+	first := upcoming(groupSessions(sets), Baseline{}, UpcomingLimit)
+	for i := 0; i < 5; i++ {
+		again := upcoming(groupSessions(sets), Baseline{}, UpcomingLimit)
+		for j := range first {
+			if again[j].ExerciseID != first[j].ExerciseID {
+				t.Fatalf("run %d ordered %d at %d, first run had %d",
+					i, again[j].ExerciseID, j, first[j].ExerciseID)
+			}
+		}
+	}
+}

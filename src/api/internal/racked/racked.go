@@ -168,11 +168,19 @@ type Report struct {
 	// surface to work out: two readers of the same Hours array picked different
 	// hours out of a tie, so the page highlighted one bar while the label named
 	// another.
-	PeakHour       int
-	Streak         Streak
-	Attendance     Attendance
-	PRs            []PR
-	Milestones     []Milestone
+	PeakHour   int
+	Streak     Streak
+	Attendance Attendance
+	PRs        []PR
+	Milestones []Milestone
+	// Upcoming is the nearest thresholds NOT yet reached, closest first — the only
+	// forward-looking figure in the report. Short or empty rather than padded; see
+	// upcoming() for everything deliberately left out of it.
+	//
+	// On the Report and not on the session recap: what a lifter is closing in on is
+	// a standing fact about their training, not something one workout is a record
+	// of, and a recap is a record of a moment.
+	Upcoming       []UpcomingMilestone
 	HeaviestSet    *SetHighlight
 	FastestSession *SessionHighlight
 	Deloads        []Deload
@@ -437,6 +445,7 @@ func Build(in Input) Report {
 		Streak:      streak(sessions),
 		PRs:         personalRecords(sessions, in.Baseline),
 		Milestones:  milestones(sessions, in.Baseline),
+		Upcoming:    upcoming(sessions, in.Baseline, UpcomingLimit),
 		Deloads:     deloads(sessions),
 	}
 

@@ -1,7 +1,11 @@
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/svelte";
+import { describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/svelte";
 import AchievementList from "./AchievementList.svelte";
-import { testAchievement, testLifterAchievement } from "./testFixtures";
+import {
+  testAchievement,
+  testLifterAchievement,
+  testUpcomingMilestone,
+} from "./testFixtures";
 
 describe("the empty state", () => {
   // Second person to yourself and third person about anybody else. Getting this
@@ -82,5 +86,90 @@ describe("an entry", () => {
     });
     expect(screen.getByText("Top of Week streak")).toBeInTheDocument();
     expect(screen.getByText("Top of Volume")).toBeInTheDocument();
+  });
+});
+
+// What is still ahead. Only ever drawn about yourself — what somebody else is
+// closing in on is their business, so another lifter's profile passes none.
+describe("closing in", () => {
+  it("names what is next and how far off it is", () => {
+    render(AchievementList, {
+      props: { items: [], you: true, upcoming: [testUpcomingMilestone()] },
+    });
+
+    expect(screen.getByText("Closing in")).toBeInTheDocument();
+    expect(screen.getByText("First 225 lb Squat")).toBeInTheDocument();
+    expect(screen.getByText("20 lb to go")).toBeInTheDocument();
+  });
+
+  // RecapHighlights' rule: draw nothing rather than an empty congratulation. A
+  // lifter past every rung, or one who has trained nothing, gets no heading.
+  it("draws nothing at all when there is nothing to chase", () => {
+    render(AchievementList, { props: { items: [testLifterAchievement()], you: true } });
+    expect(screen.queryByText("Closing in")).not.toBeInTheDocument();
+  });
+
+  it("lists every rung it is given", () => {
+    render(AchievementList, {
+      props: {
+        items: [],
+        you: true,
+        upcoming: [
+          testUpcomingMilestone(),
+          testUpcomingMilestone({
+            kind: "volume",
+            label: "1,000,000 lb lifted, all time",
+            targetLb: 1_000_000,
+            currentLb: 820_000,
+            exerciseId: 0,
+            exerciseName: "",
+          }),
+        ],
+      },
+    });
+
+    expect(screen.getByText("First 225 lb Squat")).toBeInTheDocument();
+    expect(screen.getByText("1,000,000 lb lifted, all time")).toBeInTheDocument();
+    expect(screen.getByText("180,000 lb to go")).toBeInTheDocument();
+  });
+});
+
+describe("sharing", () => {
+  // Offered only on a crown they still hold. "I used to be top of this" is not a
+  // brag, and the list keeps showing lapsed reigns for a different reason.
+  it("offers a share button for a crown they hold", () => {
+    render(AchievementList, {
+      props: { items: [testLifterAchievement()], you: true, onShare: () => {} },
+    });
+    expect(
+      screen.getByRole("button", { name: "Share Top of Week streak" }),
+    ).toBeInTheDocument();
+  });
+
+  it("offers none for a reign that has ended", () => {
+    render(AchievementList, {
+      props: {
+        items: [testLifterAchievement({ heldNow: false })],
+        you: true,
+        onShare: () => {},
+      },
+    });
+    expect(screen.queryByRole("button", { name: /^Share/ })).not.toBeInTheDocument();
+  });
+
+  // Another lifter's profile passes no handler, so there is nothing to press —
+  // sharing somebody else's crown is not the reader's to do.
+  it("offers none when no handler was given", () => {
+    render(AchievementList, { props: { items: [testLifterAchievement()] } });
+    expect(screen.queryByRole("button", { name: /^Share/ })).not.toBeInTheDocument();
+  });
+
+  it("hands the achievement back when pressed", async () => {
+    const onShare = vi.fn();
+    const held = testLifterAchievement();
+    render(AchievementList, { props: { items: [held], you: true, onShare } });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Share Top of Week streak" }));
+    expect(onShare).toHaveBeenCalledWith(held);
   });
 });

@@ -116,10 +116,16 @@ export function canShareFile(file: File): boolean {
  * changing their mind, not a failure, and reporting it as one would put an
  * error message on screen every time somebody backed out.
  */
-export async function shareOrDownload(file: File): Promise<ShareOutcome> {
+export async function shareOrDownload(
+  file: File,
+  // What the share sheet calls it. Defaulted to the monthly recap's name, which is
+  // what this said unconditionally when there was only one card to send — a crown
+  // offered as "Racked" is the share sheet describing the wrong thing.
+  title: string = "Racked",
+): Promise<ShareOutcome> {
   if (canShareFile(file)) {
     try {
-      await navigator.share({ files: [file], title: "Racked" });
+      await navigator.share({ files: [file], title });
       return "shared";
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") return "cancelled";

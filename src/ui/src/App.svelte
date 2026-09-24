@@ -202,7 +202,11 @@
   // which chunk has arrived. It asks far less often; see the module.
   $effect(() => {
     if (!auth.me || auth.me.mustChangePassword) return;
-    return startAchievementPolling();
+    // The id is handed over rather than read inside the module: auth already
+    // imports achievements' reset, so the module reading auth would be a cycle.
+    // It is what lets a crown the CALLER just took be celebrated — the server
+    // tells everybody except them.
+    return startAchievementPolling(auth.me.id);
   });
 
   // The live socket, on exactly the same terms and for the same reasons: the

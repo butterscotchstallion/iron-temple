@@ -5735,7 +5735,7 @@ components:
       required:
         [period, totals, change, comparison, split, muscles, lifts, series, mostImproved,
          bodyweight, days, weekdays, bestWeekday, hours, peakHour, hourLabel, streak, attendance,
-         prs, milestones, heaviestSet, fastestSession, deloads, archetype]
+         prs, milestones, upcomingMilestones, heaviestSet, fastestSession, deloads, archetype]
       properties:
         period:
           $ref: "#/components/schemas/RackedPeriod"
@@ -5841,6 +5841,28 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/RackedMilestone"
+        upcomingMilestones:
+          type: array
+          description: >
+            The nearest thresholds this lifter has NOT reached, **closest first** —
+            the only forward-looking figure in this report. Everything else here is
+            a reading of what happened; this is what there is to aim at.
+
+            **Closest means fraction of the way there, not pounds remaining.** Those
+            rank differently and only one is useful: 20 lb short of a 225 lb squat is
+            91% of the way, where 180,000 lb short of a million is 82%. Ranked by
+            pounds the squat would sit behind every tonnage rung forever. A surface
+            showing only the first entry therefore shows the one most nearly in hand.
+
+            **Short or empty rather than padded**, and at most four. Absent entries
+            are deliberate: a lift the lifter has never loaded claims nothing (a
+            banded movement is seeded at 0 lb and "95 lb to go" on it is a category
+            error), a lifter past the top of a ladder is given no invented rung above
+            it, a lift not trained during the period is not something they are
+            closing in on, and somebody who has moved nothing at all is not closing
+            in on their first 100,000 lb.
+          items:
+            $ref: "#/components/schemas/RackedUpcomingMilestone"
         heaviestSet:
           allOf:
             - $ref: "#/components/schemas/RackedSetHighlight"
@@ -6265,6 +6287,43 @@ components:
           type: integer
           format: int64
           description: Zero for a volume milestone, which belongs to no single lift.
+        exerciseName:
+          type: string
+
+    RackedUpcomingMilestone:
+      type: object
+      required: [kind, label, targetLb, currentLb, exerciseId, exerciseName]
+      description: >
+        A threshold this lifter has NOT reached, and the nearest one of its kind.
+
+        The mirror of `RackedMilestone`, and a separate schema rather than a
+        variant of it: a crossed threshold has a date and a value, an uncrossed one
+        has a target and a distance. `label` is built from the same phrasing, so the
+        thing a lifter was chasing reads the same as the thing they are eventually
+        congratulated for.
+      properties:
+        kind:
+          type: string
+          enum: [volume, plate]
+        label:
+          type: string
+          example: First 225 lb Bench Press
+        targetLb:
+          type: number
+          description: The rung being aimed at.
+        currentLb:
+          type: number
+          description: >
+            Where the lifter stands now — lifetime tonnage including this period for
+            `volume`, the lift's all-time best top set for `plate`.
+
+            Sent alongside `targetLb` rather than as a remainder so a surface can
+            draw a bar without reconstructing the denominator, and so the bar and
+            the "20 lb to go" beside it cannot disagree.
+        exerciseId:
+          type: integer
+          format: int64
+          description: Zero for a volume threshold, which belongs to no single lift.
         exerciseName:
           type: string
 

@@ -358,7 +358,9 @@ func rackedReportToDTO(rep racked.Report) rackedReportDTO {
 		},
 		PRs:        make([]rackedPRDTO, 0, len(rep.PRs)),
 		Milestones: make([]rackedMilestoneDTO, 0, len(rep.Milestones)),
-		Deloads:    make([]rackedDeloadDTO, 0, len(rep.Deloads)),
+		UpcomingMilestones: make(
+			[]rackedUpcomingMilestoneDTO, 0, len(rep.Upcoming)),
+		Deloads: make([]rackedDeloadDTO, 0, len(rep.Deloads)),
 		Archetype: rackedArchetypeDTO{
 			Name:        rep.Archetype.Name,
 			Description: rep.Archetype.Description,
@@ -451,6 +453,19 @@ func rackedReportToDTO(rep racked.Report) rackedReportDTO {
 	}
 	for _, m := range rep.Milestones {
 		out.Milestones = append(out.Milestones, rackedMilestoneToDTO(m))
+	}
+	// Order is the report's, and it is load-bearing: nearest first by fraction
+	// completed, so a surface showing only the first one shows the one most nearly
+	// in hand. Re-sorting here would need the same rule in a second place.
+	for _, u := range rep.Upcoming {
+		out.UpcomingMilestones = append(out.UpcomingMilestones, rackedUpcomingMilestoneDTO{
+			Kind:         string(u.Kind),
+			Label:        u.Label,
+			TargetLb:     u.TargetLb,
+			CurrentLb:    u.CurrentLb,
+			ExerciseID:   u.ExerciseID,
+			ExerciseName: u.ExerciseName,
+		})
 	}
 	if h := rep.HeaviestSet; h != nil {
 		out.HeaviestSet = &rackedSetHighlightDTO{

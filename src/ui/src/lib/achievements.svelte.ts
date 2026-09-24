@@ -4,6 +4,9 @@ import {
   type AchievementHolders,
   type Lifter,
 } from "./api";
+import { celebrate } from "./celebrate";
+import { noteCrowns, resetCrownWatch } from "./crownWatch";
+import { pushToast } from "./toast.svelte";
 
 // Who is wearing what, for every lifter on the install at once.
 //
@@ -140,12 +143,42 @@ export function achievementLabel(slug: string | undefined): string | null {
  *
  * `loaded` is deliberately not set on failure, so a surface that wants to tell
  * "nobody holds anything" from "we have not been told yet" still can.
+ *
+ * `viewerId` is what lets this celebrate. It is a PARAMETER rather than a read of
+ * `auth.me`, and that is a hard constraint and not a preference: auth.svelte.ts
+ * imports `resetAchievements` from this module, so importing auth here would close
+ * a cycle. App.svelte's poller has the id and hands it over.
  */
-export async function loadAchievements(): Promise<void> {
+export async function loadAchievements(viewerId?: number): Promise<void> {
   const result = await getAchievements();
   if (result.status !== 200) return;
   achievements.items = result.data.items;
   achievements.loaded = true;
+  announce(viewerId, result.data.items);
+}
+
+/**
+ * Mark a crown the lifter has just taken.
+ *
+ * The server tells everybody else and deliberately not them, so this is the
+ * earner's half of the news — and it is a MOMENT rather than a panel row, which is
+ * why it is a toast and confetti and not a notification.
+ *
+ * ONE BURST OF CONFETTI, however many crowns arrived at once. The reconciler runs
+ * a whole pass at a time, so taking three boards in one sweep is ordinary; three
+ * overlapping bursts is not three times the celebration, it is a stutter. Each
+ * crown still gets its own toast, because each is a different thing to have won.
+ *
+ * Silent on the first observation and on a crown already held — see noteCrowns.
+ */
+function announce(viewerId: number | undefined, items: AchievementHolders[]): void {
+  const fresh = noteCrowns(viewerId, items);
+  if (fresh.length === 0) return;
+
+  for (const crown of fresh) {
+    pushToast({ title: "You took a crown", body: crown.label, tone: "success" });
+  }
+  celebrate({ particleCount: 140, spread: 75, origin: { y: 0.6 } });
 }
 
 /**
@@ -170,10 +203,10 @@ const POLL_MS = 10 * 60 * 1000;
  * are lazy-loaded, and whether anybody is keeping them current must not depend
  * on which chunk has arrived.
  */
-export function startAchievementPolling(): () => void {
+export function startAchievementPolling(viewerId?: number): () => void {
   const tick = () => {
     if (document.visibilityState !== "visible") return;
-    void loadAchievements();
+    void loadAchievements(viewerId);
   };
 
   tick();
@@ -191,4 +224,9 @@ export function startAchievementPolling(): () => void {
 export function resetAchievements(): void {
   achievements.items = [];
   achievements.loaded = false;
+  // The celebration's memory goes too. It names which crowns one account held, so
+  // leaving it would compare the next lifter against somebody else's standing —
+  // and it is cleared here rather than from auth.svelte.ts because that module
+  // already imports this one, and the reverse would be a cycle.
+  resetCrownWatch();
 }

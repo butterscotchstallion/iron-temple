@@ -1,7 +1,10 @@
 <script lang="ts">
   import Crown from "@lucide/svelte/icons/crown";
+  import Share2 from "@lucide/svelte/icons/share-2";
   import { formatLongDate } from "./date";
-  import type { LifterAchievement } from "./api";
+  import { formatRemaining } from "./achievementShareCard";
+  import { barFraction } from "./racked";
+  import type { LifterAchievement, RackedUpcomingMilestone } from "./api";
 
   // One lifter's achievements, as a list.
   //
@@ -14,11 +17,24 @@
   // Second person to yourself and third person about anybody else is the
   // difference between "you haven't won anything yet" and a sentence about a
   // person who is not reading it.
+  //
+  // `upcoming` and `onShare` are the halves that only make sense about yourself.
+  // What somebody else is closing in on is their business, and sharing their crown
+  // is not the reader's to do — so both are absent on another lifter's profile and
+  // the component draws neither.
   let {
     items,
     you = false,
     name = "",
-  }: { items: LifterAchievement[]; you?: boolean; name?: string } = $props();
+    upcoming = [],
+    onShare,
+  }: {
+    items: LifterAchievement[];
+    you?: boolean;
+    name?: string;
+    upcoming?: RackedUpcomingMilestone[];
+    onShare?: (held: LifterAchievement) => void;
+  } = $props();
 
   /**
    * What an entry says under its label.
@@ -81,7 +97,56 @@
             {item.achievement.description}
           </p>
         </div>
+        <!-- Only on a crown they still hold, and only on their own profile. A
+             card reading "I used to be top of this" is not a brag, and sharing
+             somebody else's is not the reader's to do. -->
+        {#if onShare && item.heldNow}
+          <button
+            type="button"
+            class="shrink-0 rounded-full p-2 text-muted-foreground transition hover:bg-white/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            aria-label="Share {item.achievement.label}"
+            onclick={() => onShare(item)}
+          >
+            <Share2 class="size-4" aria-hidden="true" />
+          </button>
+        {/if}
       </li>
     {/each}
   </ul>
+{/if}
+
+<!-- What is still ahead. Below what has been earned, because the list above is
+     what the section was opened for — and absent entirely when there is nothing
+     to chase, the same call RecapHighlights makes rather than drawing an empty
+     congratulation. -->
+{#if upcoming.length > 0}
+  <div class="mt-4 border-t border-border/60 pt-4">
+    <h4 class="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+      Closing in
+    </h4>
+    <ul class="mt-3 flex flex-col gap-3">
+      {#each upcoming as next (next.label)}
+        <li>
+          <p class="flex items-baseline justify-between gap-2">
+            <span class="truncate text-sm text-foreground">{next.label}</span>
+            <span class="shrink-0 text-xs font-semibold tabular-nums text-primary">
+              {formatRemaining(next)}
+            </span>
+          </p>
+          <!-- aria-hidden: the bar is a picture of the figure beside it, and a
+               screen reader reading both says the same thing twice. The same
+               call every other bar in this app makes. -->
+          <div
+            class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/10"
+            aria-hidden="true"
+          >
+            <div
+              class="h-full rounded-full bg-primary"
+              style="width:{barFraction(next.currentLb, next.targetLb) * 100}%"
+            ></div>
+          </div>
+        </li>
+      {/each}
+    </ul>
+  </div>
 {/if}
