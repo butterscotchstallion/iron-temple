@@ -6,6 +6,17 @@ info:
     REST API for the Iron Temple weight-lifting tracker. All weights are in
     pounds (lb).
 
+    ONE ENDPOINT IS MISSING FROM THIS DOCUMENT AND IT IS NOT AN OVERSIGHT. The
+    install also serves `GET /api/v1/live`, an authenticated WebSocket that
+    tells a signed-in client when its notification panel has changed. OpenAPI
+    3.0 cannot describe a WebSocket, and a fabricated `paths` entry for one
+    would be a lie in the shape of a schema — so the contract for it lives in
+    `docs/live-socket.md` instead, and this says so rather than staying silent.
+
+    Nothing there is required to use this API. Every frame the socket sends is
+    a signal to refetch one of the endpoints below, so a client that ignores it
+    entirely sees the same data a little later.
+
     Authentication is a session cookie (`it_session`), issued by
     `POST /auth/login` and revoked by `POST /auth/logout`. Every endpoint
     requires it except `/health`, the `/auth/*` endpoints, and avatar images.

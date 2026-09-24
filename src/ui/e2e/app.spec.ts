@@ -349,6 +349,13 @@ test.beforeEach(async ({ page }) => {
     route.fulfill({ json: { items: [], total: 0, limit: 20, offset: 0 } }),
   );
 
+  // page.route cannot see a WebSocket, and this suite does not leave requests
+  // unstubbed. Closed rather than answered: with no socket the app falls back
+  // to polling, which is the path every other test here already asserts. An
+  // unstubbed ws:// would instead reconnect-loop for the life of every test,
+  // because `vite preview` proxies nothing.
+  await page.routeWebSocket("**/api/v1/live", (ws) => ws.close());
+
   // The feed card at the foot of Home, which every test that loads "/" now
   // reaches. Empty, so the card renders nothing at all — which is what a
   // one-lifter install looks like and what these tests were written against.

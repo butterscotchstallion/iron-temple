@@ -84,6 +84,13 @@ async function mockCommon(page: import("@playwright/test").Page) {
     route.fulfill({ json: { items: [], total: 0, limit: 20, offset: 0 } }),
   );
 
+  // page.route cannot see a WebSocket, and this suite does not leave requests
+  // unstubbed. Closed rather than answered: with no socket the app falls back
+  // to polling, which is the path every other test here already asserts. An
+  // unstubbed ws:// would instead reconnect-loop for the life of every test,
+  // because `vite preview` proxies nothing.
+  await page.routeWebSocket("**/api/v1/live", (ws) => ws.close());
+
   // The feed card on Home, and the roster the account menu links to.
   await page.route("**/api/v1/feed**", (route) =>
     route.fulfill({ json: { items: [], limit: 20, offset: 0 } }),

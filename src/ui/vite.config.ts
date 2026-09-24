@@ -482,7 +482,20 @@ export default defineConfig({
         // from the API's point of view, which is what production is too
         // (Traefik path-routes /api and preserves Host). The target is a plain
         // Go server that ignores Host, so nothing needs the rewrite.
+        //
+        // NOW LOAD-BEARING FOR A SECOND REASON. /api/v1/live is a WebSocket,
+        // and its handshake is checked against the same origin rule — but a
+        // handshake is a GET, which the CSRF middleware skips, so the socket
+        // enforces it directly instead. With changeOrigin on, Host would become
+        // localhost:8080 while the browser still sent Origin: localhost:5173,
+        // and every socket in development would be refused rather than only
+        // every POST.
         changeOrigin: false,
+        // Upgrade requests are proxied too, which is what /api/v1/live needs.
+        // Without this the handshake gets an ordinary HTTP response, the client
+        // reconnects on a backoff forever, and the app quietly falls back to
+        // polling — working, but never live, and with nothing saying why.
+        ws: true,
       },
     },
   },

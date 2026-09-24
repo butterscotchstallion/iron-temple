@@ -56,6 +56,11 @@ Conventions for agents (and humans) working in this repository.
   git. Never hand-edit it, and never commit it — change the spec instead.
 - **`src/api/openapi.yaml` is the contract.** Adding an endpoint or a response field is
   a spec edit first; the client and its types follow from regeneration.
+- **The live WebSocket is the one exception, and it is hand-maintained on both sides.**
+  OpenAPI 3.0 cannot describe `GET /api/v1/live`, so [`docs/live-socket.md`](docs/live-socket.md)
+  is its contract. Nothing generates either end: `src/api/internal/live/event.go` and
+  `src/ui/src/lib/live.svelte.ts` have to be kept in step with that document by hand.
+  Changing a frame means editing all three.
 - **Every npm script that imports the client regenerates it first.** `dev`, `build`,
   `check`, `test:unit`, `test:coverage` and `test:e2e` all chain `pnpm generate:api`, so
   a stale client can't survive into a type-check. Keep that chain when adding a script —

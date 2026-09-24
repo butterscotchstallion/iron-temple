@@ -82,7 +82,7 @@ func (q *Queries) CountUnreadNotifications(ctx context.Context, userID int32) (i
 	return total, err
 }
 
-const createCommentNotifications = `-- name: CreateCommentNotifications :exec
+const createCommentNotifications = `-- name: CreateCommentNotifications :many
 INSERT INTO notifications (user_id, actor_id, kind, session_id, comment_id)
 SELECT DISTINCT ON (recipient.user_id)
        recipient.user_id,
@@ -108,6 +108,7 @@ WHERE recipient.user_id IS NOT NULL
   AND recipient.user_id <> $1::int
 ORDER BY recipient.user_id,
          CASE recipient.kind WHEN 'comment' THEN 0 ELSE 1 END
+RETURNING user_id
 `
 
 type CreateCommentNotificationsParams struct {
@@ -134,16 +135,35 @@ type CreateCommentNotificationsParams struct {
 // The author is filtered out last, which covers both halves at once: commenting
 // on your own session notifies nobody, and replying to a thread you are already
 // in does not notify you.
-func (q *Queries) CreateCommentNotifications(ctx context.Context, arg CreateCommentNotificationsParams) error {
-	_, err := q.db.Exec(ctx, createCommentNotifications, arg.ActorID, arg.SessionID, arg.CommentID)
-	return err
+// Returns every recipient it chose, so the socket can tell exactly the people
+// this query decided to tell. See CreateReactionNotification for why the answer
+// comes back from SQL rather than being recomputed in Go.
+func (q *Queries) CreateCommentNotifications(ctx context.Context, arg CreateCommentNotificationsParams) ([]int32, error) {
+	rows, err := q.db.Query(ctx, createCommentNotifications, arg.ActorID, arg.SessionID, arg.CommentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int32
+	for rows.Next() {
+		var user_id int32
+		if err := rows.Scan(&user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, user_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
-const createJoinNotifications = `-- name: CreateJoinNotifications :exec
+const createJoinNotifications = `-- name: CreateJoinNotifications :many
 INSERT INTO notifications (user_id, actor_id, kind)
 SELECT u.id, $1::int, 'joined'::text
 FROM users u
 WHERE u.id <> $1::int
+RETURNING user_id
 `
 
 // CreateJoinNotifications announces a new account to everybody already here.
@@ -155,12 +175,28 @@ WHERE u.id <> $1::int
 //
 // No session, no comment, no emoji; 'joined' is the kind whose subject is the
 // actor themselves.
-func (q *Queries) CreateJoinNotifications(ctx context.Context, actorID int32) error {
-	_, err := q.db.Exec(ctx, createJoinNotifications, actorID)
-	return err
+// Returns everybody told, which on this one is everybody on the install.
+func (q *Queries) CreateJoinNotifications(ctx context.Context, actorID int32) ([]int32, error) {
+	rows, err := q.db.Query(ctx, createJoinNotifications, actorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int32
+	for rows.Next() {
+		var user_id int32
+		if err := rows.Scan(&user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, user_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
-const createReactionNotification = `-- name: CreateReactionNotification :exec
+const createReactionNotification = `-- name: CreateReactionNotification :many
 
 INSERT INTO notifications (user_id, actor_id, kind, session_id, emoji)
 SELECT s.user_id,
@@ -185,6 +221,7 @@ WHERE s.id = $3::int
       AND n.emoji = $2::text
       AND n.archived_at IS NULL
   )
+RETURNING user_id
 `
 
 type CreateReactionNotificationParams struct {
@@ -227,18 +264,39 @@ type CreateReactionNotificationParams struct {
 // same applause given again today, and the lifter would simply never be told.
 // An archived notification is not news anybody still has; a fresh tap after it
 // is gone is.
-func (q *Queries) CreateReactionNotification(ctx context.Context, arg CreateReactionNotificationParams) error {
-	_, err := q.db.Exec(ctx, createReactionNotification, arg.ActorID, arg.Emoji, arg.SessionID)
-	return err
+// RETURNS ITS RECIPIENT, which is how the live socket learns who to push to
+// without the rule for "who hears about this" moving into Go. The query still
+// decides; it now also says what it decided. It is faithful in the negative
+// case too: a self-reaction or an ownerless session matches nothing above, so
+// the silence reproduces as "no event" with no Go-side guard to forget.
+func (q *Queries) CreateReactionNotification(ctx context.Context, arg CreateReactionNotificationParams) ([]int32, error) {
+	rows, err := q.db.Query(ctx, createReactionNotification, arg.ActorID, arg.Emoji, arg.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int32
+	for rows.Next() {
+		var user_id int32
+		if err := rows.Scan(&user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, user_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
-const deleteReactionNotification = `-- name: DeleteReactionNotification :exec
+const deleteReactionNotification = `-- name: DeleteReactionNotification :many
 DELETE FROM notifications
 WHERE kind = 'reaction'
   AND actor_id = $1::int
   AND session_id = $2::int
   AND emoji = $3::text
   AND read_at IS NULL
+RETURNING user_id
 `
 
 type DeleteReactionNotificationParams struct {
@@ -271,9 +329,27 @@ type DeleteReactionNotificationParams struct {
 // The applause itself is gone either way. This is only about whether the
 // telling of it is also taken back, and it can only honestly be taken back
 // before it lands.
-func (q *Queries) DeleteReactionNotification(ctx context.Context, arg DeleteReactionNotificationParams) error {
-	_, err := q.db.Exec(ctx, deleteReactionNotification, arg.ActorID, arg.SessionID, arg.Emoji)
-	return err
+// Returns whose panel changed, for the same reason the insert above does: a
+// withdrawal removes a row somebody may be looking at, and they should see it
+// go rather than find out on the next poll.
+func (q *Queries) DeleteReactionNotification(ctx context.Context, arg DeleteReactionNotificationParams) ([]int32, error) {
+	rows, err := q.db.Query(ctx, deleteReactionNotification, arg.ActorID, arg.SessionID, arg.Emoji)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int32
+	for rows.Next() {
+		var user_id int32
+		if err := rows.Scan(&user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, user_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listNotifications = `-- name: ListNotifications :many

@@ -150,7 +150,8 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 	// only while the install has no accounts, so the lifter it creates is the
 	// first one and there is nobody to tell. Calling it there would be a query
 	// that can only ever select zero rows.
-	if err := qtx.CreateJoinNotifications(ctx, user.ID); err != nil {
+	told, err := qtx.CreateJoinNotifications(ctx, user.ID)
+	if err != nil {
 		internalError(w)
 		return
 	}
@@ -159,6 +160,11 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 		internalError(w)
 		return
 	}
+	// After the commit, never deferred — see liveEvents. Everybody already on
+	// the install hears about the new account without waiting out a poll.
+	events := s.newLiveEvents()
+	events.notify(told)
+	events.publish()
 
 	writeJSON(w, http.StatusCreated, adminUserDTO{
 		ID:                 user.ID,

@@ -175,7 +175,12 @@ WHERE created_at < now() - make_interval(days => sqlc.arg('older_than_days')::in
 -- same applause given again today, and the lifter would simply never be told.
 -- An archived notification is not news anybody still has; a fresh tap after it
 -- is gone is.
--- name: CreateReactionNotification :exec
+-- RETURNS ITS RECIPIENT, which is how the live socket learns who to push to
+-- without the rule for "who hears about this" moving into Go. The query still
+-- decides; it now also says what it decided. It is faithful in the negative
+-- case too: a self-reaction or an ownerless session matches nothing above, so
+-- the silence reproduces as "no event" with no Go-side guard to forget.
+-- name: CreateReactionNotification :many
 INSERT INTO notifications (user_id, actor_id, kind, session_id, emoji)
 SELECT s.user_id,
        sqlc.arg('actor_id')::int,
@@ -198,7 +203,8 @@ WHERE s.id = sqlc.arg('session_id')::int
       AND n.session_id = sqlc.arg('session_id')::int
       AND n.emoji = sqlc.arg('emoji')::text
       AND n.archived_at IS NULL
-  );
+  )
+RETURNING user_id;
 
 -- DeleteReactionNotification withdraws the notification along with the
 -- applause.
@@ -224,13 +230,17 @@ WHERE s.id = sqlc.arg('session_id')::int
 -- The applause itself is gone either way. This is only about whether the
 -- telling of it is also taken back, and it can only honestly be taken back
 -- before it lands.
--- name: DeleteReactionNotification :exec
+-- Returns whose panel changed, for the same reason the insert above does: a
+-- withdrawal removes a row somebody may be looking at, and they should see it
+-- go rather than find out on the next poll.
+-- name: DeleteReactionNotification :many
 DELETE FROM notifications
 WHERE kind = 'reaction'
   AND actor_id = sqlc.arg('actor_id')::int
   AND session_id = sqlc.arg('session_id')::int
   AND emoji = sqlc.arg('emoji')::text
-  AND read_at IS NULL;
+  AND read_at IS NULL
+RETURNING user_id;
 
 -- CreateCommentNotifications fans one comment out to everybody it concerns.
 --
@@ -250,7 +260,10 @@ WHERE kind = 'reaction'
 -- The author is filtered out last, which covers both halves at once: commenting
 -- on your own session notifies nobody, and replying to a thread you are already
 -- in does not notify you.
--- name: CreateCommentNotifications :exec
+-- Returns every recipient it chose, so the socket can tell exactly the people
+-- this query decided to tell. See CreateReactionNotification for why the answer
+-- comes back from SQL rather than being recomputed in Go.
+-- name: CreateCommentNotifications :many
 INSERT INTO notifications (user_id, actor_id, kind, session_id, comment_id)
 SELECT DISTINCT ON (recipient.user_id)
        recipient.user_id,
@@ -275,7 +288,8 @@ FROM (
 WHERE recipient.user_id IS NOT NULL
   AND recipient.user_id <> sqlc.arg('actor_id')::int
 ORDER BY recipient.user_id,
-         CASE recipient.kind WHEN 'comment' THEN 0 ELSE 1 END;
+         CASE recipient.kind WHEN 'comment' THEN 0 ELSE 1 END
+RETURNING user_id;
 
 -- CreateJoinNotifications announces a new account to everybody already here.
 --
@@ -286,8 +300,10 @@ ORDER BY recipient.user_id,
 --
 -- No session, no comment, no emoji; 'joined' is the kind whose subject is the
 -- actor themselves.
--- name: CreateJoinNotifications :exec
+-- Returns everybody told, which on this one is everybody on the install.
+-- name: CreateJoinNotifications :many
 INSERT INTO notifications (user_id, actor_id, kind)
 SELECT u.id, sqlc.arg('actor_id')::int, 'joined'::text
 FROM users u
-WHERE u.id <> sqlc.arg('actor_id')::int;
+WHERE u.id <> sqlc.arg('actor_id')::int
+RETURNING user_id;

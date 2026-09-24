@@ -14,6 +14,7 @@
   import { auth, loadMe } from "./lib/auth.svelte";
   import { loadHomeSessions } from "./lib/homeData";
   import { startPolling as startNotificationPolling } from "./lib/notifications.svelte";
+  import { startLive } from "./lib/live.svelte";
   import { startPolling } from "./lib/version.svelte";
   import { deferred } from "./lib/deferred.svelte";
   import { watchConnectivity } from "./lib/connectivity.svelte";
@@ -192,6 +193,16 @@
   $effect(() => {
     if (!auth.me || auth.me.mustChangePassword) return;
     return startNotificationPolling();
+  });
+
+  // The live socket, on exactly the same terms and for the same reasons: the
+  // /live route is behind both gates too, so an account that cannot poll
+  // cannot connect either. The poller above does not stop when this connects —
+  // it backs off to a safety net, because a proxy that eats upgrades has to
+  // leave a working app behind. See live.svelte.ts.
+  $effect(() => {
+    if (!auth.me || auth.me.mustChangePassword) return;
+    return startLive();
   });
 </script>
 
