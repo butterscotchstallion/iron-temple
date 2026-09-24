@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeWebSocket } from "../../test-support/fakeWebSocket";
-import { live, resetLive, startLive } from "./live.svelte";
+import { live, resetLive, startLive, watchSession } from "./live.svelte";
 import { notifications } from "./notifications.svelte";
 
 // The live socket's client half.
@@ -252,5 +252,122 @@ describe("tearing down", () => {
 
     expect(ws.closed).toBe(1);
     expect(live.connected).toBe(false);
+  });
+});
+
+describe("watching a session", () => {
+  beforeEach(async () => {
+    start();
+    FakeWebSocket.last.welcome();
+    await vi.advanceTimersByTimeAsync(0);
+    listNotifications.mockClear();
+  });
+
+  it("subscribes on the first watcher and unsubscribes after the last", () => {
+    const stop = watchSession(42, () => {});
+    expect(FakeWebSocket.last.messages()).toEqual([
+      { type: "subscribe", sessionId: 42 },
+    ]);
+
+    stop();
+    expect(FakeWebSocket.last.messages()).toEqual([
+      { type: "subscribe", sessionId: 42 },
+      { type: "unsubscribe", sessionId: 42 },
+    ]);
+  });
+
+  // Refcounted: one card unmounting must not cancel another's feed.
+  it("subscribes once for two watchers of the same session", () => {
+    const a = watchSession(42, () => {});
+    const b = watchSession(42, () => {});
+    expect(FakeWebSocket.last.messages()).toHaveLength(1);
+
+    a();
+    // Still one watcher left, so nothing is given up.
+    expect(FakeWebSocket.last.messages()).toHaveLength(1);
+
+    b();
+    expect(FakeWebSocket.last.messages()).toEqual([
+      { type: "subscribe", sessionId: 42 },
+      { type: "unsubscribe", sessionId: 42 },
+    ]);
+  });
+
+  it("routes an event only to the watchers of that session", () => {
+    const mine = vi.fn();
+    const theirs = vi.fn();
+    watchSession(42, mine);
+    watchSession(99, theirs);
+
+    FakeWebSocket.last.emit({ type: "comment", sessionId: 42 });
+
+    expect(mine).toHaveBeenCalledWith("comment");
+    expect(theirs).not.toHaveBeenCalled();
+  });
+
+  it("passes the kind through so a caller can refetch only what changed", () => {
+    const watcher = vi.fn();
+    watchSession(42, watcher);
+
+    FakeWebSocket.last.emit({ type: "reaction", sessionId: 42 });
+    expect(watcher).toHaveBeenLastCalledWith("reaction");
+
+    FakeWebSocket.last.emit({ type: "comment", sessionId: 42 });
+    expect(watcher).toHaveBeenLastCalledWith("comment");
+  });
+
+  it("ignores a session event with no session on it", () => {
+    const watcher = vi.fn();
+    watchSession(42, watcher);
+
+    FakeWebSocket.last.emit({ type: "comment" });
+    expect(watcher).not.toHaveBeenCalled();
+  });
+
+  // A gap in the connection is a gap in everything, so every watcher is told to
+  // start again — and the server, which remembers nothing of a dead socket, is
+  // told what this tab is watching.
+  it("re-subscribes and resyncs every watcher on reconnect", async () => {
+    const watcher = vi.fn();
+    watchSession(42, watcher);
+    watchSession(7, watcher);
+
+    FakeWebSocket.last.fail();
+    await vi.advanceTimersByTimeAsync(2000);
+    FakeWebSocket.last.welcome();
+    await vi.advanceTimersByTimeAsync(0);
+
+    const sent = FakeWebSocket.last.messages();
+    expect(sent).toContainEqual({ type: "subscribe", sessionId: 42 });
+    expect(sent).toContainEqual({ type: "subscribe", sessionId: 7 });
+    expect(watcher).toHaveBeenCalledWith("resync");
+  });
+
+  // Registering while disconnected is not an error: the subscription goes out
+  // on the next welcome rather than being lost.
+  it("keeps a subscription made while the socket was down", async () => {
+    FakeWebSocket.last.fail();
+    watchSession(42, () => {});
+
+    await vi.advanceTimersByTimeAsync(2000);
+    FakeWebSocket.last.welcome();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(FakeWebSocket.last.messages()).toContainEqual({
+      type: "subscribe",
+      sessionId: 42,
+    });
+  });
+
+  // A callback is allowed to unsubscribe itself, which would otherwise mutate
+  // the set being iterated and skip whoever came next.
+  it("survives a watcher that unsubscribes from inside its own callback", () => {
+    const second = vi.fn();
+    let stopFirst: () => void = () => {};
+    stopFirst = watchSession(42, () => stopFirst());
+    watchSession(42, second);
+
+    FakeWebSocket.last.emit({ type: "comment", sessionId: 42 });
+    expect(second).toHaveBeenCalledWith("comment");
   });
 });

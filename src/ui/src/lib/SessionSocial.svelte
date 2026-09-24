@@ -8,6 +8,7 @@
   import Skeleton from "./skeleton/Skeleton.svelte";
   import { auth } from "./auth.svelte";
   import { prefersReducedMotion } from "./reducedMotion";
+  import { watchSession } from "./live.svelte";
   import {
     addSessionComment,
     addSessionReaction,
@@ -120,6 +121,24 @@
   }
   async function loadComments() {
     const result = await listSessionComments(sessionId, { limit: COMMENT_PAGE });
+    if (result.status === 200) {
+      comments = result.data.items;
+      commentTotal = result.data.total;
+    }
+  }
+
+  /**
+   * Re-read the conversation without losing what is already on screen.
+   *
+   * A live update must not silently drop the earlier pages somebody has walked
+   * back through, so this asks for as much as is currently held rather than for
+   * the first page. Bounded by the endpoint's own limit of 100: past that the
+   * card falls back to the tail of the thread, which is where a reader who has
+   * paged that far up is not looking anyway.
+   */
+  async function refreshComments() {
+    const held = Math.min(Math.max(comments.length, COMMENT_PAGE), 100);
+    const result = await listSessionComments(sessionId, { limit: held });
     if (result.status === 200) {
       comments = result.data.items;
       commentTotal = result.data.total;
@@ -261,6 +280,26 @@
       day: "numeric",
     });
   }
+
+  // Applause and conversation arriving while this card is on screen.
+  //
+  // Before this, two lifters talking at once each saw a stale list until one of
+  // them reloaded — the recap is the screen where a conversation actually
+  // happens and it was the one screen that never refetched.
+  //
+  // SPLIT BY KIND so a run of reactions does not refetch the comment list and
+  // vice versa; `resync` arrives on every (re)connect and refetches both,
+  // because a gap in the connection is a gap in both.
+  //
+  // The effect's teardown is watchSession's, which is refcounted — so this card
+  // appearing twice on one screen, or being replaced when the route changes,
+  // does not leave the other one unsubscribed.
+  $effect(() =>
+    watchSession(sessionId, (kind) => {
+      if (kind !== "comment") void loadReactions();
+      if (kind !== "reaction") void refreshComments();
+    }),
+  );
 
   onMount(() => {
     // Both at once: they are separate requests and neither waits on the other.
