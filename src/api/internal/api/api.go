@@ -230,6 +230,12 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 					r.Get("/baselines", s.listBaselines)
 					r.Put("/baselines/{exerciseId}", s.setBaseline)
 					r.Delete("/baselines/{exerciseId}", s.clearBaseline)
+					// Leaving the House you are in. Here rather than under
+					// /houses/{houseId} because the subject is the caller, not
+					// the House — there is no id to give, since a lifter is in
+					// at most one. That also keeps it off /lifters, which is
+					// read-only by construction and may never write.
+					r.Delete("/house", s.leaveHouse)
 				})
 			})
 
@@ -276,6 +282,31 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 				// crown beside somebody else's name, which is why it answers
 				// for everybody at once rather than per lifter.
 				r.Get("/achievements", s.getAchievements)
+
+				// Houses. The collection read is top-level for the same reason
+				// /achievements is — the subject is the install, and it is the
+				// read every client makes in order to draw a sigil beside
+				// somebody else's name, so it answers for everybody at once.
+				//
+				// The writes are all here rather than on a path naming a
+				// person, which is the arrangement lifters.go asks for: the
+				// caller is the authenticated user, and the ids in these paths
+				// are a House and a request, never a lifter. The one write
+				// whose subject IS the caller — leaving — is on /me/house.
+				r.Route("/houses", func(r chi.Router) {
+					r.Get("/", s.listHouses)
+					r.Post("/", s.createHouse)
+					r.Get("/{houseId}", s.getHouse)
+					r.Patch("/{houseId}", s.updateHouse)
+					r.Post("/{houseId}/requests", s.requestToJoinHouse)
+					r.Delete("/{houseId}/requests/{requestId}", s.withdrawHouseRequest)
+					// Owner-only, checked in the handlers rather than by a
+					// middleware on a subtree: unlike requireAdmin, the answer
+					// depends on which House is in the path, so there is nothing
+					// a mount point could decide on its own.
+					r.Post("/{houseId}/requests/{requestId}/approve", s.approveHouseRequest)
+					r.Post("/{houseId}/requests/{requestId}/decline", s.declineHouseRequest)
+				})
 
 				// What happened to the caller. Top-level like the two above,
 				// but for the opposite reason: the subject IS a person, and it
