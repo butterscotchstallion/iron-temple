@@ -19,6 +19,16 @@ import (
 // the immediate first pass) must keep using it; this bypasses that guard.
 func (s *Server) SendDueReportsNow(ctx context.Context) { s.sendDueReports(ctx) }
 
+// RefreshCrownsNow runs exactly one crown reconcile and returns when it is done.
+//
+// Test-only, and the synchronous twin of what StartSessionSweeper's goroutine
+// calls hourly — SendDueReportsNow's reasoning applies unchanged. It matters more
+// here, because most of what is worth asserting about this pass is what a SECOND
+// one does not do: a reign must not be restamped, and a crown that has not moved
+// must not be announced again. Sleeping cannot distinguish "did nothing, as
+// intended" from "has not run yet".
+func (s *Server) RefreshCrownsNow(ctx context.Context) { s.refreshCrowns(ctx) }
+
 // SetHasher replaces the password hasher this server uses.
 //
 // Test-only. The _test.go suffix keeps this file out of every non-test build,

@@ -3,6 +3,7 @@
   import { link } from "svelte-spa-router";
   import { Card } from "$lib/components/ui/card";
   import Avatar from "../lib/Avatar.svelte";
+  import LifterName from "../lib/LifterName.svelte";
   import { auth } from "../lib/auth.svelte";
   import { formatLongDate } from "../lib/date";
   import { listLifters, type Lifter } from "../lib/api";
@@ -83,9 +84,7 @@
               <Avatar user={lifter} size={40} />
               <span class="flex min-w-0 flex-col">
                 <span class="flex items-baseline gap-2">
-                  <span class="truncate font-semibold text-foreground">
-                    {lifter.displayName || lifter.username}
-                  </span>
+                  <LifterName {lifter} class="font-semibold text-foreground" />
                   {#if lifter.id === auth.me?.id}
                     <span class="text-xs text-muted-foreground">(you)</span>
                   {/if}

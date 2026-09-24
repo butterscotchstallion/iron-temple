@@ -3,7 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import NotificationBell from "./NotificationBell.svelte";
 import { auth } from "./auth.svelte";
 import { notifications, poll } from "./notifications.svelte";
-import { testLifter, testNotification, testUser } from "./testFixtures";
+import { achievements, resetAchievements } from "./achievements.svelte";
+import {
+  testAchievementHolders,
+  testLifter,
+  testNotification,
+  testUser,
+} from "./testFixtures";
 
 // The header bell and the panel behind it.
 //
@@ -84,6 +90,27 @@ afterEach(() => {
 /** Open the panel and wait for it to draw. */
 async function open() {
   await fireEvent.click(screen.getByRole("button", { name: /notifications/i }));
+}
+
+/**
+ * A crown row: no session, no comment, no emoji, and a board instead.
+ *
+ * Spelled out rather than defaulted in the fixture because every one of those
+ * absences is load-bearing — a crown that arrived carrying a sessionId would
+ * take the reader to a recap, which is the bug this shape prevents.
+ */
+function crownRow(overrides: Record<string, unknown> = {}) {
+  return testNotification({
+    id: 90,
+    kind: "crown",
+    emoji: undefined,
+    sessionId: undefined,
+    sessionOwnerId: undefined,
+    programDayName: undefined,
+    achievementSlug: "crown-streak",
+    actor: testLifter({ id: THEM, displayName: "Grace Hopper" }),
+    ...overrides,
+  });
 }
 
 describe("the badge", () => {
@@ -310,6 +337,64 @@ describe("where a row goes", () => {
 
     await fireEvent.click(await screen.findByText(/joined the gym/));
     await waitFor(() => expect(push).toHaveBeenCalledWith("/lifters/2"));
+  });
+
+  // A crown row is news about a BOARD, so it goes to the standings rather than to
+  // the lifter — the reader's own place on that board is what they want next, and
+  // the leaderboard names the holder anyway.
+  it("sends a crown to the leaderboard", async () => {
+    seed([crownRow()]);
+    render(NotificationBell);
+    await open();
+
+    // "a crown" rather than "the crown on …": no catalogue is seeded in this
+    // block, and where a row goes must not depend on whether the board's name
+    // has arrived.
+    await fireEvent.click(await screen.findByText(/took a crown/));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/leaderboard"));
+  });
+});
+
+// The one kind whose sentence depends on a second endpoint having answered. The
+// board name lives in the achievements catalogue, so the panel has to read well
+// both when it is there and when it is not.
+describe("a crown", () => {
+  beforeEach(() => {
+    achievements.items = [testAchievementHolders()];
+    achievements.loaded = true;
+  });
+  afterEach(() => resetAchievements());
+
+  it("names the board it was won on", async () => {
+    seed([crownRow()]);
+    render(NotificationBell);
+    await open();
+
+    expect(
+      await screen.findByText(/took the crown on Top of Week streak/),
+    ).toBeInTheDocument();
+  });
+
+  // The API withholds the slug when a row folded crowns from several boards,
+  // because naming one of them would be a claim the group does not support. The
+  // panel has to say the unnamed thing rather than render a gap.
+  it("says the unnamed thing when the row spans boards", async () => {
+    seed([crownRow({ achievementSlug: undefined, actorCount: 3 })]);
+    render(NotificationBell);
+    await open();
+
+    expect(await screen.findByText(/took a crown/)).toBeInTheDocument();
+  });
+
+  // Same fallback, different cause: the catalogue is a separate request and may
+  // not have landed when the panel is opened.
+  it("says the unnamed thing before the catalogue has loaded", async () => {
+    resetAchievements();
+    seed([crownRow()]);
+    render(NotificationBell);
+    await open();
+
+    expect(await screen.findByText(/took a crown/)).toBeInTheDocument();
   });
 });
 

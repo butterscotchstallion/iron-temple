@@ -14,6 +14,7 @@
   import { auth, loadMe } from "./lib/auth.svelte";
   import { loadHomeSessions } from "./lib/homeData";
   import { startPolling as startNotificationPolling } from "./lib/notifications.svelte";
+  import { startAchievementPolling } from "./lib/achievements.svelte";
   import { startLive } from "./lib/live.svelte";
   import { startPolling } from "./lib/version.svelte";
   import { deferred } from "./lib/deferred.svelte";
@@ -193,6 +194,15 @@
   $effect(() => {
     if (!auth.me || auth.me.mustChangePassword) return;
     return startNotificationPolling();
+  });
+
+  // Who is wearing which crown. Owned here on the same terms and for the same
+  // reason as the poll above — the surfaces that draw a crown are lazy-loaded,
+  // so whether anybody is keeping the standings current must not depend on
+  // which chunk has arrived. It asks far less often; see the module.
+  $effect(() => {
+    if (!auth.me || auth.me.mustChangePassword) return;
+    return startAchievementPolling();
   });
 
   // The live socket, on exactly the same terms and for the same reasons: the

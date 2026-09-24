@@ -407,6 +407,18 @@ test.beforeEach(async ({ page }) => {
       },
     }),
   );
+  // Polled by App.svelte for as long as any signed-in page is open, so this is
+  // the second stub here that no test has to visit anything to reach. Empty, so
+  // no name draws a crown and the header looks exactly as these tests expect.
+  await page.route("**/api/v1/achievements**", (route) =>
+    route.fulfill({ json: { items: [] } }),
+  );
+  // Its own registration, and NOT shadowed by the pattern above — that one needs
+  // the literal "/api/v1/achievements", which this path does not contain. Same
+  // relationship /lifters/*/sessions has with /lifters.
+  await page.route("**/api/v1/lifters/*/achievements", (route) =>
+    route.fulfill({ json: { items: [] } }),
+  );
 });
 
 test("renders the programs list", async ({ page }) => {

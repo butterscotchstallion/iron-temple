@@ -14,6 +14,7 @@ export const PROFILE_SECTIONS = [
   { slug: "details", label: "Details" },
   { slug: "password", label: "Password" },
   { slug: "equipment", label: "Equipment" },
+  { slug: "achievements", label: "Achievements" },
   { slug: "data", label: "Your data" },
 ] as const;
 

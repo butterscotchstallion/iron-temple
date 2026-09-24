@@ -5,6 +5,7 @@
   import UserPlus from "@lucide/svelte/icons/user-plus";
   import Dices from "@lucide/svelte/icons/dices";
   import ErrorBanner from "../lib/ErrorBanner.svelte";
+  import LifterName from "../lib/LifterName.svelte";
   import { auth } from "../lib/auth.svelte";
   import { formatLongDate } from "../lib/date";
   import { passphrase } from "../lib/passphrase";
@@ -283,9 +284,7 @@
       <ul class="mt-3 flex flex-col divide-y divide-border/60">
         {#each users as user (user.id)}
           <li class="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-3">
-            <span class="font-semibold text-foreground">
-              {user.displayName || user.username}
-            </span>
+            <LifterName lifter={user} class="font-semibold text-foreground" />
             <span class="text-sm text-muted-foreground">{user.username}</span>
 
             {#if user.isAdmin}

@@ -7,6 +7,7 @@ import {
   type User,
 } from "./api";
 import { clearCache } from "./cache.svelte";
+import { resetAchievements } from "./achievements.svelte";
 import { resetNotifications } from "./notifications.svelte";
 import { resetLive } from "./live.svelte";
 import { flush } from "./writeQueue.svelte";
@@ -115,6 +116,10 @@ export async function signOut(): Promise<void> {
     // own reactive module, not cache entries. Without this the header would
     // keep the previous lifter's unread badge until the next poll.
     resetNotifications();
+    // And the crowns, for the same reason and with an extra one: this holds
+    // OTHER lifters' names and avatars, so leaving it would show the next person
+    // to use this browser a roster from an install they may not be on.
+    resetAchievements();
     // The socket was opened as the account that is signing out. Closed here
     // rather than left to App.svelte's effect, so nothing of theirs is still
     // connected while the next sign-in is being typed.

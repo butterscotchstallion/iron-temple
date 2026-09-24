@@ -319,6 +319,81 @@ type leaderboardEntryDTO struct {
 	Detail string `json:"detail,omitempty"`
 }
 
+// achievementDTO is one thing that can be earned.
+//
+// The catalogue half of the feature: what it is called and what it means, held
+// server-side so the five boards and the five crowns derived from them cannot
+// drift into describing themselves differently.
+type achievementDTO struct {
+	Slug string `json:"slug"`
+	// Kind is what a client switches on to decide how to draw this. 'crown'
+	// today; the column exists because the catalogue is meant to hold more.
+	Kind string `json:"kind"`
+	// Metric ties a crown back to the leaderboard board it comes from, matching
+	// the metric strings on leaderboardBoardDTO. Absent for any kind that is not
+	// a board's.
+	Metric      string `json:"metric,omitempty"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+}
+
+// achievementHoldersDTO is one achievement and everybody currently wearing it.
+//
+// Holders is a LIST because the leaderboard gives tied figures the same rank, so
+// two lifters genuinely level on a board are both first. Never nil, so a client
+// branches on length — an achievement nobody currently holds is an ordinary
+// state, not a missing row.
+type achievementHoldersDTO struct {
+	Achievement achievementDTO `json:"achievement"`
+	Holders     []lifterDTO    `json:"holders"`
+}
+
+// achievementListDTO is the whole catalogue with its current holders.
+//
+// THIS IS THE SITE-WIDE READ, and its shape follows from that. Every signed-in
+// client asks for it once and then draws from the answer beside every name it
+// renders, so it returns everything rather than answering "does this lifter hold
+// anything" per lifter — which would be a request per row of the feed.
+//
+// The catalogue rides along with the holders rather than being a second endpoint
+// because a client needs both to draw one crown, and an achievement nobody holds
+// still has to be listable on a profile that has never earned it.
+type achievementListDTO struct {
+	Items []achievementHoldersDTO `json:"items"`
+}
+
+// lifterAchievementDTO is one lifter's history with one achievement.
+//
+// Folded to one entry per achievement rather than one per reign: "held this three
+// times" is the fact a profile wants, and a lifter who has traded a crown back and
+// forth for a year would otherwise be a list nobody reads to the end of.
+type lifterAchievementDTO struct {
+	Achievement achievementDTO `json:"achievement"`
+	// HeldNow is whether one of these reigns is still open. It is what decides
+	// whether the entry is drawn as a possession or as a memory.
+	HeldNow bool `json:"heldNow"`
+	// TimesHeld counts reigns, not hours. A continuous stretch is one however
+	// long it lasts, which is what makes this a number worth showing.
+	TimesHeld int64 `json:"timesHeld"`
+	// FirstHeldFrom is when they first took it, ever. LastHeldFrom is when the
+	// most recent reign began — the same value on a lifter who has held it once.
+	// Both are sent because they answer different questions ("since when" for a
+	// current reign, "when last" for a lapsed one) and the client picks by
+	// HeldNow rather than asking twice.
+	FirstHeldFrom string `json:"firstHeldFrom"`
+	LastHeldFrom  string `json:"lastHeldFrom"`
+}
+
+// lifterAchievementListDTO is one lifter's profile section.
+//
+// Holds only what they have actually earned. A catalogue entry they have never
+// held is absent rather than present-and-empty: the client already has the full
+// catalogue from the endpoint above if it wants to draw the ones still to win,
+// and repeating it per lifter would put the whole catalogue on every profile.
+type lifterAchievementListDTO struct {
+	Items []lifterAchievementDTO `json:"items"`
+}
+
 // sessionReactionDTO is one emoji's worth of applause.
 type sessionReactionDTO struct {
 	Emoji string `json:"emoji"`
@@ -420,6 +495,18 @@ type notificationDTO struct {
 	// points at is long and the conversation is the last card on it.
 	CommentID   *int32  `json:"commentId,omitempty"`
 	CommentBody *string `json:"commentBody,omitempty"`
+
+	// AchievementSlug is which achievement, for 'crown'. It names the board that
+	// was won, so the row can read "took the crown on Week streak" rather than
+	// the vaguer thing.
+	//
+	// Absent when the row folds crowns from MORE THAN ONE board, which is a state
+	// only this kind can reach: 'crown' has no session, so every crown on the
+	// install folds into one group. Naming the representative's board there would
+	// be a claim about the group that the group does not support, so the query
+	// withholds it and the client says "took crowns" instead. Absent on every
+	// other kind, which has no achievement at all.
+	AchievementSlug *string `json:"achievementSlug,omitempty"`
 
 	CreatedAt string `json:"createdAt"`
 	// ReadAt is absent while unread, which is the state the badge counts.

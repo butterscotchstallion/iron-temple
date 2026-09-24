@@ -3,6 +3,7 @@
   import Heart from "@lucide/svelte/icons/heart";
   import MessageCircle from "@lucide/svelte/icons/message-circle";
   import Avatar from "./Avatar.svelte";
+  import LifterName from "./LifterName.svelte";
   import { formatLongDate } from "./date";
   import { formatVolume } from "./volume";
   import type { FeedEntry } from "./api";
@@ -35,9 +36,7 @@
         <Avatar user={entry.lifter} size={36} />
 
         <span class="flex min-w-0 flex-1 flex-col">
-          <span class="truncate text-sm font-semibold text-foreground">
-            {entry.lifter.displayName || entry.lifter.username}
-          </span>
+          <LifterName lifter={entry.lifter} class="text-sm font-semibold text-foreground" />
           <span class="truncate text-xs text-muted-foreground">
             {entry.programDayName} · {formatLongDate(entry.performedOn)}
           </span>

@@ -172,6 +172,20 @@ func TestMigrateAppliesSchemaAndSeed(t *testing.T) {
 	// 0017 put the cap in the schema, not just in the data. Asserted by trying
 	// to break it: the rail is what holds for rows no migration wrote.
 	assertRestRejected(t, sqlDB, 181)
+
+	// 0032's catalogue: one crown per leaderboard board, and five boards. Pinned
+	// because the reconciler maps a board to a crown THROUGH this table — a board
+	// with no row here silently awards nothing, and the only sign would be a
+	// leader who never gets a crown.
+	assertCount(t, sqlDB, "SELECT count(*) FROM achievements", 5)
+	assertCount(t, sqlDB, "SELECT count(*) FROM achievements WHERE kind = 'crown'", 5)
+	// Every crown names the board it comes from. A NULL metric would make the
+	// reconciler skip it, which is the quiet version of the failure above.
+	assertCount(t, sqlDB, "SELECT count(*) FROM achievements WHERE metric IS NULL", 0)
+	// And the ledger ships empty. The reigns are deliberately NOT backfilled —
+	// see the migration on why inventing a held_from would be fiction — so a
+	// fresh install has no crowns until the first sweeper pass.
+	assertCount(t, sqlDB, "SELECT count(*) FROM lifter_achievements", 0)
 }
 
 func assertRest(t *testing.T, db *sql.DB, name string, want int) {

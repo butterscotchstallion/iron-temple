@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { Card } from "$lib/components/ui/card";
   import Avatar from "../lib/Avatar.svelte";
+  import LifterName from "../lib/LifterName.svelte";
   import ErrorCard from "../lib/ErrorCard.svelte";
   import Loading from "../lib/skeleton/Loading.svelte";
   import Skeleton from "../lib/skeleton/Skeleton.svelte";
@@ -196,9 +197,7 @@
               <Avatar user={entry.lifter} size={32} />
               <span class="flex min-w-0 flex-1 flex-col">
                 <span class="flex items-baseline gap-2">
-                  <span class="truncate text-sm font-semibold text-foreground">
-                    {entry.lifter.displayName || entry.lifter.username}
-                  </span>
+                  <LifterName lifter={entry.lifter} class="text-sm font-semibold text-foreground" />
                   {#if entry.lifter.id === auth.me?.id}
                     <span class="shrink-0 text-xs text-muted-foreground">(you)</span>
                   {/if}

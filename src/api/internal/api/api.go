@@ -270,6 +270,12 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 				// How the lifters compare. Also top-level, and for the same
 				// reason: the subject is the install, not a lifter.
 				r.Get("/leaderboard", s.getLeaderboard)
+				// What can be earned, and who is currently wearing it.
+				// Top-level for the leaderboard's reason — the subject is the
+				// install — and the read every client makes in order to draw a
+				// crown beside somebody else's name, which is why it answers
+				// for everybody at once rather than per lifter.
+				r.Get("/achievements", s.getAchievements)
 
 				// What happened to the caller. Top-level like the two above,
 				// but for the opposite reason: the subject IS a person, and it
@@ -296,6 +302,11 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 					r.Get("/{lifterId}/racked", s.getLifterRacked)
 					r.Get("/{lifterId}/sessions", s.getLifterSessions)
 					r.Get("/{lifterId}/sessions/{sessionId}/recap", s.getLifterSessionRecap)
+					// One lifter's achievements, current and past. Here rather
+					// than beside /achievements because this one's subject IS a
+					// person, and there is no /me variant — a lifter's own
+					// achievements are the same public facts as anybody else's.
+					r.Get("/{lifterId}/achievements", s.getLifterAchievements)
 				})
 
 				r.Route("/exercises", func(r chi.Router) {

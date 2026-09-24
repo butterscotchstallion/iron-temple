@@ -2,6 +2,8 @@
   import { onMount } from "svelte";
   import { Card } from "$lib/components/ui/card";
   import Avatar from "../lib/Avatar.svelte";
+  import LifterName from "../lib/LifterName.svelte";
+  import AchievementList from "../lib/AchievementList.svelte";
   import CalendarHeatmap from "../lib/CalendarHeatmap.svelte";
   import ErrorCard from "../lib/ErrorCard.svelte";
   import Loading from "../lib/skeleton/Loading.svelte";
@@ -16,8 +18,10 @@
   import { Button } from "$lib/components/ui/button";
   import {
     getLifter,
+    getLifterAchievements,
     getLifterRacked,
     listLifterSessions,
+    type LifterAchievement,
     type LifterProfile,
     type RackedReport,
     type SessionSummary,
@@ -36,6 +40,10 @@
 
   let profile = $state<LifterProfile | null>(null);
   let report = $state<RackedReport | null>(null);
+  // What they have earned, current and past. The crown beside their name comes
+  // from the global achievements module; this is the history behind it, which
+  // only the per-lifter endpoint knows.
+  let achievements = $state<LifterAchievement[]>([]);
   let loading = $state(true);
   let failed = $state(false);
 
@@ -93,6 +101,13 @@
     if (history.status === 200) {
       sessions = history.data.items;
       sessionTotal = history.data.total;
+    }
+
+    // And what they have won, on exactly the same terms: a failure here leaves
+    // the section empty rather than failing a page that has already arrived.
+    const earned = await getLifterAchievements(id);
+    if (earned.status === 200) {
+      achievements = earned.data.items;
     }
     loading = false;
   }
@@ -176,7 +191,9 @@
     <Card class="flex items-center gap-4 p-6">
       <Avatar user={profile} size={56} />
       <div class="min-w-0">
-        <h2 class="truncate text-2xl font-black text-foreground">{name}</h2>
+        <h2 class="flex min-w-0 text-2xl font-black text-foreground">
+          <LifterName lifter={profile} crownSize="size-5" />
+        </h2>
         <p class="truncate text-sm text-muted-foreground">
           {profile.username}
           {#if profile.lastTrainedOn}
@@ -206,6 +223,17 @@
         <p class="mt-1 text-xl font-black text-foreground">{profile.sessionCount}</p>
       </Card>
     </div>
+
+    <!-- What they have won. Above the month's statistics because it is about
+         the lifter rather than about a window — the same reason the lifetime
+         figures are up here and not down there. Drawn even when empty, so the
+         section does not appear and disappear as crowns change hands. -->
+    <Card class="p-6">
+      <h3 class="text-lg font-bold text-card-foreground">Achievements</h3>
+      <div class="mt-2">
+        <AchievementList items={achievements} {name} />
+      </div>
+    </Card>
 
     {#if report && totals && totals.sessions > 0}
       <div>

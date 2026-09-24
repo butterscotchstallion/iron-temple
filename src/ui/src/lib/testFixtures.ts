@@ -13,10 +13,13 @@
  */
 
 import type {
+  Achievement,
+  AchievementHolders,
   FeedEntry,
   LeaderboardBoard,
   LeaderboardEntry,
   Lifter,
+  LifterAchievement,
   Notification,
   ProgramSummary,
   RackedReport,
@@ -155,6 +158,63 @@ export function testBoardEntry(
     rank: 1,
     lifter: testLifter(),
     value: 3,
+    ...overrides,
+  };
+}
+
+/**
+ * One catalogue entry, defaulting to the week-streak crown.
+ *
+ * A crown rather than some neutral achievement, because `crown` is the only kind
+ * the contract has — a fixture for a kind that does not exist would not compile
+ * against the generated enum, which is the point of that enum.
+ */
+export function testAchievement(overrides: Partial<Achievement> = {}): Achievement {
+  return {
+    slug: "crown-streak",
+    kind: "crown",
+    metric: "streak",
+    label: "Top of Week streak",
+    description: "Held the longest run of consecutive weeks trained.",
+    ...overrides,
+  };
+}
+
+/**
+ * One achievement and who is wearing it.
+ *
+ * Holders default to EMPTY for testBoard's reason: who holds a crown is the thing
+ * under test on every surface that draws one, and a fixture that arrived with a
+ * holder would hide the nobody-holds-it case — which is the state of every new
+ * install and the one a renderer is most likely to get wrong.
+ */
+export function testAchievementHolders(
+  overrides: Partial<AchievementHolders> = {},
+): AchievementHolders {
+  return {
+    achievement: testAchievement(),
+    holders: [],
+    ...overrides,
+  };
+}
+
+/**
+ * One lifter's history with one achievement, defaulting to a crown they hold now
+ * and have held once.
+ *
+ * The once-and-current case is the default because it is what every first win
+ * looks like; a test asserting on the reign count or on a lapsed reign overrides
+ * `timesHeld` and `heldNow` where the assertion can be read beside it.
+ */
+export function testLifterAchievement(
+  overrides: Partial<LifterAchievement> = {},
+): LifterAchievement {
+  return {
+    achievement: testAchievement(),
+    heldNow: true,
+    timesHeld: 1,
+    firstHeldFrom: "2026-09-01T00:00:00Z",
+    lastHeldFrom: "2026-09-01T00:00:00Z",
     ...overrides,
   };
 }
