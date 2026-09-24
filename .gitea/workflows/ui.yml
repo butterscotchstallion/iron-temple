@@ -1,18 +1,19 @@
 ---
 name: UI Check & Test
 
-# Frontend CI for src/ui (Svelte + Vite + pnpm). Type-check, unit tests (Vitest),
-# and e2e (Playwright/Firefox). Runs on the shared host-executor runner: Node +
-# corepack ship in the base image; the Playwright Firefox *system libs* are baked
-# into the runner image (see homelab-gitops services/act-runner/Dockerfile), so this
-# job only downloads the Firefox *browser* — and that is cached across runs.
+# Frontend CI for src/ui (Svelte + Vite + pnpm). Type-check and unit tests (Vitest)
+# in one job, e2e (Playwright/Firefox) in another, in parallel — see the note on
+# `build`. Runs on the shared host-executor runner: Node + corepack ship in the base
+# image; the Playwright Firefox *system libs* are baked into the runner image (see
+# homelab-gitops services/act-runner/Dockerfile), so the e2e job only downloads the
+# Firefox *browser* — and that is cached across runs.
 #
 # Required-status-check safety: this workflow always triggers on every branch push
 # (NO `on.paths` filter) so its `result` gate always reports a commit status. Branch
 # protection can then require the "UI Check & Test" context and it will never deadlock
 # on a PR that doesn't touch src/ui. The path filtering lives in the `changes` job
-# instead, so the expensive build/test job still only runs when UI-relevant files
-# change. See docs/ci-branch-protection.md.
+# instead, so the expensive jobs still only run when UI-relevant files change.
+# See docs/ci-branch-protection.md.
 on:
   push:
     branches: ["**"]
@@ -60,8 +61,19 @@ jobs:
             '^(src/ui/|src/api/openapi\.yaml$|\.gitea/workflows/ui\.yml$|\.gitea/scripts/)')
           echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
 
+  # Type-check and unit tests. The e2e suite is a SEPARATE job below rather than
+  # three more steps here, because nothing in it depends on these and running
+  # them in sequence made the two waits add up: 23s + 126s + 184s in one job, on
+  # the critical path of every push. Split, the wall time is the longer of the
+  # two (~218s) instead of their sum (~338s).
+  #
+  # The price is that both jobs repeat the checkout/pnpm/install preamble. That
+  # is this repo's existing shape — go.yml already repeats "Merge main into the
+  # head under test" and "Use the baked Go toolchain" across three jobs, with
+  # the logic itself shared through .gitea/scripts — and the preamble is ~30s
+  # against the ~120s the split saves.
   build:
-    name: UI Build & Test
+    name: UI Check & Unit Tests
     needs: changes
     if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
@@ -143,6 +155,75 @@ jobs:
       # webServer — playwright.config.ts serves `vite preview` over the built output, so
       # a broken build fails e2e. No separate build step needed (avoids a double build).
 
+      - name: Notify on failure
+        if: failure()
+        working-directory: ${{ github.workspace }}
+        env:
+          WORKFLOW: "${{ github.workflow }} / ${{ github.job }}"
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: ./scripts/ci-notify.sh
+
+  # The browser suite. Runs alongside `build` rather than after it — see the note
+  # on that job. Deliberately NOT `needs: build`: a type error and a broken page
+  # are independent failures, and learning about both from one run beats
+  # serialising for the small chance that the second was going to fail anyway.
+  e2e:
+    name: UI E2E Tests
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/ui
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Merging the base branch needs its commits present.
+          fetch-depth: 0
+
+      # Same merge preview as `build` — the browser suite has to run against the
+      # merge result too, or it certifies a tree that never ships.
+      # Context goes through env, not ${{ }} — see the note in the changes job.
+      - name: Merge main into the head under test
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: bash "$GITHUB_WORKSPACE/.gitea/scripts/merge-base-branch" "$EVENT_NAME" "$REF_NAME"
+
+      # Identical to `build`'s preamble; see the header comment on that job for
+      # why it is repeated rather than shared.
+      - name: Enable pnpm
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          corepack enable --install-directory "$HOME/.local/bin"
+          corepack prepare pnpm@12.3.4 --activate
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.local/bin:$PATH"
+          node --version
+          pnpm --version
+
+      - name: Locate pnpm store
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('src/ui/pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --prefer-offline
+
+      # playwright.config.ts's webServer builds the app, and the build imports the
+      # generated client — so this is needed here for the same reason it is in `build`.
+      - name: Generate API client
+        run: pnpm generate:api
+
       # Cache the Playwright browser binaries at Playwright's DEFAULT location
       # (~/.cache/ms-playwright). This path is stable across runs, so the browser also
       # persists on the host-executor pod's filesystem between runs — Firefox is reused,
@@ -222,25 +303,30 @@ jobs:
           SHA: ${{ github.sha }}
         run: ./scripts/ci-notify.sh
 
-  # Required-check gate. Always runs (even when `build` was skipped as irrelevant, or
-  # cancelled by a newer push) so it always posts a "UI Check & Test" commit status.
-  # Passes when the build succeeded OR was legitimately skipped; fails when the build
-  # failed. Make THIS the required status check in branch protection.
+  # Required-check gate. Always runs (even when the jobs above were skipped as
+  # irrelevant, or cancelled by a newer push) so it always posts a "UI Check & Test"
+  # commit status. Passes when both real jobs succeeded or were legitimately skipped;
+  # fails if either failed. Make THIS the required status check in branch protection —
+  # its NAME is the contract, which is why splitting the work into `build` and `e2e`
+  # above needed no change to branch protection.
   result:
     name: UI Check & Test
-    needs: [changes, build]
+    needs: [changes, build, e2e]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Require UI build to pass
+      - name: Require UI jobs to pass
         run: |
           set -euo pipefail
-          echo "changes: ${{ needs.changes.result }}, build: ${{ needs.build.result }}"
+          echo "changes=${{ needs.changes.result }} build=${{ needs.build.result }} e2e=${{ needs.e2e.result }}"
           # A broken detector must not silently green-light the gate.
           if [ "${{ needs.changes.result }}" != "success" ]; then
             echo "::error::change-detection job did not succeed"; exit 1
           fi
-          case "${{ needs.build.result }}" in
-            success|skipped) echo "UI checks OK"; exit 0 ;;
-            *) echo "::error::UI checks did not pass (build=${{ needs.build.result }})"; exit 1 ;;
-          esac
+          for r in "${{ needs.build.result }}" "${{ needs.e2e.result }}"; do
+            case "$r" in
+              success|skipped) ;;
+              *) echo "::error::UI checks did not pass ($r)"; exit 1 ;;
+            esac
+          done
+          echo "UI checks OK"
