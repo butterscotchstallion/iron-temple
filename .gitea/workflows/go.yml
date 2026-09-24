@@ -2,9 +2,16 @@
 name: Go Lint & Test
 
 # Backend CI for src/api (Go + chi). Mirrors the homelab-gitops go-lint.yml job
-# set — go.mod tidy check, vet, golangci-lint, govulncheck, gosec, test+coverage —
+# set — go.mod tidy check, golangci-lint, govulncheck, gosec, test+coverage —
 # adapted for this repo: a single vendored module, and `go test -short` because the
 # integration tests use Testcontainers (no container runtime on the host executor).
+#
+# ONE job does the lint and the tests, deliberately. Splitting them into two was
+# tried (PR #253) and measured SLOWER: the act host executor runs at most two
+# non-trivial jobs at a time, and the backend and frontend jobs already saturate
+# that. More jobs bought no parallelism and each one paid its own checkout and
+# setup again. With the slot count fixed, the only thing that helps is doing less
+# total work — which is what removing the `go vet` step below does.
 #
 # Required-status-check safety: this workflow always triggers on every branch push
 # (NO `on.paths` filter) so its `result` gate always reports a commit status. Branch
@@ -213,10 +220,13 @@ jobs:
             exit 1
           fi
 
-      # vet uses the committed vendor/ tree automatically and fails on inconsistent vendoring.
-      - name: go vet
-        run: go vet ./...
-
+      # No `go vet` step: .golangci.yml enables the govet linter, so the run below
+      # makes the same passes over the same tree, and reads vendor/ the same way.
+      # It was not doing 68s of extra checking — it was paying 68s of a compile
+      # golangci-lint then reused. Cold, `vet` + `golangci-lint` is 111s against
+      # `golangci-lint` alone at 101s. preflight.sh drops its matching gate too, so
+      # a local pass still means the same set of checks as a CI pass.
+      #
       # golangci-lint is baked on PATH; uses the committed src/api/.golangci.yml (v2).
       # --allow-parallel-runners: the host executor may run two jobs in one pod, whose
       # shared cache lock otherwise fails the second. retry-etxtbsy guards the shared-FS

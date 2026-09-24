@@ -1,7 +1,7 @@
 # Development
 
-How to work on iron-temple: the gates that run before a commit, how to run them
-yourself, and what the DB-backed tests need. For what the app does, see the
+How to work on iron-temple: the gates that run before a commit and before a push,
+how to run them yourself, and what the DB-backed tests need. For what the app does, see the
 [README](../README.md).
 
 ## Git hooks
@@ -15,20 +15,39 @@ lefthook install
 In the devcontainer sandbox both the binary and the install are handled for you —
 the image bakes lefthook and the launcher runs `lefthook install` per session.
 
-On commit, `lefthook.yml` runs one command, `dev/precommit.sh`, which looks at the
-staged paths and runs the matching gates from `scripts/preflight.sh`:
+`lefthook.yml` runs one command per hook, and they split the gates by how often the
+same work is worth repeating. Both delegate to `scripts/preflight.sh`.
 
-| staged | gates |
+**On commit**, `dev/precommit.sh` runs the repo-wide set and nothing else:
+
+| gates | why on every commit |
+|-------|---------------------|
+| `gitleaks` | a secret has to be caught *before* it enters history — at push it is already in a commit you must rewrite, and in CI the only honest fix is rotation |
+| `hadolint`, `shellcheck` | under a second between them, and the feedback is only useful while the file is still in your head |
+
+**On push**, `dev/prepush.sh` runs the build and test gates, scoped to what the branch
+changes against `main`:
+
+| changed vs `main` | gates |
 |--------|-------|
-| `src/api/**`, `.gitea/workflows/go.yml` | `go vet`, `golangci-lint`, `gosec`, `go test -short -race`, the integration suite |
+| `src/api/**`, `.gitea/workflows/go.yml` | `golangci-lint`, `gosec`, `go test -short -race`, the integration suite |
 | `src/ui/**`, `src/api/openapi.yaml` | frozen-lockfile install, `generate:api`, `svelte-check`, Vitest |
-| anything | `hadolint`, `gitleaks`, `shellcheck` |
+| anything | `hadolint`, `gitleaks`, `shellcheck` again — cheap, and a `--no-verify` commit or a rebase can put something into the range the commit hook never saw |
+
+Push is where this belongs because push is what reaches CI, and because the gates
+check the **working tree** rather than a commit: a stack of five commits built from
+one tree used to run the identical suite five times to learn the same thing five
+times. Relevance is computed branch-vs-`main`, the same way
+`.gitea/scripts/detect-relevant-changes` does it in CI, so a backend branch whose
+last commit only touches docs still runs the backend gates — the backend is what is
+about to merge. Anything the script cannot work out (no `origin/main`, no
+merge-base, detached HEAD) runs **every** gate rather than none.
 
 Those match what CI enforces, gate for gate and flag for flag — the point is that a
 local pass should mean a CI pass. Four checks are **deliberately CI-only**, each
 because it needs something an air-gapped box can't have: `go mod tidy` and
 `govulncheck` (Go proxy / `vuln.go.dev`), `trivy` (vulnerability DB), and the
-Playwright e2e suite (too slow for a commit hook). See the header of
+Playwright e2e suite (too slow for a local hook). See the header of
 `scripts/preflight.sh` for the full reasoning.
 
 Two gates are **stricter in one direction**, and both lean the safe way — CI catches
@@ -38,17 +57,18 @@ newest release on the runner, which flags more. So a green hook is necessary but
 quite sufficient; if CI reports a shell finding your commit didn't, the finding is
 real — newer shellcheck simply learned to spot it. Fix the script.
 
-If a gate's tooling is missing the commit is **blocked**, not waved through — a hook
-that silently no-ops looks exactly like one that passed. Bypass once with
-`git commit --no-verify`.
+If a gate's tooling is missing the commit or push is **blocked**, not waved through
+— a hook that silently no-ops looks exactly like one that passed. Bypass once with
+`git commit --no-verify` or `git push --no-verify`.
 
 Per-project setup lives in `src/api` (see its `Makefile`) and `src/ui`
 (see its `README.md`).
 
-## Preflight — check before you push
+## Preflight — the gates themselves
 
-`scripts/preflight.sh` runs the same gates, so a PR doesn't come back red on
-something you could catch in seconds. Selectors combine; naming none runs everything:
+`scripts/preflight.sh` is what both hooks call, and running it by hand is how you
+check something without committing anything. Selectors combine; naming none runs
+everything:
 
 ```sh
 scripts/preflight.sh                  # everything runnable here
@@ -65,7 +85,7 @@ Everything above runs **fully offline** in the sandbox: the Go module is vendore
 
 The script exits non-zero only when a gate that actually ran failed; skipped gates
 never fail it. `--strict` flips that for *missing tooling* specifically: a gate that
-can't run becomes a failure instead of a skip. The pre-commit hook always passes
+can't run becomes a failure instead of a skip. Both hooks always pass
 `--strict`; interactive runs stay lenient, so a box missing one tool can still check
 the rest. ("Nothing to check here" — no `src/ui`, no `go.mod` — stays a skip either way.)
 

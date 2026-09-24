@@ -1,13 +1,13 @@
 #!/usr/bin/env sh
 # preflight: run the CI gates locally BEFORE pushing, so a PR doesn't fail on
 # something you could have caught in seconds. This is the single definition of
-# "the gates" — dev/precommit.sh (the lefthook hook) calls it too, so the hook and
-# a manual run can't drift apart.
+# "the gates" — dev/precommit.sh and dev/prepush.sh (the lefthook hooks) call it
+# too, so the hooks and a manual run can't drift apart.
 #
 # WHAT IT MIRRORS, AND WHAT IT DELIBERATELY DOESN'T
 #
 # Aligned with CI (.gitea/workflows/):
-#   --api   go vet, golangci-lint, gosec, go test -short -race      (go.yml)
+#   --api   golangci-lint, gosec, go test -short -race              (go.yml)
 #   --ui    frozen-lockfile install, generate:api, check, test:unit (ui.yml)
 #   --repo  hadolint, gitleaks, shellcheck   (hadolint.yml, secret-scan.yml, shellcheck.yml)
 #
@@ -23,13 +23,13 @@
 #                 local gate on an air-gapped box — same bucket as trivy.
 #   trivy         same reason: needs a live vulnerability DB.
 #   deploy manifests  kustomize + kubeconform aren't in the image.
-#   UI e2e        Playwright builds and serves the app; too slow for a commit hook.
+#   UI e2e        Playwright builds and serves the app; too slow for a local hook.
 #                 NOTE this also means `pnpm build` is never exercised locally — in
 #                 ui.yml the production build is covered only by e2e's preview server.
 #
 # Exit status: non-zero if any gate that actually RAN failed. Skipped gates never fail
 # the run — unless --strict, which turns "the tooling for this gate isn't installed"
-# from a SKIP into a FAIL. The pre-commit hook passes --strict: a hook that silently
+# from a SKIP into a FAIL. Both hooks pass --strict: a hook that silently
 # no-ops when a tool is missing gives the same green light as one that ran clean.
 # Interactive use stays lenient, so a box missing one tool can still check the rest.
 #
@@ -89,7 +89,7 @@ skip() { printf 'SKIP\t%s\n' "$1" >> "$summary"; printf '\n\033[1m==> %s\033[0m 
 
 # unavailable <label> <reason> — a gate can't run because its tooling is absent.
 # Lenient mode records a SKIP and leans on CI; --strict records a FAIL, because the
-# caller (the commit hook) asked for a real gate rather than a best-effort one.
+# caller (a git hook) asked for a real gate rather than a best-effort one.
 # Distinct from skip(), which is for "there is genuinely nothing here to check".
 unavailable() {
   if [ "$strict" -eq 0 ]; then
@@ -257,8 +257,10 @@ if [ "$run_api" -eq 1 ]; then
       race="-race"
     fi
 
-    gate "go vet" sh -c "cd '$root/src/api' && go vet ./..."
-
+    # No separate `go vet` gate: src/api/.golangci.yml enables the govet linter, so
+    # the run below makes the same passes over the same tree. go.yml dropped its own
+    # vet step for this reason and this has to match it — a gate here that CI does
+    # not have is drift in the direction that stops mattering, but drift all the same.
     if command -v golangci-lint >/dev/null 2>&1; then
       gate "golangci-lint" sh -c "cd '$root/src/api' && golangci-lint run"
     else
