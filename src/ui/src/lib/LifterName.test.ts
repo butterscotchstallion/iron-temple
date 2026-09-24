@@ -214,3 +214,40 @@ describe("the sigil", () => {
     expect(screen.getByText("Top of Week streak")).toBeInTheDocument();
   });
 });
+
+// Getting to a lifter. Until this existed a name was plain text everywhere except
+// the roster, so the only route to a profile was a menu item nobody finds — which
+// is exactly how a follow feature shipped with nowhere to press Follow from.
+describe("linking to the profile", () => {
+  it("is plain text by default", () => {
+    render(LifterName, { props: { lifter: testUser({ id: 4 }) } });
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  });
+
+  it("links to the lifter when asked", () => {
+    render(LifterName, { props: { lifter: testUser({ id: 4 }), link: true } });
+    const anchor = screen.getByRole("link", { name: "Ada Lovelace" });
+    expect(anchor).toHaveAttribute("href", "#/lifters/4");
+  });
+
+  // The crowns stay OUTSIDE the anchor. Each carries a visually-hidden board
+  // label, and inside the link those would join its accessible name — a link
+  // called "Ada Lovelace Top of Week streak" is a worse answer than a link called
+  // by her name with a decoration beside it.
+  it("keeps the crowns out of the link's accessible name", () => {
+    crowned([{ achievement: testAchievement(), ids: [4] }]);
+    render(LifterName, { props: { lifter: testUser({ id: 4 }), link: true } });
+
+    const anchor = screen.getByRole("link", { name: "Ada Lovelace" });
+    expect(anchor.querySelector("svg")).toBeNull();
+    // Still drawn, just not part of the link.
+    expect(screen.getByText("Top of Week streak")).toBeInTheDocument();
+  });
+
+  it("falls back to the username in the link text", () => {
+    render(LifterName, {
+      props: { lifter: testUser({ id: 4, displayName: "" }), link: true },
+    });
+    expect(screen.getByRole("link", { name: "ada" })).toBeInTheDocument();
+  });
+});

@@ -2,11 +2,13 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/svelte";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AchievementDialog from "./AchievementDialog.svelte";
 import { achievements, resetAchievements } from "./achievements.svelte";
+import { auth } from "./auth.svelte";
 import {
   testAchievement,
   testAchievementHolders,
   testLifter,
   testNotification,
+  testUser,
 } from "./testFixtures";
 
 // The dialog a folded crown row opens.
@@ -39,6 +41,16 @@ function catalogue(holders = [GRACE], achievement = testAchievement()) {
   achievements.loaded = true;
 }
 
+// The dialog asks who the actor is so it can draw a Follow button in the right
+// state — a notification's actor carries no `following`, deliberately.
+const getLifter = vi.hoisted(() => vi.fn());
+const followLifter = vi.hoisted(() => vi.fn());
+vi.mock("./api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./api")>()),
+  getLifter,
+  followLifter,
+}));
+
 const onLeaderboard = vi.fn();
 
 function show(items: ReturnType<typeof crown>[], loading = false) {
@@ -49,6 +61,13 @@ function show(items: ReturnType<typeof crown>[], loading = false) {
 
 beforeEach(() => {
   onLeaderboard.mockReset();
+  getLifter.mockReset().mockResolvedValue({
+    status: 200,
+    data: { ...GRACE, sessionCount: 1, lifetimeVolumeLb: 1000, following: false },
+  });
+  followLifter.mockReset().mockResolvedValue({ status: 204, data: undefined });
+  auth.me = testUser({ id: 1 });
+  auth.loaded = true;
   catalogue();
 });
 afterEach(() => resetAchievements());
@@ -252,5 +271,96 @@ describe("leaving", () => {
     await waitFor(() =>
       expect(screen.queryByTestId("achievement-dialog")).not.toBeInTheDocument(),
     );
+  });
+});
+
+// Getting from "who is this?" to following them. The notification that told you
+// about the crown is where you act on it, rather than being sent off to a profile
+// to come back from.
+describe("reaching the lifter", () => {
+  it("links the name to their profile", async () => {
+    show([crown()]);
+    const anchor = await screen.findByRole("link", { name: "Grace Hopper" });
+    expect(anchor).toHaveAttribute("href", "#/lifters/2");
+  });
+
+  it("offers to follow them", async () => {
+    show([crown()]);
+
+    await waitFor(() => expect(getLifter).toHaveBeenCalledWith(2));
+    expect(
+      await screen.findByRole("button", { name: "Follow Grace Hopper" }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows one already followed as followed", async () => {
+    getLifter.mockResolvedValue({
+      status: 200,
+      data: { ...GRACE, sessionCount: 1, lifetimeVolumeLb: 1000, following: true },
+    });
+    show([crown()]);
+
+    expect(
+      await screen.findByRole("button", { name: "Unfollow Grace Hopper" }),
+    ).toBeInTheDocument();
+  });
+
+  it("follows from inside the dialog", async () => {
+    show([crown()]);
+
+    await fireEvent.click(await screen.findByRole("button", { name: /^Follow/ }));
+
+    await waitFor(() => expect(followLifter).toHaveBeenCalledWith(2));
+    expect(
+      await screen.findByRole("button", { name: "Unfollow Grace Hopper" }),
+    ).toBeInTheDocument();
+  });
+
+  // A Follow button that might already be Following is worse than none, so a
+  // failed or in-flight lookup draws nothing.
+  it("offers nothing when it could not find out", async () => {
+    getLifter.mockResolvedValue({ status: 500, data: {} });
+    show([crown()]);
+
+    await screen.findByText("Top of Week streak");
+    expect(screen.queryByRole("button", { name: /^Follow/ })).not.toBeInTheDocument();
+  });
+
+  // Your own crown: nothing to follow, nobody to link to, and no request made.
+  it("asks nothing and offers nothing about your own crown", async () => {
+    const me = testLifter({ id: 1, displayName: "Ada Lovelace" });
+    show([crown(me)]);
+
+    await screen.findByText("Top of Week streak");
+    expect(screen.getByText("You")).toBeInTheDocument();
+    expect(getLifter).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /^Follow/ })).not.toBeInTheDocument();
+  });
+
+  // The answer is keyed by lifter id, so a slow reply about the previous card
+  // cannot be drawn against this one.
+  it("follows the cursor to the next card's lifter", async () => {
+    achievements.items = [
+      testAchievementHolders({ holders: [GRACE] }),
+      testAchievementHolders({
+        achievement: testAchievement({ slug: "crown-volume", label: "Top of Volume" }),
+        holders: [ADA],
+      }),
+    ];
+    achievements.loaded = true;
+    show([crown(GRACE, "crown-streak", 1), crown(ADA, "crown-volume", 2)]);
+
+    await screen.findByRole("button", { name: "Follow Grace Hopper" });
+
+    getLifter.mockResolvedValue({
+      status: 200,
+      data: { ...ADA, sessionCount: 1, lifetimeVolumeLb: 1000, following: true },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Next" }));
+
+    expect(
+      await screen.findByRole("button", { name: "Unfollow Ada Lovelace" }),
+    ).toBeInTheDocument();
+    expect(getLifter).toHaveBeenLastCalledWith(3);
   });
 });

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { link as spaLink } from "svelte-spa-router";
   import Crown from "@lucide/svelte/icons/crown";
   import { crownsFor } from "./achievements.svelte";
   import { houseFor } from "./houses.svelte";
@@ -26,6 +27,7 @@
     crownSize = "size-3.5",
     crowns: showCrowns = true,
     sigil: showSigil = true,
+    link = false,
   }: {
     lifter: NamedUser;
     class?: string;
@@ -53,6 +55,17 @@
      * the heading already says.
      */
     sigil?: boolean;
+    /**
+     * Whether the name is a link to this lifter's profile.
+     *
+     * Off by default, because the two surfaces that came first cannot take one: a
+     * feed row is already an anchor to the session and a link inside a link is
+     * invalid markup, and the roster's row is an anchor to this very profile. Every
+     * other surface that draws a name had no way to reach a lifter at all, which is
+     * what this is for — a leaderboard you cannot tap was the reason nobody could
+     * find a profile to follow from.
+     */
+    link?: boolean;
   } = $props();
 
   const name = $derived(lifter.displayName || lifter.username);
@@ -75,7 +88,23 @@
 </script>
 
 <span class="inline-flex min-w-0 items-baseline gap-1">
-  <span class="truncate {className}">{name}</span>
+  {#if link}
+    <!-- The NAME ALONE is the link, not the whole component — and this is where
+         that matters most now that a name can wear two ornaments. The sigil below
+         and each crown after it carry visually-hidden text, and inside the anchor
+         all of it would join the link's accessible name: "Grace Hopper Ironside
+         Top of Week streak Top of Volume" as one link is a worse answer than a
+         link called "Grace Hopper" beside three decorations. -->
+    <a
+      href={`/lifters/${lifter.id}`}
+      use:spaLink
+      class="truncate rounded hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary {className}"
+    >
+      {name}
+    </a>
+  {:else}
+    <span class="truncate {className}">{name}</span>
+  {/if}
   <!-- Before the crowns, because it says who they are rather than what they have
        won — and because it is the one ornament whose width is fixed, so a row that
        is truncating stays readable in the same place every time. -->

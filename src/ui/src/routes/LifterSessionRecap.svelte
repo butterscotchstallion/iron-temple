@@ -156,7 +156,7 @@
         {recap.session.programDayName}
       </h2>
       <p class="mt-1 text-sm text-muted-foreground">
-        {#if lifter}<LifterName {lifter} crownSize="size-3" /> ·
+        {#if lifter}<LifterName {lifter} crownSize="size-3" link /> ·
         {/if}{recap.session.programName} · {formatLongDate(recap.session.performedOn)}
       </p>
     </div>
