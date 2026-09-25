@@ -120,6 +120,14 @@ describe("the header", () => {
 });
 
 describe("the join button", () => {
+  const MEMBER = { isMember: true, isOwner: false, inAnotherHouse: false };
+
+  /** Tap the card's Leave House button and wait for the confirmation to open. */
+  async function openLeaveDialog() {
+    await fireEvent.click(await screen.findByRole("button", { name: /leave house/i }));
+    await screen.findByRole("alertdialog");
+  }
+
   it("offers to join for a lifter with no House", async () => {
     render(House, { props: PROPS });
     expect(
@@ -157,7 +165,7 @@ describe("the join button", () => {
   });
 
   it("offers to leave for a member, and not to join", async () => {
-    served({ viewer: { isMember: true, isOwner: false, inAnotherHouse: false } });
+    served({ viewer: MEMBER });
     render(House, { props: PROPS });
 
     expect(await screen.findByRole("button", { name: /leave house/i })).toBeInTheDocument();
@@ -165,14 +173,40 @@ describe("the join button", () => {
   });
 
   it("leaves, then sends the lifter back to the list", async () => {
-    served({ viewer: { isMember: true, isOwner: false, inAnotherHouse: false } });
+    served({ viewer: MEMBER });
     render(House, { props: PROPS });
-    await fireEvent.click(await screen.findByRole("button", { name: /leave house/i }));
+    await openLeaveDialog();
+    await fireEvent.click(screen.getByRole("button", { name: "Leave" }));
 
     await waitFor(() => expect(leaveHouse).toHaveBeenCalled());
     // Not back to the page they just left, which may no longer exist — leaving as
     // the last member deletes the House.
     await waitFor(() => expect(push).toHaveBeenCalledWith("/houses"));
+  });
+
+  // The whole point of the dialog. Tapping the card's button is a request to be
+  // ASKED, and a version where the tap itself left would be the bug this guards.
+  it("asks before leaving rather than leaving on the tap", async () => {
+    served({ viewer: MEMBER, name: "House Iron" });
+    render(House, { props: PROPS });
+    await openLeaveDialog();
+
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    // Named, because a lifter reaches this from a page they may have opened by
+    // mistake, and "Leave?" alone does not say leave WHAT.
+    expect(screen.getByText("Leave House Iron?")).toBeInTheDocument();
+    expect(leaveHouse).not.toHaveBeenCalled();
+  });
+
+  it("stays in the House when the dialog is dismissed", async () => {
+    served({ viewer: MEMBER });
+    render(House, { props: PROPS });
+    await openLeaveDialog();
+    await fireEvent.click(screen.getByRole("button", { name: "Stay" }));
+
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+    expect(leaveHouse).not.toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
   });
 });
 
