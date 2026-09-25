@@ -1,6 +1,8 @@
 <script lang="ts">
   import Crown from "@lucide/svelte/icons/crown";
   import { crownsFor } from "./achievements.svelte";
+  import { houseFor } from "./houses.svelte";
+  import Sigil from "./Sigil.svelte";
   import type { User } from "./api";
 
   // A lifter's name, with whatever they are currently wearing after it.
@@ -23,6 +25,7 @@
     class: className = "",
     crownSize = "size-3.5",
     crowns: showCrowns = true,
+    sigil: showSigil = true,
   }: {
     lifter: NamedUser;
     class?: string;
@@ -42,6 +45,14 @@
      * is why that surface uses this component rather than the raw expression.
      */
     crowns?: boolean;
+    /**
+     * Whether to draw the House sigil.
+     *
+     * Off for the same kind of surface `crowns` is off for: one that is itself
+     * about the lifter's House, where the tag beside the name would repeat what
+     * the heading already says.
+     */
+    sigil?: boolean;
   } = $props();
 
   const name = $derived(lifter.displayName || lifter.username);
@@ -55,10 +66,22 @@
   // thirty names costs thirty lookups rather than thirty scans. See
   // achievements.svelte.ts.
   const crowns = $derived(showCrowns ? crownsFor(lifter.id) : []);
+
+  // AT MOST ONE, unlike the crowns, and that is the schema's doing rather than a
+  // choice made here: house_members takes the lifter as its primary key, so a
+  // lifter in two Houses is a row the database cannot hold. Read from the same
+  // kind of map and for the same reason — see houses.svelte.ts.
+  const house = $derived(showSigil ? houseFor(lifter.id) : null);
 </script>
 
 <span class="inline-flex min-w-0 items-baseline gap-1">
   <span class="truncate {className}">{name}</span>
+  <!-- Before the crowns, because it says who they are rather than what they have
+       won — and because it is the one ornament whose width is fixed, so a row that
+       is truncating stays readable in the same place every time. -->
+  {#if house}
+    <Sigil {house} />
+  {/if}
   {#if crowns.length > 0}
     <!-- shrink-0 so the crowns survive a row that is truncating the name: the
          name can be cut and still read, where half a crown is just noise. -->

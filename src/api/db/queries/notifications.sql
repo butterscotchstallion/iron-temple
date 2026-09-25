@@ -136,6 +136,18 @@ WITH live AS (
            (min(n.achievement_slug) OVER w
                 IS NOT DISTINCT FROM max(n.achievement_slug) OVER w)::bool
                AS one_achievement,
+           n.house_id,
+           -- The same question for Houses, and it needs asking for the same
+           -- reason: none of the three house kinds carries a session, so 0031's
+           -- key folds every one of them into a single group per kind.
+           --
+           -- An owner only ever has one House, so their `house-request` group
+           -- names it. A lifter who asked three Houses and was turned down by two
+           -- is the case this exists for: one `house-declined` row naming the
+           -- newest would be a claim about both that only holds for one of them.
+           (min(n.house_id) OVER w
+                IS NOT DISTINCT FROM max(n.house_id) OVER w)::bool
+               AS one_house,
            row_number() OVER w AS rn,
            -- Whether anything in the group is still unread, which is both the
            -- panel's dot and what makes the group count towards the badge.
@@ -166,6 +178,8 @@ SELECT g.id,
        g.emoji,
        g.achievement_slug,
        g.one_achievement,
+       g.house_id,
+       g.one_house,
        g.created_at,
        (CASE WHEN g.has_unread THEN NULL ELSE g.last_read_at END)::timestamptz
            AS read_at,
@@ -262,6 +276,7 @@ SELECT n.id,
        n.comment_id,
        n.emoji,
        n.achievement_slug,
+       n.house_id,
        n.created_at,
        n.read_at,
        u.id AS actor_id,

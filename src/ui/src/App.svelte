@@ -15,6 +15,7 @@
   import { loadHomeSessions } from "./lib/homeData";
   import { startPolling as startNotificationPolling } from "./lib/notifications.svelte";
   import { startAchievementPolling } from "./lib/achievements.svelte";
+  import { startHousePolling } from "./lib/houses.svelte";
   import { startLive } from "./lib/live.svelte";
   import { startPolling } from "./lib/version.svelte";
   import { deferred } from "./lib/deferred.svelte";
@@ -135,6 +136,10 @@
     // install looking untouched. See FeedCard.svelte.
     "/feed": wrap({ asyncComponent: () => import("./routes/Feed.svelte") }),
     "/leaderboard": wrap({ asyncComponent: () => import("./routes/Leaderboard.svelte") }),
+    "/houses": wrap({ asyncComponent: () => import("./routes/Houses.svelte") }),
+    // After the literal above, because svelte-spa-router matches in insertion
+    // order and ":id" would otherwise swallow "/houses".
+    "/houses/:id": wrap({ asyncComponent: () => import("./routes/House.svelte") }),
     // Another lifter's session recap. Its own route rather than a mode of
     // /sessions/:id/recap: that one is scoped to the caller and would 404 here,
     // and the two read different endpoints.
@@ -207,6 +212,16 @@
     // It is what lets a crown the CALLER just took be celebrated — the server
     // tells everybody except them.
     return startAchievementPolling(auth.me.id);
+  });
+
+  // Which House everybody is in, on exactly the same terms as the crowns and for
+  // the same reason: a sigil is drawn beside a name on surfaces that are all
+  // lazy-loaded. No id is handed over because nothing about a House is
+  // celebrated — being let in arrives as a notification, which the panel above
+  // already picks up.
+  $effect(() => {
+    if (!auth.me || auth.me.mustChangePassword) return;
+    return startHousePolling();
   });
 
   // The live socket, on exactly the same terms and for the same reasons: the

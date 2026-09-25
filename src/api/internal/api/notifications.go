@@ -218,6 +218,11 @@ func (s *Server) listNotifications(w http.ResponseWriter, r *http.Request) {
 		if row.OneAchievement {
 			item.AchievementSlug = row.AchievementSlug
 		}
+		// The same withholding for the same reason, on the other subject that
+		// folds without a session to fold by.
+		if row.OneHouse {
+			item.HouseID = row.HouseID
+		}
 		items = append(items, item)
 	}
 
@@ -280,11 +285,11 @@ func (s *Server) getNotificationGroupMembers(w http.ResponseWriter, r *http.Requ
 	// ActorCount is 1 and OtherActorNames absent on every one of these: a member
 	// folds nobody, which is exactly what those two fields report.
 	//
-	// AchievementSlug is passed through UNCONDITIONALLY, which is the one place
-	// this mapping deliberately differs from the panel's. Up there it is gated on
-	// the group agreeing about which board was won; down here a row is a single
-	// notification, so its board is not in doubt and withholding it would defeat
-	// the only reason a client asked.
+	// AchievementSlug and HouseID are passed through UNCONDITIONALLY, which is
+	// where this mapping deliberately differs from the panel's. Up there each is
+	// gated on the group agreeing about its subject; down here a row is a single
+	// notification, so neither subject is in doubt and withholding one would
+	// defeat the only reason a client asked.
 	items := make([]notificationDTO, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, notificationDTO{
@@ -306,6 +311,7 @@ func (s *Server) getNotificationGroupMembers(w http.ResponseWriter, r *http.Requ
 			CommentID:       row.CommentID,
 			CommentBody:     row.CommentBody,
 			AchievementSlug: row.AchievementSlug,
+			HouseID:         row.HouseID,
 			CreatedAt:       timestamptzToString(row.CreatedAt),
 			ReadAt:          timestamptzToString(row.ReadAt),
 		})

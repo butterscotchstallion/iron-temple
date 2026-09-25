@@ -16,6 +16,7 @@
   // both concern people need two silhouettes, or the menu reads as one item
   // repeated.
   import UsersRound from "@lucide/svelte/icons/users-round";
+  import Shield from "@lucide/svelte/icons/shield";
   import Avatar from "./Avatar.svelte";
   import LifterName from "./LifterName.svelte";
   import { auth, signOut } from "./auth.svelte";
@@ -81,6 +82,13 @@
         <DropdownMenu.Item class={itemClass} onSelect={() => go("/leaderboard")}>
           <Medal class="size-4" aria-hidden="true" />
           Leaderboard
+        </DropdownMenu.Item>
+        <!-- The only reliable way in on a touch screen. The sigil beside a name
+             previews its House on hover, and a phone has no hover — see the note
+             in Sigil.svelte on why that tag is not itself a link. -->
+        <DropdownMenu.Item class={itemClass} onSelect={() => go("/houses")}>
+          <Shield class="size-4" aria-hidden="true" />
+          Houses
         </DropdownMenu.Item>
         <DropdownMenu.Item class={itemClass} onSelect={() => go("/profile")}>
           <Settings class="size-4" aria-hidden="true" />

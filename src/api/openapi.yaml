@@ -60,6 +60,7 @@ tags:
   - name: admin
   - name: lifters
   - name: achievements
+  - name: houses
   - name: recognition
   - name: notifications
   - name: exercises
@@ -899,6 +900,258 @@ paths:
                 $ref: "#/components/schemas/AchievementList"
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /houses:
+    get:
+      tags: [houses]
+      operationId: listHouses
+      summary: Every House on the install, and who is in each
+      description: >
+        **This is the read that lets a client draw a sigil beside somebody else's
+        name.** Fetch it once, keep it, and consult it per name rendered — like
+        `/achievements`, and for the same reason: a per-lifter question would be a
+        request per row of the feed.
+
+        **`description` is not here.** It is the only unbounded field a House has
+        and exactly one screen reads it, so it would be dead weight in the payload
+        every client fetches on load. `GET /houses/{houseId}` carries it.
+
+        **`memberships` is flat, not nested per House.** It is keyed into a map by
+        lifter id on the client, which is the shape that answers "which sigil goes
+        beside this name" in one lookup.
+
+        **Which House a lifter is in is as public as their name.** A House groups;
+        it does not gate. Nothing on this install became less visible when Houses
+        arrived, and no other endpoint gained a House filter.
+      responses:
+        "200":
+          description: Every House, with its members
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HouseList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [houses]
+      operationId: createHouse
+      summary: Found a House
+      description: >
+        The caller becomes its first member and its owner.
+
+        **A lifter may only be in one House**, so founding one while already in
+        another is a `409` rather than a move. Leave first.
+
+        Name and sigil are both unique case-insensitively, and a collision on
+        either is also a `409`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateHouseRequest"
+      responses:
+        "201":
+          description: The House as founded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HouseDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /houses/{houseId}:
+    parameters:
+      - $ref: "#/components/parameters/HouseId"
+    get:
+      tags: [houses]
+      operationId: getHouse
+      summary: One House in full, for its page
+      description: >
+        Everything `/houses` carries plus the long `description`, the members as
+        lifters, and the caller's own standing with this House.
+
+        **`pendingRequests` is present only for the owner.** For anybody else it
+        is absent, because who has asked to join is the owner's business and the
+        answer is not drawn anywhere else.
+
+        **`viewer` is what the join button reads.** It says whether the caller is
+        a member, has a request outstanding, or is in some other House — the three
+        states that decide whether the page offers to join, to withdraw, or
+        explains why it cannot.
+      responses:
+        "200":
+          description: The House
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HouseDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [houses]
+      operationId: updateHouse
+      summary: Change a House's name, sigil, icon or prose
+      description: >
+        **Owner only** — `403` with code `house_owner_required` for any other
+        member, and `404` for a lifter who is not in this House at all, because
+        the membership is not theirs to know about.
+
+        Every field is optional and an omitted one is left alone. Name and sigil
+        remain unique case-insensitively.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateHouseRequest"
+      responses:
+        "200":
+          description: The House as it now stands
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HouseDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /houses/{houseId}/requests:
+    parameters:
+      - $ref: "#/components/parameters/HouseId"
+    post:
+      tags: [houses]
+      operationId: requestToJoinHouse
+      summary: Ask to join a House
+      description: >
+        The House's owner is notified. Nothing happens to the caller's membership
+        until the owner approves.
+
+        **A lifter may ask several Houses at once.** That is deliberate: asking is
+        not committing, and a lifter with no House should not have to pick one
+        queue to wait in. The first approval wins and closes the rest —
+        see `superseded` in `HouseJoinRequest.outcome`.
+
+        Asking while already in a House is a `409`, as is asking twice.
+      responses:
+        "201":
+          description: The request as filed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HouseJoinRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /houses/{houseId}/requests/{requestId}:
+    parameters:
+      - $ref: "#/components/parameters/HouseId"
+      - $ref: "#/components/parameters/RequestId"
+    delete:
+      tags: [houses]
+      operationId: withdrawHouseRequest
+      summary: Withdraw your own request
+      description: >
+        The caller's own request only. Somebody else's is a `404` rather than a
+        `403`, because a lifter has no business learning that a request they did
+        not make exists.
+      responses:
+        "204":
+          description: Withdrawn
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /houses/{houseId}/requests/{requestId}/approve:
+    parameters:
+      - $ref: "#/components/parameters/HouseId"
+      - $ref: "#/components/parameters/RequestId"
+    post:
+      tags: [houses]
+      operationId: approveHouseRequest
+      summary: Let a lifter in
+      description: >
+        **Owner only.** The requester joins, is notified, and every other request
+        they have open is closed as `superseded`.
+
+        A requester who joined some other House in the meantime is a `409`: the
+        request is no longer answerable, and quietly moving them out of the House
+        they chose would be worse than failing.
+      responses:
+        "204":
+          description: Approved
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /houses/{houseId}/requests/{requestId}/decline:
+    parameters:
+      - $ref: "#/components/parameters/HouseId"
+      - $ref: "#/components/parameters/RequestId"
+    post:
+      tags: [houses]
+      operationId: declineHouseRequest
+      summary: Turn a request down
+      description: >
+        **Owner only.** The requester is told, and may ask again later — a
+        declined request is closed, not a bar.
+      responses:
+        "204":
+          description: Declined
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /me/house:
+    delete:
+      tags: [houses]
+      operationId: leaveHouse
+      summary: Leave the House you are in
+      description: >
+        **A write about the caller, so it is on `/me` and not on a path naming a
+        person.** `/lifters/{lifterId}` is read-only by construction.
+
+        Two things can follow, and neither is the caller's choice. **If the
+        caller owns the House and other members remain, ownership passes to the
+        longest-standing of them** — a House is not left without an owner because
+        one lifter walked. **If the caller was the last member, the House is
+        deleted**, along with any requests outstanding against it; an empty House
+        sitting on a reserved name and sigil is litter.
+
+        Leaving when in no House is a `404`.
+      responses:
+        "204":
+          description: Left
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /admin/activity:
     get:
@@ -2730,6 +2983,24 @@ components:
       schema:
         type: integer
         format: int64
+    HouseId:
+      name: houseId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+    RequestId:
+      name: requestId
+      in: path
+      required: true
+      description: >
+        A row in `house_join_requests`. The House in the path is checked against
+        the one the request belongs to, so an id from another House is a 404
+        rather than a cross-House write.
+      schema:
+        type: integer
+        format: int64
 
   responses:
     BadRequest:
@@ -3208,6 +3479,280 @@ components:
           items:
             $ref: "#/components/schemas/AchievementHolders"
 
+    # ---- Houses ----
+
+    HouseIcon:
+      type: string
+      description: >
+        Which icon a House is drawn with. A closed set, and **this enum is the
+        set** — the Go validator and the UI's icon map both answer to it, so
+        adding one is an edit here plus a case on each side rather than a free
+        string that renders as nothing when it is misspelled.
+
+        Picked rather than uploaded. An icon that is a name and a colour costs no
+        storage, needs no endpoint of its own, and can be drawn inside a hover
+        card built entirely from a list the client already holds.
+
+        Empty means no icon chosen, which is what a House founded without one
+        has. A client should fall back to the sigil.
+      enum:
+        [
+          "",
+          dumbbell,
+          flame,
+          anvil,
+          hammer,
+          mountain,
+          shield,
+          swords,
+          skull,
+          zap,
+          star,
+          gem,
+          landmark,
+          castle,
+          trophy,
+          target,
+          anchor,
+        ]
+      example: dumbbell
+
+    House:
+      type: object
+      required: [id, name, sigil, tagline, icon, iconColor, createdAt, memberCount]
+      description: >
+        A House as it appears in the site-wide list. **No `description`** — see
+        `GET /houses` for why the long field is not in the payload every client
+        loads.
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+          description: Unique on the install, case-insensitively.
+        sigil:
+          type: string
+          description: >
+            Two to five alphanumerics, unique case-insensitively. The tag every
+            member wears beside their name.
+
+            The ceiling is the load-bearing half: this is rendered inline next to
+            a name that is already truncating, so a long sigil does not look bad,
+            it pushes the name out of the row.
+          example: IRON
+        tagline:
+          type: string
+          description: >
+            The one-line pitch, up to 80 characters. Shown in the hover card and
+            on the House's page. Empty is ordinary.
+        icon:
+          $ref: "#/components/schemas/HouseIcon"
+        iconColor:
+          type: string
+          description: >
+            Hex colour for the icon, in the form `avatarColor` already uses.
+            Empty means the UI picks one.
+          example: "#b026ff"
+        createdAt:
+          type: string
+          format: date-time
+        memberCount:
+          type: integer
+          description: >
+            Carried here so the list screen does not need a request per row.
+
+    HouseMembership:
+      type: object
+      required: [userId, houseId, isOwner]
+      description: >
+        One lifter's place in one House. Flat rather than nested inside `House`
+        because the client keys these into a map by lifter id — that map is what
+        answers "which sigil goes beside this name" in a single lookup.
+      properties:
+        userId:
+          type: integer
+          format: int64
+        houseId:
+          type: integer
+          format: int64
+        isOwner:
+          type: boolean
+
+    HouseList:
+      type: object
+      required: [items, memberships]
+      description: >
+        Every House and every membership on the install — the site-wide read a
+        client keeps in order to draw a sigil beside any name it renders.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/House"
+        memberships:
+          type: array
+          items:
+            $ref: "#/components/schemas/HouseMembership"
+
+    HouseMember:
+      type: object
+      required: [lifter, isOwner, joinedAt]
+      description: A member of a House, as the House's page lists them.
+      properties:
+        lifter:
+          $ref: "#/components/schemas/Lifter"
+        isOwner:
+          type: boolean
+          description: >
+            True for at most one member. False for every member of a House whose
+            owner deleted their account — the API still answers owner-only
+            questions in that case by treating the longest-standing member as the
+            owner, so a House is never stuck.
+        joinedAt:
+          type: string
+          format: date-time
+
+    HouseJoinRequest:
+      type: object
+      required: [id, houseId, lifter, requestedAt]
+      description: One lifter asking to join one House.
+      properties:
+        id:
+          type: integer
+          format: int64
+        houseId:
+          type: integer
+          format: int64
+        lifter:
+          $ref: "#/components/schemas/Lifter"
+        requestedAt:
+          type: string
+          format: date-time
+
+    HouseViewer:
+      type: object
+      required: [isMember, isOwner, inAnotherHouse]
+      description: >
+        The caller's own standing with this House, which is what the join button
+        reads. The three flags are exhaustive between them: a member may leave, a
+        lifter in no House with no request may ask, one with `openRequestId` may
+        withdraw, and one `inAnotherHouse` is told why it cannot ask.
+      properties:
+        isMember:
+          type: boolean
+        isOwner:
+          type: boolean
+        inAnotherHouse:
+          type: boolean
+          description: In some House, but not this one.
+        openRequestId:
+          type: integer
+          format: int64
+          description: >
+            The caller's outstanding request to this House, absent when they have
+            none. Present so the page can offer to withdraw it without a second
+            round trip.
+
+    HouseDetail:
+      type: object
+      required:
+        [
+          id,
+          name,
+          sigil,
+          tagline,
+          description,
+          icon,
+          iconColor,
+          createdAt,
+          memberCount,
+          members,
+          viewer,
+        ]
+      description: One House in full, for its own page.
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        sigil:
+          type: string
+        tagline:
+          type: string
+        description:
+          type: string
+          description: >
+            The long version, up to 2000 characters. Only this endpoint carries
+            it. Empty is ordinary.
+        icon:
+          $ref: "#/components/schemas/HouseIcon"
+        iconColor:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        memberCount:
+          type: integer
+        members:
+          type: array
+          description: Owner first, then by how long they have been in.
+          items:
+            $ref: "#/components/schemas/HouseMember"
+        viewer:
+          $ref: "#/components/schemas/HouseViewer"
+        pendingRequests:
+          type: array
+          description: >
+            **Present only for the owner**, and absent — not empty — for anybody
+            else. An empty array from an owner means nobody is waiting; an absent
+            one means the caller is not entitled to the answer.
+          items:
+            $ref: "#/components/schemas/HouseJoinRequest"
+
+    CreateHouseRequest:
+      type: object
+      required: [name, sigil]
+      properties:
+        name:
+          type: string
+          description: 1 to 60 characters, unique case-insensitively.
+        sigil:
+          type: string
+          description: Two to five alphanumerics, unique case-insensitively.
+        tagline:
+          type: string
+          description: Up to 80 characters. Optional.
+        description:
+          type: string
+          description: Up to 2000 characters. Optional.
+        icon:
+          $ref: "#/components/schemas/HouseIcon"
+        iconColor:
+          type: string
+          description: A `#rrggbb` hex colour, or empty.
+
+    UpdateHouseRequest:
+      type: object
+      description: >
+        Every field is optional; an omitted one is left as it was. Sending an
+        empty string is a change — it clears that field — which is how a tagline
+        is removed.
+      properties:
+        name:
+          type: string
+        sigil:
+          type: string
+        tagline:
+          type: string
+        description:
+          type: string
+        icon:
+          $ref: "#/components/schemas/HouseIcon"
+        iconColor:
+          type: string
+
     LifterAchievement:
       type: object
       required: [achievement, heldNow, timesHeld, firstHeldFrom, lastHeldFrom]
@@ -3601,6 +4146,21 @@ components:
             should say the unnamed thing.
 
             Absent on every other kind, which has no achievement at all.
+        houseId:
+          type: integer
+          format: int64
+          description: >
+            Which House, on the three `house-` kinds. The client already holds
+            every House from `/houses`, so this is an id rather than a name — the
+            row looks up its own sigil and tagline from what it has.
+
+            **Absent when the row folds more than one House**, the same withholding
+            `achievementSlug` describes and for the same reason. None of these
+            kinds carries a session, so they fold per kind: an owner's requests
+            all name their one House, but a lifter declined by two Houses gets one
+            row, and naming the newest would misdescribe the other.
+
+            Absent on every other kind.
         createdAt:
           type: string
           format: date-time
@@ -3644,12 +4204,29 @@ components:
 
         Like `joined` it carries no session, so every crown folds into a single row.
 
+        The three `house-` kinds follow the same rule about who is told. A
+        `house-request` goes to the House's owner and not to the lifter who
+        asked; `house-approved` and `house-declined` go to that lifter and not to
+        the owner who decided. Nobody is ever notified of their own action. None
+        of them carries a session, so like `joined` and `crown` each folds into a
+        single row — see `Notification.houseId` for what that costs.
+
         Unlike `ReactionEmoji`, this set is never validated on the way in,
         because it never arrives on the way in: a client cannot raise a
         notification, and every kind is written as a literal by the query that
         fans it out. The database does not constrain the column either — see
         migration 0026 for why.
-      enum: [reaction, comment, reply, joined, crown]
+      enum:
+        [
+          reaction,
+          comment,
+          reply,
+          joined,
+          crown,
+          house-request,
+          house-approved,
+          house-declined,
+        ]
       example: reaction
 
     Lifter:

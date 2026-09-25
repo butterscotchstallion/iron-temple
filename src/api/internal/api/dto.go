@@ -409,6 +409,107 @@ type lifterAchievementListDTO struct {
 	Items []lifterAchievementDTO `json:"items"`
 }
 
+// houseDTO is a House as the site-wide list carries it.
+//
+// No Description, and that is the type enforcing the decision rather than the
+// handler remembering it: this struct is serialised into the payload every
+// signed-in client fetches on load in order to draw sigils, and the long field is
+// read on exactly one screen. houseDetailDTO below is where it lives.
+type houseDTO struct {
+	ID    int32  `json:"id"`
+	Name  string `json:"name"`
+	Sigil string `json:"sigil"`
+	// Tagline is short enough to travel with the list — it is drawn in the hover
+	// card, which is built entirely from what the client already holds.
+	Tagline   string `json:"tagline"`
+	Icon      string `json:"icon"`
+	IconColor string `json:"iconColor"`
+	CreatedAt string `json:"createdAt"`
+	// MemberCount rides along so the list screen does not cost a query per row.
+	MemberCount int32 `json:"memberCount"`
+}
+
+// houseMembershipDTO is one lifter's place in one House.
+//
+// Flat, and returned alongside the houses rather than nested inside them, because
+// the client keys these into a map by lifter id — see sigilFor in
+// src/ui/src/lib/houses.svelte.ts. Nesting would mean the client rebuilding that
+// map by walking every House's member array on every load.
+type houseMembershipDTO struct {
+	UserID  int32 `json:"userId"`
+	HouseID int32 `json:"houseId"`
+	IsOwner bool  `json:"isOwner"`
+}
+
+// houseListDTO is the site-wide read: every House, and who is in each.
+type houseListDTO struct {
+	Items       []houseDTO           `json:"items"`
+	Memberships []houseMembershipDTO `json:"memberships"`
+}
+
+// houseMemberDTO is a member of one House, for its page.
+type houseMemberDTO struct {
+	Lifter lifterDTO `json:"lifter"`
+	// IsOwner is true for at most one member, and false for EVERY member of a
+	// House whose owner deleted their account — the cascade takes the membership
+	// row with it and no transfer runs. Owner-only checks do not read this field;
+	// they go through GetHouseOwner, which falls through to the longest-standing
+	// member so that a House in that state is still answerable.
+	IsOwner  bool   `json:"isOwner"`
+	JoinedAt string `json:"joinedAt"`
+}
+
+// houseJoinRequestDTO is one lifter asking to join one House.
+type houseJoinRequestDTO struct {
+	ID          int32     `json:"id"`
+	HouseID     int32     `json:"houseId"`
+	Lifter      lifterDTO `json:"lifter"`
+	RequestedAt string    `json:"requestedAt"`
+}
+
+// houseViewerDTO is the caller's own standing with the House they are looking at.
+//
+// It exists so the join button is a read rather than a deduction. A client could
+// work all of this out from members plus its own id plus a request list it is not
+// allowed to see — which is the point: the last part is why the server answers.
+type houseViewerDTO struct {
+	IsMember bool `json:"isMember"`
+	IsOwner  bool `json:"isOwner"`
+	// InAnotherHouse is the state that makes the button explain itself instead of
+	// offering. One House at a time is a rule the lifter has to be told about at
+	// the moment it stops them, not after a 409.
+	InAnotherHouse bool `json:"inAnotherHouse"`
+	// OpenRequestID is the caller's outstanding request to THIS House, absent when
+	// they have none, so the page can offer to withdraw without a second call.
+	OpenRequestID *int32 `json:"openRequestId,omitempty"`
+}
+
+// houseDetailDTO is one House in full, for its own page.
+type houseDetailDTO struct {
+	ID          int32  `json:"id"`
+	Name        string `json:"name"`
+	Sigil       string `json:"sigil"`
+	Tagline     string `json:"tagline"`
+	Description string `json:"description"`
+	Icon        string `json:"icon"`
+	IconColor   string `json:"iconColor"`
+	CreatedAt   string `json:"createdAt"`
+	// MemberCount is an int where houseDTO's is an int32, because this one is
+	// len(Members) rather than a COUNT(*) from the database. Converting would be
+	// a narrowing cast with nothing to gain — both encode to the same JSON number.
+	MemberCount int `json:"memberCount"`
+
+	Members []houseMemberDTO `json:"members"`
+	Viewer  houseViewerDTO   `json:"viewer"`
+
+	// PendingRequests is a POINTER to a slice, which is the one unusual thing in
+	// this type and is load-bearing. Absent for anybody but the owner, and empty
+	// for an owner with nobody waiting — two different answers that a plain nil
+	// slice with omitempty would flatten into one. "Nobody has asked" and "you are
+	// not entitled to know" must not look the same on the wire.
+	PendingRequests *[]houseJoinRequestDTO `json:"pendingRequests,omitempty"`
+}
+
 // sessionReactionDTO is one emoji's worth of applause.
 type sessionReactionDTO struct {
 	Emoji string `json:"emoji"`
@@ -522,6 +623,16 @@ type notificationDTO struct {
 	// withholds it and the client says "took crowns" instead. Absent on every
 	// other kind, which has no achievement at all.
 	AchievementSlug *string `json:"achievementSlug,omitempty"`
+
+	// HouseID is which House, for the three 'house-' kinds. An id rather than a
+	// name because the client already holds every House from /houses and looks up
+	// the sigil and tagline it wants to draw.
+	//
+	// Withheld on a fold spanning more than one House, exactly as AchievementSlug
+	// is. None of these kinds carries a session either, so they fold per kind: an
+	// owner's requests all name their one House, but a lifter turned down by two
+	// gets a single row, and naming the newest would misdescribe the other.
+	HouseID *int32 `json:"houseId,omitempty"`
 
 	CreatedAt string `json:"createdAt"`
 	// ReadAt is absent while unread, which is the state the badge counts.

@@ -49,6 +49,34 @@ type GeneratedActivitySchedule struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
+type House struct {
+	ID          int32              `json:"id"`
+	Name        string             `json:"name"`
+	Sigil       string             `json:"sigil"`
+	Tagline     string             `json:"tagline"`
+	Description string             `json:"description"`
+	Icon        string             `json:"icon"`
+	IconColor   string             `json:"icon_color"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type HouseJoinRequest struct {
+	ID          int32              `json:"id"`
+	HouseID     int32              `json:"house_id"`
+	UserID      int32              `json:"user_id"`
+	RequestedAt pgtype.Timestamptz `json:"requested_at"`
+	DecidedAt   pgtype.Timestamptz `json:"decided_at"`
+	DecidedBy   *int32             `json:"decided_by"`
+	Outcome     *string            `json:"outcome"`
+}
+
+type HouseMember struct {
+	UserID   int32              `json:"user_id"`
+	HouseID  int32              `json:"house_id"`
+	IsOwner  bool               `json:"is_owner"`
+	JoinedAt pgtype.Timestamptz `json:"joined_at"`
+}
+
 type LifterAchievement struct {
 	ID              int32              `json:"id"`
 	UserID          int32              `json:"user_id"`
@@ -69,6 +97,7 @@ type Notification struct {
 	ReadAt          pgtype.Timestamptz `json:"read_at"`
 	ArchivedAt      pgtype.Timestamptz `json:"archived_at"`
 	AchievementSlug *string            `json:"achievement_slug"`
+	HouseID         *int32             `json:"house_id"`
 }
 
 type Program struct {

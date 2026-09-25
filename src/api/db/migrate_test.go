@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -192,6 +193,57 @@ func TestMigrateAppliesSchemaAndSeed(t *testing.T) {
 	// their own achievements. A seeded mutual-follow graph would be a migration
 	// deciding who trains with whom.
 	assertCount(t, sqlDB, "SELECT count(*) FROM follows", 0)
+
+	// 0034 seeds nothing — every House is founded by a lifter — so what is worth
+	// pinning here is the rails, which hold for rows no handler wrote. Each is
+	// asserted by trying to break it.
+	assertCount(t, sqlDB, "SELECT count(*) FROM houses", 0)
+	assertHouseRejected(t, sqlDB, "sigil too short", "X", "", "")
+	assertHouseRejected(t, sqlDB, "sigil too long", "TOOLONG", "", "")
+	assertHouseRejected(t, sqlDB, "sigil not alphanumeric", "A-B", "", "")
+	assertHouseRejected(t, sqlDB, "tagline too long", "OK", strings.Repeat("x", 81), "")
+	assertHouseRejected(t, sqlDB, "description too long", "OK", "", strings.Repeat("x", 2001))
+
+	// Both uniqueness rules are case-insensitive, which is the whole reason they
+	// are expression indexes rather than column constraints. Asserted with a real
+	// pair of inserts, then cleaned up so the count above stays true for any test
+	// that runs after this one.
+	if _, err := sqlDB.Exec(
+		`INSERT INTO houses (name, sigil) VALUES ('Case Test', 'CASE')`,
+	); err != nil {
+		t.Fatalf("inserting the first House: %v", err)
+	}
+	if _, err := sqlDB.Exec(
+		`INSERT INTO houses (name, sigil) VALUES ('case test', 'OTHR')`,
+	); err == nil {
+		t.Error("a House name differing only in case was accepted")
+	}
+	if _, err := sqlDB.Exec(
+		`INSERT INTO houses (name, sigil) VALUES ('Other Name', 'case')`,
+	); err == nil {
+		t.Error("a House sigil differing only in case was accepted")
+	}
+	if _, err := sqlDB.Exec(`DELETE FROM houses WHERE lower(sigil) = 'case'`); err != nil {
+		t.Fatalf("cleaning up the case-test House: %v", err)
+	}
+}
+
+// assertHouseRejected proves a houses CHECK refuses a value, by writing one.
+//
+// The insert fails atomically, so a rejected write leaves the table as it was and
+// an accepted one is both the failure being reported and a row that would break
+// the count above — which is why the message names the constraint rather than the
+// value.
+func assertHouseRejected(t *testing.T, db *sql.DB, what, sigil, tagline, description string) {
+	t.Helper()
+	_, err := db.Exec(
+		`INSERT INTO houses (name, sigil, tagline, description) VALUES ($1, $2, $3, $4)`,
+		"Rejected "+what, sigil, tagline, description,
+	)
+	if err == nil {
+		t.Errorf("%s was accepted; the matching houses CHECK is missing", what)
+		_, _ = db.Exec(`DELETE FROM houses WHERE name = $1`, "Rejected "+what)
+	}
 }
 
 func assertRest(t *testing.T, db *sql.DB, name string, want int) {

@@ -155,7 +155,12 @@
             {#if mine}
               <span class="font-semibold">You</span>
             {:else}
-              <LifterName lifter={current.actor} class="font-semibold" crowns={false} />
+              <LifterName
+                lifter={current.actor}
+                class="font-semibold"
+                crowns={false}
+                sigil={false}
+              />
             {/if}
             <span class="text-muted-foreground">
               took this {relativeTime(current.createdAt)}
