@@ -303,7 +303,7 @@
           <AlertDialog.Header>
             <AlertDialog.Title>Leave {house.name}?</AlertDialog.Title>
             <AlertDialog.Description class="flex flex-col gap-2">
-              <p>Your sigil comes off your name everywhere it's drawn.</p>
+              <p>You will be stripped of your sigil.</p>
             </AlertDialog.Description>
           </AlertDialog.Header>
           <AlertDialog.Footer>
