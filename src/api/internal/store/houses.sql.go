@@ -608,6 +608,31 @@ func (q *Queries) ListPendingHouseRequests(ctx context.Context, houseID int32) (
 	return items, nil
 }
 
+const lockHouse = `-- name: LockHouse :one
+SELECT id
+FROM houses
+WHERE id = $1::int
+FOR UPDATE
+`
+
+// LockHouse holds the House's row for the rest of the transaction.
+//
+// Asking to join decides between two outcomes on one read — claim an EMPTY
+// House, or file a request against an occupied one — and that read has to be
+// stable or both can happen at once. Under read committed, two lifters asking
+// the same empty House in the same instant would each see no owner and each walk
+// in as owner: AddHouseMember's ON CONFLICT is on user_id, which says "one House
+// per LIFTER" and has nothing to say about two lifters joining one House.
+//
+// So that decision is made under this lock. The second lifter waits, re-reads a
+// House that now has an owner, and files an ordinary request instead.
+func (q *Queries) LockHouse(ctx context.Context, id int32) (int32, error) {
+	row := q.db.QueryRow(ctx, lockHouse, id)
+	var id_2 int32
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
 const promoteLongestStandingMember = `-- name: PromoteLongestStandingMember :execrows
 UPDATE house_members
 SET is_owner = true

@@ -414,23 +414,6 @@ func (s *Server) requestToJoinHouse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read before the insert so the notification can be addressed, and so an
-	// EMPTY House takes the other path entirely.
-	//
-	// A House outlives its last member, so "no owner" is an ordinary state rather
-	// than the unreachable one it used to be: the House is standing, nobody is in
-	// it, and there is no one to work a queue. Filing a request against it would
-	// put a row somewhere nobody will ever look, so the caller walks in instead.
-	owner, err := s.q.GetHouseOwner(ctx, house.ID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		s.claimEmptyHouse(ctx, w, house, caller)
-		return
-	}
-	if err != nil {
-		internalError(w)
-		return
-	}
-
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		internalError(w)
@@ -438,6 +421,35 @@ func (s *Server) requestToJoinHouse(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := s.q.WithTx(tx)
+
+	// The owner read decides which of this endpoint's two outcomes happens, so it
+	// is taken INSIDE the transaction and under the House's row lock. Read
+	// unlocked, two lifters asking the same empty House at once would both see no
+	// owner and both claim it — see LockHouse for why AddHouseMember cannot catch
+	// that pair.
+	if _, err := qtx.LockHouse(ctx, house.ID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Deleted between houseFromPath and here. Nothing left to join.
+			notFound(w, "House not found")
+			return
+		}
+		internalError(w)
+		return
+	}
+
+	// A House outlives its last member, so "no owner" is an ordinary state rather
+	// than the unreachable one it used to be: the House is standing, nobody is in
+	// it, and there is no one to work a queue. Filing a request against it would
+	// put a row somewhere nobody will ever look, so the caller walks in instead.
+	owner, err := qtx.GetHouseOwner(ctx, house.ID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		s.claimEmptyHouse(ctx, w, tx, qtx, house, caller)
+		return
+	}
+	if err != nil {
+		internalError(w)
+		return
+	}
 
 	req, err := qtx.CreateJoinRequest(ctx, store.CreateJoinRequestParams{
 		HouseID: house.ID,
@@ -499,17 +511,20 @@ func (s *Server) requestToJoinHouse(w http.ResponseWriter, r *http.Request) {
 //
 // Answering 200-with-a-House rather than 201-with-a-request is what tells the
 // client which of the two happened, without a second round trip to find out.
+//
+// Takes the caller's transaction rather than opening its own, because the read
+// that chose this path — "no owner" — is only true for as long as that
+// transaction holds the House's row lock. Beginning a second one here would put
+// the decision and the write in different transactions, which is the race the
+// lock exists to close.
 func (s *Server) claimEmptyHouse(
-	ctx context.Context, w http.ResponseWriter, house store.House, caller int32,
+	ctx context.Context,
+	w http.ResponseWriter,
+	tx pgx.Tx,
+	qtx *store.Queries,
+	house store.House,
+	caller int32,
 ) {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		internalError(w)
-		return
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	qtx := s.q.WithTx(tx)
-
 	added, err := qtx.AddHouseMember(ctx, store.AddHouseMemberParams{
 		UserID:  caller,
 		HouseID: house.ID,
@@ -714,8 +729,12 @@ func (s *Server) decideHouseRequest(w http.ResponseWriter, r *http.Request, outc
 // Two things can follow and neither is the caller's choice. If they owned it and
 // others remain, ownership passes to the longest-standing member — a House is
 // not left ownerless because one lifter walked. If they were the last member the
-// House is deleted, taking its outstanding requests with it through the cascade;
-// an empty House sitting on a reserved name and sigil is litter.
+// House STANDS, empty and unowned, keeping its name, sigil, founding date and
+// description; claimEmptyHouse is the way back into one.
+//
+// Its outstanding requests are superseded here rather than cascading away with a
+// deleted House. Nobody is left to answer them, and leaving them open would lock
+// their own askers out of claiming it — see SupersedeHouseOpenRequests.
 func (s *Server) leaveHouse(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	caller := userFrom(ctx).ID

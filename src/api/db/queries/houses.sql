@@ -202,6 +202,23 @@ SET name        = sqlc.arg('name')::text,
 WHERE id = sqlc.arg('id')::int
 RETURNING id, name, sigil, tagline, description, icon, icon_color, created_at;
 
+-- LockHouse holds the House's row for the rest of the transaction.
+--
+-- Asking to join decides between two outcomes on one read — claim an EMPTY
+-- House, or file a request against an occupied one — and that read has to be
+-- stable or both can happen at once. Under read committed, two lifters asking
+-- the same empty House in the same instant would each see no owner and each walk
+-- in as owner: AddHouseMember's ON CONFLICT is on user_id, which says "one House
+-- per LIFTER" and has nothing to say about two lifters joining one House.
+--
+-- So that decision is made under this lock. The second lifter waits, re-reads a
+-- House that now has an owner, and files an ordinary request instead.
+-- name: LockHouse :one
+SELECT id
+FROM houses
+WHERE id = sqlc.arg('id')::int
+FOR UPDATE;
+
 -- AddHouseMember joins a lifter to a House.
 --
 -- ON CONFLICT DO NOTHING rather than an upsert that moves them: a lifter who is

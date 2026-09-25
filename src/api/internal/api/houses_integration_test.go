@@ -2,9 +2,12 @@ package api_test
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gavv/httpexpect/v2"
 )
@@ -649,6 +652,103 @@ func TestClaimingAnEmptyHouseSupersedesTheClaimantsOtherRequests(t *testing.T) {
 	// And a lifter who already has a House cannot claim an empty one.
 	expectAs(t, claimant).POST("/houses/{h}/requests", occupied).
 		Expect().Status(http.StatusConflict)
+}
+
+// Claiming an empty House takes the House's ROW LOCK before it decides.
+//
+// Without it, two lifters asking the same empty House at once would each read
+// "no owner" under read committed and each walk in as owner: AddHouseMember's
+// ON CONFLICT is on user_id, which forbids one LIFTER holding two Houses and has
+// nothing to say about two lifters holding one.
+//
+// Asserted by holding the lock and showing the claim WAITS, rather than by
+// firing concurrent claims and hoping they overlap. That was tried first and is
+// worthless here: the window between the owner read and the commit is
+// sub-millisecond, and the racing version passed against the unlocked code every
+// time. This fails against it deterministically, which is the whole job of the
+// test.
+func TestClaimingAnEmptyHouseTakesTheHouseRowLock(t *testing.T) {
+	_, owner := secondLifter(t, "house-race-owner")
+	_, claimant := secondLifter(t, "house-race-claimant")
+	houseID := foundHouse(t, owner, "House Race", "HRCE")
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(
+			context.Background(), `DELETE FROM houses WHERE lower(sigil) = 'hrce'`,
+		)
+	})
+
+	expectAs(t, owner).DELETE("/me/house").Expect().Status(http.StatusNoContent)
+
+	// Raw net/http rather than expectAs: httpexpect reports through *testing.T,
+	// which is not safe to call from the goroutine below.
+	claim := func(token string) int {
+		req, err := http.NewRequest(
+			http.MethodPost, fmt.Sprintf("%s/houses/%d/requests", baseURL, houseID), nil,
+		)
+		if err != nil {
+			return 0
+		}
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return 0
+		}
+		defer func() { _ = resp.Body.Close() }()
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return resp.StatusCode
+	}
+
+	ctx := context.Background()
+	blocker, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("opening the blocking transaction: %v", err)
+	}
+	defer func() { _ = blocker.Rollback(ctx) }()
+	// FOR KEY SHARE, and the weaker mode is the entire point. FOR UPDATE here
+	// would prove nothing: AddHouseMember's insert carries a foreign key to
+	// houses, so it takes a FOR KEY SHARE on this row by itself and would block
+	// against FOR UPDATE whether or not the handler asks for a lock of its own.
+	// FOR KEY SHARE is compatible with that implicit lock and conflicts only with
+	// the handler's explicit FOR UPDATE, so this blocks if and only if LockHouse
+	// ran.
+	if _, err := blocker.Exec(
+		ctx, `SELECT id FROM houses WHERE id = $1 FOR KEY SHARE`, houseID,
+	); err != nil {
+		t.Fatalf("locking the House row: %v", err)
+	}
+
+	done := make(chan int, 1)
+	go func() { done <- claim(claimant) }()
+
+	select {
+	case code := <-done:
+		t.Fatalf(
+			"claim returned %d while the House row was locked — it is not taking the lock, "+
+				"so two lifters can both claim an empty House", code,
+		)
+	case <-time.After(750 * time.Millisecond):
+		// Blocked on the row, which is the point.
+	}
+
+	// Released: the claim proceeds and takes the House.
+	if err := blocker.Rollback(ctx); err != nil {
+		t.Fatalf("releasing the lock: %v", err)
+	}
+	if code := <-done; code != http.StatusOK {
+		t.Fatalf("expected the freed claim to take the House with 200, got %d", code)
+	}
+
+	// The invariant the lock is protecting.
+	var owners int
+	if err := testPool.QueryRow(
+		ctx,
+		`SELECT COUNT(*) FROM house_members WHERE house_id = $1 AND is_owner`, houseID,
+	).Scan(&owners); err != nil {
+		t.Fatalf("counting owners: %v", err)
+	}
+	if owners != 1 {
+		t.Fatalf("expected exactly one owner, found %d", owners)
+	}
 }
 
 // Owner-only writes against an empty House 404: there is no owner, so there is
