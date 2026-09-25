@@ -3,7 +3,12 @@
   import { link, push } from "svelte-spa-router";
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog";
   import Pencil from "@lucide/svelte/icons/pencil";
+  // UserMinus rather than LogOut, which UserMenu already spends on signing out
+  // of Iron Temple entirely. Leaving a House is not leaving the app, and one
+  // glyph doing both jobs is how a lifter taps the wrong one.
+  import UserMinus from "@lucide/svelte/icons/user-minus";
   import Avatar from "../lib/Avatar.svelte";
   import LifterName from "../lib/LifterName.svelte";
   import Timestamp from "../lib/Timestamp.svelte";
@@ -47,6 +52,7 @@
   let saving = $state(false);
   let formError = $state<string | null>(null);
   let busy = $state(false);
+  let confirmLeave = $state(false);
 
   const houseID = $derived(Number(params.id));
 
@@ -227,7 +233,18 @@
               Edit
             </Button>
           {/if}
-          <Button variant="destructive" size="sm" onclick={leave} disabled={busy}>
+          <!-- Held against the card's right edge, away from Edit. It is the one
+               control on this row that a second tap cannot undo, so it does not
+               get to sit under the thumb that was reaching for something else.
+               ml-auto puts it there whether or not Edit is drawn beside it. -->
+          <Button
+            variant="destructive"
+            size="sm"
+            class="ml-auto"
+            onclick={() => (confirmLeave = true)}
+            disabled={busy}
+          >
+            <UserMinus />
             Leave House
           </Button>
         {:else if house.viewer.openRequestId !== undefined}
@@ -273,6 +290,30 @@
           />
         </div>
       {/if}
+
+      <!-- Leaving is a one-way door for the lifter who taps it: there is no
+           "rejoin", only asking again and waiting for an owner to say yes. So it
+           is confirmed rather than done on the first tap.
+           The description is a STACK of paragraphs holding one line today. The
+           rest of what leaving costs is a job of its own, and it lands here as
+           further <p>s — the layout is already sized for prose, so adding them
+           does not redraw the dialog. -->
+      <AlertDialog.Root open={confirmLeave} onOpenChange={(o) => (confirmLeave = o)}>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>Leave {house.name}?</AlertDialog.Title>
+            <AlertDialog.Description class="flex flex-col gap-2">
+              <p>Your sigil comes off your name everywhere it's drawn.</p>
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel>Stay</AlertDialog.Cancel>
+            <AlertDialog.Action variant="destructive" onclick={leave}>
+              Leave
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </Card>
 
     {#if pending}
