@@ -295,3 +295,84 @@ describe("following from the profile", () => {
     expect(screen.queryByRole("button", { name: /^Follow/ })).not.toBeInTheDocument();
   });
 });
+
+// The account menu links straight here now, which makes your own profile a page
+// lifters actually arrive at rather than one they stumbled into from the roster.
+// It is the same component drawing the same history either way — what these
+// cover is that the prose switches person when the subject is the reader.
+describe("your own profile", () => {
+  beforeEach(() => {
+    auth.me = testUser({ id: 1 });
+    auth.loaded = true;
+    getLifter.mockResolvedValue({
+      status: 200,
+      data: profile({ id: 1, displayName: "Ada Lovelace" }),
+    });
+  });
+
+  it("names the sections in the second person", async () => {
+    listLifterSessions.mockResolvedValue(history([session()]));
+    render(LifterProfile, { params: { id: "1" } });
+
+    await waitFor(() => {
+      expect(screen.getByText("Your training")).toBeInTheDocument();
+    });
+    expect(screen.getByText("What you trained")).toBeInTheDocument();
+    expect(screen.queryByText("Their training")).not.toBeInTheDocument();
+    expect(screen.queryByText("What they trained")).not.toBeInTheDocument();
+  });
+
+  // The section is drawn even when empty, so the one line in it that has to name
+  // somebody is the line that would otherwise talk about the reader in the third
+  // person. `getLifterAchievements` is unmocked on purpose — apiFetch turns the
+  // jsdom network failure into status 0, which is the empty case.
+  it("addresses you in the empty achievements list", async () => {
+    render(LifterProfile, { params: { id: "1" } });
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Lead any board on the leaderboard and its crown is yours/),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("says so in the second person when the month is empty", async () => {
+    getLifterRacked.mockResolvedValue({ status: 200, data: testRackedReport() });
+    render(LifterProfile, { params: { id: "1" } });
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("You haven't logged anything this month."),
+      ).toBeInTheDocument();
+    });
+  });
+
+  // Where the Follow control sits on anybody else's profile. Arriving from the
+  // account menu, this page is where you notice the display name is stale — and
+  // until now the edit for it was somewhere else entirely.
+  it("offers the way back to the settings screen", async () => {
+    render(LifterProfile, { params: { id: "1" } });
+
+    const settings = await screen.findByRole("link", { name: "Configure profile" });
+    expect(settings).toHaveAttribute("href", "#/profile");
+  });
+
+  // Somebody else's profile keeps the third person and keeps the Follow control.
+  // Asserted here rather than left to the cases above, because one flag drives
+  // both and a bug that pinned it true would pass every test in this block.
+  it("leaves another lifter's profile in the third person", async () => {
+    // The flag reads the profile the server returned, not the id in the URL, so
+    // this override is the whole of what makes it somebody else.
+    getLifter.mockResolvedValue({ status: 200, data: profile() });
+    listLifterSessions.mockResolvedValue(history([session()]));
+    render(LifterProfile, { params: { id: "2" } });
+
+    await waitFor(() => {
+      expect(screen.getByText("Their training")).toBeInTheDocument();
+    });
+    expect(screen.getByText("What they trained")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "Configure profile" }),
+    ).not.toBeInTheDocument();
+  });
+});

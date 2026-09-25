@@ -3,6 +3,10 @@
   import { push } from "svelte-spa-router";
   import BarChart3 from "@lucide/svelte/icons/bar-chart-3";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  // A head in a circle — an avatar, which is what the entry it marks leads to.
+  // Deliberately neither of the two silhouettes already in this menu: see the
+  // note on Users vs UsersRound below.
+  import CircleUserRound from "@lucide/svelte/icons/circle-user-round";
   import LogIn from "@lucide/svelte/icons/log-in";
   import LogOut from "@lucide/svelte/icons/log-out";
   import Medal from "@lucide/svelte/icons/medal";
@@ -29,6 +33,17 @@
   // click) comes for free and matches the alert-dialog already in use.
 
   let open = $state(false);
+
+  // Where "Your profile" goes: the lifter's own page on /lifters, the same one
+  // everybody else reads about them.
+  //
+  // Derived rather than built inside the item's onSelect, because TypeScript
+  // does not carry the template's `{#if auth.me}` narrowing into a callback —
+  // `auth.me.isAdmin` a few lines down is fine where `() => go(auth.me.id)`
+  // would not be, and a `!` there would assert something the template already
+  // proves. The empty string is unreachable for the same reason: nothing renders
+  // this menu until there is an account.
+  const myProfile = $derived(auth.me ? `/lifters/${auth.me.id}` : "");
 
   function go(path: string) {
     open = false;
@@ -76,6 +91,20 @@
         align="end"
         class="z-50 min-w-44 rounded-md border border-border/60 bg-card p-1 shadow-lg shadow-black/40"
       >
+        <!-- First, and separate from "Configure profile" at the bottom on
+             purpose — the two are not a pair to be tidied together. This one is
+             the page other lifters read about you: crowns, sigil, level,
+             lifetime volume, the month and your sessions. That one is a stack of
+             forms. Until this entry existed the page had no way in of its own at
+             all — you reached your own profile by opening the roster and finding
+             the row marked "(you)".
+
+             The menu reads in three groups from here: you (this, Racked), the
+             gym (Lifters, Around the gym, Leaderboard, Houses), then settings. -->
+        <DropdownMenu.Item class={itemClass} onSelect={() => go(myProfile)}>
+          <CircleUserRound class="size-4" aria-hidden="true" />
+          Your profile
+        </DropdownMenu.Item>
         <DropdownMenu.Item class={itemClass} onSelect={() => go("/racked")}>
           <BarChart3 class="size-4" aria-hidden="true" />
           Racked
