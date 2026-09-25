@@ -49,8 +49,23 @@ import (
 // repair pass looking for that state, it is resolved by reading —
 // GetHouseOwner orders by is_owner first and falls through to the
 // longest-standing member, which is the lifter a transfer would have chosen
-// anyway. Every owner-only check in this file goes through effectiveOwner, so
+// anyway. Every owner-only check in this file goes through GetHouseOwner, so
 // there is one rule and one place it is applied.
+//
+// # THE EMPTY HOUSE
+//
+// GetHouseOwner returns NO ROW for a House with no members, and that is an
+// ordinary state rather than an impossible one: a House outlives its last
+// member. It keeps its name, its sigil, its founding date and its description,
+// all of which belonged to more lifters than the one who happened to leave
+// last, and both name and sigil are indexed install-wide so deleting it is the
+// only way anybody could reuse them.
+//
+// An empty House is therefore standing and unowned. The only way back in is
+// claimEmptyHouse: the first lifter to ask joins it outright, as owner, because
+// the ordinary path files a request for a human to approve and there is no
+// human. Owner-only endpoints 404 in the meantime, which is honest — there is
+// nobody they could be addressed to.
 
 // The three notification kinds this feature raises.
 //
@@ -399,11 +414,20 @@ func (s *Server) requestToJoinHouse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read before the insert so the notification can be addressed, and so a
-	// House with no members at all — which the leave path makes unreachable — is
-	// a 404 rather than an unanswerable request.
-	owner, ok := s.effectiveOwner(ctx, w, house.ID)
-	if !ok {
+	// Read before the insert so the notification can be addressed, and so an
+	// EMPTY House takes the other path entirely.
+	//
+	// A House outlives its last member, so "no owner" is an ordinary state rather
+	// than the unreachable one it used to be: the House is standing, nobody is in
+	// it, and there is no one to work a queue. Filing a request against it would
+	// put a row somewhere nobody will ever look, so the caller walks in instead.
+	owner, err := s.q.GetHouseOwner(ctx, house.ID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		s.claimEmptyHouse(ctx, w, house, caller)
+		return
+	}
+	if err != nil {
+		internalError(w)
 		return
 	}
 
@@ -432,7 +456,7 @@ func (s *Server) requestToJoinHouse(w http.ResponseWriter, r *http.Request) {
 	}
 
 	told, err := qtx.CreateHouseNotification(ctx, store.CreateHouseNotificationParams{
-		UserID:  owner,
+		UserID:  owner.UserID,
 		ActorID: caller,
 		Kind:    notificationKindHouseRequest,
 		HouseID: house.ID,
@@ -463,6 +487,71 @@ func (s *Server) requestToJoinHouse(w http.ResponseWriter, r *http.Request) {
 		},
 		RequestedAt: timestamptzToString(req.RequestedAt),
 	})
+}
+
+// claimEmptyHouse walks a lifter into a House that has no members left, as its
+// owner, and answers with the House rather than with a request.
+//
+// The asking endpoint's other path files a row and waits for a human. This one
+// cannot: there is no human. An empty House would otherwise be a headstone —
+// standing, unjoinable, and holding a name and a sigil nobody else can use,
+// because both indexes are install-wide. So the first lifter to ask takes it.
+//
+// Answering 200-with-a-House rather than 201-with-a-request is what tells the
+// client which of the two happened, without a second round trip to find out.
+func (s *Server) claimEmptyHouse(
+	ctx context.Context, w http.ResponseWriter, house store.House, caller int32,
+) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		internalError(w)
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := s.q.WithTx(tx)
+
+	added, err := qtx.AddHouseMember(ctx, store.AddHouseMemberParams{
+		UserID:  caller,
+		HouseID: house.ID,
+		IsOwner: true,
+	})
+	if err != nil {
+		internalError(w)
+		return
+	}
+	if added == 0 {
+		// Lost the race with a request that joined this lifter to a House between
+		// the membership check above and here — the same 409 founding a House
+		// answers, and for the same reason.
+		conflict(w, "already_in_house", "leave your current House before asking to join another")
+		return
+	}
+
+	// Joining answers the caller's own outstanding requests elsewhere, exactly as
+	// founding does: they have a House now, so the queues they are sitting in
+	// cannot be worked. ExceptID 0 excludes nothing — no request was approved
+	// here, because none was ever filed.
+	if _, err := qtx.SupersedeOtherOpenRequests(ctx, store.SupersedeOtherOpenRequestsParams{
+		UserID:   caller,
+		ExceptID: 0,
+	}); err != nil {
+		internalError(w)
+		return
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		internalError(w)
+		return
+	}
+
+	// Nobody is notified. The notification on the other path addresses the owner,
+	// and here the caller IS the owner — telling them what they just did is noise.
+
+	detail, ok := s.houseDetail(ctx, w, house, caller)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, detail)
 }
 
 // withdrawHouseRequest closes the caller's own pending request.
@@ -654,32 +743,36 @@ func (s *Server) leaveHouse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	remaining, err := qtx.CountHouseMembers(ctx, membership.HouseID)
-	if err != nil {
+	// A House is NOT deleted when its last member goes. It stands empty, keeping
+	// its name, its sigil, its founding date and whatever its members wrote about
+	// it, and the first lifter to ask walks in as its owner — see claimEmptyHouse.
+	// Deleting it would throw all of that away on the say-so of one lifter who was
+	// merely the last to leave.
+	//
+	// So the only thing to settle here is the owner, and only while somebody is
+	// left to hold it. Asked rather than assumed from membership.IsOwner, so that
+	// a House which was ALREADY ownerless — its owner deleted their account, and
+	// the cascade took the membership row before any transfer could run — gets a
+	// marked owner the first time anybody leaves it. GetHouseOwner returns the
+	// fallback with IsOwner false, which is exactly the signal to promote.
+	owner, err := qtx.GetHouseOwner(ctx, membership.HouseID)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		// That was the last member. Nobody to promote — but every request still
+		// open against this House has just become unanswerable, and those rows no
+		// longer cascade away with a deleted House. See the query's note: left
+		// open, they would lock their own askers out of claiming it.
+		if _, err := qtx.SupersedeHouseOpenRequests(ctx, membership.HouseID); err != nil {
+			internalError(w)
+			return
+		}
+	case err != nil:
 		internalError(w)
 		return
-	}
-
-	if remaining == 0 {
-		if err := qtx.DeleteHouse(ctx, membership.HouseID); err != nil {
+	case !owner.IsOwner:
+		if _, err := qtx.PromoteLongestStandingMember(ctx, membership.HouseID); err != nil {
 			internalError(w)
 			return
-		}
-	} else {
-		// Asked rather than assumed from membership.IsOwner, so that a House
-		// which was already ownerless — its owner deleted their account — gets a
-		// marked owner the first time anybody leaves it. GetHouseOwner returns
-		// the fallback with IsOwner false, which is exactly the signal to promote.
-		owner, err := qtx.GetHouseOwner(ctx, membership.HouseID)
-		if err != nil {
-			internalError(w)
-			return
-		}
-		if !owner.IsOwner {
-			if _, err := qtx.PromoteLongestStandingMember(ctx, membership.HouseID); err != nil {
-				internalError(w)
-				return
-			}
 		}
 	}
 
@@ -740,26 +833,6 @@ func (s *Server) pendingRequestFromPath(
 		return store.GetJoinRequestRow{}, false
 	}
 	return req, true
-}
-
-// effectiveOwner is who speaks for a House. See the note at the top of this file
-// for why it is a read rather than a column that has to be kept true.
-func (s *Server) effectiveOwner(
-	ctx context.Context, w http.ResponseWriter, houseID int32,
-) (int32, bool) {
-	owner, err := s.q.GetHouseOwner(ctx, houseID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		// A House with no members at all. The leave path deletes one rather than
-		// leaving it empty, so this is unreachable — and a 404 is the honest
-		// answer if it ever is reached, because there is nobody to address.
-		notFound(w, "House not found")
-		return 0, false
-	}
-	if err != nil {
-		internalError(w)
-		return 0, false
-	}
-	return owner.UserID, true
 }
 
 // requireHouseOwner answers the owner-only endpoints' question.

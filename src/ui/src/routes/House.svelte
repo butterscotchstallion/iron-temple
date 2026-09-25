@@ -96,10 +96,23 @@
         : "That didn't work — check the name and sigil.";
   }
 
+  // Asking has two outcomes and the status code is which. 201 filed a request
+  // for an owner to answer; 200 means the House was standing empty and is now
+  // the caller's, as its owner — see the endpoint's note in the API. Both
+  // refresh, because either way the sigil beside their name elsewhere changed.
   async function ask() {
     busy = true;
     const result = await requestToJoinHouse(houseID);
     busy = false;
+    if (result.status === 200) {
+      await refresh();
+      pushToast({
+        title: "The House is yours",
+        body: `Nobody was left in ${result.data.name}. You're its owner now.`,
+        tone: "success",
+      });
+      return;
+    }
     if (result.status === 201) {
       await refresh();
       pushToast({ title: "Asked to join", body: `${house?.name} will be told.` });
@@ -180,10 +193,10 @@
     </Card>
   {:else if notFound}
     <Card class="p-6">
-      <p class="text-sm text-muted-foreground">
-        That House doesn't exist. Its last member may have left — a House goes when
-        the last lifter does.
-      </p>
+      <!-- No longer blames an empty House: one stands after its last member
+           leaves, so a 404 here really is "there was never a House with this
+           id", not "you just missed it". -->
+      <p class="text-sm text-muted-foreground">That House doesn't exist.</p>
     </Card>
   {:else if failed || !house}
     <ErrorCard message="Couldn't load this House." onRetry={load} />

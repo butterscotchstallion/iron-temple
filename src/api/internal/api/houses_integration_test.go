@@ -555,32 +555,128 @@ func TestLeavingTransfersOwnershipToTheLongestStandingMember(t *testing.T) {
 	})
 }
 
-func TestTheLastMemberOutDeletesTheHouse(t *testing.T) {
+// The last member out leaves the House STANDING. It was deleted once; it is not
+// anymore, because a name, a sigil and a founding date belong to more lifters
+// than whoever happened to leave last.
+func TestTheLastMemberOutLeavesTheHouseStanding(t *testing.T) {
 	_, owner := secondLifter(t, "house-last-out")
 	_, asker := secondLifter(t, "house-last-out-asker")
 	houseID := foundHouse(t, owner, "House Last Out", "HLOT")
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(
+			context.Background(), `DELETE FROM houses WHERE lower(sigil) = 'hlot'`,
+		)
+	})
 
-	// An outstanding request goes with it, through the cascade.
 	askToJoin(t, asker, houseID)
 
 	expectAs(t, owner).DELETE("/me/house").Expect().Status(http.StatusNoContent)
 
-	expectAs(t, owner).GET("/houses/{id}", houseID).
-		Expect().Status(http.StatusNotFound)
+	// Still there, still named, and now empty.
+	detail := expectAs(t, owner).GET("/houses/{id}", houseID).
+		Expect().Status(http.StatusOK).JSON().Object()
+	detail.Value("name").String().IsEqual("House Last Out")
+	detail.Value("memberCount").Number().IsEqual(0)
+	detail.Value("members").Array().IsEmpty()
 
 	// Leaving when in no House.
 	expectAs(t, owner).DELETE("/me/house").Expect().Status(http.StatusNotFound)
 
-	var requests int
+	// The outstanding request was closed rather than cascaded away. Nobody is
+	// left to answer it, and leaving it open would lock its own asker out of
+	// claiming the House below — the page would offer them Withdraw, not ask.
+	var open int
 	if err := testPool.QueryRow(
 		context.Background(),
-		`SELECT COUNT(*) FROM house_join_requests WHERE house_id = $1`, houseID,
-	).Scan(&requests); err != nil {
-		t.Fatalf("counting requests: %v", err)
+		`SELECT COUNT(*) FROM house_join_requests
+		 WHERE house_id = $1 AND decided_at IS NULL`, houseID,
+	).Scan(&open); err != nil {
+		t.Fatalf("counting open requests: %v", err)
 	}
-	if requests != 0 {
-		t.Fatalf("expected the House's requests to cascade away, found %d", requests)
+	if open != 0 {
+		t.Fatalf("expected the House's open requests to be superseded, found %d", open)
 	}
+
+	// And the asker walks straight in, as its owner, rather than filing a request
+	// that nobody could ever approve. 200-with-a-House, not 201-with-a-request.
+	claimed := expectAs(t, asker).POST("/houses/{h}/requests", houseID).
+		Expect().Status(http.StatusOK).JSON().Object()
+	claimed.Value("id").Number().IsEqual(houseID)
+	claimed.Value("memberCount").Number().IsEqual(1)
+	viewer := claimed.Value("viewer").Object()
+	viewer.Value("isMember").Boolean().IsTrue()
+	viewer.Value("isOwner").Boolean().IsTrue()
+}
+
+// An empty House is claimed, not queued for. The ordinary ask files a row for an
+// owner to answer, and an empty House has no owner to answer it.
+func TestClaimingAnEmptyHouseSupersedesTheClaimantsOtherRequests(t *testing.T) {
+	_, owner := secondLifter(t, "house-claim-owner")
+	_, claimant := secondLifter(t, "house-claim-claimant")
+	_, bystander := secondLifter(t, "house-claim-bystander")
+
+	emptied := foundHouse(t, owner, "House Claim Empty", "HCLE")
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(
+			context.Background(), `DELETE FROM houses WHERE lower(sigil) = 'hcle'`,
+		)
+	})
+	// A second, occupied House the claimant is also waiting on.
+	occupied := foundHouse(t, bystander, "House Claim Occupied", "HCLO")
+
+	elsewhere := askToJoin(t, claimant, occupied)
+
+	// Empty the first House.
+	expectAs(t, owner).DELETE("/me/house").Expect().Status(http.StatusNoContent)
+
+	expectAs(t, claimant).POST("/houses/{h}/requests", emptied).
+		Expect().Status(http.StatusOK)
+
+	// Claiming is joining, so the queue they were sitting in elsewhere closes —
+	// exactly as founding a House closes it. Left open, the bystander could
+	// approve a lifter who already has a House.
+	var outcome string
+	if err := testPool.QueryRow(
+		context.Background(),
+		`SELECT outcome FROM house_join_requests WHERE id = $1`, elsewhere,
+	).Scan(&outcome); err != nil {
+		t.Fatalf("reading the other request: %v", err)
+	}
+	if outcome != "superseded" {
+		t.Fatalf("expected the claimant's other request to be superseded, got %q", outcome)
+	}
+
+	// And a lifter who already has a House cannot claim an empty one.
+	expectAs(t, claimant).POST("/houses/{h}/requests", occupied).
+		Expect().Status(http.StatusConflict)
+}
+
+// Owner-only writes against an empty House 404: there is no owner, so there is
+// nobody they could be addressed to.
+func TestAnEmptyHouseHasNoOwnerToActAsOne(t *testing.T) {
+	_, owner := secondLifter(t, "house-empty-owner")
+	_, stranger := secondLifter(t, "house-empty-stranger")
+	houseID := foundHouse(t, owner, "House Empty Owner", "HEMO")
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(
+			context.Background(), `DELETE FROM houses WHERE lower(sigil) = 'hemo'`,
+		)
+	})
+
+	expectAs(t, owner).DELETE("/me/house").Expect().Status(http.StatusNoContent)
+
+	// The lifter who founded it has no standing over it once they walk out.
+	expectAs(t, owner).PATCH("/houses/{id}", houseID).
+		WithJSON(map[string]any{"tagline": "still mine"}).
+		Expect().Status(http.StatusNotFound)
+	expectAs(t, stranger).PATCH("/houses/{id}", houseID).
+		WithJSON(map[string]any{"tagline": "mine now"}).
+		Expect().Status(http.StatusNotFound)
+
+	// But it reads fine, which is what makes it findable enough to claim.
+	expectAs(t, stranger).GET("/houses/{id}", houseID).
+		Expect().Status(http.StatusOK).JSON().Object().
+		Value("viewer").Object().Value("isMember").Boolean().IsFalse()
 }
 
 func TestAnOwnerlessHouseFallsBackToItsLongestStandingMember(t *testing.T) {

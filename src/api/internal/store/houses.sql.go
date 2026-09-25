@@ -40,19 +40,6 @@ func (q *Queries) AddHouseMember(ctx context.Context, arg AddHouseMemberParams) 
 	return result.RowsAffected(), nil
 }
 
-const countHouseMembers = `-- name: CountHouseMembers :one
-SELECT COUNT(*)::int AS member_count
-FROM house_members
-WHERE house_id = $1::int
-`
-
-func (q *Queries) CountHouseMembers(ctx context.Context, houseID int32) (int32, error) {
-	row := q.db.QueryRow(ctx, countHouseMembers, houseID)
-	var member_count int32
-	err := row.Scan(&member_count)
-	return member_count, err
-}
-
 const createHouse = `-- name: CreateHouse :one
 
 INSERT INTO houses (name, sigil, tagline, description, icon, icon_color)
@@ -209,16 +196,6 @@ func (q *Queries) DecideJoinRequest(ctx context.Context, arg DecideJoinRequestPa
 	return result.RowsAffected(), nil
 }
 
-const deleteHouse = `-- name: DeleteHouse :exec
-DELETE FROM houses
-WHERE id = $1::int
-`
-
-func (q *Queries) DeleteHouse(ctx context.Context, id int32) error {
-	_, err := q.db.Exec(ctx, deleteHouse, id)
-	return err
-}
-
 const getHouse = `-- name: GetHouse :one
 SELECT h.id,
        h.name,
@@ -298,8 +275,10 @@ type GetHouseOwnerRow struct {
 // chosen. So an ownerless House answers this question rather than needing to be
 // repaired first, and there is no scheduled pass looking for one.
 //
-// Returns no row only when the House has no members at all, which the leave path
-// makes unreachable by deleting the House instead.
+// Returns NO ROW when the House has no members at all. That is a real state and
+// not an impossible one: the leave path lets an empty House stand rather than
+// deleting it. Callers read the empty answer as "unowned" — owner-only
+// endpoints 404, and the asking endpoint hands the House to whoever asked.
 func (q *Queries) GetHouseOwner(ctx context.Context, houseID int32) (GetHouseOwnerRow, error) {
 	row := q.db.QueryRow(ctx, getHouseOwner, houseID)
 	var i GetHouseOwnerRow
@@ -526,10 +505,12 @@ type ListHousesRow struct {
 // here would have reversed that premise rather than extended it. Which House a
 // lifter is in is exactly as public as the name it is drawn beside.
 //
-// The writes are ordinary except for two rules the SQL cannot state on its own,
-// both of which live in internal/api/houses.go: the first approval of a lifter's
-// several requests supersedes the rest, and a member leaving either transfers
-// ownership or takes the House with them.
+// The writes are ordinary except for three rules the SQL cannot state on its
+// own, all of which live in internal/api/houses.go: the first approval of a
+// lifter's several requests supersedes the rest; the last member leaving hands
+// ownership to the longest-standing of whoever is left; and a House with nobody
+// left in it STANDS rather than being deleted, to be claimed outright by the
+// next lifter who asks.
 // ---- reading ----
 // ListHouses is the site-wide read: every House, without its description.
 //
@@ -660,6 +641,33 @@ WHERE user_id = $1::int
 
 func (q *Queries) RemoveHouseMember(ctx context.Context, userID int32) (int64, error) {
 	result, err := q.db.Exec(ctx, removeHouseMember, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const supersedeHouseOpenRequests = `-- name: SupersedeHouseOpenRequests :execrows
+UPDATE house_join_requests
+SET decided_at = now(),
+    outcome    = 'superseded'
+WHERE house_id = $1::int
+  AND decided_at IS NULL
+`
+
+// SupersedeHouseOpenRequests closes every request still open against one House.
+//
+// Called in the same transaction as the last member leaving it. Back when that
+// deleted the House, these rows went with it through the cascade; now the House
+// stands, and without this they would sit open forever against a House with no
+// owner to answer them.
+//
+// Leaving them would also lock the askers OUT of the very House they asked for:
+// an empty House is claimed by asking, `viewer.openRequestId` makes the page
+// offer Withdraw instead of Request to join, and so the one lifter who already
+// wanted in would be the one who could not take it.
+func (q *Queries) SupersedeHouseOpenRequests(ctx context.Context, houseID int32) (int64, error) {
+	result, err := q.db.Exec(ctx, supersedeHouseOpenRequests, houseID)
 	if err != nil {
 		return 0, err
 	}
