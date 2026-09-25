@@ -19,6 +19,7 @@
   import LiftTrendChart from "../lib/LiftTrendChart.svelte";
   import LiftVolumeBars from "../lib/LiftVolumeBars.svelte";
   import MuscleVolumeBars from "../lib/MuscleVolumeBars.svelte";
+  import HighlightsHelp from "../lib/HighlightsHelp.svelte";
   import RackedBars from "../lib/RackedBars.svelte";
   import ChartTable from "../lib/ChartTable.svelte";
   import BodyweightChart from "../lib/BodyweightChart.svelte";
@@ -46,6 +47,13 @@
 
   let period = $state<Period>("month");
   let report = $state<RackedReport | null>(null);
+
+  // Read through `?? []` because this field is NEW and load() paints from
+  // cachedValue before any request returns — so a report cached before first
+  // times existed comes back without the field, whatever its type claims.
+  // Unguarded, `.length` throws on that first paint, and offline it keeps
+  // throwing, because nothing arrives to replace the stale entry.
+  const firstTimes = $derived(report?.firstTimes ?? []);
   let loading = $state(true);
   let failed = $state(false);
   let sharing = $state(false);
@@ -606,10 +614,12 @@
     </Card>
 
     {#if report.prs.length > 0}
-      <Card class="p-4">
+      <!-- `relative` so HighlightsHelp's trigger sits in the card's own padding. -->
+      <Card class="relative p-4">
         <h3 class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
           {report.prs.length} personal record{report.prs.length === 1 ? "" : "s"}
         </h3>
+        <HighlightsHelp />
         <ul class="flex flex-col gap-1.5">
           <!-- Keyed by position. Nothing derived from a date is unique here: two
                sessions of one lift in a day can each set a weight record, which
@@ -626,6 +636,21 @@
             </li>
           {/each}
         </ul>
+      </Card>
+    {/if}
+
+    <!-- One card, one line, however many lifts. A lifter's opening month
+         introduces everything at once, and listing each as its own row would bury
+         the records card above it under work that beat nothing. -->
+    {#if firstTimes.length > 0}
+      <Card class="p-4">
+        <h3 class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+          {firstTimes.length}
+          {firstTimes.length === 1 ? "lift" : "lifts"} for the first time
+        </h3>
+        <p class="text-sm text-foreground">
+          {firstTimes.map((f) => f.exerciseName).join(" · ")}
+        </p>
       </Card>
     {/if}
 

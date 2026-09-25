@@ -167,10 +167,16 @@ func TestRenderEmailCapsTheLiftTable(t *testing.T) {
 	start, end := Bounds(PeriodMonth, day(2026, time.March, 15))
 	var sets []Set
 	names := []string{"Squat", "Bench Press", "Deadlift", "Overhead Press", "Barbell Row", "Pause Squat", "Chin Up"}
+	// A history for every lift, so these land as RECORDS rather than as first
+	// times — this test is about the records list not being capped, and a lifter
+	// with no history sets no records at all.
+	base := Baseline{BestWeight: map[int32]float64{}, BestE1RM: map[int32]float64{}}
 	for i, name := range names {
 		sets = append(sets, mkSets(int32(i+1), day(2026, time.March, 2), int32(i+1), name, 1, 5, float64(200-i))...)
+		base.BestWeight[int32(i+1)] = 100
+		base.BestE1RM[int32(i+1)] = 110
 	}
-	rep := Build(Input{Kind: PeriodMonth, Start: start, End: end, Sets: sets})
+	rep := Build(Input{Kind: PeriodMonth, Start: start, End: end, Sets: sets, Baseline: base})
 
 	html, err := RenderEmail("Ada", rep)
 	if err != nil {
@@ -194,6 +200,35 @@ func TestRenderEmailCapsTheLiftTable(t *testing.T) {
 	// ...but every record still gets its line.
 	if records := sectionAfter(html, "personal record"); !strings.Contains(records, "Chin Up") {
 		t.Error("the records list dropped a record; only the lift table is capped")
+	}
+}
+
+// A first month is the case this email used to get most wrong: every lift was
+// listed as a personal record, so the section a lifter reads first told them
+// they had beaten marks they had never set.
+func TestRenderEmailCallsAFirstMonthWhatItIs(t *testing.T) {
+	start, end := Bounds(PeriodMonth, day(2026, time.March, 15))
+	var sets []Set
+	sets = append(sets, mkSets(1, day(2026, time.March, 2), 1, "Squat", 5, 5, 95)...)
+	sets = append(sets, mkSets(1, day(2026, time.March, 2), 2, "Bench Press", 5, 5, 65)...)
+	rep := Build(Input{Kind: PeriodMonth, Start: start, End: end, Sets: sets})
+
+	html, err := RenderEmail("Ada", rep)
+	if err != nil {
+		t.Fatalf("RenderEmail: %v", err)
+	}
+
+	if strings.Contains(html, "personal record") {
+		t.Error("a first month claimed a personal record")
+	}
+	section := sectionAfter(html, "lifts for the first time")
+	if section == "" {
+		t.Fatal("the first-time section is missing entirely")
+	}
+	// Both names, joined as prose, with their capitals kept — the email names a
+	// lift the same way wherever it appears.
+	if !strings.Contains(section, "Bench Press and Squat") {
+		t.Errorf("first-time line = %q, want both lifts joined", section)
 	}
 }
 

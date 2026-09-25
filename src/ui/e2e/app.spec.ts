@@ -261,6 +261,7 @@ function sessionRecap(overrides: Partial<SessionRecap> = {}): SessionRecap {
     bodyweightLb: null,
     earned: null,
     prs: [],
+    firstTimes: [],
     milestones: [],
     streak: { sessions: 2, weeks: 1 },
     ...overrides,
@@ -1498,6 +1499,8 @@ const rackedMarch: RackedReport = {
       previousLb: 215,
     },
   ],
+  // A lifter with history sets records, not first times — this fixture is one.
+  firstTimes: [],
   milestones: [
     {
       kind: "plate",

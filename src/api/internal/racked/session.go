@@ -220,10 +220,14 @@ type SessionRecap struct {
 	Volume   SessionVolume
 	Progress SessionProgress
 	// Muscles is the groups this session actually trained, heaviest first.
-	Muscles    []MuscleSlice
-	Split      Split
-	Lifts      []SessionLift
-	PRs        []PR
+	Muscles []MuscleSlice
+	Split   Split
+	Lifts   []SessionLift
+	PRs     []PR
+	// FirstTimes are the lifts this session was the lifter's first ever go at.
+	// On a first workout this holds every lift and PRs holds none, which is the
+	// whole point of the two being separate — see FirstTime.
+	FirstTimes []FirstTime
 	Milestones []Milestone
 	Streak     SessionStreak
 }
@@ -244,6 +248,7 @@ func BuildSession(in SessionInput) SessionRecap {
 		Sets:        in.Sets,
 	}
 	one := []session{sess}
+	prs, firstTimes := personalRecords(one, in.Baseline)
 
 	rec := SessionRecap{
 		Session: in.Meta,
@@ -254,7 +259,8 @@ func BuildSession(in SessionInput) SessionRecap {
 		Muscles:    trainedMuscles(in.Sets),
 		Split:      split(in.Sets),
 		Lifts:      sessionLifts(sess, in),
-		PRs:        personalRecords(one, in.Baseline),
+		PRs:        prs,
+		FirstTimes: firstTimes,
 		Milestones: milestones(one, in.Baseline),
 		Streak:     sessionStreak(in.Outcomes),
 	}
@@ -263,6 +269,9 @@ func BuildSession(in SessionInput) SessionRecap {
 
 	if rec.PRs == nil {
 		rec.PRs = []PR{}
+	}
+	if rec.FirstTimes == nil {
+		rec.FirstTimes = []FirstTime{}
 	}
 	if rec.Milestones == nil {
 		rec.Milestones = []Milestone{}

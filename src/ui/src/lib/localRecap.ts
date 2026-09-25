@@ -53,6 +53,21 @@ export type LocalPR = {
   previousLb: number;
 };
 
+/**
+ * A lift with no entry in previousBests: the lifter has never done it.
+ *
+ * Not a LocalPR, because there was no mark to beat. Mirrors racked.FirstTime on
+ * the server for the reason this whole file exists — the list produced offline
+ * has to be the list the server confirms, and a first-ever set announced here as
+ * a record would be quietly downgraded the moment the recap loaded.
+ */
+export type LocalFirstTime = {
+  exerciseId: number;
+  exerciseName: string;
+  weightLb: number;
+  reps: number;
+};
+
 export type LocalRecap = {
   durationSeconds: number | null;
   volumeLb: number;
@@ -71,6 +86,7 @@ export type LocalRecap = {
   setsBonus: number;
   lifts: LocalLift[];
   prs: LocalPR[];
+  firstTimes: LocalFirstTime[];
 };
 
 export function localRecap(session: Session): LocalRecap {
@@ -84,6 +100,7 @@ export function localRecap(session: Session): LocalRecap {
     setsBonus: 0,
     lifts: [],
     prs: [],
+    firstTimes: [],
   };
 
   // Prescription order, which is the order the server returns sets in — main
@@ -146,12 +163,25 @@ export function localRecap(session: Session): LocalRecap {
 
   const best = new Map(session.previousBests.map((b) => [b.exerciseId, b]));
   for (const lift of out.lifts) {
-    // A lift with no history is absent from previousBests rather than zero, so
-    // `?? 0` reads as "nothing to beat" — the same rule the session screen uses
-    // to decide whether a set earns confetti.
+    // A lift with no history is ABSENT from previousBests rather than carried at
+    // zero, and that absence is the whole distinction: there was nothing to beat,
+    // so this is a first time and not a record. Reading it as a zero to clear is
+    // what made a novice's opening workout a wall of personal records.
+    //
+    // Absence rather than a best of zero, because a bodyweight lift has a real
+    // best of zero and is present — see personalRecords in internal/racked.
     const prev = best.get(lift.exerciseId);
-    const prevWeight = prev?.weightLb ?? 0;
-    const prevE1rm = prev?.e1rmLb ?? 0;
+    if (!prev) {
+      out.firstTimes.push({
+        exerciseId: lift.exerciseId,
+        exerciseName: lift.exerciseName,
+        weightLb: lift.topWeightLb,
+        reps: lift.topReps,
+      });
+      continue;
+    }
+    const prevWeight = prev.weightLb;
+    const prevE1rm = prev.e1rmLb;
 
     // A heavier bar suppresses the estimated-max record it implies: the plate
     // is the better story, and reporting both is one achievement told twice.

@@ -357,6 +357,7 @@ func rackedReportToDTO(rep racked.Report) rackedReportDTO {
 			Weekdays:        rep.Attendance.Weekdays,
 		},
 		PRs:        make([]rackedPRDTO, 0, len(rep.PRs)),
+		FirstTimes: make([]rackedFirstTimeDTO, 0, len(rep.FirstTimes)),
 		Milestones: make([]rackedMilestoneDTO, 0, len(rep.Milestones)),
 		UpcomingMilestones: make(
 			[]rackedUpcomingMilestoneDTO, 0, len(rep.Upcoming)),
@@ -451,6 +452,9 @@ func rackedReportToDTO(rep racked.Report) rackedReportDTO {
 	for _, p := range rep.PRs {
 		out.PRs = append(out.PRs, rackedPRToDTO(p))
 	}
+	for _, f := range rep.FirstTimes {
+		out.FirstTimes = append(out.FirstTimes, rackedFirstTimeToDTO(f))
+	}
 	for _, m := range rep.Milestones {
 		out.Milestones = append(out.Milestones, rackedMilestoneToDTO(m))
 	}
@@ -504,10 +508,11 @@ func rackedReportToDTO(rep racked.Report) rackedReportDTO {
 	return out
 }
 
-// rackedPRToDTO and rackedMilestoneToDTO are shared with the session recap,
-// which publishes the same two schemas. One mapping rather than two: a record
-// announced at the rack and the same record listed in the month's recap are the
-// same object, and a second copy of this is a second chance to disagree.
+// rackedPRToDTO, rackedFirstTimeToDTO and rackedMilestoneToDTO are shared with
+// the session recap, which publishes the same three schemas. One mapping rather
+// than two: a record announced at the rack and the same record listed in the
+// month's recap are the same object, and a second copy of this is a second
+// chance to disagree.
 func rackedPRToDTO(p racked.PR) rackedPRDTO {
 	return rackedPRDTO{
 		Kind:         string(p.Kind),
@@ -518,6 +523,16 @@ func rackedPRToDTO(p racked.PR) rackedPRDTO {
 		Reps:         p.Reps,
 		ValueLb:      p.ValueLb,
 		PreviousLb:   p.PreviousLb,
+	}
+}
+
+func rackedFirstTimeToDTO(f racked.FirstTime) rackedFirstTimeDTO {
+	return rackedFirstTimeDTO{
+		PerformedOn:  f.PerformedOn.Format(dateLayout),
+		ExerciseID:   f.ExerciseID,
+		ExerciseName: f.ExerciseName,
+		WeightLb:     f.WeightLb,
+		Reps:         f.Reps,
 	}
 }
 

@@ -6035,7 +6035,7 @@ components:
       type: object
       required:
         [session, durationSeconds, pace, volume, progress, muscles, split, bodyweightLb,
-         earned, lifts, prs, milestones, streak]
+         earned, lifts, prs, firstTimes, milestones, streak]
       properties:
         session:
           $ref: "#/components/schemas/SessionRecapHeader"
@@ -6104,8 +6104,17 @@ components:
             it. Same rules as the Racked recap: at most one record of each kind
             per lift, and a weight record suppresses the estimated-max record it
             implies.
+
+            A lift performed for the first time is NOT here; see firstTimes.
           items:
             $ref: "#/components/schemas/RackedPR"
+        firstTimes:
+          type: array
+          description: >
+            Lifts this session was the lifter's first ever go at. On a first
+            workout this holds every lift and `prs` holds none.
+          items:
+            $ref: "#/components/schemas/RackedFirstTime"
         milestones:
           type: array
           items:
@@ -6415,7 +6424,8 @@ components:
       required:
         [period, totals, change, comparison, split, muscles, lifts, series, mostImproved,
          bodyweight, days, weekdays, bestWeekday, hours, peakHour, hourLabel, streak, attendance,
-         prs, milestones, upcomingMilestones, heaviestSet, fastestSession, deloads, archetype]
+         prs, firstTimes, milestones, upcomingMilestones, heaviestSet, fastestSession,
+         deloads, archetype]
       properties:
         period:
           $ref: "#/components/schemas/RackedPeriod"
@@ -6515,8 +6525,18 @@ components:
           $ref: "#/components/schemas/RackedAttendance"
         prs:
           type: array
+          description: >
+            Records set in the period. A lift performed for the first time is NOT
+            here; see firstTimes.
           items:
             $ref: "#/components/schemas/RackedPR"
+        firstTimes:
+          type: array
+          description: >
+            Lifts first performed in this period. For a lifter's opening month this
+            holds every lift they own and `prs` is empty.
+          items:
+            $ref: "#/components/schemas/RackedFirstTime"
         milestones:
           type: array
           items:
@@ -6946,7 +6966,49 @@ components:
           description: The record itself — weight for `weight`, estimated max for `e1rm`.
         previousLb:
           type: number
-          description: The mark it beat; 0 when the lift had no history.
+          description: >
+            The mark it beat. Zero or greater, and it no longer stands in for
+            "there was nothing to beat" — a lift with no history at all is a
+            `RackedFirstTime` rather than a record.
+
+            **It can still be 0, and a client must not divide by it.** A lift whose
+            prior best was genuinely zero is bodyweight work: chin-ups are recorded
+            at 0 lb, so the lift IS in the lifter's history with a best of 0. Put a
+            belt on and the first loaded set is a real weight record against that
+            zero. Treat this as "no percentage to report" rather than as an
+            infinite gain.
+
+    RackedFirstTime:
+      description: >
+        A lift the lifter had never performed before this period — or, on a session
+        recap, before this session.
+
+        Separate from `RackedPR` rather than a third `kind` of one, because there
+        was no previous best to beat. Reporting a first-ever set as a personal
+        record is what made a novice's opening workout read as six records, and the
+        seventh mean nothing: the baseline stops a lifter's SECOND year opening with
+        a false record on every lift, but in their first week there is genuinely
+        nothing to compare against.
+
+        No `valueLb` and no `previousLb`, for the same reason: a first time is not a
+        ranked claim, it is the fact that a lift has now been done at all.
+      type: object
+      required: [performedOn, exerciseId, exerciseName, weightLb, reps]
+      properties:
+        performedOn:
+          type: string
+          format: date
+        exerciseId:
+          type: integer
+          format: int64
+        exerciseName:
+          type: string
+        weightLb:
+          type: number
+          description: The heaviest set of this lift in the session that introduced it.
+        reps:
+          type: integer
+          description: The reps carried at weightLb.
 
     RackedMilestone:
       type: object

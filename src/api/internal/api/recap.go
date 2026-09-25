@@ -396,6 +396,7 @@ func sessionRecapToDTO(rec racked.SessionRecap, earned *earnedNext) sessionRecap
 		BodyweightLb: rec.Session.BodyweightLb,
 		Lifts:        make([]sessionRecapLiftDTO, 0, len(rec.Lifts)),
 		PRs:          make([]rackedPRDTO, 0, len(rec.PRs)),
+		FirstTimes:   make([]rackedFirstTimeDTO, 0, len(rec.FirstTimes)),
 		Milestones:   make([]rackedMilestoneDTO, 0, len(rec.Milestones)),
 		Streak: sessionRecapStreakDTO{
 			Sessions: rec.Streak.Sessions,
@@ -475,6 +476,9 @@ func sessionRecapToDTO(rec racked.SessionRecap, earned *earnedNext) sessionRecap
 	}
 	for _, p := range rec.PRs {
 		out.PRs = append(out.PRs, rackedPRToDTO(p))
+	}
+	for _, f := range rec.FirstTimes {
+		out.FirstTimes = append(out.FirstTimes, rackedFirstTimeToDTO(f))
 	}
 	for _, m := range rec.Milestones {
 		out.Milestones = append(out.Milestones, rackedMilestoneToDTO(m))

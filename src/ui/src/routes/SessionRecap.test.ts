@@ -269,6 +269,54 @@ describe("SessionRecap", () => {
     expect(box).toHaveTextContent("was 240 · +2%");
   });
 
+  // A recap stored before firstTimes existed comes back from the cache without
+  // the field. TypeScript says it is required and the runtime does not care, so
+  // the render has to survive it — and the cache is painted BEFORE any request
+  // returns, which offline is the only thing that ever paints.
+  //
+  // Delivered here as a response rather than by seeding the cache directly: the
+  // page renders both through one expression, and a response is the shape a test
+  // can state plainly.
+  it("renders a recap that predates first times", async () => {
+    const legacy = fullRecap() as Partial<Recap>;
+    delete legacy.firstTimes;
+    getSessionRecap.mockResolvedValue({ status: 200, data: legacy, headers: new Headers() });
+    render(SessionRecap, props);
+
+    await waitFor(() => expect(screen.getByTestId("recap-highlights")).toBeInTheDocument());
+    // The records it does carry still draw, which is how we know the card was
+    // rendered rather than swallowed by an error boundary.
+    expect(screen.getByTestId("recap-highlights")).toHaveTextContent("was 240 · +2%");
+  });
+
+  // The first workout, which used to arrive as a wall of personal records — one
+  // per lift, every one of them against a best of nothing.
+  it("calls a first workout's lifts first times rather than records", async () => {
+    const recap = fullRecap();
+    recap.prs = [];
+    recap.milestones = [];
+    recap.firstTimes = [
+      { performedOn: "2026-09-13", exerciseId: 1, exerciseName: "Squat", weightLb: 95, reps: 5 },
+      {
+        performedOn: "2026-09-13",
+        exerciseId: 2,
+        exerciseName: "Bench Press",
+        weightLb: 65,
+        reps: 5,
+      },
+    ];
+    getSessionRecap.mockResolvedValue({ status: 200, data: recap, headers: new Headers() });
+    render(SessionRecap, props);
+
+    await waitFor(() => expect(screen.getByTestId("recap-highlights")).toBeInTheDocument());
+    const box = screen.getByTestId("recap-highlights");
+    expect(box).toHaveTextContent("2 lifts for the first time");
+    expect(box).toHaveTextContent("Squat · Bench Press");
+    // Nothing on this card claims a mark was beaten.
+    expect(box).not.toHaveTextContent("was ");
+    expect(box).not.toHaveTextContent("PR");
+  });
+
   // previousLb is 0 for a lift with no history, so there is no mark to be a
   // percentage of — and nothing is claimed.
   it("says nothing about a first-ever lift's gain", async () => {

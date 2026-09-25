@@ -4,20 +4,29 @@
   import { Badge } from "$lib/components/ui/badge";
   import Trophy from "@lucide/svelte/icons/trophy";
   import Flame from "@lucide/svelte/icons/flame";
+  import Sprout from "@lucide/svelte/icons/sprout";
   import { formatVolume } from "./volume";
-  import { formatPRGain, type RecapPRRow } from "./recap";
+  import { formatPRGain, type RecapFirstTimeRow, type RecapPRRow } from "./recap";
   import { STREAK_DISPLAY_THRESHOLD } from "./streak";
+  import HighlightsHelp from "./HighlightsHelp.svelte";
 
   // Records, milestones and streaks — the part worth reading first, so it sits
   // above the per-lift table on the page.
 
   let {
     prs,
+    firstTimes = [],
     milestones = [],
     streakSessions = 0,
     streakWeeks = 0,
   }: {
     prs: RecapPRRow[];
+    /**
+     * Lifts done for the first time. Optional like milestones, so the third
+     * consumer of this card — the profile's achievement list — keeps working
+     * without passing a list it has no session to draw one from.
+     */
+    firstTimes?: RecapFirstTimeRow[];
     /** Empty offline: a milestone is a claim about a lifetime, and that needs the server. */
     milestones?: RackedMilestone[];
     streakSessions?: number;
@@ -36,9 +45,11 @@
   const showWeeks = $derived(!showStreak && streakWeeks >= STREAK_DISPLAY_THRESHOLD);
 </script>
 
-{#if prs.length > 0 || milestones.length > 0 || showStreak || showWeeks}
-  <Card class="p-4" data-testid="recap-highlights">
+{#if prs.length > 0 || firstTimes.length > 0 || milestones.length > 0 || showStreak || showWeeks}
+  <!-- `relative` so HighlightsHelp's trigger can sit in the card's own padding. -->
+  <Card class="relative p-4" data-testid="recap-highlights">
     <h3 class="text-xs uppercase tracking-[0.2em] text-muted-foreground">Worth noting</h3>
+    <HighlightsHelp />
     <ul class="mt-2 space-y-2">
       {#each prs as pr (pr.exerciseName + pr.kind)}
         <li class="flex items-center gap-2 text-sm">
@@ -66,6 +77,24 @@
           {/if}
         </li>
       {/each}
+
+      <!-- One line for all of them, however many there are. A first workout
+           introduces every lift at once, and six separate congratulations for
+           six lifts nobody had a best on yet is what made the seventh — a real
+           record — read as more of the same. Sprout rather than the Trophy a
+           record gets: this is a start, not a win. -->
+      {#if firstTimes.length > 0}
+        <li class="flex items-baseline gap-2 text-sm">
+          <Sprout class="size-4 shrink-0 translate-y-0.5 text-muted-foreground" aria-hidden="true" />
+          <span class="text-muted-foreground">
+            <span class="font-bold tabular-nums text-foreground">{firstTimes.length}</span>
+            {firstTimes.length === 1 ? "lift" : "lifts"} for the first time ·
+            <span class="text-foreground">
+              {firstTimes.map((f) => f.exerciseName).join(" · ")}
+            </span>
+          </span>
+        </li>
+      {/if}
 
       {#each milestones as milestone (milestone.kind + milestone.label)}
         <li class="flex items-center gap-2 text-sm">

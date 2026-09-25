@@ -300,6 +300,7 @@ export function testSessionRecap(overrides: Partial<SessionRecap> = {}): Session
     earned: null,
     lifts: [],
     prs: [],
+    firstTimes: [],
     milestones: [],
     streak: { sessions: 0, weeks: 0 },
     ...overrides,
@@ -397,6 +398,7 @@ export function testRackedReport(overrides: Partial<RackedReport> = {}): RackedR
       weekdays: [],
     },
     prs: [],
+    firstTimes: [],
     milestones: [],
     // Empty by default, like prs and milestones: what a lifter is closing in on is
     // the thing under test wherever it matters, and a fixture that arrived with a

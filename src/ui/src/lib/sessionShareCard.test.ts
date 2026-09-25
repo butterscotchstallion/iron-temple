@@ -45,6 +45,7 @@ function mkRecap(over: Partial<SessionRecap> = {}): SessionRecap {
     earned: null,
     lifts: [],
     prs: [],
+    firstTimes: [],
     milestones: [],
     streak: { sessions: 4, weeks: 2 },
     ...over,
@@ -207,9 +208,16 @@ describe("sessionShareCardContent", () => {
       ]);
     });
 
-    // previousLb is 0 for a lift with no history — "nothing to beat" rather
-    // than a mark of zero pounds — so there is no percentage to report.
-    it("omits the gain on a lift with no history", () => {
+    // A previousLb of 0 has no percentage to report, and this is a LIVE case, not
+    // a defensive one.
+    //
+    // It is no longer "a lift with no history" — that is a firstTime now, not a
+    // record. It is a lift whose prior best was genuinely zero, which is what
+    // bodyweight work is: chin-ups are recorded at 0 lb, so the lift is in the
+    // history with a best of 0, and the first set done wearing a belt is a real
+    // weight record against it. Divide by that and a share card goes out reading
+    // "+Infinity%".
+    it("omits the gain on a record over a prior best of zero", () => {
       const c = sessionShareCardContent(
         mkRecap({ prs: [{ ...mkPR("Squat", 245), previousLb: 0 }] }),
       );
