@@ -145,6 +145,34 @@ describe("the join button", () => {
     expect(getHouse).toHaveBeenCalledTimes(2);
   });
 
+  // Asking an EMPTY House claims it outright — the API answers 200 with the
+  // House instead of 201 with a request, because there is no owner to queue for.
+  // The two status codes are the only thing telling these apart, so a version
+  // that toasted "Asked to join" at a lifter who is now the owner would be wrong
+  // in the one place the lifter is looking.
+  it("says the House is theirs when an empty one is claimed", async () => {
+    requestToJoinHouse.mockResolvedValue({
+      status: 200,
+      data: testHouseDetail({
+        name: "House Last Out",
+        viewer: { isMember: true, isOwner: true, inAnotherHouse: false },
+      }),
+    });
+    render(House, { props: PROPS });
+    await fireEvent.click(await screen.findByRole("button", { name: /request to join/i }));
+
+    await waitFor(() =>
+      expect(pushToast).toHaveBeenCalledWith(
+        expect.objectContaining({ title: "The House is yours" }),
+      ),
+    );
+    expect(pushToast).toHaveBeenCalledWith(
+      expect.objectContaining({ body: expect.stringContaining("House Last Out") }),
+    );
+    // Still both reads: claiming changes the sigil drawn beside their name.
+    await waitFor(() => expect(listHouses).toHaveBeenCalled());
+  });
+
   it("offers to withdraw once a request is outstanding", async () => {
     served({ viewer: { isMember: false, isOwner: false, inAnotherHouse: false, openRequestId: 21 } });
     render(House, { props: PROPS });

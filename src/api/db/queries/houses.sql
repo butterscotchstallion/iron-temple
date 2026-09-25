@@ -12,10 +12,12 @@
 -- here would have reversed that premise rather than extended it. Which House a
 -- lifter is in is exactly as public as the name it is drawn beside.
 --
--- The writes are ordinary except for two rules the SQL cannot state on its own,
--- both of which live in internal/api/houses.go: the first approval of a lifter's
--- several requests supersedes the rest, and a member leaving either transfers
--- ownership or takes the House with them.
+-- The writes are ordinary except for three rules the SQL cannot state on its
+-- own, all of which live in internal/api/houses.go: the first approval of a
+-- lifter's several requests supersedes the rest; the last member leaving hands
+-- ownership to the longest-standing of whoever is left; and a House with nobody
+-- left in it STANDS rather than being deleted, to be claimed outright by the
+-- next lifter who asks.
 
 -- ---- reading ----
 
@@ -79,8 +81,10 @@ WHERE h.id = sqlc.arg('id')::int;
 -- chosen. So an ownerless House answers this question rather than needing to be
 -- repaired first, and there is no scheduled pass looking for one.
 --
--- Returns no row only when the House has no members at all, which the leave path
--- makes unreachable by deleting the House instead.
+-- Returns NO ROW when the House has no members at all. That is a real state and
+-- not an impossible one: the leave path lets an empty House stand rather than
+-- deleting it. Callers read the empty answer as "unowned" — owner-only
+-- endpoints 404, and the asking endpoint hands the House to whoever asked.
 -- name: GetHouseOwner :one
 SELECT hm.user_id,
        hm.is_owner
@@ -198,9 +202,22 @@ SET name        = sqlc.arg('name')::text,
 WHERE id = sqlc.arg('id')::int
 RETURNING id, name, sigil, tagline, description, icon, icon_color, created_at;
 
--- name: DeleteHouse :exec
-DELETE FROM houses
-WHERE id = sqlc.arg('id')::int;
+-- LockHouse holds the House's row for the rest of the transaction.
+--
+-- Asking to join decides between two outcomes on one read — claim an EMPTY
+-- House, or file a request against an occupied one — and that read has to be
+-- stable or both can happen at once. Under read committed, two lifters asking
+-- the same empty House in the same instant would each see no owner and each walk
+-- in as owner: AddHouseMember's ON CONFLICT is on user_id, which says "one House
+-- per LIFTER" and has nothing to say about two lifters joining one House.
+--
+-- So that decision is made under this lock. The second lifter waits, re-reads a
+-- House that now has an owner, and files an ordinary request instead.
+-- name: LockHouse :one
+SELECT id
+FROM houses
+WHERE id = sqlc.arg('id')::int
+FOR UPDATE;
 
 -- AddHouseMember joins a lifter to a House.
 --
@@ -219,11 +236,6 @@ ON CONFLICT (user_id) DO NOTHING;
 -- name: RemoveHouseMember :execrows
 DELETE FROM house_members
 WHERE user_id = sqlc.arg('user_id')::int;
-
--- name: CountHouseMembers :one
-SELECT COUNT(*)::int AS member_count
-FROM house_members
-WHERE house_id = sqlc.arg('house_id')::int;
 
 -- PromoteLongestStandingMember hands a House to whoever has been in it longest.
 --
@@ -272,6 +284,24 @@ SET decided_at = now(),
     outcome    = 'superseded'
 WHERE user_id = sqlc.arg('user_id')::int
   AND id <> sqlc.arg('except_id')::int
+  AND decided_at IS NULL;
+
+-- SupersedeHouseOpenRequests closes every request still open against one House.
+--
+-- Called in the same transaction as the last member leaving it. Back when that
+-- deleted the House, these rows went with it through the cascade; now the House
+-- stands, and without this they would sit open forever against a House with no
+-- owner to answer them.
+--
+-- Leaving them would also lock the askers OUT of the very House they asked for:
+-- an empty House is claimed by asking, `viewer.openRequestId` makes the page
+-- offer Withdraw instead of Request to join, and so the one lifter who already
+-- wanted in would be the one who could not take it.
+-- name: SupersedeHouseOpenRequests :execrows
+UPDATE house_join_requests
+SET decided_at = now(),
+    outcome    = 'superseded'
+WHERE house_id = sqlc.arg('house_id')::int
   AND decided_at IS NULL;
 
 -- ---- notifications ----

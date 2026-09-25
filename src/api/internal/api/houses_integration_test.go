@@ -2,9 +2,12 @@ package api_test
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gavv/httpexpect/v2"
 )
@@ -555,32 +558,289 @@ func TestLeavingTransfersOwnershipToTheLongestStandingMember(t *testing.T) {
 	})
 }
 
-func TestTheLastMemberOutDeletesTheHouse(t *testing.T) {
+// The last member out leaves the House STANDING. It was deleted once; it is not
+// anymore, because a name, a sigil and a founding date belong to more lifters
+// than whoever happened to leave last.
+func TestTheLastMemberOutLeavesTheHouseStanding(t *testing.T) {
 	_, owner := secondLifter(t, "house-last-out")
 	_, asker := secondLifter(t, "house-last-out-asker")
 	houseID := foundHouse(t, owner, "House Last Out", "HLOT")
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(
+			context.Background(), `DELETE FROM houses WHERE lower(sigil) = 'hlot'`,
+		)
+	})
 
-	// An outstanding request goes with it, through the cascade.
 	askToJoin(t, asker, houseID)
 
 	expectAs(t, owner).DELETE("/me/house").Expect().Status(http.StatusNoContent)
 
-	expectAs(t, owner).GET("/houses/{id}", houseID).
-		Expect().Status(http.StatusNotFound)
+	// Still there, still named, and now empty.
+	detail := expectAs(t, owner).GET("/houses/{id}", houseID).
+		Expect().Status(http.StatusOK).JSON().Object()
+	detail.Value("name").String().IsEqual("House Last Out")
+	detail.Value("memberCount").Number().IsEqual(0)
+	detail.Value("members").Array().IsEmpty()
 
 	// Leaving when in no House.
 	expectAs(t, owner).DELETE("/me/house").Expect().Status(http.StatusNotFound)
 
-	var requests int
+	// The outstanding request was closed rather than cascaded away. Nobody is
+	// left to answer it, and leaving it open would lock its own asker out of
+	// claiming the House below — the page would offer them Withdraw, not ask.
+	var open int
 	if err := testPool.QueryRow(
 		context.Background(),
-		`SELECT COUNT(*) FROM house_join_requests WHERE house_id = $1`, houseID,
-	).Scan(&requests); err != nil {
-		t.Fatalf("counting requests: %v", err)
+		`SELECT COUNT(*) FROM house_join_requests
+		 WHERE house_id = $1 AND decided_at IS NULL`, houseID,
+	).Scan(&open); err != nil {
+		t.Fatalf("counting open requests: %v", err)
 	}
-	if requests != 0 {
-		t.Fatalf("expected the House's requests to cascade away, found %d", requests)
+	if open != 0 {
+		t.Fatalf("expected the House's open requests to be superseded, found %d", open)
 	}
+
+	// And the asker walks straight in, as its owner, rather than filing a request
+	// that nobody could ever approve. 200-with-a-House, not 201-with-a-request.
+	claimed := expectAs(t, asker).POST("/houses/{h}/requests", houseID).
+		Expect().Status(http.StatusOK).JSON().Object()
+	claimed.Value("id").Number().IsEqual(houseID)
+	claimed.Value("memberCount").Number().IsEqual(1)
+	viewer := claimed.Value("viewer").Object()
+	viewer.Value("isMember").Boolean().IsTrue()
+	viewer.Value("isOwner").Boolean().IsTrue()
+}
+
+// An empty House is claimed, not queued for. The ordinary ask files a row for an
+// owner to answer, and an empty House has no owner to answer it.
+func TestClaimingAnEmptyHouseSupersedesTheClaimantsOtherRequests(t *testing.T) {
+	_, owner := secondLifter(t, "house-claim-owner")
+	_, claimant := secondLifter(t, "house-claim-claimant")
+	_, bystander := secondLifter(t, "house-claim-bystander")
+
+	emptied := foundHouse(t, owner, "House Claim Empty", "HCLE")
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(
+			context.Background(), `DELETE FROM houses WHERE lower(sigil) = 'hcle'`,
+		)
+	})
+	// A second, occupied House the claimant is also waiting on.
+	occupied := foundHouse(t, bystander, "House Claim Occupied", "HCLO")
+
+	elsewhere := askToJoin(t, claimant, occupied)
+
+	// Empty the first House.
+	expectAs(t, owner).DELETE("/me/house").Expect().Status(http.StatusNoContent)
+
+	expectAs(t, claimant).POST("/houses/{h}/requests", emptied).
+		Expect().Status(http.StatusOK)
+
+	// Claiming is joining, so the queue they were sitting in elsewhere closes —
+	// exactly as founding a House closes it. Left open, the bystander could
+	// approve a lifter who already has a House.
+	var outcome string
+	if err := testPool.QueryRow(
+		context.Background(),
+		`SELECT outcome FROM house_join_requests WHERE id = $1`, elsewhere,
+	).Scan(&outcome); err != nil {
+		t.Fatalf("reading the other request: %v", err)
+	}
+	if outcome != "superseded" {
+		t.Fatalf("expected the claimant's other request to be superseded, got %q", outcome)
+	}
+
+	// And a lifter who already has a House cannot claim an empty one.
+	expectAs(t, claimant).POST("/houses/{h}/requests", occupied).
+		Expect().Status(http.StatusConflict)
+}
+
+// Claiming an empty House takes the House's ROW LOCK before it decides.
+//
+// Without it, two lifters asking the same empty House at once would each read
+// "no owner" under read committed and each walk in as owner: AddHouseMember's
+// ON CONFLICT is on user_id, which forbids one LIFTER holding two Houses and has
+// nothing to say about two lifters holding one.
+//
+// Asserted by holding the lock and showing the claim WAITS, rather than by
+// firing concurrent claims and hoping they overlap. That was tried first and is
+// worthless here: the window between the owner read and the commit is
+// sub-millisecond, and the racing version passed against the unlocked code every
+// time. This fails against it deterministically, which is the whole job of the
+// test.
+func TestClaimingAnEmptyHouseTakesTheHouseRowLock(t *testing.T) {
+	_, owner := secondLifter(t, "house-race-owner")
+	_, claimant := secondLifter(t, "house-race-claimant")
+	houseID := foundHouse(t, owner, "House Race", "HRCE")
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(
+			context.Background(), `DELETE FROM houses WHERE lower(sigil) = 'hrce'`,
+		)
+	})
+
+	expectAs(t, owner).DELETE("/me/house").Expect().Status(http.StatusNoContent)
+
+	// Raw net/http rather than expectAs: httpexpect reports through *testing.T,
+	// which is not safe to call from the goroutine below.
+	claim := func(token string) int {
+		req, err := http.NewRequest(
+			http.MethodPost, fmt.Sprintf("%s/houses/%d/requests", baseURL, houseID), nil,
+		)
+		if err != nil {
+			return 0
+		}
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return 0
+		}
+		defer func() { _ = resp.Body.Close() }()
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return resp.StatusCode
+	}
+
+	ctx := context.Background()
+	blocker, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("opening the blocking transaction: %v", err)
+	}
+	defer func() { _ = blocker.Rollback(ctx) }()
+	// FOR KEY SHARE, and the weaker mode is the entire point. FOR UPDATE here
+	// would prove nothing: AddHouseMember's insert carries a foreign key to
+	// houses, so it takes a FOR KEY SHARE on this row by itself and would block
+	// against FOR UPDATE whether or not the handler asks for a lock of its own.
+	// FOR KEY SHARE is compatible with that implicit lock and conflicts only with
+	// the handler's explicit FOR UPDATE, so this blocks if and only if LockHouse
+	// ran.
+	if _, err := blocker.Exec(
+		ctx, `SELECT id FROM houses WHERE id = $1 FOR KEY SHARE`, houseID,
+	); err != nil {
+		t.Fatalf("locking the House row: %v", err)
+	}
+
+	done := make(chan int, 1)
+	go func() { done <- claim(claimant) }()
+
+	select {
+	case code := <-done:
+		t.Fatalf(
+			"claim returned %d while the House row was locked — it is not taking the lock, "+
+				"so two lifters can both claim an empty House", code,
+		)
+	case <-time.After(750 * time.Millisecond):
+		// Blocked on the row, which is the point.
+	}
+
+	// Released: the claim proceeds and takes the House.
+	if err := blocker.Rollback(ctx); err != nil {
+		t.Fatalf("releasing the lock: %v", err)
+	}
+	if code := <-done; code != http.StatusOK {
+		t.Fatalf("expected the freed claim to take the House with 200, got %d", code)
+	}
+
+	// The invariant the lock is protecting.
+	var owners int
+	if err := testPool.QueryRow(
+		ctx,
+		`SELECT COUNT(*) FROM house_members WHERE house_id = $1 AND is_owner`, houseID,
+	).Scan(&owners); err != nil {
+		t.Fatalf("counting owners: %v", err)
+	}
+	if owners != 1 {
+		t.Fatalf("expected exactly one owner, found %d", owners)
+	}
+}
+
+// Leaving takes the same House row lock that asking does, so the two serialise.
+//
+// Unlocked, leaving contends for nothing: it deletes a house_members row and
+// updates house_join_requests, neither of which touches the House's row. That
+// lets a request slip past the supersede — asking reads an owner on their way
+// out and files a request, leaving then reads no owner and supersedes without
+// seeing that uncommitted row. The House ends up empty with an open request
+// against it, which is the "asker locked out" state SupersedeHouseOpenRequests
+// exists to prevent.
+//
+// Same FOR KEY SHARE blocker as the claim test, and the weaker mode matters for
+// the same reason — see the note there.
+func TestLeavingAHouseTakesTheHouseRowLock(t *testing.T) {
+	_, owner := secondLifter(t, "house-leavelock-owner")
+	houseID := foundHouse(t, owner, "House Leave Lock", "HLVL")
+
+	ctx := context.Background()
+	blocker, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("opening the blocking transaction: %v", err)
+	}
+	defer func() { _ = blocker.Rollback(ctx) }()
+	if _, err := blocker.Exec(
+		ctx, `SELECT id FROM houses WHERE id = $1 FOR KEY SHARE`, houseID,
+	); err != nil {
+		t.Fatalf("locking the House row: %v", err)
+	}
+
+	leave := func(token string) int {
+		req, err := http.NewRequest(http.MethodDelete, baseURL+"/me/house", nil)
+		if err != nil {
+			return 0
+		}
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return 0
+		}
+		defer func() { _ = resp.Body.Close() }()
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return resp.StatusCode
+	}
+
+	done := make(chan int, 1)
+	go func() { done <- leave(owner) }()
+
+	select {
+	case code := <-done:
+		t.Fatalf(
+			"leave returned %d while the House row was locked — it is not taking the lock, "+
+				"so a concurrent join request can escape being superseded", code,
+		)
+	case <-time.After(750 * time.Millisecond):
+		// Blocked on the row, which is the point.
+	}
+
+	if err := blocker.Rollback(ctx); err != nil {
+		t.Fatalf("releasing the lock: %v", err)
+	}
+	if code := <-done; code != http.StatusNoContent {
+		t.Fatalf("expected the freed leave to succeed with 204, got %d", code)
+	}
+}
+
+// Owner-only writes against an empty House 404: there is no owner, so there is
+// nobody they could be addressed to.
+func TestAnEmptyHouseHasNoOwnerToActAsOne(t *testing.T) {
+	_, owner := secondLifter(t, "house-empty-owner")
+	_, stranger := secondLifter(t, "house-empty-stranger")
+	houseID := foundHouse(t, owner, "House Empty Owner", "HEMO")
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(
+			context.Background(), `DELETE FROM houses WHERE lower(sigil) = 'hemo'`,
+		)
+	})
+
+	expectAs(t, owner).DELETE("/me/house").Expect().Status(http.StatusNoContent)
+
+	// The lifter who founded it has no standing over it once they walk out.
+	expectAs(t, owner).PATCH("/houses/{id}", houseID).
+		WithJSON(map[string]any{"tagline": "still mine"}).
+		Expect().Status(http.StatusNotFound)
+	expectAs(t, stranger).PATCH("/houses/{id}", houseID).
+		WithJSON(map[string]any{"tagline": "mine now"}).
+		Expect().Status(http.StatusNotFound)
+
+	// But it reads fine, which is what makes it findable enough to claim.
+	expectAs(t, stranger).GET("/houses/{id}", houseID).
+		Expect().Status(http.StatusOK).JSON().Object().
+		Value("viewer").Object().Value("isMember").Boolean().IsFalse()
 }
 
 func TestAnOwnerlessHouseFallsBackToItsLongestStandingMember(t *testing.T) {

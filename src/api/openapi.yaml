@@ -1046,7 +1046,23 @@ paths:
         see `superseded` in `HouseJoinRequest.outcome`.
 
         Asking while already in a House is a `409`, as is asking twice.
+
+        **An EMPTY House is claimed outright, and answers `200` with the House
+        rather than `201` with a request.** A House outlives its last member, so
+        one can be standing with nobody in it — and there is then no owner to
+        work a queue, which would make a filed request a row nobody will ever
+        read. The caller joins immediately as its owner, and their outstanding
+        requests to other Houses are superseded exactly as founding one does.
+        The two status codes are what tell the client which happened.
       responses:
+        "200":
+          description: >
+            The House was empty and is now the caller's, who is its owner. No
+            request was filed, because there was nobody to file it with.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HouseDetail"
         "201":
           description: The request as filed
           content:
@@ -1140,9 +1156,14 @@ paths:
         Two things can follow, and neither is the caller's choice. **If the
         caller owns the House and other members remain, ownership passes to the
         longest-standing of them** — a House is not left without an owner because
-        one lifter walked. **If the caller was the last member, the House is
-        deleted**, along with any requests outstanding against it; an empty House
-        sitting on a reserved name and sigil is litter.
+        one lifter walked. **If the caller was the last member, the House still
+        stands**, empty and unowned, keeping its name, sigil, founding date and
+        description. Those belonged to more lifters than whoever happened to
+        leave last, and both name and sigil are indexed install-wide, so
+        deleting it would be the only way anyone could ever reuse them.
+
+        An empty House is reached again through `POST /houses/{houseId}/requests`,
+        which hands it to the first lifter who asks — see that endpoint's `200`.
 
         Leaving when in no House is a `404`.
       responses:
