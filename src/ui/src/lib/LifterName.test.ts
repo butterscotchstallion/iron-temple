@@ -2,9 +2,12 @@ import { describe, it, expect, afterEach } from "vitest";
 import { render, screen } from "@testing-library/svelte";
 import LifterName from "./LifterName.svelte";
 import { achievements, resetAchievements } from "./achievements.svelte";
+import { houses, resetHouses } from "./houses.svelte";
 import {
   testAchievement,
   testAchievementHolders,
+  testHouse,
+  testHouseMembership,
   testLifter,
   testUser,
 } from "./testFixtures";
@@ -36,7 +39,10 @@ function crowned(entries: { achievement: ReturnType<typeof testAchievement>; ids
   achievements.loaded = true;
 }
 
-afterEach(() => resetAchievements());
+afterEach(() => {
+  resetAchievements();
+  resetHouses();
+});
 
 describe("the name", () => {
   it("renders the display name", () => {
@@ -131,5 +137,80 @@ describe("crowns", () => {
     render(LifterName, { props: { lifter: testUser({ id: 1 }) } });
     expect(screen.getByText("Ada Lovelace")).toBeInTheDocument();
     expect(document.querySelector("svg")).toBeNull();
+  });
+});
+
+describe("the sigil", () => {
+  /**
+   * Put this lifter in a House.
+   *
+   * Seeds the module for `crowned`'s reason: the lookup is as much under test as
+   * the markup, and a sigil drawn beside the wrong name is the failure that
+   * matters.
+   */
+  function housed(lifterId: number, overrides = {}) {
+    houses.items = [testHouse({ id: 7, ...overrides })];
+    houses.memberships = [testHouseMembership({ userId: lifterId, houseId: 7 })];
+    houses.loaded = true;
+  }
+
+  it("draws the tag for a lifter in a House", () => {
+    housed(1, { sigil: "IRON" });
+    render(LifterName, { props: { lifter: testUser({ id: 1 }) } });
+    expect(screen.getByText("IRON")).toBeInTheDocument();
+  });
+
+  it("names the House in text a screen reader reaches", () => {
+    // Four stray letters after a name is not a sentence. The tagline rides along
+    // when there is one, which is the same thing the hover card shows.
+    housed(1, { sigil: "IRON", name: "House Iron", tagline: "We lift at dawn" });
+    render(LifterName, { props: { lifter: testUser({ id: 1 }) } });
+    expect(screen.getByText("Member of House Iron — We lift at dawn")).toBeInTheDocument();
+  });
+
+  it("names the House without a tagline when it has none", () => {
+    housed(1, { sigil: "IRON", name: "House Iron" });
+    render(LifterName, { props: { lifter: testUser({ id: 1 }) } });
+    expect(screen.getByText("Member of House Iron")).toBeInTheDocument();
+  });
+
+  // The name is whatever its founder typed, so the label cannot prefix "House"
+  // without announcing "House House Iron" for one and losing the group entirely
+  // for another.
+  it("reads sensibly for a House whose name says nothing about houses", () => {
+    housed(1, { sigil: "TMPL", name: "Iron Temple" });
+    render(LifterName, { props: { lifter: testUser({ id: 1 }) } });
+    expect(screen.getByText("Member of Iron Temple")).toBeInTheDocument();
+  });
+
+  it("draws none for a lifter in no House", () => {
+    housed(2, { sigil: "IRON" });
+    render(LifterName, { props: { lifter: testUser({ id: 1 }) } });
+    expect(screen.queryByText("IRON")).not.toBeInTheDocument();
+  });
+
+  it("draws none before the Houses have loaded", () => {
+    render(LifterName, { props: { lifter: testUser({ id: 1 }) } });
+    expect(screen.getByText("Ada Lovelace")).toBeInTheDocument();
+    expect(screen.queryByTestId("sigil")).not.toBeInTheDocument();
+  });
+
+  // For a surface that is itself about the House — its own member list — where
+  // the tag beside every name would repeat the heading.
+  it("can be turned off", () => {
+    housed(1, { sigil: "IRON" });
+    render(LifterName, { props: { lifter: testUser({ id: 1 }), sigil: false } });
+    expect(screen.queryByText("IRON")).not.toBeInTheDocument();
+    expect(screen.getByText("Ada Lovelace")).toBeInTheDocument();
+  });
+
+  // The two ornaments are independent: a lifter can have either, both, or
+  // neither, and turning one off must not take the other with it.
+  it("draws alongside a crown", () => {
+    crowned([{ achievement: testAchievement(), ids: [1] }]);
+    housed(1, { sigil: "IRON" });
+    render(LifterName, { props: { lifter: testUser({ id: 1 }) } });
+    expect(screen.getByText("IRON")).toBeInTheDocument();
+    expect(screen.getByText("Top of Week streak")).toBeInTheDocument();
   });
 });

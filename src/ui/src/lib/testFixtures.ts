@@ -16,6 +16,11 @@ import type {
   Achievement,
   AchievementHolders,
   FeedEntry,
+  House,
+  HouseDetail,
+  HouseJoinRequest,
+  HouseMember,
+  HouseMembership,
   LeaderboardBoard,
   LeaderboardEntry,
   Lifter,
@@ -401,6 +406,95 @@ export function testRackedReport(overrides: Partial<RackedReport> = {}): RackedR
     fastestSession: null,
     deloads: [],
     archetype: { name: "", description: "" },
+    ...overrides,
+  };
+}
+
+/**
+ * A House, defaulting to NO icon and NO tagline.
+ *
+ * Both empty on purpose, following testAchievementHolders' rule: they are the
+ * state a renderer is most likely to get wrong. A House founded without an icon
+ * has to fall back to its sigil, and a hover card with no tagline must not leave
+ * an empty paragraph behind — a fixture that arrived with both would hide the two
+ * cases worth covering.
+ *
+ * `memberCount` is 1 because a founder is a member: a House with zero members is
+ * a state the API deletes rather than serves.
+ */
+export function testHouse(overrides: Partial<House> = {}): House {
+  return {
+    id: 7,
+    name: "House Iron",
+    sigil: "IRON",
+    tagline: "",
+    icon: "",
+    iconColor: "",
+    createdAt: "2026-03-01T09:00:00Z",
+    memberCount: 1,
+    ...overrides,
+  };
+}
+
+/** One lifter's place in one House. Not the owner, which is the common case. */
+export function testHouseMembership(
+  overrides: Partial<HouseMembership> = {},
+): HouseMembership {
+  return {
+    userId: 1,
+    houseId: 7,
+    isOwner: false,
+    ...overrides,
+  };
+}
+
+/** A member as the House page lists them. */
+export function testHouseMember(overrides: Partial<HouseMember> = {}): HouseMember {
+  return {
+    lifter: testLifter(),
+    isOwner: false,
+    joinedAt: "2026-03-01T09:00:00Z",
+    ...overrides,
+  };
+}
+
+/** One lifter asking to join one House. */
+export function testHouseJoinRequest(
+  overrides: Partial<HouseJoinRequest> = {},
+): HouseJoinRequest {
+  return {
+    id: 21,
+    houseId: 7,
+    lifter: testLifter(),
+    requestedAt: "2026-03-02T09:00:00Z",
+    ...overrides,
+  };
+}
+
+/**
+ * A House in full, defaulting to a viewer who is a STRANGER to it.
+ *
+ * Not a member, not the owner, not in another House, with no request outstanding
+ * — which is the state that offers "Request to join", and the only one of the four
+ * a reader arrives in without having done something first.
+ *
+ * `pendingRequests` is absent rather than empty, which is the difference the API
+ * is careful about: absent means the caller is not the owner and may not know,
+ * where empty would mean nobody is waiting.
+ */
+export function testHouseDetail(overrides: Partial<HouseDetail> = {}): HouseDetail {
+  return {
+    id: 7,
+    name: "House Iron",
+    sigil: "IRON",
+    tagline: "",
+    description: "",
+    icon: "",
+    iconColor: "",
+    createdAt: "2026-03-01T09:00:00Z",
+    memberCount: 1,
+    members: [testHouseMember({ isOwner: true })],
+    viewer: { isMember: false, isOwner: false, inAnotherHouse: false },
     ...overrides,
   };
 }

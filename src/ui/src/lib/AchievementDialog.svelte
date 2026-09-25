@@ -145,7 +145,12 @@
                  the heading. Decorating the name too would repeat it, and on a
                  lifter leading three boards would add two the card is not
                  talking about. -->
-            <LifterName lifter={current.actor} class="font-semibold" crowns={false} />
+            <LifterName
+              lifter={current.actor}
+              class="font-semibold"
+              crowns={false}
+              sigil={false}
+            />
             <span class="text-muted-foreground">
               took this {relativeTime(current.createdAt)}
             </span>

@@ -252,6 +252,27 @@ exist only because the owner created them, so admission is the consent. The gym
 setup is the one thing that stays private, because another lifter's bar and plates
 decide their weights and must never be read as a basis for yours.
 
+### Houses
+
+Lifters who train together can form a **House**: a named group with an icon, a
+one-line tagline, a longer description, and a short **sigil** — two to five
+characters — that every member wears next to their name wherever the app draws it.
+Hovering a sigil previews the House; its own page collects the members with whatever
+crowns they are currently holding.
+
+Anyone can found one, and a lifter is **in one House at a time** — to join another,
+leave the first. Getting in is by asking: the House's owner is notified and approves
+or declines, and you can ask several Houses at once, in which case the first yes
+closes the rest. The founder owns the House and is the only one who edits it or
+answers requests; if they leave, it passes to whoever has been in it longest, and the
+last member out takes the House with them rather than leaving an empty one sitting on
+a name.
+
+**A House groups; it does not gate.** Nothing that was visible before Houses existed
+is hidden by them, and being outside one costs a lifter nothing — the achievements, the
+leaderboard and the roster read exactly as they always did. It is a way of saying who
+trains together, not a privacy setting, which this install deliberately does not have.
+
 ## Documentation
 
 | | |

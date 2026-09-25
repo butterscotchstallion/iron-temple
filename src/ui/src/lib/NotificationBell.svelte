@@ -7,6 +7,7 @@
   import SkeletonRows from "./skeleton/SkeletonRows.svelte";
   import { auth } from "./auth.svelte";
   import { achievementLabel } from "./achievements.svelte";
+  import { houseById } from "./houses.svelte";
   import { relativeTime } from "./date";
   import {
     clearAll,
@@ -63,6 +64,17 @@
     // every crown on the install and a route could only ever show one of them.
     // The leaderboard is still one press away, from inside that dialog.
     if (item.kind === "crown") return null;
+    // The three House rows go to the House, which is where every one of them can
+    // be acted on: an owner approves from its page and a requester reads about it
+    // there. The id is withheld on a row that folded more than one House — see
+    // Notification.houseId — and such a row goes nowhere rather than picking one.
+    if (
+      item.kind === "house-request" ||
+      item.kind === "house-approved" ||
+      item.kind === "house-declined"
+    ) {
+      return item.houseId === undefined ? null : `/houses/${item.houseId}`;
+    }
     if (item.sessionId === undefined) return null;
 
     // Which comment, appended so the recap can scroll to the sentence rather
@@ -96,6 +108,22 @@
         // fall through to the unnamed sentence rather than to a blank.
         const board = achievementLabel(item.achievementSlug);
         return board ? `took the crown on ${board}` : "took a crown";
+      }
+      // The House's name when the API named one and the list has loaded, and the
+      // unnamed sentence otherwise — the same two fallbacks the crown needs, for
+      // the same two reasons. A House can also have been deleted since, which is
+      // why houseById can answer null for an id that was real.
+      case "house-request": {
+        const house = houseById(item.houseId);
+        return house ? `asked to join ${house.name}` : "asked to join your House";
+      }
+      case "house-approved": {
+        const house = houseById(item.houseId);
+        return house ? `let you into ${house.name}` : "let you into their House";
+      }
+      case "house-declined": {
+        const house = houseById(item.houseId);
+        return house ? `turned down your request to join ${house.name}` : "turned down your request";
       }
     }
   }

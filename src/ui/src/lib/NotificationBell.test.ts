@@ -4,8 +4,10 @@ import NotificationBell from "./NotificationBell.svelte";
 import { auth } from "./auth.svelte";
 import { notifications, poll } from "./notifications.svelte";
 import { achievements, resetAchievements } from "./achievements.svelte";
+import { houses, resetHouses } from "./houses.svelte";
 import {
   testAchievementHolders,
+  testHouse,
   testLifter,
   testNotification,
   testUser,
@@ -93,6 +95,7 @@ beforeEach(() => {
 afterEach(() => {
   notifications.items = [];
   notifications.unread = 0;
+  resetHouses();
 });
 
 // This file grew a dialog, so it inherits UpdatePrompt.test.ts's teardown race.
@@ -701,5 +704,100 @@ describe("following a notification", () => {
 
     expect(push).not.toHaveBeenCalled();
     expect(markNotificationRead).not.toHaveBeenCalled();
+  });
+});
+
+describe("House rows", () => {
+  /**
+   * A House row: no session, no comment, no emoji, and a House instead.
+   *
+   * Spelled out rather than defaulted for crownRow's reason — every one of those
+   * absences is load-bearing, and a house row carrying a sessionId would take the
+   * reader to a recap.
+   */
+  function houseRow(kind: string, overrides: Record<string, unknown> = {}) {
+    return testNotification({
+      id: 91,
+      kind: kind as "house-request",
+      emoji: undefined,
+      sessionId: undefined,
+      sessionOwnerId: undefined,
+      programDayName: undefined,
+      houseId: 7,
+      actor: testLifter({ id: THEM, displayName: "Grace Hopper" }),
+      ...overrides,
+    });
+  }
+
+  /** Put one House in the list the panel looks names up in. */
+  function known(overrides = {}) {
+    houses.items = [testHouse({ id: 7, name: "House Iron", ...overrides })];
+    houses.memberships = [];
+    houses.loaded = true;
+  }
+
+  it("names the House somebody asked to join", async () => {
+    known();
+    seed([houseRow("house-request")]);
+    render(NotificationBell);
+    await open();
+    expect(await screen.findByText(/asked to join House Iron/)).toBeInTheDocument();
+  });
+
+  it("names the House somebody let you into", async () => {
+    known();
+    seed([houseRow("house-approved")]);
+    render(NotificationBell);
+    await open();
+    expect(await screen.findByText(/let you into House Iron/)).toBeInTheDocument();
+  });
+
+  it("names the House that turned you down", async () => {
+    known();
+    seed([houseRow("house-declined")]);
+    render(NotificationBell);
+    await open();
+    expect(
+      await screen.findByText(/turned down your request to join House Iron/),
+    ).toBeInTheDocument();
+  });
+
+  // The API withholds houseId on a row that folded more than one House — a lifter
+  // turned down by two gets one row — and the list may simply not have loaded.
+  // Both fall through to the unnamed sentence rather than to a blank.
+  it("says the unnamed thing when the API withheld the House", async () => {
+    known();
+    seed([houseRow("house-declined", { houseId: undefined })]);
+    render(NotificationBell);
+    await open();
+    expect(await screen.findByText(/turned down your request/)).toBeInTheDocument();
+    expect(screen.queryByText(/House Iron/)).not.toBeInTheDocument();
+  });
+
+  it("says the unnamed thing when the Houses have not loaded", async () => {
+    seed([houseRow("house-request")]);
+    render(NotificationBell);
+    await open();
+    expect(await screen.findByText(/asked to join your House/)).toBeInTheDocument();
+  });
+
+  it("takes the reader to the House, which is where it can be acted on", async () => {
+    known();
+    seed([houseRow("house-request")]);
+    render(NotificationBell);
+    await open();
+    await fireEvent.click(await screen.findByText(/asked to join House Iron/));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/houses/7"));
+  });
+
+  // A row that folded several Houses has no single place to go, so it must not
+  // pick one — the same reason a crown row goes nowhere.
+  it("goes nowhere when the House was withheld", async () => {
+    known();
+    seed([houseRow("house-approved", { houseId: undefined })]);
+    render(NotificationBell);
+    await open();
+    await fireEvent.click(await screen.findByText(/let you into/));
+    expect(push).not.toHaveBeenCalled();
   });
 });

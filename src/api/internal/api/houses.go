@@ -379,7 +379,12 @@ func (s *Server) updateHouse(w http.ResponseWriter, r *http.Request) {
 // requestToJoinHouse files the caller's ask. The owner is notified.
 func (s *Server) requestToJoinHouse(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	caller := userFrom(ctx).ID
+	// The whole caller rather than just their id, because the response carries a
+	// Lifter and the spec requires its name fields. They are already on the
+	// context, so filling them costs nothing — and a request echoed back with an
+	// empty username would be a shape no other endpoint sends.
+	me := userFrom(ctx)
+	caller := me.ID
 
 	house, ok := s.houseFromPath(w, r)
 	if !ok {
@@ -448,9 +453,14 @@ func (s *Server) requestToJoinHouse(w http.ResponseWriter, r *http.Request) {
 	events.publish()
 
 	writeJSON(w, http.StatusCreated, houseJoinRequestDTO{
-		ID:          req.ID,
-		HouseID:     req.HouseID,
-		Lifter:      lifterDTO{ID: caller},
+		ID:      req.ID,
+		HouseID: req.HouseID,
+		Lifter: lifterDTO{
+			ID:          caller,
+			Username:    me.Username,
+			DisplayName: me.DisplayName,
+			AvatarColor: me.AvatarColor,
+		},
 		RequestedAt: timestamptzToString(req.RequestedAt),
 	})
 }

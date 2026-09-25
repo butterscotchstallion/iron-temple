@@ -425,6 +425,12 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/api/v1/lifters/*/achievements", (route) =>
     route.fulfill({ json: { items: [] } }),
   );
+  // Polled by App.svelte beside the achievements above, so this is reached by
+  // every signed-in page load whether or not a test visits the Houses screen.
+  // Empty, so no name draws a sigil and the header looks as these tests expect.
+  await page.route("**/api/v1/houses**", (route) =>
+    route.fulfill({ json: { items: [], memberships: [] } }),
+  );
 });
 
 test("renders the programs list", async ({ page }) => {
@@ -609,6 +615,46 @@ test("navigates between the main tabs via the nav bar", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Choose a program" })).toBeVisible();
   // The active tab is exposed to assistive tech.
   await expect(page.getByRole("link", { name: "Programs" })).toHaveAttribute("aria-current", "page");
+});
+
+test("browses the Houses and opens one", async ({ page }) => {
+  const house = {
+    id: 7,
+    name: "House Iron",
+    sigil: "IRON",
+    tagline: "We lift at dawn",
+    icon: "anvil",
+    iconColor: "#b026ff",
+    createdAt: "2026-03-01T09:00:00Z",
+    memberCount: 1,
+  };
+  // Registered after the beforeEach stub so these win, and WITHOUT a trailing
+  // wildcard on the first so it matches only the collection — /houses/7 is the
+  // detail shape and carries fields the list deliberately leaves out.
+  await page.route("**/api/v1/houses", (route) =>
+    route.fulfill({ json: { items: [house], memberships: [] } }),
+  );
+  await page.route("**/api/v1/houses/7", (route) =>
+    route.fulfill({
+      json: {
+        ...house,
+        description: "A longer account of who we are.",
+        members: [],
+        viewer: { isMember: false, isOwner: false, inAnotherHouse: false },
+      },
+    }),
+  );
+
+  await page.goto("/#/houses");
+  await expect(page.getByRole("heading", { name: "Houses", exact: true })).toBeVisible();
+  await expect(page.getByText("We lift at dawn")).toBeVisible();
+
+  await page.getByRole("link", { name: /House Iron/ }).click();
+  await expect(page).toHaveURL(/#\/houses\/7$/);
+  await expect(page.getByRole("heading", { name: "House Iron" })).toBeVisible();
+  // The long description is the detail endpoint's alone — the list does not carry it.
+  await expect(page.getByText("A longer account of who we are.")).toBeVisible();
+  await expect(page.getByRole("button", { name: /request to join/i })).toBeVisible();
 });
 
 test("browses and searches the exercise library", async ({ page }) => {
