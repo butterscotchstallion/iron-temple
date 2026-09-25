@@ -6946,9 +6946,16 @@ components:
         previousLb:
           type: number
           description: >
-            The mark it beat. Always greater than zero: a lift with no history at
-            all is a `RackedFirstTime`, not a record, so this no longer stands in
-            for "there was nothing to beat".
+            The mark it beat. Zero or greater, and it no longer stands in for
+            "there was nothing to beat" — a lift with no history at all is a
+            `RackedFirstTime` rather than a record.
+
+            **It can still be 0, and a client must not divide by it.** A lift whose
+            prior best was genuinely zero is bodyweight work: chin-ups are recorded
+            at 0 lb, so the lift IS in the lifter's history with a best of 0. Put a
+            belt on and the first loaded set is a real weight record against that
+            zero. Treat this as "no percentage to report" rather than as an
+            infinite gain.
 
     RackedFirstTime:
       description: >

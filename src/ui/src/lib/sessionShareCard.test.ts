@@ -208,14 +208,16 @@ describe("sessionShareCardContent", () => {
       ]);
     });
 
-    // A previousLb of 0 means "nothing to beat" rather than a mark of zero
-    // pounds, so there is no percentage to report.
+    // A previousLb of 0 has no percentage to report, and this is a LIVE case, not
+    // a defensive one.
     //
-    // The server no longer sends this: a lift with no history is a firstTime and
-    // not a PR. The guard stays because recaps are CACHED on the client, so a
-    // recap stored before that change can still be read back with a zero in it,
-    // and "+Infinity%" on a share card is not a thing to find out in public.
-    it("omits the gain on a lift with no history", () => {
+    // It is no longer "a lift with no history" — that is a firstTime now, not a
+    // record. It is a lift whose prior best was genuinely zero, which is what
+    // bodyweight work is: chin-ups are recorded at 0 lb, so the lift is in the
+    // history with a best of 0, and the first set done wearing a belt is a real
+    // weight record against it. Divide by that and a share card goes out reading
+    // "+Infinity%".
+    it("omits the gain on a record over a prior best of zero", () => {
       const c = sessionShareCardContent(
         mkRecap({ prs: [{ ...mkPR("Squat", 245), previousLb: 0 }] }),
       );

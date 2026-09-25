@@ -312,3 +312,31 @@ func TestARackedBarEarnsNothing(t *testing.T) {
 		t.Errorf("got %+v, want no milestone for a weight never lifted", got)
 	}
 }
+
+// Putting a belt on. A chin-up is recorded at 0 lb, so the lift is in the
+// baseline with a legitimate best of zero — and the first LOADED set of it is a
+// genuine weight record against that zero, carrying PreviousLb == 0.
+//
+// So previousLb greater than zero is NOT an invariant of a record, and a client
+// dividing by it to show a percentage gain would print "+Infinity%". This is the
+// one live case behind formatPRGain's guard, which is why that guard is not
+// merely defending against a stale cached recap.
+func TestALoadedSetOverABodyweightZeroIsARecord(t *testing.T) {
+	sets := mkSets(1, day(2026, time.March, 2), 1, "Chin-up", 3, 5, 25)
+	base := Baseline{
+		BestWeight: map[int32]float64{1: 0},
+		BestE1RM:   map[int32]float64{1: 0},
+	}
+
+	prs, firsts := personalRecords(groupSessions(sets), base)
+	if len(firsts) != 0 {
+		t.Fatalf("got %+v, want no first time — the lift is in the baseline", firsts)
+	}
+	if len(prs) != 1 || prs[0].Kind != PRWeight {
+		t.Fatalf("got %+v, want one weight record", prs)
+	}
+	if prs[0].PreviousLb != 0 {
+		t.Errorf("previous = %v, want 0 — the documented zero a client must not divide by",
+			prs[0].PreviousLb)
+	}
+}

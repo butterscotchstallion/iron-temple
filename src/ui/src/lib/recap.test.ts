@@ -61,11 +61,13 @@ describe("formatPRGain", () => {
     expect(formatPRGain(300, 200)).toBe("+50%");
   });
 
-  // previousLb is 0 when the lift has no history — the API's spelling of
-  // "nothing to beat", not a mark of zero pounds. A rise from nothing is a
-  // ratio with no meaning.
-  it("says nothing about a first-ever lift", () => {
-    expect(formatPRGain(245, 0)).toBeNull();
+  // A previousLb of 0 is a record over a prior best of zero, and a rise from
+  // nothing is a ratio with no meaning. Live rather than defensive: bodyweight
+  // work is recorded at 0 lb, so a chin-up IS in the history with a best of 0,
+  // and the first set done wearing a belt is a genuine weight record against it.
+  // Divide instead of guarding and a share card goes out reading "+Infinity%".
+  it("says nothing about a record over a prior best of zero", () => {
+    expect(formatPRGain(25, 0)).toBeNull();
   });
 
   // "+0%" against a row announcing a personal record reads as a contradiction.

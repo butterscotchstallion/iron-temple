@@ -106,13 +106,19 @@ export function formatOrdinal(n: number): string {
 /**
  * How much a record beat the mark it replaced: 240 -> 245 reads "+2%".
  *
- * Null rather than a figure in the two cases where a percentage would be a
- * lie. A lift with no history has `previousLb: 0` — that is the API's spelling
- * of "nothing to beat", not a mark of zero pounds, and a rise from nothing is a
- * ratio with no meaning. And a gain that rounds below one percent is reported
- * as no gain rather than as "0%", which on a row announcing a personal record
- * reads as a contradiction. The second case is reachable: an extra rep can move
- * an estimated max by a single pound.
+ * Null rather than a figure in the two cases where a percentage would be a lie.
+ *
+ * A `previousLb` of 0 is a record over a prior best of zero, and a rise from
+ * nothing is a ratio with no meaning. That is bodyweight work: chin-ups are
+ * recorded at 0 lb, so such a lift IS in the lifter's history with a best of 0,
+ * and the first set done wearing a belt is a genuine weight record against it.
+ * (It is no longer the API's spelling of "nothing to beat" — a lift with no
+ * history at all now arrives as a `firstTimes` entry rather than as a record.)
+ *
+ * And a gain that rounds below one percent is reported as no gain rather than as
+ * "0%", which on a row announcing a personal record reads as a contradiction.
+ * The second case is reachable: an extra rep can move an estimated max by a
+ * single pound.
  *
  * Takes the two numbers rather than a record, because the two surfaces that
  * draw this hold different shapes of one — the wire type on the share card, the
