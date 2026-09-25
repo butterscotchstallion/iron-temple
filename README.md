@@ -271,9 +271,11 @@ Anyone can found one, and a lifter is **in one House at a time** — to join ano
 leave the first. Getting in is by asking: the House's owner is notified and approves
 or declines, and you can ask several Houses at once, in which case the first yes
 closes the rest. The founder owns the House and is the only one who edits it or
-answers requests; if they leave, it passes to whoever has been in it longest, and the
-last member out takes the House with them rather than leaving an empty one sitting on
-a name.
+answers requests; if they leave, it passes to whoever has been in it longest. The last
+member out leaves the House **standing** — empty and unowned, keeping its name, sigil,
+founding date and description, which belonged to more lifters than whoever happened to
+leave last. An empty House is claimed by asking: with no owner to approve a request,
+the next lifter to ask walks in as its owner.
 
 **A House groups; it does not gate.** Nothing that was visible before Houses existed
 is hidden by them, and being outside one costs a lifter nothing — the achievements, the

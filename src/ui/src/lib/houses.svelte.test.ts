@@ -99,9 +99,10 @@ describe("houseById", () => {
     expect(houseById(7)?.name).toBe("House Iron");
   });
 
-  it("is null for a House that has since been deleted", async () => {
-    // Its last member left. The notification outlives it only until the cascade,
-    // and the panel says the unnamed thing in the meantime.
+  it("is null for an id the loaded list does not carry", async () => {
+    // A cold or stale cache rather than a House that went: nothing deletes a
+    // House, so this is the panel asking before the list has caught up, and it
+    // says the unnamed thing in the meantime.
     served([], []);
     await loadHouses();
 
