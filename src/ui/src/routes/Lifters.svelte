@@ -70,12 +70,22 @@
           <!-- The row is a flex container with the link as its growing child,
                rather than one anchor wrapping everything. A <button> inside an
                <a> is invalid markup and its click bubbles into the navigation,
-               so the Follow control has to be the link's sibling. -->
-          <li class="flex items-center gap-2">
+               so the Follow control has to be the link's sibling.
+
+               The highlight therefore belongs to the row, not to the link: on the
+               link it stopped where the link stopped, leaving the Follow control
+               sitting in an unlit strip at the end of a lit row. The `-mx-2 px-2`
+               that bleeds it past the avatar moves here with it, and the focus
+               ring follows via `has-[a:focus-visible]` so arriving by keyboard
+               lights the same shape the mouse does. The link keeps `py-3`, which
+               is what makes the row's full height clickable. -->
+          <li
+            class="-mx-2 flex items-center gap-2 rounded-md px-2 transition hover:bg-white/5 has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-primary"
+          >
             <a
               href={`/lifters/${lifter.id}`}
               use:link
-              class="-mx-2 flex min-w-0 flex-1 items-center gap-3 rounded-md px-2 py-3 transition hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              class="flex min-w-0 flex-1 items-center gap-3 py-3 focus-visible:outline-none"
             >
               <Avatar user={lifter} size={40} />
               <span class="flex min-w-0 flex-col">
