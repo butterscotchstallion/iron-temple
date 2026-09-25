@@ -150,6 +150,7 @@ func (s *Server) rackedSets(
 			ExerciseID:     row.ExerciseID,
 			ExerciseName:   row.ExerciseName,
 			MuscleGroup:    row.MuscleGroup,
+			Equipment:      row.Equipment,
 			Reps:           reps,
 			WeightLb:       numericToFloat(row.WeightLb),
 			Completed:      row.Completed,
@@ -469,6 +470,7 @@ func rackedReportToDTO(rep racked.Report) rackedReportDTO {
 			CurrentLb:    u.CurrentLb,
 			ExerciseID:   u.ExerciseID,
 			ExerciseName: u.ExerciseName,
+			Equipment:    u.Equipment,
 		})
 	}
 	if h := rep.HeaviestSet; h != nil {

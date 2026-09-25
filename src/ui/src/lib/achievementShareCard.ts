@@ -33,7 +33,12 @@ import type { MomentRow, ShareCardContent } from "./shareCard";
  * floors at 1.
  */
 export function formatRemaining(upcoming: RackedUpcomingMilestone): string {
-  const remaining = Math.max(1, Math.round(upcoming.targetLb - upcoming.currentLb));
+  // Per hand on a dumbbell, because the label beside this is. targetLb and
+  // currentLb are the whole load, as every weight in this app is, so a pair-pound
+  // figure under a label reading "First 50 lb per hand" would be two units ten
+  // pixels apart — the confusion ExerciseCard's own unit suffix exists to prevent.
+  const half = upcoming.equipment === "dumbbell" ? 2 : 1;
+  const remaining = Math.max(1, Math.round((upcoming.targetLb - upcoming.currentLb) / half));
   return `${formatVolume(remaining)} lb to go`;
 }
 

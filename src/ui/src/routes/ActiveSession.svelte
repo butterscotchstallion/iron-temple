@@ -97,6 +97,33 @@
   // What to say over the sets, if anything. Carries WHICH of the two it is
   // rather than just the text, so the banner cannot call a first time a PR.
   let prNote = $state<{ kind: "pr" | "first"; text: string } | null>(null);
+
+  // The heaviest weight already celebrated for each lift in THIS session, so a
+  // 5x5 at a new weight fires the confetti once rather than five times.
+  //
+  // Not $state and deliberately so: nothing renders from it. It only gates a side
+  // effect, and making it reactive would invite a reader to draw from a map that
+  // is written to mid-update. It resets with the page, which is the right lifetime
+  // — a reload means the celebration already happened.
+  const celebrated = new Map<number, number>();
+
+  // What each lift has left to chase, keyed the way the cards ask for it.
+  //
+  // The server decides the rung: which weights count as named is a fact about the
+  // equipment and it already owns that ladder, so nothing here reimplements it —
+  // see racked.NextRung. Null means there is nothing to aim at, which covers a
+  // lifter past the top of a ladder, a lift never loaded, and band work.
+  const rungByExercise = $derived(
+    new Map(
+      (session?.previousBests ?? [])
+        .filter((b) => b.nextRungLb !== null)
+        .map((b) => [b.exerciseId, { targetLb: b.nextRungLb!, currentLb: b.weightLb }]),
+    ),
+  );
+
+  function rungFor(exerciseId: number) {
+    return rungByExercise.get(exerciseId) ?? null;
+  }
   let prTimer: ReturnType<typeof setTimeout> | undefined;
 
   async function load() {
@@ -309,7 +336,19 @@
       } else if (set.weightLb > previous) {
         prNote = { kind: "pr", text };
         fresh = true;
-        celebrate({ particleCount: 120, spread: 70, origin: { y: 0.5 } });
+        // ONCE PER LIFT, not once per set. prBest is the standing best as of page
+        // load and never advances, so on a 5x5 at a new weight all five sets clear
+        // the same old mark and each one used to fire — five bursts of confetti for
+        // one achievement, which is precisely how a celebration stops landing.
+        //
+        // The record itself is still five records' worth of news as far as the
+        // banner is concerned: it re-reads on every set, because the lifter should
+        // see the note against the set they just did. It is the confetti that is
+        // rationed, because that is the part that means "this was rare".
+        if ((celebrated.get(set.exerciseId) ?? -1) < set.weightLb) {
+          celebrated.set(set.exerciseId, set.weightLb);
+          celebrate({ particleCount: 120, spread: 70, origin: { y: 0.5 } });
+        }
       }
       if (fresh) {
         if (prTimer) clearTimeout(prTimer);
@@ -769,6 +808,7 @@
         onChangeWeight={(delta) => changeWeight(group.sets, delta)}
         onAddSet={() => addSet(group.sets[0].exerciseId)}
         onRemoveSet={removeSet}
+        nextRung={rungFor(group.sets[0].exerciseId)}
         readonly={isOver}
       />
     {/each}

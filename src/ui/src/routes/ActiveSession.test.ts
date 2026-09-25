@@ -312,7 +312,7 @@ describe("ActiveSession: records and first times", () => {
 
   it("celebrates a set above the lift's standing best", async () => {
     getSession.mockResolvedValue(
-      ok(oneTap({ previousBests: [{ exerciseId: 1, weightLb: 195, e1rmLb: 228 }] })),
+      ok(oneTap({ previousBests: [{ exerciseId: 1, weightLb: 195, e1rmLb: 228, nextRungLb: null }] })),
     );
     updateSessionSet.mockResolvedValue(
       ok(mkSet({ id: 1, setNumber: 1, targetReps: 1, actualReps: 1, completed: true })),
@@ -354,7 +354,7 @@ describe("ActiveSession: records and first times", () => {
       getSession.mockResolvedValue(
         ok(
           mkSession({
-            previousBests: [{ exerciseId: 1, weightLb: 195, e1rmLb: 228 }],
+            previousBests: [{ exerciseId: 1, weightLb: 195, e1rmLb: 228, nextRungLb: null }],
             sets: [
               mkSet({ id: 1, setNumber: 1, targetReps: 1, weightLb: 200 }),
               mkSet({ id: 2, setNumber: 2, targetReps: 1, weightLb: 185 }),
@@ -392,7 +392,7 @@ describe("ActiveSession: records and first times", () => {
   // every chin-up session a first time forever.
   it("treats a standing best of zero as a history", async () => {
     getSession.mockResolvedValue(
-      ok(oneTap({ previousBests: [{ exerciseId: 1, weightLb: 0, e1rmLb: 0 }] })),
+      ok(oneTap({ previousBests: [{ exerciseId: 1, weightLb: 0, e1rmLb: 0, nextRungLb: null }] })),
     );
     updateSessionSet.mockResolvedValue(
       ok(mkSet({ id: 1, setNumber: 1, targetReps: 1, actualReps: 1, completed: true })),
@@ -405,3 +405,108 @@ describe("ActiveSession: records and first times", () => {
     expect(screen.queryByText(/First time!/)).not.toBeInTheDocument();
   });
 });
+
+// Five sets at a new weight are one achievement. prBest is the standing best as
+// of page load and never advances, so every set of a 5x5 clears the same old mark
+// — and each one used to fire the confetti. Five bursts is how a celebration stops
+// meaning anything.
+describe("ActiveSession: confetti is rationed", () => {
+  it("fires once for a 5x5 at a new weight, not five times", async () => {
+    getSession.mockResolvedValue(
+      ok(
+        mkSession({
+          previousBests: [{ exerciseId: 1, weightLb: 195, e1rmLb: 228, nextRungLb: null }],
+          sets: [1, 2, 3, 4, 5].map((n) =>
+            mkSet({ id: n, setNumber: n, targetReps: 1, weightLb: 200 }),
+          ),
+        }),
+      ),
+    );
+    updateSessionSet.mockImplementation((_s: number, setId: number) =>
+      Promise.resolve(
+        ok(mkSet({ id: setId, setNumber: setId, targetReps: 1, actualReps: 1, completed: true })),
+      ),
+    );
+
+    render(ActiveSession, props);
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Set 1/ })).toBeTruthy());
+
+    for (const n of [1, 2, 3, 4, 5]) {
+      await fireEvent.click(screen.getByRole("button", { name: new RegExp(`^Set ${n}`) }));
+    }
+
+    // Every set has to have been written and judged before the count means
+    // anything — see the note in the test below.
+    await waitFor(() => expect(updateSessionSet).toHaveBeenCalledTimes(5));
+
+    // The banner still reads on every set — the lifter should see the note against
+    // the set they just did. It is the confetti that is rationed.
+    expect(await screen.findByText(/New PR!/)).toBeInTheDocument();
+    expect(celebrate).toHaveBeenCalledTimes(1);
+  });
+
+  // Going heavier again inside one session is a second achievement and earns its
+  // own burst: the gate is the weight already celebrated, not "once per lift".
+  it("fires again when the weight goes up within the session", async () => {
+    getSession.mockResolvedValue(
+      ok(
+        mkSession({
+          previousBests: [{ exerciseId: 1, weightLb: 195, e1rmLb: 228, nextRungLb: null }],
+          sets: [
+            mkSet({ id: 1, setNumber: 1, targetReps: 1, weightLb: 200 }),
+            mkSet({ id: 2, setNumber: 2, targetReps: 1, weightLb: 205 }),
+          ],
+        }),
+      ),
+    );
+    updateSessionSet.mockImplementation((_s: number, setId: number) =>
+      Promise.resolve(
+        ok(mkSet({ id: setId, setNumber: setId, targetReps: 1, actualReps: 1, completed: true })),
+      ),
+    );
+
+    render(ActiveSession, props);
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Set 1/ })).toBeTruthy());
+
+    await fireEvent.click(screen.getByRole("button", { name: /^Set 1/ }));
+    await fireEvent.click(screen.getByRole("button", { name: /^Set 2/ }));
+
+    // Waited for rather than asserted straight away: cycle() is async, so a click
+    // returns before the set it logged has been written and judged. Without this
+    // the count is read mid-flight and the test passes for the wrong reason —
+    // which is how the 5x5 case below first went green.
+    await waitFor(() => expect(updateSessionSet).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(celebrate).toHaveBeenCalledTimes(2));
+  });
+});
+
+// The one screen where a milestone can still be acted on.
+describe("ActiveSession: the next rung", () => {
+  it("shows what there is to aim at on a lift that has a rung", async () => {
+    getSession.mockResolvedValue(
+      ok(
+        mkSession({
+          previousBests: [{ exerciseId: 1, weightLb: 215, e1rmLb: 250, nextRungLb: 225 }],
+        }),
+      ),
+    );
+    render(ActiveSession, props);
+    expect(await screen.findByText(/10 lb to your first 225/)).toBeInTheDocument();
+  });
+
+  // Null covers a lifter past the top of a ladder, a lift never loaded, and band
+  // work — none of which has anything to chase.
+  it("says nothing when there is no rung left", async () => {
+    getSession.mockResolvedValue(
+      ok(
+        mkSession({
+          previousBests: [{ exerciseId: 1, weightLb: 500, e1rmLb: 560, nextRungLb: null }],
+        }),
+      ),
+    );
+    render(ActiveSession, props);
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Set 1/ })).toBeTruthy());
+    expect(screen.queryByText(/to your first/)).not.toBeInTheDocument();
+  });
+});
+

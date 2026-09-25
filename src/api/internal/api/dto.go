@@ -1039,6 +1039,18 @@ type personalBestDTO struct {
 	// weight; the recap reports both kinds of record, and reconstructs itself
 	// from this response when it cannot reach the server.
 	E1rmLb float64 `json:"e1rmLb"`
+	// NextRungLb is the next named weight on this lift's ladder — the thing to aim
+	// at, sent so the screen can show it BEFORE the bar is loaded rather than
+	// congratulating the lifter afterwards. See racked.NextRung.
+	//
+	// Null rather than zero, and the distinction is the point: a lift with no rung
+	// left and a lift whose rung happens to be nothing are different answers, and a
+	// zero would draw a bar that is already full. Null covers a lifter past the top
+	// of a ladder, a lift never loaded, and band work, which has no ladder at all.
+	//
+	// The WHOLE LOAD, as every weight here is. A dumbbell card halves it to print
+	// per hand, which is what it already does with the set's own weight.
+	NextRungLb *float64 `json:"nextRungLb"`
 }
 
 // ---- Session recap ----
@@ -1449,6 +1461,10 @@ type rackedUpcomingMilestoneDTO struct {
 	CurrentLb    float64 `json:"currentLb"`
 	ExerciseID   int32   `json:"exerciseId"`
 	ExerciseName string  `json:"exerciseName"`
+	// Equipment picks the rung ladder, and tells a client which units the label is
+	// in: targetLb and currentLb are the whole load, so a dumbbell's must be halved
+	// before being printed beside a per-hand label. Empty for a volume threshold.
+	Equipment string `json:"equipment"`
 }
 
 type rackedSetHighlightDTO struct {

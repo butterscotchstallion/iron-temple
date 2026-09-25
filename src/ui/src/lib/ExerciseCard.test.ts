@@ -718,4 +718,48 @@ describe("ExerciseCard", () => {
       ).toBeGreaterThan(0);
     });
   });
+
+  // The only screen where a milestone can still be acted on. Everything else the
+  // app says about achievements is a reading of what already happened.
+  describe("the next rung", () => {
+    it("says what there is to aim at, and how far", () => {
+      render(ExerciseCard, {
+        name: "Squat",
+        sets: workSets(215, 3),
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+        nextRung: { targetLb: 225, currentLb: 215 },
+      });
+      expect(screen.getByText("10 lb to your first 225")).toBeInTheDocument();
+    });
+
+    // Null covers a lifter past the top of a ladder, a lift never loaded, and band
+    // work — none of which has anything to chase, and a bar drawn at nothing reads
+    // as a very long way to go rather than as an invitation.
+    it("says nothing when there is no rung", () => {
+      const { container } = render(ExerciseCard, {
+        name: "Squat",
+        sets: workSets(215, 3),
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+      });
+      expect(screen.queryByText(/to your first/)).toBeNull();
+      expect(container.querySelector("[data-testid='next-rung-bar']")).toBeNull();
+    });
+
+    // Per hand, because the line above it already is. The rung arrives as the pair,
+    // and "20 lb to go" under "45 lb per hand" would be two units ten pixels apart.
+    it("counts a dumbbell rung down in bells", () => {
+      render(ExerciseCard, {
+        name: "Dumbbell Bench Press",
+        sets: workSets(90, 3),
+        equipment: "dumbbell",
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+        nextRung: { targetLb: 100, currentLb: 90 },
+      });
+      // A pair of 45s to a pair of 50s: one 5 lb step per bell.
+      expect(screen.getByText("5 lb to your first 50 per hand")).toBeInTheDocument();
+    });
+  });
 });

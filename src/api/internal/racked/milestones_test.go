@@ -288,3 +288,116 @@ func TestUpcomingIsStableAcrossRunsWhenLiftsTie(t *testing.T) {
 		}
 	}
 }
+
+// A pair of 50s is a milestone; 135 lb of dumbbell is not a thing.
+//
+// The plate ladder's rungs halve to bells no rack has — 135 is 67.5 a side — so a
+// lifter working up the rack was told about weights they could not assemble and
+// not told about the ones they could.
+func TestDumbbellMilestonesReadInBells(t *testing.T) {
+	// A pair of 50s. Past the plate ladder's 95 too, so if the wrong ladder were
+	// consulted this would report that instead.
+	sets := mkSets(1, day(2026, time.March, 2), 1, "Dumbbell Bench Press", 3, 8, 100)
+	for i := range sets {
+		sets[i].Equipment = "dumbbell"
+	}
+
+	// From a pair of 45s — one 5 lb step per bell, which is how a rack actually
+	// moves, and exactly one rung.
+	got := plateMilestones(groupSessions(sets), map[int32]float64{1: 90})
+	if len(got) != 1 {
+		t.Fatalf("got %+v, want just the pair of 50s", got)
+	}
+	if got[0].ValueLb != 100 {
+		t.Errorf("value = %v, want the rung stored as the whole load", got[0].ValueLb)
+	}
+	// Per hand, matching what the set card prints beside it.
+	if got[0].Label != "First 50 lb per hand Dumbbell Bench Press" {
+		t.Errorf("label = %q, want it worded in bells", got[0].Label)
+	}
+}
+
+// The barbell ladder is unchanged, which the rest of the suite assumes.
+func TestBarbellMilestonesAreUnchanged(t *testing.T) {
+	sets := mkSets(1, day(2026, time.March, 2), 1, "Squat", 3, 5, 225)
+	for i := range sets {
+		sets[i].Equipment = "barbell"
+	}
+	got := plateMilestones(groupSessions(sets), map[int32]float64{1: 220})
+	if len(got) != 1 || got[0].ValueLb != 225 {
+		t.Fatalf("got %+v, want the 225 rung", got)
+	}
+	if got[0].Label != "First 225 lb Squat" {
+		t.Errorf("label = %q, want the whole load", got[0].Label)
+	}
+}
+
+// An empty equipment string is what a set assembled without one carries, and it
+// has to land somewhere deliberate rather than on whichever arm is first.
+func TestAnUnknownEquipmentTakesTheBarbellLadder(t *testing.T) {
+	for _, kit := range []string{"", "other", "something-new"} {
+		if got := ladderFor(kit); len(got) == 0 || got[0] != 95 {
+			t.Errorf("ladderFor(%q) = %v, want the plate ladder", kit, got)
+		}
+	}
+}
+
+// Band work logs 0 lb permanently and by design (0023), so it has no weight to
+// have a rung. The callers skip a zero best before asking, but the ladder says so
+// itself rather than relying on them.
+func TestBandsHaveNoLadder(t *testing.T) {
+	if got := ladderFor("band"); got != nil {
+		t.Errorf("ladderFor(band) = %v, want nil", got)
+	}
+}
+
+// A weighted dip hangs ONE plate off a belt, so its rungs are plates and not
+// pairs — 95 would have meant a pair of 25s, which is not how it is attached.
+func TestBodyweightMilestonesCountPlatesNotPairs(t *testing.T) {
+	sets := mkSets(1, day(2026, time.March, 2), 1, "Weighted Dip", 3, 8, 45)
+	for i := range sets {
+		sets[i].Equipment = "bodyweight"
+	}
+	got := plateMilestones(groupSessions(sets), map[int32]float64{1: 20})
+	if len(got) != 2 {
+		t.Fatalf("got %+v, want the 25 and the 45", got)
+	}
+	if got[0].ValueLb != 25 || got[1].ValueLb != 45 {
+		t.Errorf("rungs = %v/%v, want 25 then 45", got[0].ValueLb, got[1].ValueLb)
+	}
+}
+
+// What a lifter is closing in on has to be the next rung of THEIR equipment, and
+// the figure beside it has to agree with the label's units.
+func TestUpcomingTargetsTheEquipmentsOwnLadder(t *testing.T) {
+	sets := mkSets(1, day(2026, time.March, 2), 1, "Dumbbell Bench Press", 3, 8, 90)
+	for i := range sets {
+		sets[i].Equipment = "dumbbell"
+	}
+	base := Baseline{
+		BestWeight: map[int32]float64{1: 90},
+		BestE1RM:   map[int32]float64{1: 110},
+	}
+
+	got := upcoming(groupSessions(sets), base, UpcomingLimit)
+	var plate *UpcomingMilestone
+	for i := range got {
+		if got[i].Kind == MilestonePlate {
+			plate = &got[i]
+		}
+	}
+	if plate == nil {
+		t.Fatalf("got %+v, want a plate rung to chase", got)
+	}
+	// A pair of 50s next, not the plate ladder's 95.
+	if plate.TargetLb != 100 {
+		t.Errorf("target = %v, want the pair of 50s", plate.TargetLb)
+	}
+	if plate.Equipment != "dumbbell" {
+		t.Errorf("equipment = %q, want it carried so a client can halve the figure",
+			plate.Equipment)
+	}
+	if plate.Label != "First 50 lb per hand Dumbbell Bench Press" {
+		t.Errorf("label = %q", plate.Label)
+	}
+}

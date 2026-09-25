@@ -5963,7 +5963,7 @@ components:
         One lift's best showing before the session carrying it — the marks a set
         has to beat to count as a personal record.
       type: object
-      required: [exerciseId, weightLb, e1rmLb]
+      required: [exerciseId, weightLb, e1rmLb, nextRungLb]
       properties:
         exerciseId:
           type: integer
@@ -5984,6 +5984,30 @@ components:
             like. The live session screen only flags the weight; the recap
             reports both, and needs this to say the same thing about a finished
             workout whether or not it could reach the server.
+        nextRungLb:
+          type: number
+          nullable: true
+          minimum: 0
+          description: >
+            The next named weight on this lift's ladder — what there is to aim at.
+
+            Sent so the session screen can show the goal BEFORE the bar is loaded.
+            Every other achievement in this API is a reading of what already
+            happened; this is the one forward-looking figure a lifter sees while they
+            can still act on it, which is the difference between a milestone that
+            arrives and one that was chased.
+
+            Which weights count as named depends on the equipment, because those
+            numbers are facts about the loading rather than about lifting: plates
+            make 95 and 135, a rack makes pairs of 20s and 50s, a stack makes round
+            hundreds, a dip belt makes single plates.
+
+            **Null, never zero.** A lifter past the top of a ladder, a lift never
+            loaded, and band work (which logs 0 lb permanently by design) all have no
+            rung — and a zero would draw a progress bar that is already full.
+
+            The WHOLE LOAD, as every weight here is, so a dumbbell card halves it to
+            print per hand exactly as it already halves the set's own weight.
 
     SessionSet:
       type: object
@@ -7146,7 +7170,7 @@ components:
 
     RackedUpcomingMilestone:
       type: object
-      required: [kind, label, targetLb, currentLb, exerciseId, exerciseName]
+      required: [kind, label, targetLb, currentLb, exerciseId, exerciseName, equipment]
       description: >
         A threshold this lifter has NOT reached, and the nearest one of its kind.
 
@@ -7180,6 +7204,20 @@ components:
           description: Zero for a volume threshold, which belongs to no single lift.
         exerciseName:
           type: string
+        equipment:
+          type: string
+          description: >
+            What the lift is loaded with, which decides the ladder of named weights
+            its rungs come from — plates make 95 and 135, a rack makes pairs of 20s
+            and 50s, a stack makes round hundreds, a dip belt makes single plates.
+
+            **Present so a client can print a figure in the same units the label
+            uses.** `targetLb` and `currentLb` are the WHOLE LOAD, as every weight in
+            this API is, so on a `dumbbell` lift they are the pair while `label`
+            reads per hand — halve them before printing one, exactly as the set card
+            does. The ratio a progress bar is drawn from needs no adjustment.
+
+            Empty string for a volume threshold, which belongs to no lift.
 
     RackedSetHighlight:
       type: object

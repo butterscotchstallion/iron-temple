@@ -5,6 +5,7 @@
   import Trophy from "@lucide/svelte/icons/trophy";
   import Flame from "@lucide/svelte/icons/flame";
   import Sprout from "@lucide/svelte/icons/sprout";
+  import Share2 from "@lucide/svelte/icons/share-2";
   import { formatVolume } from "./volume";
   import { formatPRGain, type RecapFirstTimeRow, type RecapPRRow } from "./recap";
   import { STREAK_DISPLAY_THRESHOLD } from "./streak";
@@ -19,6 +20,7 @@
     milestones = [],
     streakSessions = 0,
     streakWeeks = 0,
+    onShareMilestone,
   }: {
     prs: RecapPRRow[];
     /**
@@ -31,6 +33,12 @@
     milestones?: RackedMilestone[];
     streakSessions?: number;
     streakWeeks?: number;
+    /**
+     * Share a milestone, when the viewer is allowed to. Omitted on somebody else's
+     * workout and on the profile's achievement list, which is what keeps the button
+     * off both — the same shape AchievementList uses for the crown one.
+     */
+    onShareMilestone?: (milestone: RackedMilestone) => void;
   } = $props();
 
   // The same threshold Home uses. Below it there is no run to speak of, and a
@@ -102,6 +110,25 @@
           <!-- The label arrives as a finished sentence from the server, which is
                what keeps the page and the recap email wording it identically. -->
           <span class="text-foreground">{milestone.label}</span>
+          <!-- Milestones and crowns are the showable tier; a personal record is
+               not, and gets no button. If everything can be posted then posting
+               means nothing, and a rung is the scarce thing — once per lift, ever.
+
+               Absent without a handler, which is how somebody ELSE's workout
+               offers nothing to share: the same gate AchievementList puts on the
+               crown button. -->
+          {#if onShareMilestone}
+            <button
+              type="button"
+              class="ml-auto shrink-0 rounded p-1 text-muted-foreground transition
+                     hover:text-neon-lift focus-visible:outline-none focus-visible:ring-2
+                     focus-visible:ring-primary"
+              aria-label={`Share ${milestone.label}`}
+              onclick={() => onShareMilestone?.(milestone)}
+            >
+              <Share2 class="size-4" aria-hidden="true" />
+            </button>
+          {/if}
         </li>
       {/each}
 

@@ -83,6 +83,7 @@ SELECT s.id AS session_id,
        ss.exercise_id,
        e.name  AS exercise_name,
        e.muscle_group,
+       e.equipment,
        ss.set_number,
        ss.actual_reps,
        ss.weight_lb,
@@ -117,6 +118,7 @@ type RackedPeriodSetsRow struct {
 	ExerciseID     int32              `json:"exercise_id"`
 	ExerciseName   string             `json:"exercise_name"`
 	MuscleGroup    string             `json:"muscle_group"`
+	Equipment      string             `json:"equipment"`
 	SetNumber      int32              `json:"set_number"`
 	ActualReps     *int32             `json:"actual_reps"`
 	WeightLb       pgtype.Numeric     `json:"weight_lb"`
@@ -205,6 +207,7 @@ func (q *Queries) RackedPeriodSets(ctx context.Context, arg RackedPeriodSetsPara
 			&i.ExerciseID,
 			&i.ExerciseName,
 			&i.MuscleGroup,
+			&i.Equipment,
 			&i.SetNumber,
 			&i.ActualReps,
 			&i.WeightLb,

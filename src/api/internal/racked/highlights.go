@@ -112,6 +112,10 @@ func copyBests(in map[int32]float64) map[int32]float64 {
 type sessionTop struct {
 	ExerciseID   int32
 	ExerciseName string
+	// Equipment picks the milestone ladder — see ladderFor. Carried on the top
+	// rather than looked up again, because the sets it was reduced from all agree
+	// about it and the callers that need it have only this.
+	Equipment    string
 	WeightLb     float64
 	WeightReps   int
 	E1RMLb       float64
@@ -146,7 +150,11 @@ func sessionTops(sess session) []sessionTop {
 		}
 		t, ok := byID[set.ExerciseID]
 		if !ok {
-			t = &sessionTop{ExerciseID: set.ExerciseID, ExerciseName: set.ExerciseName}
+			t = &sessionTop{
+				ExerciseID:   set.ExerciseID,
+				ExerciseName: set.ExerciseName,
+				Equipment:    set.Equipment,
+			}
 			byID[set.ExerciseID] = t
 		}
 		if set.WeightLb > t.WeightLb {

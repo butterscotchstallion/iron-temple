@@ -61,6 +61,15 @@ type Set struct {
 	// taxonomy (see 0009). One group per lift, not a split across several — see
 	// muscles.go for why that is enough for the question it answers.
 	MuscleGroup string
+	// Equipment is what the movement is loaded with, from the seven values 0009
+	// constrained and 0023 extended. It decides which ladder of named weights the
+	// lift's milestones are measured against, because those numbers are not
+	// universal: 135 is a pair of 45s on a bar and 67.5 lb per bell on a rack that
+	// steps in 5s. See ladderFor.
+	//
+	// Empty for a set assembled without it, which falls to the barbell ladder —
+	// the same default `exercises.equipment` itself takes.
+	Equipment string
 	// IsAssistance is true for work the lifter bolted onto the program day
 	// rather than work the program prescribed — the same distinction the session
 	// screen draws, derived in SQL from the absence of a prescription.
