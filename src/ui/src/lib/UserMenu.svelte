@@ -51,7 +51,19 @@
       aria-label="Account menu"
     >
       <Avatar user={auth.me} size={28} />
-      <LifterName lifter={auth.me} class="max-w-[10rem] font-semibold" crownSize="size-3" />
+      <!-- The one surface whose level badge opens the full card: this is the
+           lifter's own name, and how far they are into a level is a thing they
+           are entitled to be curious about in a way they are not about anybody
+           else's. Suppressed while the menu is open — the badge is inside this
+           button, so a hover card and the menu would otherwise render on top of
+           each other. See LevelBadge. -->
+      <LifterName
+        lifter={auth.me}
+        class="max-w-[10rem] font-semibold"
+        crownSize="size-3"
+        levelCard
+        levelCardSuppressed={open}
+      />
       <ChevronDown class="size-4 opacity-70" aria-hidden="true" />
     </DropdownMenu.Trigger>
 

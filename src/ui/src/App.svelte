@@ -16,6 +16,7 @@
   import { startPolling as startNotificationPolling } from "./lib/notifications.svelte";
   import { startAchievementPolling } from "./lib/achievements.svelte";
   import { startHousePolling } from "./lib/houses.svelte";
+  import { startLevelPolling } from "./lib/levels.svelte";
   import { startLive } from "./lib/live.svelte";
   import { startPolling } from "./lib/version.svelte";
   import { deferred } from "./lib/deferred.svelte";
@@ -222,6 +223,16 @@
   $effect(() => {
     if (!auth.me || auth.me.mustChangePassword) return;
     return startHousePolling();
+  });
+
+  // How much everybody has trained, on exactly the same terms as the two above and
+  // for the same reason: a level is drawn beside a name on surfaces that are all
+  // lazy-loaded. No id is handed over because nothing about a level is celebrated
+  // — it ticks over quietly, and the lifter who just earned it is told by the
+  // session they finished rather than by a popup.
+  $effect(() => {
+    if (!auth.me || auth.me.mustChangePassword) return;
+    return startLevelPolling();
   });
 
   // The live socket, on exactly the same terms and for the same reasons: the

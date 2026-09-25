@@ -290,6 +290,14 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 				// crown beside somebody else's name, which is why it answers
 				// for everybody at once rather than per lifter.
 				r.Get("/achievements", s.getAchievements)
+				// How much training everybody has behind them. Top-level for
+				// the two above's reason — the subject is the install — and
+				// answered for everybody at once because, like a crown and a
+				// sigil, a level is drawn beside a name and names are
+				// everywhere. Unlike /achievements this is counted at read
+				// time rather than reconciled, which is affordable here and
+				// is not there; see levels.go.
+				r.Get("/levels", s.getLevels)
 
 				// Houses. The collection read is top-level for the same reason
 				// /achievements is — the subject is the install, and it is the

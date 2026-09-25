@@ -15,6 +15,7 @@
   } from "../lib/api";
   import { isOk } from "../lib/apiFetch";
   import { invalidateTraining } from "../lib/cache.svelte";
+  import { loadLevels } from "../lib/levels.svelte";
   import { observe } from "../lib/connectivity.svelte";
   import {
     enqueue,
@@ -362,6 +363,14 @@
     }
     actionError = null;
     session = outcome.value;
+
+    // The one session whose experience somebody is waiting on. The badge beside a
+    // name is polled every ten minutes, which is right for everybody else's and
+    // wrong for the lifter who has this second earned it — their own name is in
+    // the header of the page they are about to land on. Not awaited and not
+    // checked: it is an ornament, the poll will catch it either way, and offline
+    // this cannot land any more than the finish itself could.
+    void loadLevels();
 
     // Hand the finished session across before navigating. The recap asks the
     // server for the full story, but that is a GET — offline it cannot land,
