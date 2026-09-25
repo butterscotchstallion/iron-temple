@@ -17,6 +17,26 @@ import { defineConfig, devices } from "@playwright/test";
 const PORT = Number(process.env.E2E_PORT) || 5173;
 const BASE_URL = `http://localhost:${PORT}`;
 
+// How many browser workers the suite runs in CI, overridable via E2E_WORKERS.
+//
+// Playwright's default is half the CPU cores, which on the four-core runner means
+// two: the log reads "Running 61 tests using 2 workers", and that step is 114s of
+// the UI job's 237s — the single largest block of work in the whole pipeline.
+// The tests are browser-bound rather than CPU-bound (each one loads a page and
+// waits on mocked routes; the assertions are trivial), so the default leaves the
+// box idle for most of those 114s.
+//
+// Four is deliberately not a measured optimum — it is the starting point for one.
+// The runner caps at two concurrent JOBS on those same four cores, so an e2e run
+// overlapping the Go job is sharing them; whether four workers beats two, or
+// oversubscribes and gets slower, is a question about the host and not about this
+// suite. Hence the env override: the operator can re-run via workflow_dispatch at
+// 2/3/4/6 and compare, without editing code to do it.
+//
+// CI only. Locally Playwright's default already scales to the machine, and the
+// sandbox cannot run this suite at all (no browsers, no CDN egress).
+const WORKERS = Number(process.env.E2E_WORKERS) || 4;
+
 // Run e2e on Firefox (the target browser). Firefox doesn't support Playwright's
 // mobile device emulation, so we apply an iPad-landscape viewport to keep the
 // design's tablet framing without the unsupported isMobile/touch flags.
@@ -39,6 +59,7 @@ export default defineConfig({
   // test and still reports green. Failing the run is the only way that gets
   // noticed before it is merged.
   forbidOnly: !!process.env.CI,
+  workers: process.env.CI ? WORKERS : undefined,
   use: {
     baseURL: BASE_URL,
     trace: "on-first-retry",

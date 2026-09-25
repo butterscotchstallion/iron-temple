@@ -128,10 +128,19 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
 
-      # The orval client (src/ui/src/lib/api/generated/) is git-ignored; regenerate it from the
-      # backend OpenAPI spec before anything that imports it (check / dev server / e2e).
-      - name: Generate API client
-        run: pnpm generate:api
+      # NO separate `pnpm generate:api` step. The orval client
+      # (src/ui/src/lib/api/generated/) is git-ignored and must exist before anything
+      # that imports it — but every script below already regenerates it first, which is
+      # the invariant AGENTS.md states and the npm scripts enforce: `check`, `test:unit`
+      # and `test:e2e` each chain `pnpm generate:api`, as does the `pnpm build` that
+      # e2e's webServer runs. A standalone step here was a fifth invocation of orval in
+      # a job that already runs it four times, and the first of those four (inside
+      # `pnpm check`) happens before any consumer reads the client.
+      #
+      # It also actively weakened the guarantee it looked like it was providing: with a
+      # step here, a script that FORGOT the chain would still find a client on disk and
+      # pass CI, and the omission would only surface for someone running that script
+      # locally. Without it, the chain is load-bearing in CI too.
 
       - name: Type-check (svelte-check)
         run: pnpm check
@@ -194,6 +203,12 @@ jobs:
           # the browser, so the in-browser sandbox is redundant here. CI-scoped — local
           # runs keep the sandbox enabled.
           MOZ_DISABLE_CONTENT_SANDBOX: "1"
+          # Browser workers. Playwright's default is cores/2 = 2 here, which left the
+          # box idle through a 114s step; playwright.config.ts defaults this to 4. Set
+          # as a workflow-level env (not hardcoded in the config) so the operator can
+          # re-run this workflow via workflow_dispatch with a different value and
+          # compare, rather than landing a commit per measurement.
+          E2E_WORKERS: ${{ vars.E2E_WORKERS || '4' }}
         run: pnpm test:e2e
 
       # On e2e failure, keep the Playwright HTML report + traces so a failure can be
