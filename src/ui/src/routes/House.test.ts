@@ -170,8 +170,10 @@ describe("the join button", () => {
     await fireEvent.click(await screen.findByRole("button", { name: /leave house/i }));
 
     await waitFor(() => expect(leaveHouse).toHaveBeenCalled());
-    // Not back to the page they just left, which may no longer exist — leaving as
-    // the last member deletes the House.
+    // Back to the list rather than the page they just left. The House itself is
+    // still there — leaving no longer deletes it, even as the last member — but
+    // they have no standing in it now, so it is not where the tap should strand
+    // them.
     await waitFor(() => expect(push).toHaveBeenCalledWith("/houses"));
   });
 });
@@ -272,8 +274,10 @@ describe("the owner's controls", () => {
 });
 
 describe("when the House is gone", () => {
-  // Reachable from a notification about a House whose last member has since left,
-  // which is an ordinary path rather than a broken link.
+  // An id this install has never had. It used to be reachable the ordinary way —
+  // a notification about a House whose last member had since left — but a House
+  // now outlives its last member and nothing deletes one, so this is the
+  // broken-link path rather than a routine one.
   it("says so rather than offering a retry", async () => {
     getHouse.mockResolvedValue({ status: 404, data: undefined });
     render(House, { props: PROPS });

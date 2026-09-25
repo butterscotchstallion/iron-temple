@@ -91,9 +91,12 @@ export function sigilFor(lifterId: number | undefined): string | null {
  *
  * The notification panel is why this exists: a `house-` row carries `houseId` and
  * has to turn it into a name to build its sentence. Returns null when the list has
- * not loaded or the House is gone — a House can be deleted by its last member
- * leaving, and a notification about it outlives it only until the cascade — and the
- * caller says the unnamed thing.
+ * not loaded yet, or for an id this install does not carry, and the caller says the
+ * unnamed thing.
+ *
+ * The usual null is a cold cache rather than a House that went. A House outlives
+ * its last member and nothing deletes one, so a notification can no longer outlive
+ * the House it names.
  */
 export function houseById(houseId: number | undefined): House | null {
   if (houseId === undefined) return null;
