@@ -448,6 +448,103 @@ func TestAFrameIsEncodedOnceAndSharedIntact(t *testing.T) {
 }
 
 // Notify with nobody to tell does not encode a frame or walk the map.
+// Broadcast reaches everybody, which is the whole of what makes it different from
+// Notify — and in particular it reaches a connection that has asked for nothing:
+// no id of its own in a recipient list, and no subscription.
+func TestBroadcastReachesEveryConnection(t *testing.T) {
+	h := New(Options{})
+
+	first, _, doneFirst := join(t, h, 1)
+	defer doneFirst()
+	second, _, doneSecond := join(t, h, 2)
+	defer doneSecond()
+
+	waitFor(t, "both welcomes", func() bool {
+		return len(first.sent()) > 0 && len(second.sent()) > 0
+	})
+
+	h.Broadcast(KindLevel)
+
+	waitFor(t, "the level frame at both", func() bool {
+		return len(first.sent()) > 1 && len(second.sent()) > 1
+	})
+	for name, ws := range map[string]*fakeSocket{"first": first, "second": second} {
+		if got := kinds(t, ws)[1]; got != KindLevel {
+			t.Errorf("%s connection received %q, want %q", name, got, KindLevel)
+		}
+	}
+}
+
+// A broadcast frame carries its kind and nothing else. It is unaddressed, so the
+// thing that keeps it safe to send to everybody is that there is nothing on it to
+// be told — no lifter id, no figure, no session.
+func TestBroadcastCarriesNothingButItsKind(t *testing.T) {
+	h := New(Options{})
+
+	ws, _, done := join(t, h, 1)
+	defer done()
+	waitFor(t, "the welcome", func() bool { return len(ws.sent()) > 0 })
+
+	h.Broadcast(KindLevel)
+	waitFor(t, "the level frame", func() bool { return len(ws.sent()) > 1 })
+
+	got := decode(t, ws.sent()[1])
+	if got.Type != KindLevel {
+		t.Fatalf("type = %q, want %q", got.Type, KindLevel)
+	}
+	if got.SessionID != 0 || got.Code != "" || got.Message != "" || got.Protocol != 0 {
+		t.Errorf("frame carries more than its kind: %+v", got)
+	}
+}
+
+// The eviction policy applies here too, and it has to: a broadcast puts a frame on
+// EVERY queue at once, so it is the fan-out most able to fill a parked peer's
+// buffer.
+//
+// Note what this test canNOT assert, and why that is the interesting part. The
+// Notify version of it aims the burst at one account and checks the OTHER
+// connection is unharmed; a broadcast has no way to spare anybody, so a burst of
+// them threatens every open socket at once. That is precisely why liveEvents.levels
+// is a bool rather than a list — one transaction gets one frame however many
+// lifters' levels it moved — and the guard against this case lives there rather
+// than here.
+func TestBroadcastStillEvictsAConnectionThatIsTooFarBehind(t *testing.T) {
+	h := New(Options{})
+
+	// The stuck connection alone, unlike the Notify version: a healthy neighbour
+	// would be flooded by the same burst, so there is nothing to compare against.
+	stuck := newFakeSocket()
+	stuck.block = make(chan struct{})
+	slow := newConn(h, stuck, 42)
+
+	h.mu.Lock()
+	h.conns[slow] = struct{}{}
+	h.wg.Add(1)
+	h.mu.Unlock()
+	slowDone := make(chan struct{})
+	go func() {
+		defer close(slowDone)
+		defer h.wg.Done()
+		defer h.remove(slow)
+		slow.run()
+	}()
+
+	for range sendBuffer + 2 {
+		h.Broadcast(KindLevel)
+	}
+
+	waitFor(t, "the eviction", func() bool { return h.Stats().Dropped > 0 })
+
+	// And once the stalled write returns, the connection actually goes. See the
+	// Notify version: the fake blocks indefinitely where production bounds the
+	// write by writeWait, so the test plays the deadline expiring.
+	close(stuck.block)
+	<-slowDone
+	waitFor(t, "the slow connection to leave the hub", func() bool {
+		return h.Stats().Connections == 0
+	})
+}
+
 func TestNotifyWithNoRecipientsDoesNothing(t *testing.T) {
 	h := New(Options{})
 	ws, _, done := join(t, h, 1)

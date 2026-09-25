@@ -1,5 +1,6 @@
 import { API_BASE_URL } from "./apiFetch";
 import { poll, setLiveBacked } from "./notifications.svelte";
+import { loadLevels } from "./levels.svelte";
 
 // The live socket: one connection per signed-in lifter, telling this tab when
 // something happened instead of making it ask every minute.
@@ -48,6 +49,20 @@ let socket: WebSocket | null = null;
 let reconnectAt: ReturnType<typeof setTimeout> | null = null;
 let attempt = 0;
 let stopped = true;
+/**
+ * Whose levels a `level` frame is allowed to celebrate.
+ *
+ * A PARAMETER of startLive rather than a read of `auth.me`, and that is a hard
+ * constraint rather than a preference: auth.svelte.ts imports `resetLive` from
+ * this module, so importing auth here would close a cycle. It is the same reason
+ * startAchievementPolling takes an id, and it is handed over by the same caller.
+ *
+ * Undefined means "refresh the badges, celebrate nothing", which is what every
+ * non-celebrating caller of loadLevels passes — and it is safe rather than merely
+ * quiet: noteLevel records no baseline without a viewer, so a refresh cannot
+ * swallow the next real level-up.
+ */
+let viewerId: number | undefined;
 
 /** What a session watcher is told. `resync` means "you may have missed some". */
 export type SessionEvent = "reaction" | "comment" | "resync";
@@ -133,6 +148,15 @@ function receive(raw: string) {
       void poll();
       break;
 
+    case "level":
+      // Unaddressed: this frame goes to every connection because a level is
+      // drawn beside a name everywhere one appears, and it says nothing about
+      // WHOSE level moved. So every tab refetches and works out for itself
+      // whether anything it is drawing changed — including, for the one lifter
+      // whose own level it was, whether to celebrate.
+      void loadLevels(viewerId);
+      break;
+
     case "reaction":
     case "comment":
       if (typeof event.sessionId === "number") {
@@ -214,9 +238,10 @@ function connect() {
  * signed in and re-runs its effect when that changes — which is the same
  * division startPolling draws.
  */
-export function startLive(): () => void {
+export function startLive(viewer?: number): () => void {
   stopped = false;
   attempt = 0;
+  viewerId = viewer;
   connect();
 
   // Coming back to a tab is when a socket is most likely to have died
@@ -243,6 +268,7 @@ export function startLive(): () => void {
     }
     live.connected = false;
     setLiveBacked(false);
+    viewerId = undefined;
   };
 }
 

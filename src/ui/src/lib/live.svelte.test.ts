@@ -11,9 +11,11 @@ import { notifications } from "./notifications.svelte";
 // a background tab, and that the teardown leaves no timer behind.
 
 const listNotifications = vi.hoisted(() => vi.fn());
+const getLevels = vi.hoisted(() => vi.fn());
 vi.mock("./api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./api")>()),
   listNotifications,
+  getLevels,
 }));
 
 /** An empty panel, which is all these tests need the endpoint to say. */
@@ -22,6 +24,7 @@ function served() {
     status: 200,
     data: { items: [], limit: 20, offset: 0, unreadCount: 0 },
   });
+  getLevels.mockResolvedValue({ status: 200, data: { items: [] } });
 }
 
 function visible(state: "visible" | "hidden") {
@@ -52,8 +55,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function start() {
-  teardown = startLive();
+function start(viewerId?: number) {
+  teardown = startLive(viewerId);
 }
 
 describe("connecting", () => {
@@ -120,6 +123,23 @@ describe("receiving", () => {
     FakeWebSocket.last.emit({ type: "notification" });
     await vi.advanceTimersByTimeAsync(0);
     expect(listNotifications).toHaveBeenCalledTimes(1);
+  });
+
+  // The unaddressed frame. It arrives at every connection and says nothing about
+  // whose level moved, so the only sane response is to go and ask.
+  it("refetches the levels when told one moved", async () => {
+    getLevels.mockClear();
+    FakeWebSocket.last.emit({ type: "level" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getLevels).toHaveBeenCalledTimes(1);
+  });
+
+  // And it does NOT refetch the notification panel — a level is not a panel row,
+  // and the frames are separate so that neither costs the other a request.
+  it("does not refetch the panel for a level", async () => {
+    FakeWebSocket.last.emit({ type: "level" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(listNotifications).not.toHaveBeenCalled();
   });
 });
 

@@ -77,6 +77,12 @@ type liveEvents struct {
 	// sessions are ordered because a reaction and a comment on the same session
 	// are different frames and both are worth sending.
 	sessions []liveSessionEvent
+	// levels is a bool rather than a count, for the reason users is a set: the
+	// frame says only "the levels moved", so a transaction that moves three
+	// lifters' levels still has exactly one thing to say. Anything else would put
+	// N identical frames on every open connection, which is the burst the
+	// eviction policy is there to survive and not one worth creating.
+	levels bool
 }
 
 type liveSessionEvent struct {
@@ -100,6 +106,15 @@ func (e *liveEvents) session(kind live.Kind, sessionID int32) {
 	e.sessions = append(e.sessions, liveSessionEvent{kind: kind, sessionID: sessionID})
 }
 
+// levels records that somebody's level moved, for everybody.
+//
+// No recipients, because this is the one frame that has none — see
+// live.Hub.Broadcast for why a level is unaddressed where everything else here is
+// addressed by a query that returned its own audience.
+func (e *liveEvents) level() {
+	e.levels = true
+}
+
 // publish sends everything collected, then empties itself so a second call is a
 // no-op.
 //
@@ -120,6 +135,10 @@ func (e *liveEvents) publish() {
 		e.hub.Session(se.kind, se.sessionID)
 	}
 	e.sessions = nil
+	if e.levels {
+		e.hub.Broadcast(live.KindLevel)
+		e.levels = false
+	}
 }
 
 // liveOrigin is the handshake's only gate beyond authentication.

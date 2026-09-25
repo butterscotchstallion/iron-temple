@@ -1,8 +1,18 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { levelFor, levels, loadLevels, resetLevels } from "./levels.svelte";
+import { resetLevelWatch } from "./levelWatch";
 import { testLifterLevel } from "./testFixtures";
 
 const getLevels = vi.hoisted(() => vi.fn());
+
+const celebrate = vi.hoisted(() => vi.fn());
+vi.mock("./celebrate", () => ({ celebrate }));
+
+const pushToast = vi.hoisted(() => vi.fn());
+vi.mock("./toast.svelte", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./toast.svelte")>()),
+  pushToast,
+}));
 
 // The barrel, never the generated files — mocking those would pin the tests to
 // orval's output shape rather than to the contract.
@@ -27,10 +37,17 @@ function served(items: ReturnType<typeof testLifterLevel>[]) {
 
 beforeEach(() => {
   getLevels.mockReset();
+  celebrate.mockReset();
+  pushToast.mockReset();
+  localStorage.clear();
   resetLevels();
 });
 
-afterEach(() => resetLevels());
+afterEach(() => {
+  resetLevels();
+  resetLevelWatch();
+  localStorage.clear();
+});
 
 describe("levelFor", () => {
   it("gives a lifter the entry they were sent", async () => {
@@ -115,5 +132,129 @@ describe("resetLevels", () => {
     expect(levels.items).toEqual([]);
     expect(levels.loaded).toBe(false);
     expect(levelFor(THEM)).toBeNull();
+  });
+});
+
+// The earner's half of the news, and the only half there is: nothing on the server
+// knows a level changed, because a level is derived from a count of sessions rather
+// than written. The difference exists only between two readings, and this is what
+// holds both.
+describe("celebrating a level the caller reached", () => {
+  /** Get past the silent first observation, sitting at level 11. */
+  async function settled() {
+    served([testLifterLevel({ lifterId: ME, level: 11 })]);
+    await loadLevels(ME);
+    celebrate.mockReset();
+    pushToast.mockReset();
+  }
+
+  it("says nothing on the first load, however high the level", async () => {
+    served([testLifterLevel({ lifterId: ME, level: 27 })]);
+    await loadLevels(ME);
+
+    expect(pushToast).not.toHaveBeenCalled();
+    expect(celebrate).not.toHaveBeenCalled();
+  });
+
+  it("toasts and fires confetti on a level-up", async () => {
+    await settled();
+
+    served([testLifterLevel({ lifterId: ME, level: 12 })]);
+    await loadLevels(ME);
+
+    expect(pushToast).toHaveBeenCalledTimes(1);
+    expect(pushToast.mock.calls[0][0]).toMatchObject({
+      title: "You reached Level 12",
+      tone: "success",
+    });
+    expect(celebrate).toHaveBeenCalledTimes(1);
+  });
+
+  // ONE TOAST AND ONE BURST however many levels landed between two readings — an
+  // offline queue draining, or a poll that missed an afternoon. Where they got to
+  // is the whole of the news; three bursts would be a stutter.
+  it("says it once when several levels land at once", async () => {
+    await settled();
+
+    served([testLifterLevel({ lifterId: ME, level: 14 })]);
+    await loadLevels(ME);
+
+    expect(pushToast).toHaveBeenCalledTimes(1);
+    expect(pushToast.mock.calls[0][0]).toMatchObject({
+      title: "You reached Level 14",
+    });
+    expect(celebrate).toHaveBeenCalledTimes(1);
+  });
+
+  it("says nothing about somebody else levelling up", async () => {
+    await settled();
+
+    served([
+      testLifterLevel({ lifterId: ME, level: 11 }),
+      testLifterLevel({ lifterId: THEM, level: 30 }),
+    ]);
+    await loadLevels(ME);
+
+    expect(pushToast).not.toHaveBeenCalled();
+    expect(celebrate).not.toHaveBeenCalled();
+  });
+
+  it("says nothing on an unchanged poll", async () => {
+    await settled();
+
+    served([testLifterLevel({ lifterId: ME, level: 11 })]);
+    await loadLevels(ME);
+
+    expect(pushToast).not.toHaveBeenCalled();
+  });
+
+  // Deleting a session lowers experience, which lowers the level. Not an occasion.
+  it("says nothing when the level fell", async () => {
+    await settled();
+
+    served([testLifterLevel({ lifterId: ME, level: 10 })]);
+    await loadLevels(ME);
+
+    expect(pushToast).not.toHaveBeenCalled();
+    expect(celebrate).not.toHaveBeenCalled();
+  });
+
+  // Every caller that just wants fresh badges passes no id — the live frame's
+  // refetch among them. Those must not celebrate, and must not record a baseline
+  // either, or they would eat the announcement the next celebrating read owes.
+  it("says nothing when no viewer is named, and eats nothing", async () => {
+    await settled();
+
+    served([testLifterLevel({ lifterId: ME, level: 12 })]);
+    await loadLevels();
+    expect(pushToast).not.toHaveBeenCalled();
+
+    await loadLevels(ME);
+    expect(pushToast).toHaveBeenCalledTimes(1);
+  });
+
+  // A FAILED POLL MUST NOT READ AS A COLLAPSE. loadLevels leaves the last good
+  // list in place on a non-200, so there is nothing to compare against nothing —
+  // and nothing to announce when it comes back.
+  it("says nothing when the request failed", async () => {
+    await settled();
+
+    getLevels.mockResolvedValue({ status: 500, data: undefined });
+    await loadLevels(ME);
+
+    expect(pushToast).not.toHaveBeenCalled();
+    expect(celebrate).not.toHaveBeenCalled();
+  });
+
+  // Sign-out clears the watch as well as the list, so the next account is a first
+  // observation rather than a comparison against somebody else's training.
+  it("forgets the level on sign-out", async () => {
+    await settled();
+    resetLevels();
+
+    served([testLifterLevel({ lifterId: ME, level: 12 })]);
+    await loadLevels(ME);
+
+    expect(pushToast).not.toHaveBeenCalled();
   });
 });
