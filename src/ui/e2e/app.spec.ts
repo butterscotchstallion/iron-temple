@@ -799,7 +799,12 @@ test("carries the last weigh-in into a session and records an edit", async ({ pa
   // Pre-filled, and captioned as last week's number rather than this session's.
   const box = page.getByLabel("Bodyweight");
   await expect(box).toHaveValue("184.5");
-  await expect(page.getByText("Carried from July 31 2026")).toBeVisible();
+  // The caption is relative now, so its visible words drift with today's date.
+  // The tooltip carries the date itself, and asserting on that keeps this from
+  // failing once a month for no reason.
+  const caption = page.getByTestId("bodyweight-caption");
+  await expect(caption).toContainText("Carried from");
+  await expect(caption.locator("time")).toHaveAttribute("title", "July 31 2026");
 
   // Editing it is what writes it — and nothing was written before that.
   expect(patched).toEqual([]);

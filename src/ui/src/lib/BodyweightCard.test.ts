@@ -25,7 +25,14 @@ describe("BodyweightCard", () => {
       onSave: vi.fn(),
     });
     expect(box()).toHaveValue(184.5);
-    expect(caption()).toHaveTextContent("Carried from August 14 2026");
+    expect(caption()).toHaveTextContent(/Carried from .+ · edit to log today/);
+    // The visible text is relative and so drifts with today's date — "6 weeks
+    // ago" now, something else next month. The tooltip is the stable fact, and
+    // asserting on it keeps this test from rotting.
+    expect(caption().querySelector("time")).toHaveAttribute(
+      "title",
+      "August 14 2026",
+    );
   });
 
   it("prefers this session's own weigh-in over the carried one", () => {

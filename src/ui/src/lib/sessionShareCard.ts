@@ -8,6 +8,7 @@
  */
 
 import type { SessionRecap } from "./api";
+import { formatLongDate } from "./date";
 import { barFraction, formatDelta, formatSessionLength } from "./racked";
 import { formatVolume } from "./volume";
 import { formatOrdinal, formatPRGain, formatPace } from "./recap";
@@ -123,7 +124,14 @@ export function sessionShareCardContent(
   }
 
   return {
-    eyebrow: `${recap.session.programDayName.toUpperCase()} · ${recap.session.performedOn}`,
+    // The date formatted rather than raw: this was the one place in the app that
+    // put a bare "2026-09-24" in front of a reader. Absolute, and uppercased to
+    // match the eyebrow it sits in — a share card is a picture, so there is no
+    // hover here and nothing to recover a relative form from.
+    eyebrow: [
+      recap.session.programDayName.toUpperCase(),
+      formatLongDate(recap.session.performedOn).toUpperCase(),
+    ].join(" · "),
     lede: name ? `${name} lifted` : "You lifted",
     headline: `${formatVolume(recap.volume.totalLb)} LB`,
     comparison,

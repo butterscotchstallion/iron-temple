@@ -21,7 +21,7 @@
  */
 
 import type { LifterAchievement, RackedUpcomingMilestone } from "./api";
-import { formatLongDate } from "./date";
+import { formatLongDateAt } from "./date";
 import { formatVolume } from "./volume";
 import type { MomentRow, ShareCardContent } from "./shareCard";
 
@@ -69,7 +69,11 @@ export function achievementShareCardContent(
     tiles: [
       { value: String(held.timesHeld), label: held.timesHeld === 1 ? "time held" : "times held" },
       {
-        value: formatLongDate(held.lastHeldFrom),
+        // formatLongDateAt, not formatLongDate: lastHeldFrom is an instant, and
+        // handing one to the date-only formatter silently returns the raw ISO
+        // string. Absolute rather than "3 days ago" because this is baked into a
+        // PNG — there is no hover here to recover the date from.
+        value: formatLongDateAt(held.lastHeldFrom),
         // Present tense only when it is still theirs. A card saying "holding
         // since" about a crown somebody lost in August is the one way this could
         // be dishonest.

@@ -12,8 +12,8 @@
   import SkeletonTiles from "../lib/skeleton/SkeletonTiles.svelte";
   import LiftVolumeBars from "../lib/LiftVolumeBars.svelte";
   import MuscleVolumeBars from "../lib/MuscleVolumeBars.svelte";
+  import Timestamp from "../lib/Timestamp.svelte";
   import { auth } from "../lib/auth.svelte";
-  import { formatLongDate } from "../lib/date";
   import { muscleGroupLabel } from "../lib/library";
   import { formatVolume } from "../lib/volume";
   import SessionCards from "../lib/SessionCards.svelte";
@@ -199,7 +199,10 @@
         <p class="truncate text-sm text-muted-foreground">
           {profile.username}
           {#if profile.lastTrainedOn}
-            · last trained {formatLongDate(profile.lastTrainedOn)}
+            · last trained <Timestamp
+              value={profile.lastTrainedOn}
+              kind="date"
+            />
           {:else}
             · hasn't trained yet
           {/if}

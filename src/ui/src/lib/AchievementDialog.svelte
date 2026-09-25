@@ -9,7 +9,7 @@
   import Skeleton from "./skeleton/Skeleton.svelte";
   import { achievementBySlug, holdersOf } from "./achievements.svelte";
   import { auth } from "./auth.svelte";
-  import { relativeTime } from "./date";
+  import Timestamp from "./Timestamp.svelte";
   import { getLifter, type Notification } from "./api";
 
   // One crown at a time, out of a notification row that folded several.
@@ -207,7 +207,7 @@
               />
             {/if}
             <span class="text-muted-foreground">
-              took this {relativeTime(current.createdAt)}
+              took this <Timestamp value={current.createdAt} />
             </span>
           </p>
           <!-- The shortest path from "who is this?" to following them: the

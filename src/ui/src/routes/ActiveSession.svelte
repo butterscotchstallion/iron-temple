@@ -24,6 +24,7 @@
     type PendingWrite,
   } from "../lib/writeQueue.svelte";
   import { celebrate } from "../lib/celebrate";
+  import { formatLongDate } from "../lib/date";
   import { handOffSession } from "../lib/recapHandoff";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import Flag from "@lucide/svelte/icons/flag";
@@ -33,6 +34,7 @@
   import AssistancePicker from "../lib/AssistancePicker.svelte";
   import Plus from "@lucide/svelte/icons/plus";
   import BodyweightCard from "../lib/BodyweightCard.svelte";
+  import Timestamp from "../lib/Timestamp.svelte";
   import { Card } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
   import * as AlertDialog from "$lib/components/ui/alert-dialog";
@@ -614,7 +616,7 @@
           {session.programName}
         </h2>
         <p class="mt-1 text-sm text-muted-foreground">
-          {session.programDayName} · {session.performedOn}
+          {session.programDayName} · {formatLongDate(session.performedOn)}
         </p>
         <p class="mt-1 text-xs uppercase tracking-[0.3em] text-primary">
           {loggedCount} / {session.sets.length} sets logged
@@ -623,9 +625,11 @@
           <p
             class="mt-2 text-xs uppercase tracking-[0.3em] text-muted-foreground"
           >
-            {session.finishedAt
-              ? `Finished · ${new Date(session.finishedAt).toLocaleDateString()}`
-              : "Closed automatically · 12h+ old"}
+            {#if session.finishedAt}
+              Finished · <Timestamp value={session.finishedAt} />
+            {:else}
+              Closed automatically · 12h+ old
+            {/if}
           </p>
         {/if}
       </header>
