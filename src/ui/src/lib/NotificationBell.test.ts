@@ -428,6 +428,38 @@ describe("a crown", () => {
   });
 });
 
+// Your own crown, which `crown` is the one kind that can be about — it is the only
+// notification whose recipient may be its own actor, because your own achievement is
+// the thing you most want a record of.
+describe("a crown you took yourself", () => {
+  beforeEach(() => {
+    achievements.items = [testAchievementHolders()];
+    achievements.loaded = true;
+  });
+  afterEach(() => resetAchievements());
+
+  // "Ada Lovelace took the crown" about yourself reads as a stranger with your
+  // name.
+  it("is described in the second person", async () => {
+    seed([crownRow({ actor: testUser({ id: ME, displayName: "Ada Lovelace" }) })]);
+    render(NotificationBell);
+    await open();
+
+    expect(await screen.findByText(/You/)).toBeInTheDocument();
+    expect(screen.queryByText(/Ada Lovelace took/)).not.toBeInTheDocument();
+  });
+
+  // And somebody else's still reads in the third person, which is the half that
+  // would break if the comparison were the wrong way round.
+  it("leaves somebody else's crown in the third person", async () => {
+    seed([crownRow()]);
+    render(NotificationBell);
+    await open();
+
+    expect(await screen.findByText(/Grace Hopper/)).toBeInTheDocument();
+  });
+});
+
 // The panel's half of the dialog: opening it, filling it, and marking the row
 // read for having looked. What the dialog then DRAWS is AchievementDialog's own
 // test — this one stops at the seam.

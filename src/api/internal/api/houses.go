@@ -79,7 +79,7 @@ const (
 	houseDescriptionMax = 2000
 )
 
-// houseSigilPattern is the same shape houses_sigil_ck enforces in 0033.
+// houseSigilPattern is the same shape houses_sigil_ck enforces in 0034.
 //
 // Two copies of one rule, and the duplication is deliberate: the CHECK is what
 // makes the rule true of the data whatever writes it, and this is what makes a

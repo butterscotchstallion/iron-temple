@@ -131,7 +131,14 @@ func (s *Server) computeBoards(
 ) ([]leaderboardBoardDTO, racked.Period, error) {
 	var period racked.Period
 
-	lifters, err := s.q.ListLifters(ctx)
+	// noViewer: the leaderboard draws no Follow button, so it asks about nobody.
+	//
+	// Not the caller's id, and not an oversight. This function has two callers and
+	// only one of them has a caller at all — refreshCrowns runs on the sweeper with
+	// no request and no user in context, where userFrom would panic. Asking about
+	// user 0 makes ListLifters' is_following uniformly false, which is exactly the
+	// answer a ranking has no use for.
+	lifters, err := s.q.ListLifters(ctx, noViewer)
 	if err != nil {
 		return nil, period, err
 	}

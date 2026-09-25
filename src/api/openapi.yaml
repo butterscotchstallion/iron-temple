@@ -305,6 +305,62 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /me/following/{lifterId}:
+    parameters:
+      - $ref: "#/components/parameters/LifterId"
+    post:
+      tags: [users]
+      operationId: followLifter
+      summary: Start hearing about a lifter's achievements
+      description: >
+        Following somebody adds their achievements to your notification panel.
+
+        **This grants nothing, because there was nothing to grant.** Every profile,
+        session, board and crown on this install is readable by every account and
+        stays that way — admission to the install is the consent, and the roster
+        still lists everybody. A follow decides what the install *pushes* at you,
+        not what you may go and look at.
+
+        **Under `/me` and not under `/lifters` because it writes.** That subtree is
+        read-only by construction and must stay so; the resource being written here
+        is the caller's own following list, and the id in the path is what goes into
+        it.
+
+        Idempotent: a second call changes nothing and still answers 204, because
+        pressing a button twice is not a mistake worth reporting.
+
+        You cannot follow yourself — `403 own_account`. Your own achievements
+        already notify you, so the row could only ever mean what the default means.
+      responses:
+        "204":
+          description: Following, or already were
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    delete:
+      tags: [users]
+      operationId: unfollowLifter
+      summary: Stop hearing about a lifter's achievements
+      description: >
+        204 whether or not you were following them: the caller asked for a state and
+        that state holds either way, so a double-tap is not an error.
+
+        Notifications their crowns already delivered stay in your panel. Those are
+        things that happened, and unfollowing is not a claim that they did not —
+        "clear all" is the only thing that removes a row.
+      responses:
+        "204":
+          description: Not following, or already weren't
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /me/avatar:
     post:
       tags: [users]
@@ -1311,7 +1367,10 @@ paths:
 
         Every account appears, including the caller's own, and there is no
         visibility setting to respect. The owner creates each account by hand,
-        so admission to the install is the consent.
+        so admission to the install is the consent. That is still true now that
+        `following` rides along: a follow decides what gets pushed at a lifter, not
+        what they may read, and nobody is hidden from this list by not being
+        followed.
 
         `lastTrainedOn` uses the same "at least one logged rep" definition of a
         session as the history page, so a workout somebody opened and walked away
@@ -4131,12 +4190,19 @@ components:
         for one comment.
 
         `crown` is somebody TAKING a crown, and it is the one kind whose subject
-        is neither your session nor your conversation. It goes to everybody except
-        the lifter who took it, which is both the notifications table's rule — the
-        actor is always filtered out of the recipients — and the right answer:
-        the holder learns it from the crown on their own name, and a notification
-        saying "you did the thing you are looking at" is noise. Like `joined` it
-        carries no session, so every crown folds into a single row.
+        is neither your session nor your conversation. It reaches **the lifter who
+        took it, and anybody following them** — nobody else on the install is told.
+        That is about delivery and not about visibility: every crown stays on the
+        leaderboard and beside every name, so this decides what is pushed rather
+        than what may be read.
+
+        It is also the **one kind whose recipient may be its own actor**, which is a
+        deliberate exception to the rule the other four keep — being told about your
+        own applause is noise, but your own achievement is the thing you most want a
+        record of, and the row is what survives a missed celebration and what opens
+        the achievement dialog.
+
+        Like `joined` it carries no session, so every crown folds into a single row.
 
         The three `house-` kinds follow the same rule about who is told. A
         `house-request` goes to the House's owner and not to the lifter who
@@ -4203,6 +4269,22 @@ components:
             The most recent day this lifter logged a rep. Absent for an account
             that has never logged one — which the UI reads as "has not trained
             yet" rather than as a date it must invent.
+        following:
+          type: boolean
+          description: >
+            Whether **the caller** follows this lifter — the one field here that is
+            not a fact about the lifter, but about the reader's relationship to
+            them. It is what a Follow button draws from.
+
+            **Present only on `GET /lifters` and `GET /lifters/{lifterId}`.** A
+            `Lifter` is also embedded as a feed entry's lifter, a leaderboard row's,
+            a comment's author and a notification's actor, and none of those ask
+            about follows — so it is absent there rather than `false`, because
+            `false` would be an affirmative statement that you do not follow
+            somebody you may well follow. Absent means "not asked", the same
+            convention `lastTrainedOn` uses.
+
+            Always `false` on your own row: you cannot follow yourself.
 
     LifterProfile:
       type: object

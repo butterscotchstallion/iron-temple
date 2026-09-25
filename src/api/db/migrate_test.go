@@ -188,7 +188,13 @@ func TestMigrateAppliesSchemaAndSeed(t *testing.T) {
 	// fresh install has no crowns until the first sweeper pass.
 	assertCount(t, sqlDB, "SELECT count(*) FROM lifter_achievements", 0)
 
-	// 0033 seeds nothing — every House is founded by a lifter — so what is worth
+	// 0033 ships empty too, and for a different reason worth pinning: nothing is
+	// lost without a backfill, because a lifter with no follows still hears about
+	// their own achievements. A seeded mutual-follow graph would be a migration
+	// deciding who trains with whom.
+	assertCount(t, sqlDB, "SELECT count(*) FROM follows", 0)
+
+	// 0034 seeds nothing — every House is founded by a lifter — so what is worth
 	// pinning here is the rails, which hold for rows no handler wrote. Each is
 	// asserted by trying to break it.
 	assertCount(t, sqlDB, "SELECT count(*) FROM houses", 0)

@@ -56,10 +56,13 @@ sql:
       # is DML sqlc ignores. Every query in achievements.sql needs the two tables
       # declared, and the notifications fan-out needs the new column.
       - "db/migrations/0032_achievements.up.sql"
-      # 0033 is schema only: three CREATE TABLEs and the ALTER adding
+      # 0033 declares follows, which the crown fan-out reads and which the roster
+      # and the profile each test with an EXISTS. Nothing can be typed without it.
+      - "db/migrations/0033_follows.up.sql"
+      # 0034 is schema only: three CREATE TABLEs and the ALTER adding
       # notifications.house_id. Every query in houses.sql needs the three tables
       # declared, and the join-request fan-out needs the new column.
-      - "db/migrations/0033_houses.up.sql"
+      - "db/migrations/0034_houses.up.sql"
     queries: "db/queries"
     gen:
       go:

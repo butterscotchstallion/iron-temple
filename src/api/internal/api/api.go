@@ -230,11 +230,19 @@ func (s *Server) Router(corsOrigin string) http.Handler {
 					r.Get("/baselines", s.listBaselines)
 					r.Put("/baselines/{exerciseId}", s.setBaseline)
 					r.Delete("/baselines/{exerciseId}", s.clearBaseline)
-					// Leaving the House you are in. Here rather than under
-					// /houses/{houseId} because the subject is the caller, not
-					// the House — there is no id to give, since a lifter is in
-					// at most one. That also keeps it off /lifters, which is
-					// read-only by construction and may never write.
+
+					// Whose achievements the caller hears about. Here rather
+					// than under /lifters BECAUSE it writes: that subtree is
+					// read-only by construction and must stay that way, and
+					// the resource being written is the caller's own list.
+					// See the header in follows.go.
+					r.Post("/following/{lifterId}", s.followLifter)
+					r.Delete("/following/{lifterId}", s.unfollowLifter)
+
+					// Leaving the House you are in, and here for the same
+					// reason the two above are: the subject is the caller. No
+					// id to give either, since a lifter is in at most one
+					// House — which is why this is not under /houses/{houseId}.
 					r.Delete("/house", s.leaveHouse)
 				})
 			})

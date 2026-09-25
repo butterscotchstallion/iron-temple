@@ -252,6 +252,13 @@ exist only because the owner created them, so admission is the consent. The gym
 setup is the one thing that stays private, because another lifter's bar and plates
 decide their weights and must never be read as a basis for yours.
 
+You can **follow** the lifters you train with, and that decides what the install
+tells you about rather than what you may read. Achievement notifications reach the
+lifter who earned one and anybody following them — so a crown taken by somebody you
+have never spoken to stays off your panel, while everything about them is as
+readable as it ever was. Nobody is hidden by not being followed, and your own
+achievements always reach you, so a fresh install needs no setting up.
+
 ### Houses
 
 Lifters who train together can form a **House**: a named group with an icon, a
@@ -272,6 +279,10 @@ a name.
 is hidden by them, and being outside one costs a lifter nothing — the achievements, the
 leaderboard and the roster read exactly as they always did. It is a way of saying who
 trains together, not a privacy setting, which this install deliberately does not have.
+
+A House is also **not** a follow. Following decides who *hears* about an
+achievement; a House decides who is *grouped* with whom. Joining one doesn't follow
+anybody, and you can follow a lifter who belongs to no House at all.
 
 ## Documentation
 

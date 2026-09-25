@@ -7,6 +7,7 @@
   import Loading from "./skeleton/Loading.svelte";
   import Skeleton from "./skeleton/Skeleton.svelte";
   import { achievementBySlug, holdersOf } from "./achievements.svelte";
+  import { auth } from "./auth.svelte";
   import { relativeTime } from "./date";
   import type { Notification } from "./api";
 
@@ -91,6 +92,12 @@
    */
   type Standing = { held: "still" } | { held: "nobody" } | { held: "moved"; by: string };
 
+  // Your own crown, which `crown` is the one notification kind that can be about —
+  // it is the only one whose recipient may be its own actor. Second person
+  // throughout when it is: "Ada Lovelace took this" about yourself reads as a
+  // stranger with your name.
+  const mine = $derived(current !== null && current.actor.id === auth.me?.id);
+
   const standing = $derived.by<Standing | null>(() => {
     if (!current?.achievementSlug || achievement === null) return null;
     const holders = holdersOf(current.achievementSlug);
@@ -145,12 +152,16 @@
                  the heading. Decorating the name too would repeat it, and on a
                  lifter leading three boards would add two the card is not
                  talking about. -->
-            <LifterName
-              lifter={current.actor}
-              class="font-semibold"
-              crowns={false}
-              sigil={false}
-            />
+            {#if mine}
+              <span class="font-semibold">You</span>
+            {:else}
+              <LifterName
+                lifter={current.actor}
+                class="font-semibold"
+                crowns={false}
+                sigil={false}
+              />
+            {/if}
             <span class="text-muted-foreground">
               took this {relativeTime(current.createdAt)}
             </span>
@@ -160,7 +171,7 @@
         {#if standing !== null}
           <p class="mt-3 text-xs text-muted-foreground">
             {#if standing.held === "still"}
-              Still theirs.
+              {mine ? "Still yours." : "Still theirs."}
             {:else if standing.held === "nobody"}
               Nobody holds this right now.
             {:else}

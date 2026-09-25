@@ -159,6 +159,21 @@ type lifterDTO struct {
 	// when they never have. Omitted rather than zeroed: "" and a date are easy
 	// for a client to tell apart, where 1970-01-01 is a date that would draw.
 	LastTrainedOn string `json:"lastTrainedOn,omitempty"`
+	// Following is whether the CALLER follows this lifter — the one field here that
+	// is not a fact about the lifter at all, but about the reader's relationship to
+	// them. It is what the Follow button draws from.
+	//
+	// A POINTER, and that is the whole reason this field needs a comment. lifterDTO
+	// is embedded in four other places — a feed entry, a leaderboard row, a
+	// comment's author, a notification's actor — and none of their queries ask about
+	// follows. A plain bool would serialize `false` on every one of them: an
+	// affirmative statement that you do not follow somebody you may well follow,
+	// which is worse than saying nothing. Nil serializes as absent and means "not
+	// asked", which is the same absent-means-unknown convention LastTrainedOn uses
+	// above, applied to a bool the only way it can be.
+	//
+	// Populated by the roster and the profile, and nowhere else.
+	Following *bool `json:"following,omitempty"`
 }
 
 // lifterProfileDTO is a lifter plus their two lifetime figures.

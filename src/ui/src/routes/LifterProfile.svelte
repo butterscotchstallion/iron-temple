@@ -3,6 +3,7 @@
   import { Card } from "$lib/components/ui/card";
   import Avatar from "../lib/Avatar.svelte";
   import LifterName from "../lib/LifterName.svelte";
+  import FollowButton from "../lib/FollowButton.svelte";
   import AchievementList from "../lib/AchievementList.svelte";
   import CalendarHeatmap from "../lib/CalendarHeatmap.svelte";
   import ErrorCard from "../lib/ErrorCard.svelte";
@@ -11,6 +12,7 @@
   import SkeletonTiles from "../lib/skeleton/SkeletonTiles.svelte";
   import LiftVolumeBars from "../lib/LiftVolumeBars.svelte";
   import MuscleVolumeBars from "../lib/MuscleVolumeBars.svelte";
+  import { auth } from "../lib/auth.svelte";
   import { formatLongDate } from "../lib/date";
   import { muscleGroupLabel } from "../lib/library";
   import { formatVolume } from "../lib/volume";
@@ -203,6 +205,20 @@
           {/if}
         </p>
       </div>
+      <!-- ml-auto rather than a restructure: the Card is already a flex row, so
+           the button lands right-aligned beside the identity. Absent on your own
+           profile, as on your own roster row. -->
+      {#if profile.id !== auth.me?.id}
+        <div class="ml-auto">
+          <FollowButton
+            lifter={profile}
+            following={profile.following === true}
+            onChange={(next) => {
+              if (profile) profile.following = next;
+            }}
+          />
+        </div>
+      {/if}
     </Card>
 
     <!-- Lifetime. Two figures, straight off the profile — the only numbers on
