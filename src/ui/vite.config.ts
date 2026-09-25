@@ -597,6 +597,29 @@ export default defineConfig({
     // costs nothing there either; a cold run with this on is the same length as
     // a run without it, so there is no reason to make it conditional.
     fsModuleCache: true,
+    // Vitest's default is 5000, and on this machine that is not a timeout, it is a
+    // coin toss.
+    //
+    // The box has TWO CORES and is shared: several agents run gates on it at once,
+    // and load routinely sits at 4-7. The heaviest test in the suite —
+    // Racked.test.ts's "renders the headline and every populated section", which
+    // renders six charts at once — takes well under 5s on an idle box and was
+    // measured at 6.1s, 8.2s, 8.3s and 9.7s under contention. It fails on
+    // origin/main just as readily as on a branch, so it is nothing any one change
+    // introduced.
+    //
+    // That made it a gate that refused pushes for reasons unrelated to the diff,
+    // twice, on two different branches — a red suite that says nothing about the
+    // code is worse than a slow one, because it teaches everybody to re-run rather
+    // than to read.
+    //
+    // Fifteen seconds: 3x the default and comfortably above the worst observed.
+    // Raised here rather than on the one `it()` because the cause is the machine
+    // and not that assertion — the next heavy render would hit exactly the same
+    // wall. It does NOT slow a green run: only a test that actually fails waits
+    // out its timeout, and a genuine hang still fails, ten seconds later than it
+    // used to.
+    testTimeout: 15_000,
     setupFiles: ["./vitest-setup.ts"],
     include: ["src/**/*.{test,spec}.ts"],
     coverage: {
