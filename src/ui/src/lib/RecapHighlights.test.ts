@@ -95,4 +95,40 @@ describe("RecapHighlights", () => {
     expect(screen.getByText(/first time on a lift isn't a record/)).toBeTruthy();
     expect(screen.getByText(/once per lift, ever/)).toBeTruthy();
   });
+
+  // Milestones and crowns are the showable tier; a record is not. The button is
+  // absent without a handler, which is how somebody else's workout offers nothing
+  // to share.
+  it("offers a milestone share only when the viewer may take it", async () => {
+    const milestone = {
+      kind: "plate" as const,
+      performedOn: "2026-03-14",
+      label: "First 225 lb Squat",
+      valueLb: 225,
+      exerciseId: 1,
+      exerciseName: "Squat",
+    };
+
+    render(RecapHighlights, { props: { prs: [pr("Squat", 225, 215)], milestones: [milestone] } });
+    expect(screen.queryByRole("button", { name: /share first 225/i })).toBeNull();
+
+    const taken: string[] = [];
+    render(RecapHighlights, {
+      props: {
+        prs: [pr("Squat", 225, 215)],
+        milestones: [milestone],
+        onShareMilestone: (m: { label: string }) => taken.push(m.label),
+      },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: /share first 225 lb squat/i }));
+    expect(taken).toEqual(["First 225 lb Squat"]);
+  });
+
+  // A record gets no button even where milestones do. That is the scarcity line.
+  it("never offers a record for sharing", () => {
+    render(RecapHighlights, {
+      props: { prs: [pr("Squat", 225, 215)], onShareMilestone: () => {} },
+    });
+    expect(screen.queryByRole("button", { name: /share/i })).toBeNull();
+  });
 });

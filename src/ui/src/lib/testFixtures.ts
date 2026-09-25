@@ -243,6 +243,10 @@ export function testUpcomingMilestone(
     currentLb: 205,
     exerciseId: 1,
     exerciseName: "Squat",
+    // Which ladder the rung came from, and so which units the label is in. A
+    // barbell reads the whole load; a dumbbell's label is per hand while targetLb
+    // and currentLb stay the pair.
+    equipment: "barbell",
     ...overrides,
   };
 }

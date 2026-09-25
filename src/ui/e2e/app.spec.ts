@@ -1527,6 +1527,7 @@ const rackedMarch: RackedReport = {
       currentLb: 225,
       exerciseId: 1,
       exerciseName: "Squat",
+      equipment: "barbell",
     },
   ],
   heaviestSet: {

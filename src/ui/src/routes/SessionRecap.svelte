@@ -31,6 +31,11 @@
   import type { RecapFirstTimeRow, RecapLiftRow, RecapPRRow } from "../lib/recap";
   import { sessionShareCardContent } from "../lib/sessionShareCard";
   import { sessionShareCardFilename } from "../lib/shareImage";
+  import {
+    milestoneShareCardContent,
+    milestoneShareCardFilename,
+  } from "../lib/milestoneShareCard";
+  import type { RackedMilestone } from "../lib/api";
   import { formatLongDate } from "../lib/date";
   import { formatVolume } from "../lib/volume";
   import { celebrate } from "../lib/celebrate";
@@ -64,6 +69,16 @@
   let failed = $state(false);
   let degraded = $state(false);
   let sharing = $state(false);
+  // Which milestone's card is open, if any. A separate slot from `sharing` rather
+  // than a mode on it: the two cards are about different things — a workout and a
+  // rung — and one flag with a payload beside it is how a stale payload ends up
+  // drawn under the other card's title.
+  let sharingMilestone = $state<RackedMilestone | null>(null);
+  // The dialog's own open flag, bound separately from the payload above — the
+  // contract ShareCardDialog actually has, and the same pair the crown card uses in
+  // AchievementsSection. One boolean carrying a payload would leave the previous
+  // milestone's pixels under the next one's title.
+  let milestoneOpen = $state(false);
 
   async function load() {
     failed = false;
@@ -278,6 +293,10 @@
       milestones={recap?.milestones ?? []}
       streakSessions={recap?.streak.sessions ?? 0}
       streakWeeks={recap?.streak.weeks ?? 0}
+      onShareMilestone={(m) => {
+        sharingMilestone = m;
+        milestoneOpen = true;
+      }}
     />
 
     {#if recap && recap.volume.comparison.count > 0}
@@ -357,6 +376,28 @@
           .performedOn}: {formatVolume(recap.volume.totalLb)} lb lifted"
         title="Share this workout"
         subtitle="{recap.session.programDayName} as an image."
+      />
+    {/if}
+
+    <!-- A milestone's own card, which a workout's does not replace: one is what
+         happened on Tuesday and the other is a rung passed once in a lifetime.
+         Bound to the payload rather than to a boolean, so closing it clears the
+         milestone and there is no stale one to redraw.
+
+         No "next up" row here, and that is deliberate rather than an omission:
+         upcomingMilestones is on the Racked report and NOT on a session recap, for
+         the reason that field gives — what a lifter is closing in on is a standing
+         fact about their training, and a recap is a record of a moment. Fetching a
+         whole report to fill one line would be the wrong trade. -->
+    {#if sharingMilestone}
+      <ShareCardDialog
+        bind:open={milestoneOpen}
+        content={milestoneShareCardContent(sharingMilestone, auth.me?.displayName ?? "")}
+        filename={milestoneShareCardFilename(sharingMilestone.label)}
+        alt="{sharingMilestone.label} on Iron Temple"
+        title="Share this milestone"
+        subtitle="{sharingMilestone.label}, as an image."
+        shareTitle={sharingMilestone.label}
       />
     {/if}
   {/if}

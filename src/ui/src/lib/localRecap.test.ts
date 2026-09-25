@@ -108,7 +108,7 @@ describe("localRecap", () => {
   describe("records", () => {
     it("flags a set above the lift's standing best", () => {
       const r = localRecap(
-        mkSession({ previousBests: [{ exerciseId: 1, weightLb: 195, e1rmLb: 228 }] }),
+        mkSession({ previousBests: [{ exerciseId: 1, weightLb: 195, e1rmLb: 228, nextRungLb: null }] }),
       );
       expect(r.prs).toEqual([
         { exerciseId: 1, exerciseName: "Squat", kind: "weight", valueLb: 200, previousLb: 195 },
@@ -117,7 +117,7 @@ describe("localRecap", () => {
 
     it("does not flag a set that only matched the best", () => {
       const r = localRecap(
-        mkSession({ previousBests: [{ exerciseId: 1, weightLb: 200, e1rmLb: 233 }] }),
+        mkSession({ previousBests: [{ exerciseId: 1, weightLb: 200, e1rmLb: 233, nextRungLb: null }] }),
       );
       expect(r.prs).toEqual([]);
     });
@@ -140,7 +140,7 @@ describe("localRecap", () => {
     // Otherwise a chin-up is a first time every session, forever.
     it("treats a present best of zero as a history", () => {
       const r = localRecap(
-        mkSession({ previousBests: [{ exerciseId: 1, weightLb: 0, e1rmLb: 0 }] }),
+        mkSession({ previousBests: [{ exerciseId: 1, weightLb: 0, e1rmLb: 0, nextRungLb: null }] }),
       );
       expect(r.firstTimes).toEqual([]);
     });
@@ -153,7 +153,7 @@ describe("localRecap", () => {
       const r = localRecap(
         mkSession({
           // 5×200 estimates 233, against a standing estimate of 220.
-          previousBests: [{ exerciseId: 1, weightLb: 200, e1rmLb: 220 }],
+          previousBests: [{ exerciseId: 1, weightLb: 200, e1rmLb: 220, nextRungLb: null }],
         }),
       );
       expect(r.prs).toEqual([
@@ -165,7 +165,7 @@ describe("localRecap", () => {
     // implies the estimate anyway. Same rule as personalRecords server-side.
     it("lets a heavier bar suppress the estimated max it implies", () => {
       const r = localRecap(
-        mkSession({ previousBests: [{ exerciseId: 1, weightLb: 195, e1rmLb: 200 }] }),
+        mkSession({ previousBests: [{ exerciseId: 1, weightLb: 195, e1rmLb: 200, nextRungLb: null }] }),
       );
       expect(r.prs).toHaveLength(1);
       expect(r.prs[0].kind).toBe("weight");

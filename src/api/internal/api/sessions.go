@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"gitea.homelab/gitadmin/iron-temple/api/internal/racked"
 	"gitea.homelab/gitadmin/iron-temple/api/internal/store"
 )
 
@@ -668,13 +669,26 @@ func (s *Server) buildSession(ctx context.Context, id, userID int32) (sessionDTO
 	if err != nil {
 		return sessionDTO{}, err
 	}
+	// Which ladder each lift's rung comes from. Taken from the session's own sets
+	// rather than by widening the bests query: every lift with a best here has sets
+	// in this session by construction, and sessionSetDTO already carries equipment
+	// for the warm-up ramp and the weight stepper.
+	kit := make(map[int32]string, len(sets))
+	for _, set := range sets {
+		kit[set.ExerciseID] = set.Equipment
+	}
+
 	bestDTOs := make([]personalBestDTO, 0, len(bests))
 	for _, best := range bests {
-		bestDTOs = append(bestDTOs, personalBestDTO{
+		dto := personalBestDTO{
 			ExerciseID: best.ExerciseID,
 			WeightLb:   numericToFloat(best.BestWeightLb),
 			E1rmLb:     numericToFloat(best.BestE1rmLb),
-		})
+		}
+		if rung, ok := racked.NextRung(kit[best.ExerciseID], dto.WeightLb); ok {
+			dto.NextRungLb = &rung
+		}
+		bestDTOs = append(bestDTOs, dto)
 	}
 
 	setDTOs := make([]sessionSetDTO, 0, len(sets))

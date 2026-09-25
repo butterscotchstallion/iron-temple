@@ -345,6 +345,7 @@ SELECT ss.id,
        ss.exercise_id,
        e.name AS exercise_name,
        e.muscle_group,
+       e.equipment,
        ss.set_number,
        ss.target_reps,
        ss.actual_reps,
@@ -376,6 +377,7 @@ type RecapSessionSetsRow struct {
 	ExerciseID   int32          `json:"exercise_id"`
 	ExerciseName string         `json:"exercise_name"`
 	MuscleGroup  string         `json:"muscle_group"`
+	Equipment    string         `json:"equipment"`
 	SetNumber    int32          `json:"set_number"`
 	TargetReps   int32          `json:"target_reps"`
 	ActualReps   *int32         `json:"actual_reps"`
@@ -444,6 +446,7 @@ func (q *Queries) RecapSessionSets(ctx context.Context, arg RecapSessionSetsPara
 			&i.ExerciseID,
 			&i.ExerciseName,
 			&i.MuscleGroup,
+			&i.Equipment,
 			&i.SetNumber,
 			&i.TargetReps,
 			&i.ActualReps,

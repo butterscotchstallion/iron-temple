@@ -221,6 +221,7 @@ func (s *Server) recapSessionSets(
 			ExerciseID:     row.ExerciseID,
 			ExerciseName:   row.ExerciseName,
 			MuscleGroup:    row.MuscleGroup,
+			Equipment:      row.Equipment,
 			Reps:           reps,
 			WeightLb:       numericToFloat(row.WeightLb),
 			Completed:      row.Completed,

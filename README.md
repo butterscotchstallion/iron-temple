@@ -104,6 +104,14 @@ lifts, sets and reps.
   head — and drawn with **your** bar and **your** plates, so it never calls for a
   fourth pair of 45s you don't own. A weight the rack can't build rounds down to
   one it can, and says so.
+- **What you're closing in on**, on the lift's own card, before you load it: *"10
+  lb to your first 225"*. Every other thing the app says about an achievement is a
+  reading of what already happened; this is the one you can still act on. The
+  weights that count as landmarks depend on the equipment, because those numbers
+  are facts about the loading rather than about lifting — a bar makes 135 and 225,
+  a rack makes pairs of 20s and 50s, a stack makes round hundreds, a dip belt makes
+  single plates. Dumbbells count in bells, matching the per-hand figure beside
+  them. Band work has no rung, because it logs no weight.
 - **Bodyweight weigh-ins** recorded against the session.
 - **Finish the session** to close it out — with confetti when it went well — and
   land on a **recap** of what it was worth: how long it took and where that

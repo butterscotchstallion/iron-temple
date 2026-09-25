@@ -11,6 +11,8 @@
   import { equipmentStepLb } from "./library";
   import { barWeightLb, gymSteps, plateInventory } from "./gym.svelte";
   import { warmupSets } from "./warmup";
+  import { barFraction } from "./racked";
+  import { formatVolume } from "./volume";
   import { formatTime } from "./time";
   import type { SessionSet } from "./api";
 
@@ -22,6 +24,7 @@
     onChangeWeight,
     onAddSet,
     onRemoveSet,
+    nextRung = null,
     readonly = false,
   }: {
     name: string;
@@ -40,6 +43,20 @@
     onAddSet?: () => void;
     /** Drop a set that wasn't performed. Omitted where sets are fixed. */
     onRemoveSet?: (set: SessionSet) => void;
+    /**
+     * The next named weight on this lift, and where the lifter stands now — both
+     * the WHOLE LOAD, as every weight here is.
+     *
+     * Shown because this is the only screen where a milestone can still be acted
+     * on. Everything else the app says about achievements is a reading of what
+     * already happened; a lifter who knows they are 10 lb from a first 225 has
+     * something to do about it while the bar is still in front of them, which is
+     * the difference between a milestone that arrives and one that was chased.
+     *
+     * Null where there is nothing to chase: past the top of the ladder, a lift
+     * never loaded, or band work, which has no ladder at all.
+     */
+    nextRung?: { targetLb: number; currentLb: number } | null;
     // An over session is a record, not a worksheet: sets and weights lock.
     readonly?: boolean;
   } = $props();
@@ -256,6 +273,26 @@
     return "";
   });
 
+  // The goal line and its bar, from the same two helpers the profile's "Closing
+  // in" list uses — so the rung a lifter chases at the rack and the rung on their
+  // profile are drawn from one calculation rather than two that can disagree.
+  //
+  // Per hand on a dumbbell, because the line above it already is: the rung arrives
+  // as the pair, and "20 lb to go" under "50 lb per hand" would be two units ten
+  // pixels apart, which is exactly the confusion loadNote exists to prevent.
+  const rungFraction = $derived(
+    nextRung ? barFraction(nextRung.currentLb, nextRung.targetLb) : 0,
+  );
+  const rungNote = $derived.by(() => {
+    if (!nextRung) return "";
+    const half = equipment === "dumbbell" ? 2 : 1;
+    const target = nextRung.targetLb / half;
+    const remaining = Math.max(1, Math.round((nextRung.targetLb - nextRung.currentLb) / half));
+    return `${remaining} lb to your first ${formatVolume(target)}${
+      half === 2 ? " per hand" : ""
+    }`;
+  });
+
   function warmClass(i: number): string {
     const ring =
       active === i ? "ring-2 ring-cyan ring-offset-2 ring-offset-card " : "";
@@ -387,6 +424,28 @@
       <p class="text-xs tabular-nums text-muted-foreground">
         {activeWeight} lb × {activeReps}{loadNote ? ` · ${loadNote}` : ""}
       </p>
+
+      <!-- What there is to aim at, if anything. Quiet on purpose: it is a goal, not
+           an achievement, and the card's job is the set in front of the lifter. The
+           bar restates the figure beside it, so it is hidden from assistive tech —
+           the same call AchievementList makes for the profile's version. -->
+      {#if rungNote}
+        <div class="w-full max-w-[12rem]">
+          <p class="text-center text-xs tabular-nums text-muted-foreground/80">
+            {rungNote}
+          </p>
+          <div
+            class="mt-1 h-1 overflow-hidden rounded-full bg-white/10"
+            aria-hidden="true"
+            data-testid="next-rung-bar"
+          >
+            <div
+              class="h-full rounded-full bg-primary/70"
+              style="width:{rungFraction * 100}%"
+            ></div>
+          </div>
+        </div>
+      {/if}
     </div>
 
     <!-- Warm-up circles (cyan) then work-set circles (neon), in sequence. -->

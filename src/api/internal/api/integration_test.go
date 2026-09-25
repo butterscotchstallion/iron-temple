@@ -583,6 +583,69 @@ func previousBest(e *httpexpect.Expect, sessionID, exerciseID int) (float64, boo
 	return 0, false
 }
 
+// The next rung comes down with the session, so the screen can show a lifter what
+// there is to aim at while the bar is still in front of them. Every other
+// achievement figure in this API is a reading of what already happened.
+func TestSessionCarriesTheNextRung(t *testing.T) {
+	e := expect(t)
+	_, dayID := firstProgramAndDay(e)
+
+	// Log a barbell lift at a weight between two plate rungs, in its own session,
+	// so a later session's baseline can see it.
+	first := startSession(t, e, dayID)
+	firstID := int(first.Value("id").Number().Raw())
+	set := first.Value("sets").Array().Value(0).Object()
+	exerciseID := int(set.Value("exerciseId").Number().Raw())
+	logSetAt(e, firstID, int(set.Value("id").Number().Raw()), 3, 200, true)
+
+	second := startSession(t, e, dayID)
+	secondID := int(second.Value("id").Number().Raw())
+
+	var found bool
+	for _, b := range e.GET(fmt.Sprintf("/sessions/%d", secondID)).
+		Expect().Status(http.StatusOK).
+		JSON().Object().Value("previousBests").Array().Iter() {
+		best := b.Object()
+		if int(best.Value("exerciseId").Number().Raw()) != exerciseID {
+			continue
+		}
+		found = true
+		// 200 lb on a bar: the next thing lifters name is 225. Not 205 — the rung
+		// ladder is plate landmarks, not the 5 lb step the weight moves in.
+		best.Value("nextRungLb").Number().IsEqual(225)
+	}
+	if !found {
+		t.Fatalf("session %d listed no best for exercise %d", secondID, exerciseID)
+	}
+}
+
+// Null, not zero, and the distinction is load-bearing: a zero would draw a
+// progress bar that is already full. A lift the lifter has never loaded has no
+// rung, which is the same case band work is in permanently.
+func TestAnUnloadedLiftHasNoRung(t *testing.T) {
+	e := expect(t)
+	_, dayID := firstProgramAndDay(e)
+
+	session := startSession(t, e, dayID)
+	id := int(session.Value("id").Number().Raw())
+
+	// A fresh session lists bests only for lifts with history. Whatever it does
+	// list, none of them may carry a rung of zero.
+	for _, b := range e.GET(fmt.Sprintf("/sessions/%d", id)).
+		Expect().Status(http.StatusOK).
+		JSON().Object().Value("previousBests").Array().Iter() {
+		best := b.Object()
+		rung := best.Value("nextRungLb")
+		if rung.Raw() == nil {
+			continue
+		}
+		if got := rung.Number().Raw(); got <= 0 {
+			t.Errorf("exercise %v carries a rung of %v; absent is spelled null",
+				best.Value("exerciseId").Number().Raw(), got)
+		}
+	}
+}
+
 // TestConditionalGetReturnsNotModified pins the conditional-GET path the UI's
 // revalidation leans on: it repaints from cache and refetches on every mount,
 // so most reads return exactly what the caller already holds.

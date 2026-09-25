@@ -49,7 +49,90 @@ var volumeThresholds = []float64{
 // Each is awarded once per lift, ever — plateMilestones compares against the
 // lifter's all-time best before the period — so a dense low end costs a beginner
 // a handful of one-off milestones in their first months and nothing after.
+//
+// BARBELL ONLY. These are facts about a plate set, and they were applied to every
+// lift in the catalogue until ladderFor existed.
 var plateThresholds = []float64{95, 135, 185, 225, 275, 315, 365, 405, 455, 495}
+
+// dumbbellThresholds are the bells a lifter names, doubled.
+//
+// Every weight in this app is the WHOLE LOAD — a dumbbell set at 100 lb is a pair
+// of 50s, stated at length in migrations 0018 and 0023 — so a ladder of bells has
+// to be written here as pairs. 40 is a pair of 20s, 100 a pair of 50s.
+//
+// The plate ladder was nonsense here, and expensively so: its rungs are odd
+// multiples of 5 that halve to numbers no rack has. "First 135 lb Dumbbell Bench
+// Press" is 67.5 lb per hand — not a bell that exists on a rack stepping in 5s,
+// which is the rack this app assumes (0020 stores dumbbell_step_lb PER BELL for
+// exactly that reason). So a lifter pressing the 65s sailed past 135 without being
+// told, and was instead told about a weight they could not have lifted.
+//
+// The top end is sparser than the bottom on purpose, matching how racks are built:
+// bells go up in 5s to about 50 and in 10s or 20s after that, so 120/140/160/200
+// are pairs of 60/70/80/100.
+var dumbbellThresholds = []float64{40, 50, 60, 70, 80, 90, 100, 120, 140, 160, 200}
+
+// stackThresholds are for machines and cables: round numbers, because that is what
+// a selectorised stack is labelled in and "I'm on the hundred" is a thing lifters
+// say.
+//
+// The weakest of the four ladders, and the one to tune first if any of them reads
+// wrong. A plate set and a dumbbell rack have landmarks that lifters genuinely
+// name; a cable stack's numbering is whoever built it, and it differs between two
+// machines in the same room. Round hundreds are the least arbitrary thing
+// available, not a claim that they are the right ones.
+var stackThresholds = []float64{50, 100, 150, 200, 250, 300}
+
+// bodyweightThresholds are what somebody hangs off a belt, not what they load on a
+// bar.
+//
+// A weighted dip or chin-up carries ONE plate on a strap, so the rungs are plates
+// rather than pairs: 25, 45, then a couple of each. The plate ladder's 95 would
+// have meant a pair of 25s, which is not how the load is attached.
+//
+// Only ever reached once a lifter enters a weight at all. Unloaded bodyweight work
+// logs at 0 and is skipped before any ladder is consulted — see the guards in
+// plateMilestones and upcoming — and entering a weight is what opts a lift in
+// (0023). A plank will never see these, which is correct: its milestones would be
+// seconds, and this app does not record them.
+var bodyweightThresholds = []float64{25, 45, 70, 90, 135, 180}
+
+// ladderFor is the ladder of named weights a lift's milestones are measured
+// against, chosen by what the movement is loaded with.
+//
+// One ladder per kind of loading, because "the weights lifters name out loud" is
+// not one list. It is a fact about the equipment: plates make 95 and 135, racks
+// make pairs of 20s and 50s, stacks make round hundreds, and a dip belt makes
+// single plates. Sharing one list across all of them is what produced milestones
+// at weights the lifter's gym cannot assemble.
+//
+// 'band' returns nil — band work logs 0 lb permanently and by design (0023), so
+// there is no weight to have a rung. It never gets this far in practice, since the
+// callers skip a best of zero first, but nil says so rather than leaving it to
+// them.
+//
+// 'other' and anything unrecognised take the barbell ladder, matching the default
+// `exercises.equipment` itself carries and the same wide default arm
+// progression.stepFor uses, for its stated reason: their load, when they have one,
+// is plates or bells.
+//
+// Deliberately NOT progression.LadderFor, which answers a different question: that
+// is the grid a weight MOVES on — the step and the increment — where this is the
+// landmarks worth announcing. A 5 lb bar step would make every rung 95, 100, 105.
+func ladderFor(equipment string) []float64 {
+	switch equipment {
+	case "dumbbell":
+		return dumbbellThresholds
+	case "machine", "cable":
+		return stackThresholds
+	case "bodyweight":
+		return bodyweightThresholds
+	case "band":
+		return nil
+	default:
+		return plateThresholds
+	}
+}
 
 // milestones reports the thresholds crossed inside the period.
 //
@@ -113,8 +196,19 @@ type UpcomingMilestone struct {
 	// TargetLb is the rung; CurrentLb is where they stand now, counting the
 	// period. Both are sent rather than only the difference, so a client can draw
 	// a bar without having to reconstruct the denominator.
+	//
+	// Both are the WHOLE LOAD, as every weight in this app is — so on a dumbbell
+	// lift they are the pair while Label reads per hand. That is not a discrepancy
+	// to fix by halving them here: the ratio a bar is drawn from is the same either
+	// way, and a field that changed units by equipment would be worse than one that
+	// never does. Equipment is carried so a client can halve at the point it prints
+	// a figure, which is the rule the set card follows too.
 	TargetLb  float64
 	CurrentLb float64
+	// Equipment is what the lift is loaded with, so a surface printing "20 lb to
+	// go" beside a per-hand label can agree with it. Empty for a volume threshold,
+	// which belongs to no lift.
+	Equipment string
 	// Zero for a volume threshold, which belongs to no single lift — the same
 	// convention Milestone uses.
 	ExerciseID   int32
@@ -184,12 +278,17 @@ func upcoming(sessions []session, base Baseline, limit int) []UpcomingMilestone 
 	// period — so the two cannot disagree about what a lift's best is.
 	best := copyBests(base.BestWeight)
 	names := map[int32]string{}
+	// Equipment comes from the period's sets for the same reason the name does —
+	// the baseline knows ids and nothing else — and it is only ever read for a lift
+	// that has one, since a lift absent from here is skipped below.
+	kit := map[int32]string{}
 	for _, s := range sessions {
 		for _, top := range sessionTops(s) {
 			if top.WeightLb > best[top.ExerciseID] {
 				best[top.ExerciseID] = top.WeightLb
 			}
 			names[top.ExerciseID] = top.ExerciseName
+			kit[top.ExerciseID] = top.Equipment
 		}
 	}
 
@@ -207,22 +306,26 @@ func upcoming(sessions []session, base Baseline, limit int) []UpcomingMilestone 
 		if current <= 0 {
 			continue
 		}
-		t, ok := nextRung(plateThresholds, current)
-		if !ok {
-			continue
-		}
 		// ONLY LIFTS TRAINED IN THE PERIOD, which falls out of the baseline knowing
 		// ids and not names — and is the behaviour to want anyway. A first 315 lb
 		// deadlift is not something a lifter is closing in on if they have not
 		// deadlifted since spring; listing it would fill the card with goals nobody
 		// is working towards and bury the two they are.
+		//
+		// Moved above the rung lookup, which needs the equipment this same check
+		// establishes we have.
 		name, trainedInPeriod := names[id]
 		if !trainedInPeriod {
 			continue
 		}
+		t, ok := nextRung(ladderFor(kit[id]), current)
+		if !ok {
+			continue
+		}
 		out = append(out, UpcomingMilestone{
 			Kind:         MilestonePlate,
-			Label:        fmt.Sprintf("First %s lb %s", formatLb(t), name),
+			Label:        rungLabel(t, kit[id], name),
+			Equipment:    kit[id],
 			TargetLb:     t,
 			CurrentLb:    current,
 			ExerciseID:   id,
@@ -250,6 +353,47 @@ func nextRung(ladder []float64, value float64) (float64, bool) {
 	return 0, false
 }
 
+// NextRung is the lowest named weight above a lift's current best, on the ladder
+// its equipment uses, and whether there is one.
+//
+// Exported for the session screen, which is the one surface that needs this BEFORE
+// the lifter has done anything. Every other reader of a rung is looking back at a
+// period and gets it through upcoming(); this answers "what is the next thing to
+// aim at on this lift" for a workout that has not happened yet, so it takes a bare
+// best rather than a Baseline and a slice of sessions.
+//
+// A best of zero has no rung, for the reason upcoming() spells out at length: a
+// lift never loaded would otherwise be told it is 95 lb from a first 95 lb, and on
+// a banded movement that is a category error rather than a goal.
+//
+// The weight in and the weight out are both the WHOLE LOAD, as everywhere else. A
+// caller printing them beside a per-hand figure halves them itself.
+func NextRung(equipment string, bestLb float64) (float64, bool) {
+	if bestLb <= 0 {
+		return 0, false
+	}
+	return nextRung(ladderFor(equipment), bestLb)
+}
+
+// rungLabel names a rung the way the lifter holding it would.
+//
+// Dumbbells read PER HAND. The stored number is the pair, which is what every
+// weight in this app is (0018), but a rack is labelled in bells and a lifter says
+// "the fifties" — and the set card beside this already prints "50 lb per hand"
+// (ExerciseCard.svelte). Announcing "First 100 lb Dumbbell Bench Press" against a
+// card reading 50 would be two units ten pixels apart, which is the confusion that
+// card's own comment exists to prevent. So the milestone says what the card says.
+//
+// Everything else is the whole load and reads plainly. Halving is safe for the
+// dumbbell ladder specifically because every rung on it is even — it is written as
+// doubled bells.
+func rungLabel(rung float64, equipment, exerciseName string) string {
+	if equipment == "dumbbell" {
+		return fmt.Sprintf("First %s lb per hand %s", formatLb(rung/2), exerciseName)
+	}
+	return fmt.Sprintf("First %s lb %s", formatLb(rung), exerciseName)
+}
+
 // plateMilestones reports the first time each lift reached a named weight.
 func plateMilestones(sessions []session, bestBefore map[int32]float64) []Milestone {
 	best := copyBests(bestBefore)
@@ -260,12 +404,12 @@ func plateMilestones(sessions []session, bestBefore map[int32]float64) []Milesto
 			if top.WeightLb <= prev {
 				continue
 			}
-			for _, t := range plateThresholds {
+			for _, t := range ladderFor(top.Equipment) {
 				if prev < t && top.WeightLb >= t {
 					out = append(out, Milestone{
 						Kind:         MilestonePlate,
 						PerformedOn:  s.PerformedOn,
-						Label:        fmt.Sprintf("First %s lb %s", formatLb(t), top.ExerciseName),
+						Label:        rungLabel(t, top.Equipment, top.ExerciseName),
 						ValueLb:      t,
 						ExerciseID:   top.ExerciseID,
 						ExerciseName: top.ExerciseName,

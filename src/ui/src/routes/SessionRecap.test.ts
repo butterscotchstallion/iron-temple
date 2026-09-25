@@ -164,7 +164,7 @@ function mkSession(): Session {
     createdAt: "2026-09-13T18:00:00Z",
     finishedAt: "2026-09-13T18:45:00Z",
     isOver: true,
-    previousBests: [{ exerciseId: 1, weightLb: 195, e1rmLb: 228 }],
+    previousBests: [{ exerciseId: 1, weightLb: 195, e1rmLb: 228, nextRungLb: null }],
     sets: [1, 2, 3, 4, 5].map((n) => mkSet({ id: n, setNumber: n })),
   };
 }
