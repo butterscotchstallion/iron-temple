@@ -197,7 +197,11 @@
               <Avatar user={entry.lifter} size={32} />
               <span class="flex min-w-0 flex-1 flex-col">
                 <span class="flex items-baseline gap-2">
-                  <LifterName lifter={entry.lifter} class="text-sm font-semibold text-foreground" />
+                  <LifterName
+                    lifter={entry.lifter}
+                    class="text-sm font-semibold text-foreground"
+                    link
+                  />
                   {#if entry.lifter.id === auth.me?.id}
                     <span class="shrink-0 text-xs text-muted-foreground">(you)</span>
                   {/if}

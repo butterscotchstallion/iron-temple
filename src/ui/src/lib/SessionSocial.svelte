@@ -421,6 +421,7 @@
                   lifter={comment.author}
                   class="text-sm font-semibold text-foreground"
                   crownSize="size-3"
+                  link
                 />
                 <span class="shrink-0 text-xs text-muted-foreground">
                   {saidAt(comment.createdAt)}

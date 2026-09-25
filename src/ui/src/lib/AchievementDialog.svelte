@@ -4,12 +4,13 @@
   import Crown from "@lucide/svelte/icons/crown";
   import Avatar from "./Avatar.svelte";
   import LifterName from "./LifterName.svelte";
+  import FollowButton from "./FollowButton.svelte";
   import Loading from "./skeleton/Loading.svelte";
   import Skeleton from "./skeleton/Skeleton.svelte";
   import { achievementBySlug, holdersOf } from "./achievements.svelte";
   import { auth } from "./auth.svelte";
   import { relativeTime } from "./date";
-  import type { Notification } from "./api";
+  import { getLifter, type Notification } from "./api";
 
   // One crown at a time, out of a notification row that folded several.
   //
@@ -98,6 +99,48 @@
   // stranger with your name.
   const mine = $derived(current !== null && current.actor.id === auth.me?.id);
 
+  /**
+   * Whether the caller follows the lifter this card is about.
+   *
+   * FETCHED HERE RATHER THAN READ OFF THE ROW, because a notification's actor is a
+   * `Lifter` whose `following` is deliberately absent: that field is only populated
+   * by the roster and the profile, and a `false` on every notification actor would
+   * be an affirmative claim about somebody you may well follow. So the dialog asks.
+   *
+   * One request per card, on a modal the reader opened on purpose, and none at all
+   * for a crown of their own. The alternative is a global "who do I follow" set —
+   * which is what a Follow button on the leaderboard would need, and which needs an
+   * endpoint and an index that 0033 deliberately did not build.
+   *
+   * Keyed by lifter id so a slow answer for the previous card cannot be drawn
+   * against this one: pressing Next twice quickly leaves two requests in flight and
+   * only the one that matches is used.
+   */
+  let follows = $state<{ lifterId: number; following: boolean } | null>(null);
+
+  $effect(() => {
+    const actorId = current?.actor.id;
+    if (actorId === undefined || mine) {
+      follows = null;
+      return;
+    }
+    let live = true;
+    void getLifter(actorId).then((result) => {
+      if (!live || result.status !== 200) return;
+      follows = { lifterId: actorId, following: result.data.following === true };
+    });
+    return () => {
+      live = false;
+    };
+  });
+
+  // Only when the answer is about the lifter on screen. A failed or in-flight
+  // request draws no button, which is the honest degradation — a Follow button that
+  // might already be Following is worse than none.
+  const followable = $derived(
+    current !== null && !mine && follows?.lifterId === current.actor.id,
+  );
+
   const standing = $derived.by<Standing | null>(() => {
     if (!current?.achievementSlug || achievement === null) return null;
     const holders = holdersOf(current.achievementSlug);
@@ -160,12 +203,27 @@
                 class="font-semibold"
                 crowns={false}
                 sigil={false}
+                link
               />
             {/if}
             <span class="text-muted-foreground">
               took this {relativeTime(current.createdAt)}
             </span>
           </p>
+          <!-- The shortest path from "who is this?" to following them: the
+               notification that told you about the crown is also where you act on
+               it, rather than sending the reader off to a profile to come back
+               from. -->
+          {#if followable && follows}
+            <div class="ml-auto">
+              <FollowButton
+                lifter={current.actor}
+                size="sm"
+                following={follows.following}
+                onChange={(next) => (follows = { lifterId: current.actor.id, following: next })}
+              />
+            </div>
+          {/if}
         </div>
 
         {#if standing !== null}
