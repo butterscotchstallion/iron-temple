@@ -103,7 +103,7 @@
               <a
                 use:link
                 href="/sessions/{session.id}/recap"
-                class="shrink-0 text-xs font-semibold text-primary hover:underline"
+                class="shrink-0 text-xs font-semibold text-primary transition hover:text-neon-lift hover:underline"
               >
                 Recap
               </a>

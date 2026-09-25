@@ -397,7 +397,7 @@
         onclick={() => void loadEarlier()}
         disabled={loadingEarlier}
         aria-busy={loadingEarlier}
-        class="self-start rounded-md px-1 py-0.5 text-xs font-semibold text-primary transition hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-60"
+        class="self-start rounded-md px-1 py-0.5 text-xs font-semibold text-primary transition hover:text-neon-lift hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-60"
       >
         {loadingEarlier
           ? "Loading…"

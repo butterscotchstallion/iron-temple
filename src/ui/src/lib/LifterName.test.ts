@@ -250,4 +250,36 @@ describe("linking to the profile", () => {
     });
     expect(screen.getByRole("link", { name: "ada" })).toBeInTheDocument();
   });
+
+  // The app's text-link idiom: fade to `neon-lift` on hover. Asserted as classes
+  // because jsdom computes no hover state — what can be checked is that the two
+  // halves are both present, and the pair is what makes it gradual rather than
+  // instant. A hover colour with no `transition` is the bug this catches, and it was
+  // the state of four links before this.
+  //
+  // The token matters as much as the pair: neon-lift is the one purple here measured
+  // to clear WCAG AA on both dark surfaces, so a well-meaning swap back to
+  // `hover:text-primary` — which does not — should fail.
+  it("fades to purple on hover rather than snapping", () => {
+    render(LifterName, { props: { lifter: testUser({ id: 4 }), link: true } });
+    const anchor = screen.getByRole("link", { name: "Ada Lovelace" });
+    expect(anchor).toHaveClass("hover:text-neon-lift");
+    expect(anchor).toHaveClass("transition");
+  });
+
+  // A caller's own colour sets the resting shade — `{className}` is appended last —
+  // but must not take the hover with it, or a name in a row that styles itself
+  // would be the one name that does not react.
+  it("keeps its hover colour when the caller sets a resting one", () => {
+    render(LifterName, {
+      props: {
+        lifter: testUser({ id: 4 }),
+        link: true,
+        class: "text-foreground font-semibold",
+      },
+    });
+    const anchor = screen.getByRole("link", { name: "Ada Lovelace" });
+    expect(anchor).toHaveClass("text-foreground");
+    expect(anchor).toHaveClass("hover:text-neon-lift");
+  });
 });

@@ -820,7 +820,7 @@
                 <a
                   use:link
                   href="/exercises/{ex.exerciseId}"
-                  class="text-card-foreground underline-offset-2 transition hover:text-primary hover:underline"
+                  class="text-card-foreground underline-offset-2 transition hover:text-neon-lift hover:underline"
                 >
                   {ex.exerciseName}
                 </a>
@@ -887,7 +887,7 @@
                 {:else}
                   <button
                     type="button"
-                    class="self-end text-xs text-muted-foreground underline-offset-2 transition hover:text-primary hover:underline"
+                    class="self-end text-xs text-muted-foreground underline-offset-2 transition hover:text-neon-lift hover:underline"
                     onclick={() => openBaseline(ex.exerciseId, ex.weightLb)}
                   >
                     Set starting weight
@@ -917,7 +917,7 @@
                     <a
                       use:link
                       href="/exercises/{entry.exerciseId}"
-                      class="text-card-foreground underline-offset-2 transition hover:text-primary hover:underline"
+                      class="text-card-foreground underline-offset-2 transition hover:text-neon-lift hover:underline"
                     >
                       {entry.exerciseName}
                     </a>
@@ -934,7 +934,7 @@
                       </span>
                       <button
                         type="button"
-                        class="rounded-md p-1 text-muted-foreground transition hover:text-primary"
+                        class="rounded-md p-1 text-muted-foreground transition hover:text-neon-lift"
                         aria-label="Edit {entry.exerciseName} on {day.name}"
                         onclick={() =>
                           editingId === entry.id

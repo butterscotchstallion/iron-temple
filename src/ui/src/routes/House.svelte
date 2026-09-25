@@ -167,7 +167,7 @@
   <a
     href="/houses"
     use:link
-    class="text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+    class="text-sm text-muted-foreground transition hover:text-neon-lift focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
   >
     ← All Houses
   </a>

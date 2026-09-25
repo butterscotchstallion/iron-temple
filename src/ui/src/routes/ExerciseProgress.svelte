@@ -84,7 +84,7 @@
   <a
     href="/progress"
     use:link
-    class="inline-flex items-center gap-1.5 self-start text-sm text-muted-foreground transition hover:text-foreground"
+    class="inline-flex items-center gap-1.5 self-start text-sm text-muted-foreground transition hover:text-neon-lift"
   >
     <ArrowLeft class="size-4" aria-hidden="true" />
     Progress

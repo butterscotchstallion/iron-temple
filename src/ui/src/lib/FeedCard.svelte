@@ -61,7 +61,7 @@
         <a
           href="/feed"
           use:link
-          class="text-xs font-semibold text-primary transition hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          class="text-xs font-semibold text-primary transition hover:text-neon-lift hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           See all
         </a>

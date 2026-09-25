@@ -267,7 +267,7 @@
   <a
     use:link
     href="/programs/{programId}"
-    class="flex items-center gap-1 self-start text-sm text-muted-foreground transition hover:text-foreground"
+    class="flex items-center gap-1 self-start text-sm text-muted-foreground transition hover:text-neon-lift"
   >
     <ChevronLeft class="size-4" aria-hidden="true" />
     Back to the program

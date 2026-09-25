@@ -19,6 +19,39 @@
   --color-surface-2: #2a1250;
   --color-neon: #b026ff;
   --color-neon-soft: #7b2ff7;
+  /* The colour a text link lands on when hovered, and the only one of these three
+     purples chosen by measurement rather than by eye.
+     
+     It exists because the other two cannot do this job. Against --card (#171717)
+     neon is 3.90:1 and neon-soft 3.07:1, and against --background (#0a0a0a) 4.31:1
+     and 3.39:1 — all four under WCAG AA's 4.5:1 for normal text, and the links that
+     want this are text-xs/text-sm, below the 18.66px that would let the 3:1
+     large-text floor apply. A hover that went DARKER made permanently-visible text
+     harder to read, which is the one thing a hover must not do.
+     
+     This clears AA on both surfaces with room to spare: 6.66:1 on card, 7.36:1 on
+     background. Hue 274 against neon's 278, so it reads as the same violet lifted
+     rather than as a second colour. Re-measure if it is ever retuned. */
+  --color-neon-lift: #c77dff;
+  /* HOW TEXT LINKS USE THESE, because it is a convention and not a rule — there is
+     no shared link class, for the reason fieldStyles.ts gives about not promoting a
+     class string to a primitive before it has earned it. Every text link spells it
+     out, and the resting shade is whatever the surface already used:
+
+       neutral link   text-muted-foreground transition hover:text-neon-lift
+       purple CTA     text-primary          transition hover:text-neon-lift
+
+     So nothing changes at rest — no link got harder to read to gain this — and
+     everything lands on the same lifted violet, which is MORE legible than either
+     resting colour rather than less. The bare `transition` is deliberate: 150 ms,
+     and the codebase's own idiom at 91 uses against 3 of `transition-colors`.
+
+     NOT applied to three kinds of anchor, and each exclusion is load-bearing. A row
+     or card link (the feed, the roster, a House) would inherit the colour into every
+     child and repaint the whole row. A nav pill's active state is `bg-primary
+     text-primary-foreground`, so a purple hover there is purple on purple. And
+     several anchors are bare `use:link` wrappers around a <Button> — one has no
+     class at all — so a global `a:hover` would tint a button's label. */
   --color-magenta: #ff2fb9;
   --color-cyan: #05d9e8;
   --color-sun: #ff6ac1;

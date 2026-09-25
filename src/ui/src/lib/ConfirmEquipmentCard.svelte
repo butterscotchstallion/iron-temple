@@ -56,7 +56,7 @@
       <a
         href="/profile/equipment"
         use:link
-        class="text-sm font-semibold text-primary transition hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        class="text-sm font-semibold text-primary transition hover:text-neon-lift hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
       >
         Set up my gym
       </a>
@@ -70,7 +70,7 @@
       <button
         type="button"
         onclick={() => (dismissed = true)}
-        class="text-sm text-muted-foreground transition hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        class="text-sm text-muted-foreground transition hover:text-neon-lift hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
       >
         Later
       </button>
