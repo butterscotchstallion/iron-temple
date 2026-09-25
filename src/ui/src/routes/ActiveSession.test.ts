@@ -342,6 +342,51 @@ describe("ActiveSession: records and first times", () => {
     expect(celebrate).not.toHaveBeenCalled();
   });
 
+  // The banner dismisses itself after six seconds. Only a NEW record may restart
+  // that clock: an ordinary completed set that beat nothing must not, or on a 5x5
+  // the four sets after a record each re-arm it and the banner sits there for the
+  // rest of the workout announcing something that happened ten minutes ago.
+  it("does not let a later ordinary set keep a stale banner alive", async () => {
+    vi.useFakeTimers();
+    try {
+      // Two sets of one lift against a standing best of 195. The first clears it
+      // and is a record; the second is a lighter back-off set that beats nothing.
+      getSession.mockResolvedValue(
+        ok(
+          mkSession({
+            previousBests: [{ exerciseId: 1, weightLb: 195, e1rmLb: 228 }],
+            sets: [
+              mkSet({ id: 1, setNumber: 1, targetReps: 1, weightLb: 200 }),
+              mkSet({ id: 2, setNumber: 2, targetReps: 1, weightLb: 185 }),
+            ],
+          }),
+        ),
+      );
+      updateSessionSet.mockImplementation((_s: number, setId: number) =>
+        Promise.resolve(
+          ok(mkSet({ id: setId, setNumber: setId, targetReps: 1, actualReps: 1, completed: true })),
+        ),
+      );
+
+      render(ActiveSession, props);
+      await vi.waitFor(() => expect(screen.getByRole("button", { name: /^Set 1/ })).toBeTruthy());
+
+      await fireEvent.click(screen.getByRole("button", { name: /^Set 1/ }));
+      await vi.waitFor(() => expect(screen.getByText(/New PR!/)).toBeTruthy());
+
+      // Four seconds later, the second set — same weight, so not a record.
+      await vi.advanceTimersByTimeAsync(4000);
+      await fireEvent.click(screen.getByRole("button", { name: /^Set 2/ }));
+
+      // Past the original six seconds. The banner must be gone: the second set
+      // had no news of its own and so bought the first none either.
+      await vi.advanceTimersByTimeAsync(2500);
+      expect(screen.queryByText(/New PR!/)).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   // A best of zero is a lifter who HAS done the lift: bodyweight work has a
   // legitimate zero, and reading the number instead of its presence would make
   // every chin-up session a first time forever.

@@ -296,13 +296,21 @@
     // something, and a first workout would otherwise fire it on every lift.
     if (completed) {
       const previous = prBest.get(set.exerciseId);
+      const text = `${set.exerciseName} · ${set.weightLb} lb`;
+      // A NEW note, not merely a note on screen. Testing prNote itself would let
+      // an ordinary completed set re-arm the dismissal of whatever is already up,
+      // and on a 5x5 that is four more chances each — the banner would sit there
+      // for the rest of the workout, announcing a record set ten minutes ago.
+      let fresh = false;
       if (previous === undefined) {
-        prNote = { kind: "first", text: `${set.exerciseName} · ${set.weightLb} lb` };
+        prNote = { kind: "first", text };
+        fresh = true;
       } else if (set.weightLb > previous) {
-        prNote = { kind: "pr", text: `${set.exerciseName} · ${set.weightLb} lb` };
+        prNote = { kind: "pr", text };
+        fresh = true;
         celebrate({ particleCount: 120, spread: 70, origin: { y: 0.5 } });
       }
-      if (prNote) {
+      if (fresh) {
         if (prTimer) clearTimeout(prTimer);
         prTimer = setTimeout(() => (prNote = null), 6000);
       }
