@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import Admin from "./Admin.svelte";
 import type { AdminUser } from "../lib/api";
 import { auth } from "../lib/auth.svelte";
+import { formatLongDateTime } from "../lib/date";
 import { PUN_NAMES } from "../lib/punNames";
 import { testUser } from "../lib/testFixtures";
 
@@ -63,8 +64,18 @@ describe("Admin", () => {
     await screen.findByText("Ada Lovelace");
     expect(screen.getByText("Grace Hopper")).toBeInTheDocument();
     expect(screen.getByText("2 accounts")).toBeInTheDocument();
-    // The instant is rendered as the day it happened, not as an ISO string.
-    expect(screen.getByText("March 17 2026")).toBeInTheDocument();
+    // Rendered as relative text, never as the ISO string. The visible words
+    // drift with today's date, so the assertion is on the tooltip — which is
+    // also what proves the instant was read as one rather than passed through.
+    // Compared against the formatter rather than a literal so this does not
+    // depend on the timezone of whatever machine runs it.
+    const created = document.querySelector(
+      'time[datetime="2026-03-17T18:00:00Z"]',
+    );
+    expect(created).toHaveAttribute(
+      "title",
+      formatLongDateTime("2026-03-17T18:00:00Z"),
+    );
   });
 
   it("marks the owner and the caller", async () => {

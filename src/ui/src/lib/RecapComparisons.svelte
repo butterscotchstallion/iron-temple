@@ -3,8 +3,8 @@
   import { Card } from "$lib/components/ui/card";
   import Gauge from "@lucide/svelte/icons/gauge";
   import TrendingUp from "@lucide/svelte/icons/trending-up";
+  import Timestamp from "./Timestamp.svelte";
   import { formatDelta } from "./racked";
-  import { formatLongDate } from "./date";
   import { formatOrdinal, formatPace } from "./recap";
 
   // The two questions a month's recap cannot answer: was that quick, and is the
@@ -66,7 +66,7 @@
         </p>
         {#if progress.previousPerformedOn}
           <p class="text-xs text-muted-foreground">
-            vs. {formatLongDate(progress.previousPerformedOn)}
+            vs. <Timestamp value={progress.previousPerformedOn} kind="date" />
           </p>
         {/if}
         <!-- Named because the figure is a pairwise comparison: a percentage

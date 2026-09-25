@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Card } from "$lib/components/ui/card";
   import Scale from "@lucide/svelte/icons/scale";
-  import { formatLongDate } from "./date";
+  import Timestamp from "./Timestamp.svelte";
   import type { WeighIn } from "./api";
 
   let {
@@ -53,11 +53,17 @@
     if (rangeError) return `Enter a weight between ${MIN_LB} and ${MAX_LB} lb`;
     if (bodyweightLb != null) return "Logged for this session";
     if (readonly) return "No weigh-in";
-    if (carried && lastWeighIn) {
-      return `Carried from ${formatLongDate(lastWeighIn.performedOn)} · edit to log today`;
-    }
+    if (carried && lastWeighIn) return null;
     return "First weigh-in — today's number starts the series";
   });
+
+  // The one caption that names a date, split out because the date is a
+  // <Timestamp> and a component cannot be interpolated into a string. Derived
+  // from `caption` returning null rather than by restating its four conditions,
+  // so the branch precedence above stays the single place that decides.
+  const carriedFrom = $derived(
+    caption === null ? (lastWeighIn?.performedOn ?? null) : null,
+  );
 
   // Committed on change (blur or Enter), not on every keystroke: a half-typed
   // "18" on the way to "184" is not a weigh-in worth a round trip.
@@ -128,6 +134,13 @@
       : 'text-muted-foreground'}"
     data-testid="bodyweight-caption"
   >
-    {saving ? "Saving…" : caption}
+    {#if saving}
+      Saving…
+    {:else if carriedFrom}
+      Carried from <Timestamp value={carriedFrom} kind="date" /> · edit to log
+      today
+    {:else}
+      {caption}
+    {/if}
   </p>
 </Card>

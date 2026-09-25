@@ -6,8 +6,8 @@
   import Dices from "@lucide/svelte/icons/dices";
   import ErrorBanner from "../lib/ErrorBanner.svelte";
   import LifterName from "../lib/LifterName.svelte";
+  import Timestamp from "../lib/Timestamp.svelte";
   import { auth } from "../lib/auth.svelte";
-  import { formatLongDate } from "../lib/date";
   import { passphrase } from "../lib/passphrase";
   import { randomPunName } from "../lib/punNames";
   import { createUser, listUsers, type AdminUser } from "../lib/api";
@@ -122,12 +122,6 @@
     // the same two keystrokes as adding one — and so the second account never
     // reuses the password just read down the phone for the first.
     password = passphrase();
-  }
-
-  // createdAt is an RFC 3339 instant; formatLongDate takes a date-only string.
-  // The day is all this column shows, and the leading ten characters are it.
-  function createdOn(iso: string): string {
-    return formatLongDate(iso.slice(0, 10));
   }
 
   onMount(load);
@@ -307,9 +301,10 @@
               </span>
             {/if}
 
-            <span class="ml-auto text-sm text-muted-foreground">
-              {createdOn(user.createdAt)}
-            </span>
+            <Timestamp
+              value={user.createdAt}
+              class="ml-auto text-sm text-muted-foreground"
+            />
           </li>
         {/each}
       </ul>

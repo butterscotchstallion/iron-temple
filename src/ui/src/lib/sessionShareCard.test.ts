@@ -89,7 +89,10 @@ function mkLift(name: string, volumeLb: number, topWeightLb: number) {
 describe("sessionShareCardContent", () => {
   it("leads with the day, the date and the tonnage", () => {
     const c = sessionShareCardContent(mkRecap(), "Ada");
-    expect(c.eyebrow).toBe("WORKOUT A · 2026-09-13");
+    // The date is formatted, not raw. This eyebrow was the one place in the app
+    // that put a bare "2026-09-13" in front of a reader, and a share card is a
+    // picture — there is no hover here to recover a readable date from.
+    expect(c.eyebrow).toBe("WORKOUT A · SEPTEMBER 13 2026");
     expect(c.lede).toBe("Ada lifted");
     expect(c.headline).toBe("18,240 LB");
     expect(c.comparison).toBe("That's 3 pickup trucks.");

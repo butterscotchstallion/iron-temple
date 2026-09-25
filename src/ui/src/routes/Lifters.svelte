@@ -5,8 +5,8 @@
   import Avatar from "../lib/Avatar.svelte";
   import LifterName from "../lib/LifterName.svelte";
   import FollowButton from "../lib/FollowButton.svelte";
+  import Timestamp from "../lib/Timestamp.svelte";
   import { auth } from "../lib/auth.svelte";
-  import { formatLongDate } from "../lib/date";
   import { listLifters, type Lifter } from "../lib/api";
   import Loading from "../lib/skeleton/Loading.svelte";
   import SkeletonRows from "../lib/skeleton/SkeletonRows.svelte";
@@ -35,15 +35,6 @@
       lifters = result.data;
     }
     loading = false;
-  }
-
-  // "Has not trained yet" rather than a date, because the field is absent for an
-  // account that has never logged a rep — see the Lifter schema. An account
-  // created this morning and an account that lifted for a year and stopped are
-  // different facts, and only one of them has a date to show.
-  function lastTrained(lifter: Lifter): string {
-    if (!lifter.lastTrainedOn) return "Hasn't trained yet";
-    return `Last trained ${formatLongDate(lifter.lastTrainedOn)}`;
   }
 
   onMount(load);
@@ -94,8 +85,20 @@
                     <span class="text-xs text-muted-foreground">(you)</span>
                   {/if}
                 </span>
+                <!-- "Hasn't trained yet" rather than a date, because the field is
+                     absent for an account that has never logged a rep — see the
+                     Lifter schema. An account created this morning and an account
+                     that lifted for a year and stopped are different facts, and
+                     only one of them has a date to show. -->
                 <span class="truncate text-sm text-muted-foreground">
-                  {lastTrained(lifter)}
+                  {#if lifter.lastTrainedOn}
+                    Last trained <Timestamp
+                      value={lifter.lastTrainedOn}
+                      kind="date"
+                    />
+                  {:else}
+                    Hasn't trained yet
+                  {/if}
                 </span>
               </span>
             </a>

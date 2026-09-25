@@ -1,7 +1,7 @@
 <script lang="ts">
   import Crown from "@lucide/svelte/icons/crown";
   import Share2 from "@lucide/svelte/icons/share-2";
-  import { formatLongDate } from "./date";
+  import Timestamp from "./Timestamp.svelte";
   import { formatRemaining } from "./achievementShareCard";
   import { barFraction } from "./racked";
   import type { LifterAchievement, RackedUpcomingMilestone } from "./api";
@@ -37,23 +37,18 @@
   } = $props();
 
   /**
-   * What an entry says under its label.
+   * The reign count, which is only mentioned past one. "Held once" is what every
+   * first win reads as, and it adds nothing to a line that already says when.
    *
-   * The two halves of the wire contract are used for what they are for: a
-   * current holder is described by when this reign started, and a lapsed one by
-   * when they last had it. Picking on `heldNow` rather than probing the dates is
-   * what the field is there for.
-   *
-   * The reign count is only mentioned past one. "Held once" is what every first
-   * win reads as and it adds nothing to a line that already says when.
+   * The rest of that line is markup rather than a string, because the date in it
+   * is a <Timestamp> and a component cannot be interpolated into a template
+   * literal. The two halves of the wire contract are still used for what they
+   * are for — a current holder is described by when this reign started, a lapsed
+   * one by when they last had it — and it still branches on `heldNow` rather
+   * than probing the dates, which is what that field is there for.
    */
-  function detail(item: LifterAchievement): string {
-    const since = formatLongDate(item.lastHeldFrom);
-    const again =
-      item.timesHeld > 1 ? ` · held ${item.timesHeld} times` : "";
-    return item.heldNow
-      ? `Holding it since ${since}${again}`
-      : `Last held ${since}${again}`;
+  function again(item: LifterAchievement): string {
+    return item.timesHeld > 1 ? ` · held ${item.timesHeld} times` : "";
   }
 </script>
 
@@ -92,7 +87,10 @@
               </span>
             {/if}
           </p>
-          <p class="text-xs text-muted-foreground">{detail(item)}</p>
+          <p class="text-xs text-muted-foreground">
+            {item.heldNow ? "Holding it since" : "Last held"}
+            <Timestamp value={item.lastHeldFrom} />{again(item)}
+          </p>
           <p class="mt-1 text-xs text-muted-foreground/80">
             {item.achievement.description}
           </p>

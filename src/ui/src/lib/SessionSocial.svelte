@@ -5,6 +5,7 @@
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import Avatar from "./Avatar.svelte";
   import LifterName from "./LifterName.svelte";
+  import Timestamp from "./Timestamp.svelte";
   import Loading from "./skeleton/Loading.svelte";
   import Skeleton from "./skeleton/Skeleton.svelte";
   import { auth } from "./auth.svelte";
@@ -275,13 +276,6 @@
     return comment.author.id === auth.me?.id || auth.me?.isAdmin === true;
   }
 
-  function saidAt(iso: string): string {
-    return new Date(iso).toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-    });
-  }
-
   // Applause and conversation arriving while this card is on screen.
   //
   // Before this, two lifters talking at once each saw a stale list until one of
@@ -423,9 +417,10 @@
                   crownSize="size-3"
                   link
                 />
-                <span class="shrink-0 text-xs text-muted-foreground">
-                  {saidAt(comment.createdAt)}
-                </span>
+                <Timestamp
+                  value={comment.createdAt}
+                  class="shrink-0 text-xs text-muted-foreground"
+                />
               </p>
               <!-- break-words, not truncate: a comment is the content, and 256
                    characters wrap rather than being cut off. -->

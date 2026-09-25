@@ -6,12 +6,12 @@
   import Pencil from "@lucide/svelte/icons/pencil";
   import Avatar from "../lib/Avatar.svelte";
   import LifterName from "../lib/LifterName.svelte";
+  import Timestamp from "../lib/Timestamp.svelte";
   import HouseIcon from "../lib/HouseIcon.svelte";
   import HouseForm from "../lib/HouseForm.svelte";
   import ErrorCard from "../lib/ErrorCard.svelte";
   import Loading from "../lib/skeleton/Loading.svelte";
   import SkeletonRows from "../lib/skeleton/SkeletonRows.svelte";
-  import { formatLongDate } from "../lib/date";
   import { loadHouses } from "../lib/houses.svelte";
   import { pushToast } from "../lib/toast.svelte";
   import {
@@ -205,7 +205,7 @@
           {/if}
           <p class="text-xs text-muted-foreground">
             {house.memberCount === 1 ? "1 member" : `${house.memberCount} members`}
-            · Founded {formatLongDate(house.createdAt)}
+            · Founded <Timestamp value={house.createdAt} />
           </p>
         </div>
       </div>
@@ -288,7 +288,7 @@
                 <span class="flex min-w-0 flex-1 flex-col">
                   <LifterName lifter={request.lifter} class="font-semibold text-foreground" />
                   <span class="text-xs text-muted-foreground">
-                    Asked {formatLongDate(request.requestedAt)}
+                    Asked <Timestamp value={request.requestedAt} />
                   </span>
                 </span>
                 <span class="flex shrink-0 gap-2">
@@ -339,9 +339,14 @@
                   {/if}
                 </span>
                 <span class="truncate text-sm text-muted-foreground">
-                  {member.lifter.lastTrainedOn
-                    ? `Last trained ${formatLongDate(member.lifter.lastTrainedOn)}`
-                    : "Hasn't trained yet"}
+                  {#if member.lifter.lastTrainedOn}
+                    Last trained <Timestamp
+                      value={member.lifter.lastTrainedOn}
+                      kind="date"
+                    />
+                  {:else}
+                    Hasn't trained yet
+                  {/if}
                 </span>
               </span>
             </a>

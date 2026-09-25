@@ -8,7 +8,7 @@
   import { auth } from "./auth.svelte";
   import { achievementLabel } from "./achievements.svelte";
   import { houseById } from "./houses.svelte";
-  import { relativeTime } from "./date";
+  import Timestamp from "./Timestamp.svelte";
   import {
     clearAll,
     markAllRead,
@@ -399,9 +399,10 @@
                     “{item.commentBody}”
                   </span>
                 {/if}
-                <span class="text-xs text-muted-foreground">
-                  {relativeTime(item.createdAt)}
-                </span>
+                <Timestamp
+                  value={item.createdAt}
+                  class="text-xs text-muted-foreground"
+                />
               </span>
               {#if !item.readAt}
                 <!-- The unread mark. Decoration only: "unread" is already in
