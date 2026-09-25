@@ -38,7 +38,7 @@
   <a
     href={`/houses/${house.id}`}
     use:link
-    class="text-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+    class="text-sm font-medium text-primary transition hover:text-neon-lift hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
   >
     View House
   </a>

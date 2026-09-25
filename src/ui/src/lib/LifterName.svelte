@@ -58,6 +58,15 @@
     /**
      * Whether the name is a link to this lifter's profile.
      *
+     * A linked name fades to `neon-lift` on hover, which is the app's text-link
+     * idiom — the same `transition hover:text-neon-lift` every other text link uses,
+     * and a lighter violet than either resting colour so hovering makes a name easier
+     * to read rather than harder. See the note beside the palette in app.css for the
+     * measured figures. It survives a caller's own colour:
+     * `{className}` is appended last so a `text-foreground` there wins the resting
+     * shade, but a `hover:` variant outranks a plain `text-*` on hover regardless of
+     * order, so every linked name reacts the same way whatever it sits in.
+     *
      * Off by default, because the two surfaces that came first cannot take one: a
      * feed row is already an anchor to the session and a link inside a link is
      * invalid markup, and the roster's row is an anchor to this very profile. Every
@@ -98,7 +107,7 @@
     <a
       href={`/lifters/${lifter.id}`}
       use:spaLink
-      class="truncate rounded hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary {className}"
+      class="truncate rounded transition hover:text-neon-lift hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary {className}"
     >
       {name}
     </a>

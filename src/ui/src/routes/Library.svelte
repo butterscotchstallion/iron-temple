@@ -252,7 +252,7 @@
               <a
                 use:link
                 href="/exercises/{exercise.id}"
-                class="flex-1 leading-tight underline-offset-2 transition hover:text-primary hover:underline"
+                class="flex-1 leading-tight underline-offset-2 transition hover:text-neon-lift hover:underline"
               >
                 <span class="block font-semibold text-card-foreground">
                   {exercise.name}
