@@ -126,6 +126,11 @@ async function mockCommon(page: import("@playwright/test").Page) {
   await page.route("**/api/v1/achievements**", (route) =>
     route.fulfill({ json: { items: [] } }),
   );
+  // The levels, polled on exactly the same terms as the crowns above and reached
+  // here for the same reason. Empty, so no name draws a badge.
+  await page.route("**/api/v1/levels**", (route) =>
+    route.fulfill({ json: { items: [] } }),
+  );
 
   // The two the Astroturfing screen reads on mount. Idle and switched off, which
   // is the state that screen's assertions here assume.

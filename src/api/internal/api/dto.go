@@ -441,6 +441,44 @@ type houseMembershipDTO struct {
 	IsOwner bool  `json:"isOwner"`
 }
 
+// lifterLevelDTO is one lifter's standing: the level, and how far into it.
+//
+// NOT folded into lifterDTO, which is where it would obviously go and is the one
+// place it must not. Six queries hydrate a lifter for the wire and
+// db/queries/users.sql requires that a column added to one roster query is added
+// to the other — joining a count of sessions into all of them to draw an ornament
+// is the cost /achievements and /houses both declined to pay, and this ornament
+// sits in the same row as theirs.
+type lifterLevelDTO struct {
+	LifterID int32 `json:"lifterId"`
+	Level    int   `json:"level"`
+	XP       int   `json:"xp"`
+	// XPIntoLevel and XPForNextLevel are sent rather than left to the client so
+	// the curve has one definition. The second is what the WHOLE current level
+	// costs, not what is left to pay: it is the denominator of a progress bar,
+	// and a client sent the remainder would have to reconstruct it to draw one.
+	XPIntoLevel    int `json:"xpIntoLevel"`
+	XPForNextLevel int `json:"xpForNextLevel"`
+}
+
+// lifterLevelListDTO is the site-wide read: every lifter's level at once.
+//
+// achievementListDTO's shape and its reason — this is what a client fetches once
+// in order to draw an ornament beside arbitrary names, so answering per lifter
+// would be a request per row of the feed.
+//
+// EVERY ACCOUNT IS LISTED, including one that has never trained and so sits at
+// level 1 with nothing. Leaving those out was the obvious economy and is wrong
+// twice: absence is also the honest answer for an id this install does not have —
+// a deleted account still named by an old notification row — so a client could not
+// tell "untrained" from "unknown"; and it would put "a lifter starts at level 1"
+// into the UI as a default, which is the curve leaking into a second
+// implementation that can disagree with internal/levels. One row per account is
+// bounded by a number the install's owner sets by hand.
+type lifterLevelListDTO struct {
+	Items []lifterLevelDTO `json:"items"`
+}
+
 // houseListDTO is the site-wide read: every House, and who is in each.
 type houseListDTO struct {
 	Items       []houseDTO           `json:"items"`

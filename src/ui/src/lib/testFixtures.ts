@@ -25,6 +25,7 @@ import type {
   LeaderboardEntry,
   Lifter,
   LifterAchievement,
+  LifterLevel,
   Notification,
   ProgramSummary,
   RackedReport,
@@ -497,6 +498,27 @@ export function testHouseDetail(overrides: Partial<HouseDetail> = {}): HouseDeta
     memberCount: 1,
     members: [testHouseMember({ isOwner: true })],
     viewer: { isMember: false, isOwner: false, inAnotherHouse: false },
+    ...overrides,
+  };
+}
+
+/**
+ * A lifter's level, mid-level rather than sitting on a boundary.
+ *
+ * 340 into a level that costs 1,200 is deliberate: a fixture standing exactly on
+ * a floor would let a card that renders `xpIntoLevel` where it means
+ * `xpForNextLevel` — or draws a bar at 0% — pass without anybody noticing. These
+ * four figures are the ones the server sends for a lifter 69 sessions in.
+ */
+export function testLifterLevel(
+  overrides: Partial<LifterLevel> = {},
+): LifterLevel {
+  return {
+    lifterId: 2,
+    level: 12,
+    xp: 6900,
+    xpIntoLevel: 300,
+    xpForNextLevel: 1200,
     ...overrides,
   };
 }

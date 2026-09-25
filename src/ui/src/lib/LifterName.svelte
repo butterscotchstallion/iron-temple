@@ -3,6 +3,8 @@
   import Crown from "@lucide/svelte/icons/crown";
   import { crownsFor } from "./achievements.svelte";
   import { houseFor } from "./houses.svelte";
+  import { levelFor } from "./levels.svelte";
+  import LevelBadge from "./LevelBadge.svelte";
   import Sigil from "./Sigil.svelte";
   import type { User } from "./api";
 
@@ -27,6 +29,9 @@
     crownSize = "size-3.5",
     crowns: showCrowns = true,
     sigil: showSigil = true,
+    level: showLevel = true,
+    levelCard = false,
+    levelCardSuppressed = false,
     link = false,
   }: {
     lifter: NamedUser;
@@ -55,6 +60,30 @@
      * the heading already says.
      */
     sigil?: boolean;
+    /**
+     * Whether to draw the level badge.
+     *
+     * Off for the same kind of surface the two above are off for: one that is
+     * itself about how much somebody has trained, where the number beside the name
+     * would repeat what the surface already says.
+     */
+    level?: boolean;
+    /**
+     * Whether hovering the badge opens the full card rather than a plain tooltip.
+     *
+     * The header only. Progress into a level is the lifter's own business, and a
+     * card on every row of the feed would be thirty popovers waiting to happen —
+     * see LevelBadge.
+     */
+    levelCard?: boolean;
+    /**
+     * Hold that card shut while the caller's own overlay is up.
+     *
+     * Only meaningful with `levelCard`, and only the header passes it: its name
+     * sits inside the account button, so hovering opens the card and clicking
+     * opens the menu, and nothing coordinates the two. See LevelBadge.
+     */
+    levelCardSuppressed?: boolean;
     /**
      * Whether the name is a link to this lifter's profile.
      *
@@ -94,6 +123,13 @@
   // lifter in two Houses is a row the database cannot hold. Read from the same
   // kind of map and for the same reason — see houses.svelte.ts.
   const house = $derived(showSigil ? houseFor(lifter.id) : null);
+
+  // AT MOST ONE and always present once the list has loaded, which is the way this
+  // differs from the two above: a lifter belongs to no House and holds no crowns
+  // perfectly normally, where everybody has a level — an account that has never
+  // trained is level 1 rather than absent. Null here means the list has not landed
+  // yet, or the id is one this install does not carry. See levels.svelte.ts.
+  const level = $derived(showLevel ? levelFor(lifter.id) : null);
 </script>
 
 <span class="inline-flex min-w-0 items-baseline gap-1">
@@ -119,6 +155,14 @@
        is truncating stays readable in the same place every time. -->
   {#if house}
     <Sigil {house} />
+  {/if}
+  <!-- After the sigil and before the crowns. Both of the first two are
+       fixed-width, so a row that is truncating keeps them in the same place every
+       time; the crowns vary in number and go last for that reason. Sigil first of
+       the two because who somebody trains with is the more particular claim — the
+       level is a number everybody has. -->
+  {#if level}
+    <LevelBadge {level} card={levelCard} suppressed={levelCardSuppressed} />
   {/if}
   {#if crowns.length > 0}
     <!-- shrink-0 so the crowns survive a row that is truncating the name: the

@@ -432,6 +432,14 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/api/v1/houses**", (route) =>
     route.fulfill({ json: { items: [], memberships: [] } }),
   );
+  // Polled by App.svelte beside the two above, and reached by every signed-in page
+  // load for their reason. Empty, so no name draws a level badge — levelFor gives
+  // null for a lifter the list does not carry, which is what an empty list makes
+  // everybody. Populating it here would append a digit to every name these tests
+  // assert on.
+  await page.route("**/api/v1/levels**", (route) =>
+    route.fulfill({ json: { items: [] } }),
+  );
 });
 
 test("renders the programs list", async ({ page }) => {

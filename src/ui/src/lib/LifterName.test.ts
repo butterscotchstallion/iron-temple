@@ -3,12 +3,14 @@ import { render, screen } from "@testing-library/svelte";
 import LifterName from "./LifterName.svelte";
 import { achievements, resetAchievements } from "./achievements.svelte";
 import { houses, resetHouses } from "./houses.svelte";
+import { levels, resetLevels } from "./levels.svelte";
 import {
   testAchievement,
   testAchievementHolders,
   testHouse,
   testHouseMembership,
   testLifter,
+  testLifterLevel,
   testUser,
 } from "./testFixtures";
 
@@ -42,6 +44,7 @@ function crowned(entries: { achievement: ReturnType<typeof testAchievement>; ids
 afterEach(() => {
   resetAchievements();
   resetHouses();
+  resetLevels();
 });
 
 describe("the name", () => {
@@ -210,6 +213,79 @@ describe("the sigil", () => {
     crowned([{ achievement: testAchievement(), ids: [1] }]);
     housed(1, { sigil: "IRON" });
     render(LifterName, { props: { lifter: testUser({ id: 1 }) } });
+    expect(screen.getByText("IRON")).toBeInTheDocument();
+    expect(screen.getByText("Top of Week streak")).toBeInTheDocument();
+  });
+});
+
+describe("the level", () => {
+  /**
+   * Give this lifter a level.
+   *
+   * Seeds the module for `crowned`'s and `housed`'s reason: the lookup is as much
+   * under test as the markup, and a level drawn beside the wrong name is the
+   * failure that matters.
+   */
+  function levelled(lifterId: number, overrides = {}) {
+    levels.items = [testLifterLevel({ lifterId, ...overrides })];
+    levels.loaded = true;
+  }
+
+  it("draws the number beside the name", () => {
+    levelled(1, { level: 12 });
+    render(LifterName, { props: { lifter: testUser({ id: 1 }) } });
+    expect(screen.getByTestId("level-badge")).toHaveTextContent("12");
+  });
+
+  // A bare digit after a name reads as part of the name.
+  it("says what the number means in text a screen reader reaches", () => {
+    levelled(1, { level: 12 });
+    render(LifterName, { props: { lifter: testUser({ id: 1 }) } });
+    expect(screen.getByText("Level 12")).toBeInTheDocument();
+  });
+
+  it("draws none for a lifter the list does not carry", () => {
+    levelled(2, { level: 12 });
+    render(LifterName, { props: { lifter: testUser({ id: 1 }) } });
+    expect(screen.queryByTestId("level-badge")).not.toBeInTheDocument();
+  });
+
+  // The cold-load case. A Level 1 default here would put a "1" beside every name
+  // on the feed for the first beat of a load and then jump.
+  it("draws none before the levels have loaded", () => {
+    render(LifterName, { props: { lifter: testUser({ id: 1 }) } });
+    expect(screen.getByText("Ada Lovelace")).toBeInTheDocument();
+    expect(screen.queryByTestId("level-badge")).not.toBeInTheDocument();
+  });
+
+  // An untrained lifter is listed at level 1 rather than left out, so this is an
+  // ordinary badge and not an absence.
+  it("draws level 1 for a lifter who has trained nothing", () => {
+    levelled(1, { level: 1, xp: 0, xpIntoLevel: 0, xpForNextLevel: 100 });
+    render(LifterName, { props: { lifter: testUser({ id: 1 }) } });
+    expect(screen.getByTestId("level-badge")).toHaveTextContent("1");
+  });
+
+  // For a surface that is itself about how much somebody has trained.
+  it("can be turned off", () => {
+    levelled(1, { level: 12 });
+    render(LifterName, { props: { lifter: testUser({ id: 1 }), level: false } });
+    expect(screen.queryByTestId("level-badge")).not.toBeInTheDocument();
+    expect(screen.getByText("Ada Lovelace")).toBeInTheDocument();
+  });
+
+  // All three ornaments are independent: a lifter can have any combination, and
+  // turning one off must not take the others with it.
+  it("draws alongside a sigil and a crown", () => {
+    crowned([{ achievement: testAchievement(), ids: [1] }]);
+    houses.items = [testHouse({ id: 7, sigil: "IRON" })];
+    houses.memberships = [testHouseMembership({ userId: 1, houseId: 7 })];
+    houses.loaded = true;
+    levelled(1, { level: 12 });
+
+    render(LifterName, { props: { lifter: testUser({ id: 1 }) } });
+
+    expect(screen.getByTestId("level-badge")).toHaveTextContent("12");
     expect(screen.getByText("IRON")).toBeInTheDocument();
     expect(screen.getByText("Top of Week streak")).toBeInTheDocument();
   });

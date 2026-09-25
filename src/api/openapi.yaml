@@ -61,6 +61,7 @@ tags:
   - name: lifters
   - name: achievements
   - name: houses
+  - name: levels
   - name: recognition
   - name: notifications
   - name: exercises
@@ -898,6 +899,62 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AchievementList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /levels:
+    get:
+      tags: [levels]
+      operationId: getLevels
+      summary: How much training every lifter has behind them
+      description: >
+        Every lifter on the install, with the level their training has reached
+        them to.
+
+        **This is the read that lets a client draw a level beside somebody else's
+        name**, and it is shaped like `/achievements` and `/houses` for their
+        reason: fetch it once, keep it, and consult it per name rendered. A
+        per-lifter question would be a request per row of the feed.
+
+        **Every account is listed, including one that has never trained** — it
+        comes back at level 1 with no experience. Omitting them was the obvious
+        economy and is not taken, because absence is also the honest answer for an
+        id this install does not have, and a client could then not tell an
+        untrained lifter from an unknown one. Level 1 is the floor; nobody is
+        level 0, because a zero beside a name reads as a fault rather than as a
+        new account.
+
+        **Experience is a flat 100 XP per qualifying session**, and a session
+        qualifies when it is over and somebody actually lifted in it: finished by
+        hand, or started more than twelve hours ago, *and* carrying at least one
+        set with reps logged against it. A session that was opened and abandoned
+        earns nothing however long ago it was opened. Note that a set which missed
+        its target still counts — `SessionSet.completed` means the set hit its
+        target reps, and requiring it would stop paying anybody who had a hard day.
+
+        **The level is what it is measuring that matters.** Not strength, not
+        volume — a twenty-set session and a three-set session are both worth 100.
+        The badge answers "has this person been showing up", which is the one
+        claim a newcomer can read off a roster; how strong somebody is, the
+        leaderboard and the crowns already say.
+
+        **Each level costs more than the last** — level `L` costs `(L-1) x 100`
+        XP, so reaching it has cost `50 x L x (L-1)` in total. In sessions: level
+        2 is 1, level 5 is 10, level 12 is 66, level 30 is 435.
+
+        **Nothing here is stored.** Unlike `/achievements`, which is reconciled on
+        a schedule, this is counted at read time — so it is never stale, a deleted
+        session takes its experience with it, and a session edited after the fact
+        cannot leave a total behind that disagrees with it. One consequence worth
+        expecting: because "over" is partly a statement about the clock, this
+        response can change with no write having happened anywhere.
+      responses:
+        "200":
+          description: Every lifter carrying any experience
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LifterLevels"
         "401":
           $ref: "#/components/responses/Unauthorized"
 
@@ -3499,6 +3556,61 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/AchievementHolders"
+
+    # ---- Levels ----
+
+    LifterLevel:
+      type: object
+      required: [lifterId, level, xp, xpIntoLevel, xpForNextLevel]
+      description: >
+        One lifter's standing: the level they have reached, and how far into it
+        they are.
+
+        Deliberately NOT a field on `Lifter`. Six queries hydrate a lifter for the
+        wire and `db/queries/users.sql` requires that a column added to one roster
+        query is added to the other — joining this into all of them to draw an
+        ornament is the cost `/achievements` and `/houses` both declined to pay,
+        and this is the same ornament in the same place.
+      properties:
+        lifterId:
+          type: integer
+          description: Whose standing this is, matching `Lifter.id`.
+        level:
+          type: integer
+          description: >
+            The level reached. Never below 1, and the only figure the badge
+            beside a name draws.
+        xp:
+          type: integer
+          description: >
+            Lifetime experience. Always a multiple of 100, because a qualifying
+            session is worth exactly that and nothing else earns any.
+        xpIntoLevel:
+          type: integer
+          description: >
+            How much of the current level has been earned. Zero on the session
+            that reached it.
+        xpForNextLevel:
+          type: integer
+          description: >
+            What the whole of the current level costs — the DENOMINATOR of a
+            progress bar, not what is left to pay. Sending the remainder instead
+            would make every caller reconstruct this to draw anything, and the
+            two figures together are what let the header's card show progress
+            without reimplementing the curve.
+
+    LifterLevels:
+      type: object
+      required: [items]
+      description: >
+        The site-wide read. Every lifter on the install, once, so a client can draw
+        a level beside any name it renders without asking per name. An account that
+        has never trained is present at level 1 rather than left out.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/LifterLevel"
 
     # ---- Houses ----
 

@@ -286,6 +286,29 @@ A House is also **not** a follow. Following decides who *hears* about an
 achievement; a House decides who is *grouped* with whom. Joining one doesn't follow
 anybody, and you can follow a lifter who belongs to no House at all.
 
+### Levels
+
+Every session you train earns **experience**, and experience makes a **level** — a
+small number worn beside your name, next to your sigil, wherever the app draws it.
+It is there to answer the one question a roster otherwise can't: not who is strongest
+this month, which the leaderboard already says, but who has been showing up. Hovering
+your own level in the header shows how far into it you are and what the next one costs.
+
+A session is worth **100 experience**, flat, whether it was three sets or twenty.
+That is deliberate — the number is a record of turning up, not a second opinion about
+how much you lift. A session counts once it is **over** and you actually lifted in it:
+finished by hand, or simply left behind for twelve hours, and carrying at least one set
+with reps logged against it. Forgetting to tap Finish costs you nothing. Missing your
+target reps costs you nothing either; a hard day is still a day you trained. Opening a
+session and walking away earns nothing at all.
+
+**Levels get harder as they go.** The second costs one session, the fifth costs ten,
+the twelfth costs sixty-six, the thirtieth four hundred and thirty-five. Everyone
+starts at level 1, including an account that has never trained.
+
+Nothing is stored: your level is counted from your sessions every time it is asked
+for. So it is never stale, and a session you delete takes its experience with it.
+
 ## Documentation
 
 | | |

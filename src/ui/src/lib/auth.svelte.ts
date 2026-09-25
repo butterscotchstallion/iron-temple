@@ -9,6 +9,7 @@ import {
 import { clearCache } from "./cache.svelte";
 import { resetAchievements } from "./achievements.svelte";
 import { resetHouses } from "./houses.svelte";
+import { resetLevels } from "./levels.svelte";
 import { resetNotifications } from "./notifications.svelte";
 import { resetLive } from "./live.svelte";
 import { flush } from "./writeQueue.svelte";
@@ -124,6 +125,9 @@ export async function signOut(): Promise<void> {
     // And the Houses, which hold the same thing the crowns do — other lifters'
     // names, and now which group each of them belongs to.
     resetHouses();
+    // And the levels, for the third time the same reason: this one says how much
+    // every lifter on the previous account's install has trained.
+    resetLevels();
     // The socket was opened as the account that is signing out. Closed here
     // rather than left to App.svelte's effect, so nothing of theirs is still
     // connected while the next sign-in is being typed.
