@@ -47,6 +47,13 @@
 
   let period = $state<Period>("month");
   let report = $state<RackedReport | null>(null);
+
+  // Read through `?? []` because this field is NEW and load() paints from
+  // cachedValue before any request returns — so a report cached before first
+  // times existed comes back without the field, whatever its type claims.
+  // Unguarded, `.length` throws on that first paint, and offline it keeps
+  // throwing, because nothing arrives to replace the stale entry.
+  const firstTimes = $derived(report?.firstTimes ?? []);
   let loading = $state(true);
   let failed = $state(false);
   let sharing = $state(false);
@@ -635,14 +642,14 @@
     <!-- One card, one line, however many lifts. A lifter's opening month
          introduces everything at once, and listing each as its own row would bury
          the records card above it under work that beat nothing. -->
-    {#if report.firstTimes.length > 0}
+    {#if firstTimes.length > 0}
       <Card class="p-4">
         <h3 class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-          {report.firstTimes.length}
-          {report.firstTimes.length === 1 ? "lift" : "lifts"} for the first time
+          {firstTimes.length}
+          {firstTimes.length === 1 ? "lift" : "lifts"} for the first time
         </h3>
         <p class="text-sm text-foreground">
-          {report.firstTimes.map((f) => f.exerciseName).join(" · ")}
+          {firstTimes.map((f) => f.exerciseName).join(" · ")}
         </p>
       </Card>
     {/if}

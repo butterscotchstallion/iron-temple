@@ -206,9 +206,16 @@
   // Same shape from either source, for the same reason prs is: the offline list
   // is the list the server confirms, so neither path may classify a lift the
   // other would not.
+  //
+  // `?? []` on the server side too, which the fields beside it do not need. This
+  // one is NEW, and load() assigns `recap` from cachedValue and paints before any
+  // request returns — so a recap cached before first times existed comes back
+  // with the field simply missing. The type says otherwise and the runtime does
+  // not care: unguarded, that first paint throws, and offline it throws forever,
+  // because nothing ever arrives to replace the stale entry.
   const firstTimes = $derived<RecapFirstTimeRow[]>(
     recap
-      ? recap.firstTimes.map((f) => ({ exerciseName: f.exerciseName }))
+      ? (recap.firstTimes ?? []).map((f) => ({ exerciseName: f.exerciseName }))
       : (local?.firstTimes ?? []).map((f) => ({ exerciseName: f.exerciseName })),
   );
 

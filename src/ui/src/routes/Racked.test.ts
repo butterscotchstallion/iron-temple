@@ -265,6 +265,24 @@ describe("Racked", () => {
     expect(screen.queryByRole("heading", { name: /personal record/ })).not.toBeInTheDocument();
   });
 
+  // Same exposure as the session recap: this page paints from cachedValue before
+  // any request returns, and a report cached before firstTimes existed comes back
+  // without the field however the type reads.
+  it("renders a report that predates first times", async () => {
+    const legacy = fullReport() as Partial<RackedReport>;
+    delete legacy.firstTimes;
+    getRacked.mockResolvedValue({ status: 200, data: legacy, headers: new Headers() });
+    render(Racked);
+
+    // The records card still draws, so the page rendered rather than throwing.
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "1 personal record" })).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByRole("heading", { name: /for the first time/ }),
+    ).not.toBeInTheDocument();
+  });
+
   // The rule a lifter would otherwise have to infer from two cards that look
   // alike. StreakCard already does this for the streak.
   it("explains how records are decided on request", async () => {
