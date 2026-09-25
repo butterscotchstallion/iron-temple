@@ -757,6 +757,29 @@ func (s *Server) leaveHouse(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := s.q.WithTx(tx)
 
+	// Same row lock the asking endpoint takes, and for the same reason: leaving
+	// and asking BOTH decide what to do from a count of who is left, and nothing
+	// else here contends for the House's row — RemoveHouseMember deletes a child
+	// row and SupersedeHouseOpenRequests updates a different table.
+	//
+	// Unlocked, the two interleave into the exact state the supersede exists to
+	// prevent. Asking reads an owner who is on their way out and files a request;
+	// leaving then reads no owner and supersedes, but cannot see a request that
+	// has not committed yet, so it supersedes nothing. Both commit, and the House
+	// stands empty with an open request against it — which locks its own asker
+	// out, because the page reads viewer.openRequestId and offers Withdraw rather
+	// than the ask that would hand them the House.
+	if _, err := qtx.LockHouse(ctx, membership.HouseID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// The House went while we were reading. The caller's membership went
+			// with it through the cascade, so they are not in one.
+			notFound(w, "you are not in a House")
+			return
+		}
+		internalError(w)
+		return
+	}
+
 	if _, err := qtx.RemoveHouseMember(ctx, caller); err != nil {
 		internalError(w)
 		return

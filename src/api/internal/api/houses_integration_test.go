@@ -751,6 +751,70 @@ func TestClaimingAnEmptyHouseTakesTheHouseRowLock(t *testing.T) {
 	}
 }
 
+// Leaving takes the same House row lock that asking does, so the two serialise.
+//
+// Unlocked, leaving contends for nothing: it deletes a house_members row and
+// updates house_join_requests, neither of which touches the House's row. That
+// lets a request slip past the supersede — asking reads an owner on their way
+// out and files a request, leaving then reads no owner and supersedes without
+// seeing that uncommitted row. The House ends up empty with an open request
+// against it, which is the "asker locked out" state SupersedeHouseOpenRequests
+// exists to prevent.
+//
+// Same FOR KEY SHARE blocker as the claim test, and the weaker mode matters for
+// the same reason — see the note there.
+func TestLeavingAHouseTakesTheHouseRowLock(t *testing.T) {
+	_, owner := secondLifter(t, "house-leavelock-owner")
+	houseID := foundHouse(t, owner, "House Leave Lock", "HLVL")
+
+	ctx := context.Background()
+	blocker, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("opening the blocking transaction: %v", err)
+	}
+	defer func() { _ = blocker.Rollback(ctx) }()
+	if _, err := blocker.Exec(
+		ctx, `SELECT id FROM houses WHERE id = $1 FOR KEY SHARE`, houseID,
+	); err != nil {
+		t.Fatalf("locking the House row: %v", err)
+	}
+
+	leave := func(token string) int {
+		req, err := http.NewRequest(http.MethodDelete, baseURL+"/me/house", nil)
+		if err != nil {
+			return 0
+		}
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return 0
+		}
+		defer func() { _ = resp.Body.Close() }()
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return resp.StatusCode
+	}
+
+	done := make(chan int, 1)
+	go func() { done <- leave(owner) }()
+
+	select {
+	case code := <-done:
+		t.Fatalf(
+			"leave returned %d while the House row was locked — it is not taking the lock, "+
+				"so a concurrent join request can escape being superseded", code,
+		)
+	case <-time.After(750 * time.Millisecond):
+		// Blocked on the row, which is the point.
+	}
+
+	if err := blocker.Rollback(ctx); err != nil {
+		t.Fatalf("releasing the lock: %v", err)
+	}
+	if code := <-done; code != http.StatusNoContent {
+		t.Fatalf("expected the freed leave to succeed with 204, got %d", code)
+	}
+}
+
 // Owner-only writes against an empty House 404: there is no owner, so there is
 // nobody they could be addressed to.
 func TestAnEmptyHouseHasNoOwnerToActAsOne(t *testing.T) {
