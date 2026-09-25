@@ -45,6 +45,7 @@ function mkRecap(over: Partial<SessionRecap> = {}): SessionRecap {
     earned: null,
     lifts: [],
     prs: [],
+    firstTimes: [],
     milestones: [],
     streak: { sessions: 4, weeks: 2 },
     ...over,
@@ -207,8 +208,13 @@ describe("sessionShareCardContent", () => {
       ]);
     });
 
-    // previousLb is 0 for a lift with no history — "nothing to beat" rather
-    // than a mark of zero pounds — so there is no percentage to report.
+    // A previousLb of 0 means "nothing to beat" rather than a mark of zero
+    // pounds, so there is no percentage to report.
+    //
+    // The server no longer sends this: a lift with no history is a firstTime and
+    // not a PR. The guard stays because recaps are CACHED on the client, so a
+    // recap stored before that change can still be read back with a zero in it,
+    // and "+Infinity%" on a share card is not a thing to find out in public.
     it("omits the gain on a lift with no history", () => {
       const c = sessionShareCardContent(
         mkRecap({ prs: [{ ...mkPR("Squat", 245), previousLb: 0 }] }),

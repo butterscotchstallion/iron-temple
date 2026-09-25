@@ -103,9 +103,14 @@ func TestRecapDoesNotRecreditRecordsWithinADay(t *testing.T) {
 	weights := logEverySet(t, e, morning)
 	e.POST(fmt.Sprintf("/sessions/%d/finish", morningID)).Expect().Status(http.StatusOK)
 
-	// The morning legitimately sets records: it is this lifter's first work.
-	if got := len(recap(t, e, morningID).Value("prs").Array().Iter()); got == 0 {
-		t.Fatal("the first session of a lift set no records, so the rest of this proves nothing")
+	// The morning legitimately credits the work — as records if this lifter had
+	// history on these lifts, and as first times if it did not. Which of the two
+	// depends on what earlier tests left behind and is not what this test is
+	// about; that SOMETHING was credited is, or the evening proving nothing.
+	m := recap(t, e, morningID)
+	credited := len(m.Value("prs").Array().Iter()) + len(m.Value("firstTimes").Array().Iter())
+	if credited == 0 {
+		t.Fatal("the first session of a lift credited nothing, so the rest of this proves nothing")
 	}
 
 	// The evening repeats the same day at the SAME weights, on the same date.
@@ -121,6 +126,12 @@ func TestRecapDoesNotRecreditRecordsWithinADay(t *testing.T) {
 	r := recap(t, e, eveningID)
 	if got := len(r.Value("prs").Array().Iter()); got != 0 {
 		t.Errorf("evening session claimed %d records for work already done that morning", got)
+	}
+	// And not as first times either: the morning is history by the evening, so
+	// these lifts have been done. Both halves of the split have to respect the
+	// same date cut, or one of them simply re-credits what the other stopped.
+	if got := len(r.Value("firstTimes").Array().Iter()); got != 0 {
+		t.Errorf("evening session called %d lifts first times after that morning", got)
 	}
 	if got := len(r.Value("milestones").Array().Iter()); got != 0 {
 		t.Errorf("evening session claimed %d milestones already crossed that morning", got)
@@ -154,10 +165,11 @@ func TestRecapFirstSessionOfADay(t *testing.T) {
 	r.Value("session").Object().Value("sessionId").Number().IsEqual(id)
 	r.Value("durationSeconds").Number().IsEqual(48 * 60)
 
-	// Lifts, PRs and milestones are always arrays — never null — so a client
-	// can range over them without branching.
+	// Lifts, PRs, first times and milestones are always arrays — never null — so
+	// a client can range over them without branching.
 	r.Value("lifts").Array().NotEmpty()
 	r.Value("prs").Array()
+	r.Value("firstTimes").Array()
 	r.Value("milestones").Array()
 
 	vol := r.Value("volume").Object()
@@ -326,7 +338,7 @@ func TestRecapShapeMatchesTheSchema(t *testing.T) {
 	r.Keys().ContainsOnly(
 		"session", "durationSeconds", "pace", "volume", "progress",
 		"muscles", "split", "bodyweightLb", "earned",
-		"lifts", "prs", "milestones", "streak",
+		"lifts", "prs", "firstTimes", "milestones", "streak",
 	)
 	r.Value("session").Object().Keys().ContainsOnly(
 		"sessionId", "programId", "programName", "programDayId", "programDayName",
@@ -475,6 +487,7 @@ func TestRecapOfASessionWithNothingLogged(t *testing.T) {
 	r := recap(t, e, id)
 	r.Value("lifts").Array().IsEmpty()
 	r.Value("prs").Array().IsEmpty()
+	r.Value("firstTimes").Array().IsEmpty()
 	r.Value("milestones").Array().IsEmpty()
 
 	vol := r.Value("volume").Object()

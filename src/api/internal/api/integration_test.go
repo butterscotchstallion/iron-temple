@@ -1400,18 +1400,29 @@ func TestRackedDetectsPersonalRecords(t *testing.T) {
 	e := expect(t)
 	_, dayID := firstProgramAndDay(e)
 
+	// Two sessions, because a record needs something to beat. The monthly
+	// baseline is the lifter's best BEFORE the period, and every session these
+	// tests create lands inside it — so the first appearance of a lift here is a
+	// first time, and the running best has to advance within the period before
+	// anything can be a record. That advance is what this test is about.
+	first := startSession(t, e, dayID)
+	firstID := int(first.Value("id").Number().Raw())
+	firstSet := first.Value("sets").Array().Value(0).Object()
+	exerciseID := int(firstSet.Value("exerciseId").Number().Raw())
+
+	// Both well past anything the seeded programs prescribe, so neither can
+	// depend on what earlier tests left in the history.
+	const openingWeight = 900.0
+	const prWeight = 987.5
+	logSetAt(e, firstID, int(firstSet.Value("id").Number().Raw()), 3, openingWeight, true)
+
 	created := startSession(t, e, dayID)
 	sessionID := int(created.Value("id").Number().Raw())
 	set := created.Value("sets").Array().Value(0).Object()
-	exerciseID := int(set.Value("exerciseId").Number().Raw())
-
-	// Well past anything the seeded programs prescribe, so this cannot depend
-	// on what earlier tests left in the history.
-	const prWeight = 987.5
 	logSetAt(e, sessionID, int(set.Value("id").Number().Raw()), 3, prWeight, true)
 
-	prs := e.GET("/racked").Expect().Status(http.StatusOK).
-		JSON().Object().Value("prs").Array()
+	report := e.GET("/racked").Expect().Status(http.StatusOK).JSON().Object()
+	prs := report.Value("prs").Array()
 
 	var found int
 	for i := 0; i < int(prs.Length().Raw()); i++ {
@@ -1426,6 +1437,31 @@ func TestRackedDetectsPersonalRecords(t *testing.T) {
 	}
 	if found != 1 {
 		t.Fatalf("got %d records at %v lb, want exactly 1", found, prWeight)
+	}
+
+	// And the opening session is credited as a first time rather than as a second
+	// record — which is the whole distinction. Asserted here rather than in its
+	// own test because it is the same two sessions: one lift, introduced once and
+	// then beaten once.
+	firsts := report.Value("firstTimes").Array()
+	var opened int
+	for i := 0; i < int(firsts.Length().Raw()); i++ {
+		f := firsts.Value(i).Object()
+		if int(f.Value("exerciseId").Number().Raw()) != exerciseID {
+			continue
+		}
+		if f.Value("weightLb").Number().Raw() == openingWeight {
+			opened++
+		}
+	}
+	if opened != 1 {
+		t.Errorf("got %d first times at %v lb, want exactly 1", opened, openingWeight)
+	}
+	for i := 0; i < int(prs.Length().Raw()); i++ {
+		pr := prs.Value(i).Object()
+		if pr.Value("weightLb").Number().Raw() == openingWeight {
+			t.Error("the opening session was also claimed as a record")
+		}
 	}
 }
 

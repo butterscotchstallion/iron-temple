@@ -172,6 +172,9 @@ type Report struct {
 	Streak     Streak
 	Attendance Attendance
 	PRs        []PR
+	// FirstTimes are the lifts performed for the first time in the period. Beside
+	// PRs rather than among them: see FirstTime.
+	FirstTimes []FirstTime
 	Milestones []Milestone
 	// Upcoming is the nearest thresholds NOT yet reached, closest first — the only
 	// forward-looking figure in the report. Short or empty rather than padded; see
@@ -380,6 +383,32 @@ type PR struct {
 	PreviousLb   float64
 }
 
+// FirstTime is a lift the lifter had never performed before.
+//
+// Separate from PR rather than a third PRKind, for the reason UpcomingMilestone
+// gives for not being a variant of Milestone: a record has a mark it beat, and a
+// first time has none. Folded into PR, that absence has to be spelled as
+// PreviousLb = 0 — a number standing in for "there was no number" — and every
+// reader has to know which of the two it has been handed.
+//
+// This exists because the alternative was calling it a record. personalRecords
+// compares against the lifter's history, and a lift with no history has nothing
+// in the baseline map, so a first-ever set cleared a best of zero and was
+// announced as a personal record. The baseline stops a lifter's SECOND year
+// opening with a false record on every lift; nothing could stop their first
+// week, because in that week there genuinely is nothing to compare against.
+//
+// Carries the weight and reps so a surface can say what was done, even though
+// the one in the app today only lists the names. A first time is not a claim
+// about a ranking, so unlike PR there is no value and no previous.
+type FirstTime struct {
+	PerformedOn  time.Time
+	ExerciseID   int32
+	ExerciseName string
+	WeightLb     float64
+	Reps         int
+}
+
 // SetHighlight is a single set worth calling out.
 type SetHighlight struct {
 	PerformedOn  time.Time
@@ -424,6 +453,8 @@ func Build(in Input) Report {
 	measuredTo := measuredEnd(in.Start, in.End, in.AsOf)
 	inProgress := measuredTo.Before(in.End)
 
+	prs, firstTimes := personalRecords(sessions, in.Baseline)
+
 	rep := Report{
 		Period: Period{
 			Kind:       in.Kind,
@@ -443,7 +474,8 @@ func Build(in Input) Report {
 		BestWeekday: -1,
 		Hours:       make([]int, 24),
 		Streak:      streak(sessions),
-		PRs:         personalRecords(sessions, in.Baseline),
+		PRs:         prs,
+		FirstTimes:  firstTimes,
 		Milestones:  milestones(sessions, in.Baseline),
 		Upcoming:    upcoming(sessions, in.Baseline, UpcomingLimit),
 		Deloads:     deloads(sessions),

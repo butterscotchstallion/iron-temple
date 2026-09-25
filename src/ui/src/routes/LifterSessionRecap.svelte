@@ -171,6 +171,7 @@
 
     <RecapHighlights
       {prs}
+      firstTimes={recap.firstTimes.map((f) => ({ exerciseName: f.exerciseName }))}
       milestones={recap.milestones}
       streakSessions={recap.streak.sessions}
       streakWeeks={recap.streak.weeks}

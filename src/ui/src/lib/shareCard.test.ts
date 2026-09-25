@@ -66,6 +66,7 @@ function bareReport(): RackedReport {
       weekdays: [],
     },
     prs: [],
+    firstTimes: [],
     milestones: [],
     upcomingMilestones: [],
     heaviestSet: null,

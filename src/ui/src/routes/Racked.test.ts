@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/svelte";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Racked from "./Racked.svelte";
 import type { RackedReport } from "../lib/api";
@@ -233,6 +233,51 @@ describe("Racked", () => {
     expect(screen.getByText("Barbell Curl")).toBeInTheDocument();
     // One tag, on the one lift that was only ever assistance.
     expect(screen.getAllByText("assistance")).toHaveLength(1);
+  });
+
+  // An opening month introduces every lift at once. Listed as records they
+  // crowded out the section, and none of them had beaten anything.
+  it("folds a first month's lifts into one line and claims no records", async () => {
+    // A full report with the records emptied: a first month has sessions and
+    // tonnage like any other, it just has not beaten anything yet.
+    const report = fullReport();
+    report.prs = [];
+    report.firstTimes = [
+      { performedOn: "2026-03-02", exerciseId: 1, exerciseName: "Squat", weightLb: 95, reps: 5 },
+      {
+        performedOn: "2026-03-02",
+        exerciseId: 2,
+        exerciseName: "Bench Press",
+        weightLb: 65,
+        reps: 5,
+      },
+    ];
+    getRacked.mockResolvedValue({ status: 200, data: report, headers: new Headers() });
+    render(Racked);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "2 lifts for the first time" }),
+      ).toBeInTheDocument(),
+    );
+    // One line, both names — not a row each.
+    expect(screen.getByText("Squat · Bench Press")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /personal record/ })).not.toBeInTheDocument();
+  });
+
+  // The rule a lifter would otherwise have to infer from two cards that look
+  // alike. StreakCard already does this for the streak.
+  it("explains how records are decided on request", async () => {
+    getRacked.mockResolvedValue({ status: 200, data: fullReport(), headers: new Headers() });
+    render(Racked);
+
+    const help = await screen.findByRole("button", {
+      name: /how records and milestones work/i,
+    });
+    expect(screen.queryByText(/beats your own previous best/)).toBeNull();
+
+    await fireEvent.click(help);
+    expect(await screen.findByText(/first time on a lift isn't a record/)).toBeTruthy();
   });
 
   // A lifter who does no assistance should not read a line telling them all

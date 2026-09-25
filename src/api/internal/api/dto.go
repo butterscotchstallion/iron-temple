@@ -1027,10 +1027,11 @@ type sessionRecapDTO struct {
 	// Earned is nil on any but the lifter's most recent session of the day —
 	// see recapEarned for why it is withheld rather than qualified.
 	Earned *sessionRecapEarnedDTO `json:"earned"`
-	// Lifts, PRs and Milestones are never nil: a first workout serializes them
-	// as [], which reads as "nothing yet" rather than "not told".
+	// Lifts, PRs, FirstTimes and Milestones are never nil: a first workout
+	// serializes them as [], which reads as "nothing yet" rather than "not told".
 	Lifts      []sessionRecapLiftDTO `json:"lifts"`
 	PRs        []rackedPRDTO         `json:"prs"`
+	FirstTimes []rackedFirstTimeDTO  `json:"firstTimes"`
 	Milestones []rackedMilestoneDTO  `json:"milestones"`
 	Streak     sessionRecapStreakDTO `json:"streak"`
 }
@@ -1197,9 +1198,12 @@ type rackedReportDTO struct {
 	PeakHour  int    `json:"peakHour"`
 	HourLabel string `json:"hourLabel"`
 
-	Streak     rackedStreakDTO      `json:"streak"`
-	Attendance rackedAttendanceDTO  `json:"attendance"`
-	PRs        []rackedPRDTO        `json:"prs"`
+	Streak     rackedStreakDTO     `json:"streak"`
+	Attendance rackedAttendanceDTO `json:"attendance"`
+	PRs        []rackedPRDTO       `json:"prs"`
+	// FirstTimes are the lifts first performed in this period. Beside PRs and not
+	// among them: there was no previous best to beat, so it is not a record.
+	FirstTimes []rackedFirstTimeDTO `json:"firstTimes"`
 	Milestones []rackedMilestoneDTO `json:"milestones"`
 	// UpcomingMilestones is the only forward-looking field in this report.
 	// Everything else is a reading of what happened; this is what there is to aim
@@ -1368,6 +1372,16 @@ type rackedPRDTO struct {
 	Reps         int     `json:"reps"`
 	ValueLb      float64 `json:"valueLb"`
 	PreviousLb   float64 `json:"previousLb"`
+}
+
+// No kind, no value and no previous: a first time is not a ranked claim, it is
+// the fact that a lift has now been done at all. See racked.FirstTime.
+type rackedFirstTimeDTO struct {
+	PerformedOn  string  `json:"performedOn"`
+	ExerciseID   int32   `json:"exerciseId"`
+	ExerciseName string  `json:"exerciseName"`
+	WeightLb     float64 `json:"weightLb"`
+	Reps         int     `json:"reps"`
 }
 
 type rackedMilestoneDTO struct {

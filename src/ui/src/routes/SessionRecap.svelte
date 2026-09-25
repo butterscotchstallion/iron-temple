@@ -28,7 +28,7 @@
   import { formatPercent, formatWeighIn } from "../lib/racked";
   import { takeHandedSession } from "../lib/recapHandoff";
   import { localRecap } from "../lib/localRecap";
-  import type { RecapLiftRow, RecapPRRow } from "../lib/recap";
+  import type { RecapFirstTimeRow, RecapLiftRow, RecapPRRow } from "../lib/recap";
   import { sessionShareCardContent } from "../lib/sessionShareCard";
   import { sessionShareCardFilename } from "../lib/shareImage";
   import { formatLongDate } from "../lib/date";
@@ -203,6 +203,15 @@
         })),
   );
 
+  // Same shape from either source, for the same reason prs is: the offline list
+  // is the list the server confirms, so neither path may classify a lift the
+  // other would not.
+  const firstTimes = $derived<RecapFirstTimeRow[]>(
+    recap
+      ? recap.firstTimes.map((f) => ({ exerciseName: f.exerciseName }))
+      : (local?.firstTimes ?? []).map((f) => ({ exerciseName: f.exerciseName })),
+  );
+
   const shareContent = $derived(
     recap ? sessionShareCardContent(recap, auth.me?.displayName ?? "") : null,
   );
@@ -258,6 +267,7 @@
 
     <RecapHighlights
       {prs}
+      {firstTimes}
       milestones={recap?.milestones ?? []}
       streakSessions={recap?.streak.sessions ?? 0}
       streakWeeks={recap?.streak.weeks ?? 0}

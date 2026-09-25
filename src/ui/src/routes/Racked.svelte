@@ -19,6 +19,7 @@
   import LiftTrendChart from "../lib/LiftTrendChart.svelte";
   import LiftVolumeBars from "../lib/LiftVolumeBars.svelte";
   import MuscleVolumeBars from "../lib/MuscleVolumeBars.svelte";
+  import HighlightsHelp from "../lib/HighlightsHelp.svelte";
   import RackedBars from "../lib/RackedBars.svelte";
   import ChartTable from "../lib/ChartTable.svelte";
   import BodyweightChart from "../lib/BodyweightChart.svelte";
@@ -606,10 +607,12 @@
     </Card>
 
     {#if report.prs.length > 0}
-      <Card class="p-4">
+      <!-- `relative` so HighlightsHelp's trigger sits in the card's own padding. -->
+      <Card class="relative p-4">
         <h3 class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
           {report.prs.length} personal record{report.prs.length === 1 ? "" : "s"}
         </h3>
+        <HighlightsHelp />
         <ul class="flex flex-col gap-1.5">
           <!-- Keyed by position. Nothing derived from a date is unique here: two
                sessions of one lift in a day can each set a weight record, which
@@ -626,6 +629,21 @@
             </li>
           {/each}
         </ul>
+      </Card>
+    {/if}
+
+    <!-- One card, one line, however many lifts. A lifter's opening month
+         introduces everything at once, and listing each as its own row would bury
+         the records card above it under work that beat nothing. -->
+    {#if report.firstTimes.length > 0}
+      <Card class="p-4">
+        <h3 class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+          {report.firstTimes.length}
+          {report.firstTimes.length === 1 ? "lift" : "lifts"} for the first time
+        </h3>
+        <p class="text-sm text-foreground">
+          {report.firstTimes.map((f) => f.exerciseName).join(" · ")}
+        </p>
       </Card>
     {/if}
 

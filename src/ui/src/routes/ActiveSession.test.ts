@@ -15,9 +15,11 @@ import { markUnreachable, resetConnectivity } from "../lib/connectivity.svelte";
 const getSession = vi.hoisted(() => vi.fn());
 const listExercises = vi.hoisted(() => vi.fn());
 const addSessionAssistance = vi.hoisted(() => vi.fn());
+const updateSessionSet = vi.hoisted(() => vi.fn());
 vi.mock("../lib/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/api")>()),
   getSession,
+  updateSessionSet,
   listExercises,
   addSessionAssistance,
 }));
@@ -25,6 +27,7 @@ vi.mock("../lib/api", async (importOriginal) => ({
 // Confetti needs a 2D context jsdom does not have, and it throws inside a
 // requestAnimationFrame callback rather than as a test failure.
 vi.mock("../lib/celebrate", () => ({ celebrate: vi.fn() }));
+import { celebrate } from "../lib/celebrate";
 
 const props = { params: { id: "1" } };
 
@@ -82,6 +85,8 @@ beforeEach(() => {
   getSession.mockReset();
   listExercises.mockReset();
   addSessionAssistance.mockReset();
+  updateSessionSet.mockReset();
+  vi.mocked(celebrate).mockClear();
   clearQueue();
   resetConnectivity();
   localStorage.clear();
@@ -284,5 +289,74 @@ describe("ActiveSession: adding assistance", () => {
     );
     expect(screen.queryByRole("heading", { name: "Barbell Curl" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Add to this workout/ })).toBeInTheDocument();
+  });
+});
+
+// Confetti is the loudest thing the app does, and until the split it fired on
+// every lift of a lifter's first workout — the bests map was absent for all of
+// them, read as a zero, and cleared by anything. What made a real record feel
+// like nothing was being told six times before it that you had set one.
+describe("ActiveSession: records and first times", () => {
+  /** One set, one rep to its target, so a single tap completes it. */
+  function oneTap(over: Partial<Session> = {}): Session {
+    return mkSession({
+      sets: [mkSet({ id: 1, setNumber: 1, targetReps: 1, weightLb: 200 })],
+      ...over,
+    });
+  }
+
+  async function tapTheSet() {
+    const button = await screen.findByRole("button", { name: /^Set 1/ });
+    await fireEvent.click(button);
+  }
+
+  it("celebrates a set above the lift's standing best", async () => {
+    getSession.mockResolvedValue(
+      ok(oneTap({ previousBests: [{ exerciseId: 1, weightLb: 195, e1rmLb: 228 }] })),
+    );
+    updateSessionSet.mockResolvedValue(
+      ok(mkSet({ id: 1, setNumber: 1, targetReps: 1, actualReps: 1, completed: true })),
+    );
+
+    render(ActiveSession, props);
+    await tapTheSet();
+
+    expect(await screen.findByText(/New PR!/)).toBeInTheDocument();
+    expect(celebrate).toHaveBeenCalled();
+  });
+
+  // A lift absent from previousBests has no history, so there was nothing to
+  // beat. It still says so — a lifter who just did something for the first time
+  // should hear about it — but without the confetti a record earns.
+  it("marks a first-ever lift without claiming a record", async () => {
+    getSession.mockResolvedValue(ok(oneTap({ previousBests: [] })));
+    updateSessionSet.mockResolvedValue(
+      ok(mkSet({ id: 1, setNumber: 1, targetReps: 1, actualReps: 1, completed: true })),
+    );
+
+    render(ActiveSession, props);
+    await tapTheSet();
+
+    expect(await screen.findByText(/First time!/)).toBeInTheDocument();
+    expect(screen.queryByText(/New PR!/)).not.toBeInTheDocument();
+    expect(celebrate).not.toHaveBeenCalled();
+  });
+
+  // A best of zero is a lifter who HAS done the lift: bodyweight work has a
+  // legitimate zero, and reading the number instead of its presence would make
+  // every chin-up session a first time forever.
+  it("treats a standing best of zero as a history", async () => {
+    getSession.mockResolvedValue(
+      ok(oneTap({ previousBests: [{ exerciseId: 1, weightLb: 0, e1rmLb: 0 }] })),
+    );
+    updateSessionSet.mockResolvedValue(
+      ok(mkSet({ id: 1, setNumber: 1, targetReps: 1, actualReps: 1, completed: true })),
+    );
+
+    render(ActiveSession, props);
+    await tapTheSet();
+
+    expect(await screen.findByText(/New PR!/)).toBeInTheDocument();
+    expect(screen.queryByText(/First time!/)).not.toBeInTheDocument();
   });
 });

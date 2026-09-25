@@ -418,10 +418,11 @@ type RecapSessionSetsRow struct {
 // of the recap queries keep, and the departure is the point. The recap reports
 // reps hit against reps prescribed, and a workout abandoned after two sets of
 // five is only legible as "10 of 25 reps" if the other fifteen are still in the
-// result. internal/racked splits the rows on arrival: those with reps become the
-// Sets that statistics are computed from, and all of them together are the
+// result. internal/api/recap.go splits the rows on arrival: those with reps become
+// the Sets that statistics are computed from, and all of them together are the
 // prescription that those statistics are reported against. Nothing downstream
-// counts an unlogged row as work.
+// counts an unlogged row as work — and sessionTops in internal/racked skips one
+// again on the way past, so the guarantee does not rest on this one caller.
 //
 // Ordering, is_assistance and the two LEFT joins are lifted from ListSessionSets
 // unchanged, including why they are LEFT — a finished session is a record, and a

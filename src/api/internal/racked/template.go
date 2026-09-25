@@ -39,6 +39,7 @@ var emailTemplate = template.Must(template.New("racked").Funcs(template.FuncMap{
 	"perWeek":  formatPerWeek,
 	"muscle":   muscleName,
 	"names":    joinNames,
+	"lifts":    joinLifts,
 }).Parse(emailHTML))
 
 // emailData is the template's view of a report, plus the few strings the report
@@ -156,6 +157,22 @@ func joinNames(names []string) string {
 	for _, n := range names {
 		labels = append(labels, strings.ToLower(muscleName(n)))
 	}
+	return joinPhrase(labels)
+}
+
+// joinLifts is joinNames for exercise names, which keep their capitals —
+// "Overhead Press" is what the row above it calls the same lift, and lowercasing
+// it here would make one email name a lift two ways.
+func joinLifts(firsts []FirstTime) string {
+	labels := make([]string, 0, len(firsts))
+	for _, f := range firsts {
+		labels = append(labels, f.ExerciseName)
+	}
+	return joinPhrase(labels)
+}
+
+// joinPhrase renders a list as prose: "a", "a and b", "a, b and c".
+func joinPhrase(labels []string) string {
 	switch len(labels) {
 	case 0:
 		return ""
@@ -379,6 +396,11 @@ var emailHTML = strings.TrimSpace(`
       <tr><td style="padding:5px 0;color:#1e293b;">{{ .ExerciseName }}</td><td style="padding:5px 0;text-align:right;color:#64748b;">{{ lb .WeightLb }} lb × {{ .Reps }}{{ if eq (printf "%s" .Kind) "e1rm" }} · est. max{{ end }}</td></tr>
       {{ end }}
     </table>
+    {{ end }}
+
+    {{ if .Report.FirstTimes }}
+    <div style="font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#94a3b8;margin-bottom:10px;padding-bottom:5px;border-bottom:1px solid #f1f5f9;">{{ len .Report.FirstTimes }} {{ plural (len .Report.FirstTimes) "lift" "lifts" }} for the first time</div>
+    <p style="font-size:14px;color:#1e293b;margin:0 0 24px;">{{ lifts .Report.FirstTimes }}</p>
     {{ end }}
 
     {{ if .Report.Milestones }}

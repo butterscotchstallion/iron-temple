@@ -29,6 +29,7 @@
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import Flag from "@lucide/svelte/icons/flag";
   import Trophy from "@lucide/svelte/icons/trophy";
+  import Sprout from "@lucide/svelte/icons/sprout";
   import RestTimer from "../lib/RestTimer.svelte";
   import ExerciseCard from "../lib/ExerciseCard.svelte";
   import AssistancePicker from "../lib/AssistancePicker.svelte";
@@ -82,12 +83,19 @@
   // histories had not arrived yet. There is no such window now: the numbers
   // come with the sets they are compared against.
   //
-  // A lift with no prior performance is simply absent, so `?? 0` reads as "no
-  // record to beat" and any completed set clears it.
+  // A lift with no prior performance is simply ABSENT from this map, and that
+  // absence is load-bearing rather than a gap to default away. It means there is
+  // no record to beat, so the first set of a lift the lifter has never done is a
+  // first time and not a personal best — see personalRecords in internal/racked.
+  // Read instead as a zero to clear, it made every lift of an opening workout a
+  // PR, complete with confetti, which is what left a real one feeling like
+  // nothing in particular.
   const prBest = $derived(
     new Map((session?.previousBests ?? []).map((b) => [b.exerciseId, b.weightLb])),
   );
-  let prMessage = $state<string | null>(null);
+  // What to say over the sets, if anything. Carries WHICH of the two it is
+  // rather than just the text, so the banner cannot call a first time a PR.
+  let prNote = $state<{ kind: "pr" | "first"; text: string } | null>(null);
   let prTimer: ReturnType<typeof setTimeout> | undefined;
 
   async function load() {
@@ -279,12 +287,25 @@
     // this lift's rest rather than the previous exercise's.
     restSeconds = set.restSeconds;
 
-    // New PR: a completed set above this lift's prior best.
-    if (completed && set.weightLb > (prBest.get(set.exerciseId) ?? 0)) {
-      prMessage = `${set.exerciseName} · ${set.weightLb} lb`;
-      celebrate({ particleCount: 120, spread: 70, origin: { y: 0.5 } });
-      if (prTimer) clearTimeout(prTimer);
-      prTimer = setTimeout(() => (prMessage = null), 6000);
+    // Two different pieces of news, and only one of them is a record.
+    //
+    // A completed set above this lift's prior best is a PR and gets the confetti.
+    // A completed set of a lift with NO prior best is a first time: still worth
+    // marking, because a lifter who just did something for the first time should
+    // hear so, but without the confetti — that is reserved for beating
+    // something, and a first workout would otherwise fire it on every lift.
+    if (completed) {
+      const previous = prBest.get(set.exerciseId);
+      if (previous === undefined) {
+        prNote = { kind: "first", text: `${set.exerciseName} · ${set.weightLb} lb` };
+      } else if (set.weightLb > previous) {
+        prNote = { kind: "pr", text: `${set.exerciseName} · ${set.weightLb} lb` };
+        celebrate({ particleCount: 120, spread: 70, origin: { y: 0.5 } });
+      }
+      if (prNote) {
+        if (prTimer) clearTimeout(prTimer);
+        prTimer = setTimeout(() => (prNote = null), 6000);
+      }
     }
 
     // Hitting every target ends the workout outright — no need to also press
@@ -563,14 +584,29 @@
     Workout
   </a>
 
-  {#if prMessage}
+  {#if prNote}
+    <!-- Quieter for a first time, all the way down: a muted border and a sprout
+         instead of the primary wash and the trophy. It is a start, not a win, and
+         a first workout showing six of these in full voice is exactly what made
+         the first real record read as more of the same. -->
     <div
-      class="rounded-2xl border border-primary/60 bg-primary/15 p-3 text-center"
+      class="rounded-2xl border p-3 text-center {prNote.kind === 'pr'
+        ? 'border-primary/60 bg-primary/15'
+        : 'border-border/60 bg-white/5'}"
       role="status"
     >
-      <p class="flex items-center justify-center gap-2 font-black text-primary">
-        <Trophy class="size-5" aria-hidden="true" />
-        New PR! {prMessage}
+      <p
+        class="flex items-center justify-center gap-2 font-black {prNote.kind === 'pr'
+          ? 'text-primary'
+          : 'text-muted-foreground'}"
+      >
+        {#if prNote.kind === "pr"}
+          <Trophy class="size-5" aria-hidden="true" />
+          New PR! {prNote.text}
+        {:else}
+          <Sprout class="size-5" aria-hidden="true" />
+          First time! {prNote.text}
+        {/if}
       </p>
     </div>
   {/if}

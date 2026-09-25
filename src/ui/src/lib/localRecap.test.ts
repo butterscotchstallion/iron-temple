@@ -122,12 +122,27 @@ describe("localRecap", () => {
       expect(r.prs).toEqual([]);
     });
 
-    // A lift with no history is absent from previousBests rather than zero, so
-    // any completed set clears it — the same rule the session screen uses.
-    it("treats an absent best as nothing to beat", () => {
+    // A lift with no history is ABSENT from previousBests rather than carried at
+    // zero, and that absence means there was nothing to beat — so this is a first
+    // time, not a record cleared from zero. The same rule personalRecords applies
+    // server-side, which is what lets the offline list be the list the server
+    // confirms rather than one it quietly downgrades on reconnect.
+    it("calls a lift with no history a first time, not a record", () => {
       const r = localRecap(mkSession({ previousBests: [] }));
-      expect(r.prs).toHaveLength(1);
-      expect(r.prs[0].previousLb).toBe(0);
+      expect(r.prs).toEqual([]);
+      expect(r.firstTimes).toEqual([
+        { exerciseId: 1, exerciseName: "Squat", weightLb: 200, reps: 5 },
+      ]);
+    });
+
+    // A best of zero is a lifter who HAS done the lift — bodyweight work has a
+    // legitimate zero — so presence in previousBests decides, not the number.
+    // Otherwise a chin-up is a first time every session, forever.
+    it("treats a present best of zero as a history", () => {
+      const r = localRecap(
+        mkSession({ previousBests: [{ exerciseId: 1, weightLb: 0, e1rmLb: 0 }] }),
+      );
+      expect(r.firstTimes).toEqual([]);
     });
 
     // The bar did not move, but it went further — which on a 5x5 is exactly

@@ -50,6 +50,15 @@ export type RecapPRRow = {
 };
 
 /**
+ * A lift done for the first time. The name is all a surface needs: these fold
+ * into one line, so there is nowhere to put a weight, and the server and the
+ * offline path agree that a first time carries no mark it beat.
+ */
+export type RecapFirstTimeRow = {
+  exerciseName: string;
+};
+
+/**
  * How this session's pace read: "12% faster", "8% slower", "about the same".
  *
  * Words rather than a signed percentage, and deliberately NOT formatDelta.
