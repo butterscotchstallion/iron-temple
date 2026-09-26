@@ -71,9 +71,9 @@
     /**
      * Whether hovering the badge opens the full card rather than a plain tooltip.
      *
-     * The header only. Progress into a level is the lifter's own business, and a
-     * card on every row of the feed would be thirty popovers waiting to happen —
-     * see LevelBadge.
+     * The header only. A card on every row of the feed would be thirty popovers
+     * waiting to happen, and the figures behind the number are written out on the
+     * lifter's profile — which a linked name is one click from. See LevelBadge.
      */
     levelCard?: boolean;
     /**

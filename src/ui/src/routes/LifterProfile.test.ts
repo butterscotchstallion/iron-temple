@@ -1,9 +1,15 @@
 import { render, screen, waitFor } from "@testing-library/svelte";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import LifterProfile from "./LifterProfile.svelte";
 import type { LifterProfile as Profile } from "../lib/api";
 import { auth } from "../lib/auth.svelte";
-import { testLifter, testRackedReport, testUser } from "../lib/testFixtures";
+import { levels, resetLevels } from "../lib/levels.svelte";
+import {
+  testLifter,
+  testLifterLevel,
+  testRackedReport,
+  testUser,
+} from "../lib/testFixtures";
 
 // A render test for the profile, which earns its place the way Racked.test.ts
 // does: the page is assembled from two requests that can fail independently, and
@@ -167,6 +173,108 @@ describe("LifterProfile", () => {
   });
 });
 
+// The Experience section: the badge worn beside the name, written out with the
+// progress the badge cannot show.
+//
+// The module is seeded rather than mocked, for the reason LifterName.test.ts seeds
+// it: the lookup is as much of this as the markup, and a card drawn from the wrong
+// lifter's row is the failure that matters. It is also the only test anywhere that
+// renders those figures — LevelCard's other caller is a hover card, whose contents
+// no test opens.
+describe("the level on a profile", () => {
+  /** What the server says about everyone, as App.svelte's poll would have left it. */
+  function standing(items: ReturnType<typeof testLifterLevel>[]) {
+    levels.items = items;
+    levels.loaded = true;
+  }
+
+  afterEach(resetLevels);
+
+  it("draws the level and how far into it they are", async () => {
+    standing([
+      testLifterLevel({
+        lifterId: 2,
+        level: 12,
+        xp: 6900,
+        xpIntoLevel: 300,
+        xpForNextLevel: 1200,
+      }),
+    ]);
+    render(LifterProfile, { params: { id: "2" } });
+
+    const section = await screen.findByTestId("lifter-level");
+    expect(section).toHaveTextContent("Level 12");
+    // Lifetime, grouped — "6900 XP" is a number nobody reads at a glance.
+    expect(section).toHaveTextContent("6,900 XP");
+    // The progress itself: both halves of the bar's fraction, and the remainder
+    // spelled out for a reader who cannot see the bar.
+    expect(section).toHaveTextContent("300 / 1,200 XP");
+    expect(section).toHaveTextContent("900 to Level 13");
+  });
+
+  // Scoped to the lifter the page is about. A section reading the first row of the
+  // list would pass every assertion above on an install with one account.
+  it("reads the row belonging to this lifter", async () => {
+    standing([
+      testLifterLevel({ lifterId: 3, level: 30 }),
+      testLifterLevel({ lifterId: 2, level: 12 }),
+    ]);
+    render(LifterProfile, { params: { id: "2" } });
+
+    const section = await screen.findByTestId("lifter-level");
+    expect(section).toHaveTextContent("Level 12");
+    expect(section).not.toHaveTextContent("Level 30");
+  });
+
+  // Level 1 on no experience is an ordinary state, not an empty one — it is what
+  // every account that has never trained is, and the bar sits at nothing rather
+  // than the section standing down.
+  it("draws a lifter who has never trained at the bottom of level 1", async () => {
+    standing([
+      testLifterLevel({
+        lifterId: 2,
+        level: 1,
+        xp: 0,
+        xpIntoLevel: 0,
+        xpForNextLevel: 100,
+      }),
+    ]);
+    render(LifterProfile, { params: { id: "2" } });
+
+    const section = await screen.findByTestId("lifter-level");
+    expect(section).toHaveTextContent("Level 1");
+    expect(section).toHaveTextContent("0 / 100 XP");
+  });
+
+  // Nothing is fetched for this section, so before the site-wide poll lands there
+  // is no answer to draw — and a "Level 1" placeholder would be a claim about
+  // somebody the client has not been told about yet.
+  it("stands the section down until the levels have landed", async () => {
+    render(LifterProfile, { params: { id: "2" } });
+
+    await waitFor(() => {
+      expect(screen.getByText("Lifetime volume")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("lifter-level")).toBeNull();
+  });
+
+  // An id the list does not carry — an account created since the last poll. Same
+  // answer as above, which is the whole reason levelFor conflates them.
+  it("draws nothing for a lifter the list does not carry", async () => {
+    standing([testLifterLevel({ lifterId: 3, level: 30 })]);
+    render(LifterProfile, { params: { id: "2" } });
+
+    await waitFor(() => {
+      expect(screen.getByText("Lifetime volume")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("lifter-level")).toBeNull();
+  });
+
+  // Reading it about yourself is covered with the rest of the second-person prose,
+  // in "your own profile" below — where the point is that this section is the part
+  // that does NOT change.
+});
+
 // The section that turns this page from a summary into somewhere to go. Until
 // it existed the only route to another lifter's recap — the screen where one
 // lifter applauds another — was the feed.
@@ -310,6 +418,8 @@ describe("your own profile", () => {
     });
   });
 
+  afterEach(resetLevels);
+
   it("names the sections in the second person", async () => {
     listLifterSessions.mockResolvedValue(history([session()]));
     render(LifterProfile, { params: { id: "1" } });
@@ -355,6 +465,21 @@ describe("your own profile", () => {
 
     const settings = await screen.findByRole("link", { name: "Configure profile" });
     expect(settings).toHaveAttribute("href", "#/profile");
+  });
+
+  // The Experience section is the part that does NOT switch with the reader, and
+  // that is deliberate: "how far into the level am I" has to be the same page as
+  // "how far into the level are they", or the section is a second feature wearing
+  // the first's name. Nothing is hidden by drawing it either — XP is a session
+  // count times a hundred, and the session count is the tile above it.
+  it("draws the level in the same terms it draws anybody else's", async () => {
+    levels.items = [testLifterLevel({ lifterId: 1, level: 12, xpIntoLevel: 300 })];
+    levels.loaded = true;
+    render(LifterProfile, { params: { id: "1" } });
+
+    const section = await screen.findByTestId("lifter-level");
+    expect(section).toHaveTextContent("Level 12");
+    expect(section).toHaveTextContent("300 / 1,200 XP");
   });
 
   // Somebody else's profile keeps the third person and keeps the Follow control.
