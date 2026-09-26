@@ -1000,6 +1000,18 @@ type sessionSetDTO struct {
 	// a bar's 5 lb. On a pair of dumbbells the first describes equipment nobody
 	// is holding and the second builds a 35 lb pair out of 5 lb bells.
 	Equipment string `json:"equipment"`
+	// RepMin and RepMax bound this set's rep range, when its lift has one. Nil
+	// on every main lift and on assistance without a range.
+	//
+	// TargetReps above is the BOTTOM of the range, which is why these have to
+	// travel with it. A set is complete at the bottom and the weight moves only
+	// when every set reaches the top, so a card drawing TargetReps alone tells a
+	// lifter to do 8 and never mentions that 12 is what earns the increase — the
+	// prescription endpoint has carried both since the range shipped
+	// (prescribedExerciseDTO), and the session, the one screen read at the rack,
+	// did not.
+	RepMin *int32 `json:"repMin,omitempty"`
+	RepMax *int32 `json:"repMax,omitempty"`
 }
 
 type sessionDTO struct {

@@ -137,6 +137,73 @@ export function equipmentStepLb(equipment: string, steps: GymSteps = {}): number
   }
 }
 
+// Stored pounds and shown pounds, and the one place that knows they differ.
+//
+// Everything this app STORES is the whole load: a dumbbell weight is the pair.
+// That is right for the things that add weights up — tonnage sums both bells,
+// an e1RM is of the whole load, and the progression engine advances the pair by
+// the rack's step doubled. None of that changes.
+//
+// What it was wrong about is the lifter. A rack is labelled per bell, a hand
+// holds one bell, and on a curl only one arm is working at a time — so the
+// number a lifter reads off the rack, says out loud and picks up is the BELL.
+// Shown the pair, a rack of 5 lb bells appears to advance in 10s: 60 → 70 for
+// what is actually reaching past the 30s for the 35s. The step was never the
+// problem; the app was reporting one jump as two.
+//
+// So the pair stays in the database and the bell goes on the screen, and these
+// three functions are the border. Call `displayLb` on the way out and
+// `storedLb` on the way back in, and nothing in between needs to know.
+//
+// Only dumbbells split. A machine's stack is one stack however many limbs push
+// it, a band is one band, and a barbell's weight is the bar and every plate on
+// it — those are already the number the lifter reads.
+
+/** A stored weight as the lifter reads it: one bell for dumbbells, unchanged otherwise. */
+export function displayLb(weightLb: number, equipment: string): number {
+  return equipment === "dumbbell" ? weightLb / 2 : weightLb;
+}
+
+/**
+ * The inverse of `displayLb`, for what an input sends back.
+ *
+ * Every weight box in the app binds to a stored value, so each one needs both
+ * halves: `displayLb` to fill it and this to save it. Missing this is the bug
+ * that halves a lifter's dumbbell press every time they open the editor and
+ * press save.
+ */
+export function storedLb(shownLb: number, equipment: string): number {
+  return equipment === "dumbbell" ? shownLb * 2 : shownLb;
+}
+
+/**
+ * The smallest jump this equipment admits, in the units the screen is in.
+ *
+ * Drives steppers and number inputs, so a dumbbell's `+` offers the next bell
+ * (5) rather than the pair's 10 while still writing the pair. `equipmentStepLb`
+ * keeps its whole-load meaning untouched: the engine rounds against it, the
+ * warm-up ramp builds rungs with it, and it has to keep agreeing with the
+ * server's `GymSteps`.
+ */
+export function displayStepLb(equipment: string, steps: GymSteps = {}): number {
+  return displayLb(equipmentStepLb(equipment, steps), equipment);
+}
+
+/**
+ * What to write after a weight, so two screens in different units cannot be
+ * read as one.
+ *
+ * "each" only on dumbbells, and only because it is load-bearing right now: the
+ * session card and the program page show the bell while history, the progress
+ * chart and Racked still show the pair. A lifter comparing the two without a
+ * word between them would conclude their curl halved overnight. When those
+ * screens follow, this is the thing to revisit — a bare "lb" everywhere is the
+ * end state, not a suffix on every dumbbell forever.
+ */
+export function weightUnitLabel(equipment: string): string {
+  return equipment === "dumbbell" ? "lb each" : "lb";
+}
+
 /** Display name for an equipment kind; unknown values pass through unchanged. */
 export function equipmentLabel(equipment: string): string {
   return EQUIPMENT_LABELS[equipment as Equipment] ?? equipment;

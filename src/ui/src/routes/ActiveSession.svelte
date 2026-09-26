@@ -25,6 +25,7 @@
     onDrained,
     type PendingWrite,
   } from "../lib/writeQueue.svelte";
+  import { displayLb, weightUnitLabel } from "../lib/library";
   import { celebrate } from "../lib/celebrate";
   import { formatLongDate } from "../lib/date";
   import { handOffSession } from "../lib/recapHandoff";
@@ -325,7 +326,9 @@
     // something, and a first workout would otherwise fire it on every lift.
     if (completed) {
       const previous = prBest.get(set.exerciseId);
-      const text = `${set.exerciseName} · ${set.weightLb} lb`;
+      // In the units the card beside it is in — a note saying 70 lb over a
+      // card reading 35 lb each would read as news about some other lift.
+      const text = `${set.exerciseName} · ${displayLb(set.weightLb, set.equipment)} ${weightUnitLabel(set.equipment)}`;
       // A NEW note, not merely a note on screen. Testing prNote itself would let
       // an ordinary completed set re-arm the dismissal of whatever is already up,
       // and on a 5x5 that is four more chances each — the banner would sit there
@@ -446,7 +449,13 @@
     session = outcome.value;
   }
 
-  // Adjust an exercise's weight by delta lb.
+  // Adjust an exercise's weight by delta lb, as the WHOLE load.
+  //
+  // Stored pounds, not the bells on the card: ExerciseCard shows a dumbbell per
+  // bell and steps by 5, and converts back in `stepWeight` before calling this.
+  // Everything below — the top set, the ramp scaling, the round to 5 — is in the
+  // units the session stores, which is the only way it can agree with the weights
+  // already on the rows.
   //
   // For a uniform block that is every set by the same amount, which is what it
   // has always been. For a ramping lift it is the TOP set by that amount, with
@@ -812,6 +821,7 @@
         name={group.name}
         sets={group.sets}
         equipment={group.sets[0].equipment}
+        assistance={group.assistance}
         onCycle={cycle}
         onChangeWeight={(delta) => changeWeight(group.sets, delta)}
         onAddSet={() => addSet(group.sets[0].exerciseId)}

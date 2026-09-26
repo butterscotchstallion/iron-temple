@@ -1,6 +1,6 @@
 <script lang="ts">
   import { type Exercise } from "./api";
-  import { equipmentStepLb } from "./library";
+  import { displayLb, displayStepLb, storedLb, weightUnitLabel } from "./library";
   import { DEFAULT_BAR_STEP_LB } from "./plates";
   import { gymSteps } from "./gym.svelte";
   import { exerciseEmoji } from "./exerciseIcon";
@@ -53,44 +53,50 @@
 
   let selected = $state<Exercise | null>(null);
 
-  // Three sets of ten at bodyweight: the default nearly every accessory starts
+  // Three sets of five at bodyweight: the default nearly every accessory starts
   // at, and all three are editable before adding.
   let sets = $state(3);
-  let reps = $state(10);
+  let reps = $state(5);
   let weightLb = $state(0);
   let saving = $state(false);
 
-  // On by default, and this has now defaulted both ways, so it is worth
-  // recording why rather than quietly flipping back.
+  // Off by default, and this has now defaulted both ways, so it is worth
+  // recording why rather than quietly flipping back again.
   //
-  // Without a range an accessory runs the prescribed lifts' engine: hit your
-  // reps on every set and the weight goes up next time, miss and it repeats,
-  // miss three times and it deloads. That progresses, which is what earned it
-  // the default when the alternative was a lift that never moved at all.
+  // It was ON because of an argument about dumbbells: a pair steps 10 lb, the
+  // step cannot be made finer, and so the only gentle lever left was to advance
+  // less OFTEN — which is what climbing 8 to 12 inside one weight does. That
+  // reasoning was sound and its premise was wrong. The pair never stepped 10 in
+  // the lifter's hand; it stepped one bell, and the app was reporting one jump
+  // as two by showing the whole load. Now that a dumbbell reads per bell, the
+  // linear rule advances a curl 30 → 35 — the next bell in the rack, which is
+  // the smallest increase that gym can express and needs no softening.
   //
-  // But what it advances BY is the smallest jump the equipment admits, and that
-  // is the part a coarse rack makes untenable. A pair of dumbbells steps 10 lb,
-  // so a curl goes 30 → 40 → 50 on three good weeks. That is not a pace anyone
-  // chose; it is the rack's own coarseness applied once a session.
+  // What the default cost in the meantime was legibility. A range prescribes its
+  // BOTTOM (see `reps` below), so every accessory read "8 reps" beside a program
+  // of fives, forever, with nothing on the workout screen mentioning a range or
+  // asking anyone to climb to 12. A mechanism a lifter cannot see is not a
+  // gentler pace, it is an unexplained number.
   //
-  // The step cannot be made finer — there is no 35 lb bell in a rack that goes
-  // in 5s, and prescribing one would be the app lying about the gym. So the
-  // only honest way to advance more gently is to advance less OFTEN, which is
-  // exactly what double progression is: climbing 8 to 12 inside the same weight
-  // turns one 10 lb jump into several weeks of work. On a coarse grid that
-  // makes it the better default, and a lifter who wants the linear rule back
-  // unticks it per lift.
-  let ranged = $state(true);
+  // So the linear rule is the default and the range is the opt-in, which is the
+  // way round that matches what each one is: one is what an accessory does, the
+  // other is a deliberate choice about a lift that wants a slower climb.
+  let ranged = $state(false);
   let repMin = $state(8);
   let repMax = $state(12);
 
-  // What the chosen movement's weight moves in, in THIS lifter's gym: twice
-  // their lightest plate on a bar, twice their rack's step on a pair of
-  // dumbbells. Drives both the copy below and the number input's step, so the
-  // arrows offer weights the rack can actually make.
+  // What the chosen movement's weight moves in, in THIS lifter's gym, in the
+  // units the box below is in: their lightest plate doubled on a bar, the next
+  // bell up on a rack. Drives both the copy below and the number input's step,
+  // so the arrows offer weights the rack can actually make.
   const stepLb = $derived(
-    selected ? equipmentStepLb(selected.equipment, gymSteps()) : DEFAULT_BAR_STEP_LB,
+    selected ? displayStepLb(selected.equipment, gymSteps()) : DEFAULT_BAR_STEP_LB,
   );
+  // Both halves of the border, bound to the selected movement. `shown` fills the
+  // weight box from the library's stored top set; `confirm` sends `storedLb`
+  // back, because the API stores the whole load however the box says it.
+  const shown = (lb: number) => (selected ? displayLb(lb, selected.equipment) : lb);
+  const unit = $derived(selected ? weightUnitLabel(selected.equipment) : "lb");
 
   /**
    * Pick a movement, and start its weight where the lifter left it.
@@ -108,7 +114,8 @@
    */
   function choose(exercise: Exercise) {
     selected = exercise;
-    weightLb = exercise.topSet?.weightLb ?? 0;
+    // Into the box's units — topSet is stored as the whole load.
+    weightLb = displayLb(exercise.topSet?.weightLb ?? 0, exercise.equipment);
   }
 
   async function confirm() {
@@ -121,7 +128,8 @@
         // With a range the bottom is the rep target: a set is complete at the
         // bottom and the weight moves at the top.
         reps: ranged ? repMin : reps,
-        weightLb,
+        // Back to the whole load, which is what the API and the engine store.
+        weightLb: storedLb(weightLb, selected.equipment),
         ...(ranged ? { repMin, repMax } : {}),
       },
       // The movement itself, beside the numbers rather than folded into them:
@@ -197,7 +205,7 @@
         </label>
       {/if}
       <label class="flex flex-1 flex-col gap-1 text-xs text-muted-foreground">
-        Weight (lb)
+        Weight ({unit})
         <input
           type="number"
           min="0"
@@ -217,19 +225,20 @@
            LAST one — after a deload those disagree, and calling this "last
            time" would quietly be a lie. -->
       <p class="text-xs tabular-nums text-muted-foreground">
-        Your heaviest so far: {formatVolume(selected.topSet.weightLb)} lb
+        Your heaviest so far: {formatVolume(shown(selected.topSet.weightLb))}
+        {unit}
       </p>
     {/if}
     <p class="text-xs text-muted-foreground">
       Leave the weight at 0 for bodyweight work.
       {#if ranged}
-        With a range, hit the top on every set and the weight goes up {stepLb} lb
-        next time, with the reps back at the bottom. It never deloads — good for
-        light work where {stepLb} lb a session is too big a jump.
+        With a range, hit the top on every set and the weight goes up {stepLb}
+        {unit} next time, with the reps back at the bottom. It never deloads — good
+        for light work where {stepLb} a session is too big a jump.
       {:else}
-        Hit your reps on every set and it goes up {stepLb} lb next time, the same
-        as the program's own lifts. Miss and it stays; miss three times and it
-        drops back. Bodyweight work stays bodyweight.
+        Hit your reps on every set and it goes up {stepLb}
+        {unit} next time, the same as the program's own lifts. Miss and it stays;
+        miss three times and it drops back. Bodyweight work stays bodyweight.
       {/if}
     </p>
     {#if footnote}

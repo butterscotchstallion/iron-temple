@@ -1,6 +1,6 @@
 <script lang="ts">
   import { type Exercise } from "./api";
-  import { equipmentStepLb } from "./library";
+  import { displayLb, displayStepLb, storedLb, weightUnitLabel } from "./library";
   import { DEFAULT_BAR_STEP_LB } from "./plates";
   import { gymSteps } from "./gym.svelte";
   import { exerciseEmoji } from "./exerciseIcon";
@@ -45,12 +45,17 @@
   let startingWeightLb = $state(0);
   let saving = $state(false);
 
-  // What this movement's weight moves in, in THIS lifter's gym — twice their
-  // lightest plate on a bar, twice their rack's step on a pair of bells. Drives
-  // the number input's step, so the arrows offer weights the rack can make.
+  // What this movement's weight moves in, in THIS lifter's gym, in the units the
+  // box is in — their lightest plate doubled on a bar, the next bell up on a
+  // rack. Drives the number input's step, so the arrows offer weights the rack
+  // can make.
   const stepLb = $derived(
-    selected ? equipmentStepLb(selected.equipment, gymSteps()) : DEFAULT_BAR_STEP_LB,
+    selected ? displayStepLb(selected.equipment, gymSteps()) : DEFAULT_BAR_STEP_LB,
   );
+  // A dumbbell is stored as the pair and read as the bell, so the box converts
+  // on both sides: `shown` fills it, `confirm` sends `storedLb` back.
+  const shown = (lb: number) => (selected ? displayLb(lb, selected.equipment) : lb);
+  const unit = $derived(selected ? weightUnitLabel(selected.equipment) : "lb");
 
   const inputClass =
     "rounded-md border border-input bg-transparent px-2 py-1.5 text-sm tabular-nums text-foreground outline-none transition focus:border-primary";
@@ -67,7 +72,8 @@
    */
   function choose(exercise: Exercise) {
     selected = exercise;
-    startingWeightLb = exercise.topSet?.weightLb ?? 0;
+    // Into the box's units — topSet is stored as the whole load.
+    startingWeightLb = displayLb(exercise.topSet?.weightLb ?? 0, exercise.equipment);
   }
 
   async function confirm() {
@@ -77,7 +83,8 @@
       exerciseId: selected.id,
       sets,
       reps,
-      startingWeightLb,
+      // Back to the whole load, which is what the program stores.
+      startingWeightLb: storedLb(startingWeightLb, selected.equipment),
     });
     saving = false;
     // On failure the parent shows the banner and this stays open with the
@@ -110,7 +117,7 @@
         <input type="number" min="1" max="100" bind:value={reps} class={inputClass} />
       </label>
       <label class="flex flex-1 flex-col gap-1 text-xs text-muted-foreground">
-        Starts at (lb)
+        Starts at ({unit})
         <input
           type="number"
           min="0"
@@ -126,7 +133,8 @@
       <!-- Named for what it is. topSet is the heaviest set ever; the engine
            advances from the LAST one, and after a deload those disagree. -->
       <p class="text-xs tabular-nums text-muted-foreground">
-        Your heaviest so far: {formatVolume(selected.topSet.weightLb)} lb
+        Your heaviest so far: {formatVolume(shown(selected.topSet.weightLb))}
+        {unit}
       </p>
     {/if}
 

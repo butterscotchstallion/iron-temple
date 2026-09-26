@@ -733,10 +733,9 @@ test("adds assistance to a program day", async ({ page }) => {
 
   await page.getByRole("button", { name: "Add assistance" }).click();
   await page.getByRole("button", { name: /Dip/ }).click();
-  // On by default now, so this unticks it: the plain rep input is what a lift
-  // on the linear rule shows, and that is the path this case covers.
-  await expect(page.getByLabel("Use a rep range")).toBeChecked();
-  await page.getByLabel("Use a rep range").uncheck();
+  // Off by default, so the plain rep input is already what is on screen —
+  // this only has to type over the 5 it opens on.
+  await expect(page.getByLabel("Use a rep range")).not.toBeChecked();
   await page.getByLabel("Reps", { exact: true }).fill("8");
   await page.getByRole("button", { name: "Add to this day" }).click();
 
@@ -1095,16 +1094,15 @@ test("adds an assistance lift to the workout in progress", async ({ page }) => {
   // exact, because getByText matches case-insensitively on a substring by
   // default and the "Add assistance" button below would match too.
   await expect(page.getByText("Assistance", { exact: true })).toBeVisible();
-  // Carrying the rep range the picker defaults to, with reps at its BOTTOM —
-  // a set is complete at the bottom and the weight moves at the top. The
-  // unticked path is covered where a bodyweight accessory is added to a day.
+  // Fives and no range, matching the picker's defaults and the lifts the
+  // program itself prescribes. An accessory runs the linear engine unless
+  // somebody deliberately ticks a range on; the ranged path is covered in
+  // AssistancePicker.test.ts and ActiveSession.test.ts.
   expect(added).toEqual({
     exerciseId: 4,
     sets: 3,
-    reps: 8,
+    reps: 5,
     weightLb: 0,
-    repMin: 8,
-    repMax: 12,
   });
 });
 

@@ -1007,3 +1007,71 @@ func TestAssistanceSetsEditDoesNotPinTheWeight(t *testing.T) {
 	assistancePreview(e, programID, dayID, curlID).
 		Value("weightLb").Number().IsEqual(50)
 }
+
+// A ranged accessory has to read the same in the workout as it does on the
+// program page, and until now it did not: the session carried target_reps
+// alone, which is the BOTTOM of the range. So a lift the program page showed as
+// "3x8-12" arrived at the rack as a bare 8, with nothing on screen naming a
+// range or saying that 12 on every set is what moves the weight. The one screen
+// a lifter reads while deciding how many reps to do was the only one that never
+// mentioned the rule it was running.
+//
+// Both ends now ride on every set of that lift, off the assistance row
+// ListSessionSets was already joining for its ORDER BY.
+//
+// On its own lifter, because it logs a rep. Sets logged by the shared account
+// move that account's history, and the engine reads history — a dozen tests
+// that assert on a prescribed weight start failing somewhere else entirely.
+func TestSessionSetsCarryTheRepRange(t *testing.T) {
+	_, token := secondLifter(t, "rep-range-on-sets")
+	e := expectAs(t, token)
+	programID, dayID := firstProgramAndDay(e)
+	flyID := exerciseIDByName(t, e, "Dumbbell Fly")
+
+	created := addAssistance(t, e, programID, dayID, flyID, 3, 8, 20)
+	assistanceID := int(created.Value("id").Number().Raw())
+	e.PATCH(fmt.Sprintf("/programs/%d/days/%d/assistance/%d",
+		programID, dayID, assistanceID)).
+		WithJSON(map[string]any{"repMin": 8, "repMax": 12}).
+		Expect().Status(http.StatusOK)
+
+	session := startSession(t, e, dayID)
+	sessionID := int(session.Value("id").Number().Raw())
+
+	// Every set of the accessory carries the range; the day's own barbell work
+	// carries neither, because a main lift has no assistance row to read one
+	// off and "8-12" on a squat would be an invention.
+	sets := session.Value("sets").Array()
+	var rangedSetID int
+	var sawMainLift bool
+	for i := 0; i < int(sets.Length().Raw()); i++ {
+		s := sets.Value(i).Object()
+		if int(s.Value("exerciseId").Number().Raw()) == flyID {
+			s.Value("targetReps").Number().IsEqual(8)
+			s.Value("repMin").Number().IsEqual(8)
+			s.Value("repMax").Number().IsEqual(12)
+			rangedSetID = int(s.Value("id").Number().Raw())
+			continue
+		}
+		s.NotContainsKey("repMin")
+		s.NotContainsKey("repMax")
+		sawMainLift = true
+	}
+	if rangedSetID == 0 {
+		t.Fatal("the ranged accessory is not in the session")
+	}
+	if !sawMainLift {
+		t.Fatal("no main lift in the session to check the nil case against")
+	}
+
+	// And the PATCH echo agrees with the read. GetSessionSet did not join the
+	// assistance row — it does no ordering, so it had never needed to — which
+	// would have left a tapped rep collapsing "8-12" back to "8" on that card
+	// alone until the next reload. A row read two ways has to read the same
+	// both times.
+	e.PATCH(fmt.Sprintf("/sessions/%d/sets/%d", sessionID, rangedSetID)).
+		WithJSON(map[string]any{"actualReps": 10}).
+		Expect().Status(http.StatusOK).JSON().Object().
+		HasValue("repMin", 8).
+		HasValue("repMax", 12)
+}

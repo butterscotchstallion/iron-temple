@@ -36,6 +36,22 @@ export type WarmupGym = {
    * step — which is a fact about their rack and not a constant.
    */
   steps?: GymSteps;
+  /**
+   * Whether this is assistance work rather than a prescribed lift.
+   *
+   * An accessory gets one light feeler set instead of a ramp. The ramp below is
+   * a StrongLifts ramp — it exists to walk a lifter up to a heavy barbell single
+   * digit, and applied to a curl it is absurd: three loaded rungs in front of
+   * three work sets is a warm-up as long as the lift, and nobody in a gym ramps
+   * a lateral raise in three steps. The accessory is the warm-up, past the first
+   * set.
+   *
+   * One set rather than none because an accessory is not always small — a heavy
+   * dumbbell row or an RDL earns a feeler — and because a rung that rounds away
+   * to nothing is dropped anyway, so light work still ends up with no ramp at all
+   * without this having to decide where "light" starts.
+   */
+  accessory?: boolean;
   /** See `trimToCap`. Uncapped by default, for callers asking what the full ramp would be. */
   maxSets?: number;
 };
@@ -45,6 +61,10 @@ export type WarmupGym = {
  * of the work weight with descending reps, opening on a barbell with two sets of
  * the empty bar. Ramps at or below the previous rung, or at or above the work
  * weight, are dropped — so a light work weight yields fewer warm-ups.
+ *
+ * `accessory` collapses all of that to a single ~50% feeler set, because the
+ * ramp above is for the lift a session is built around and an accessory is not
+ * one. See the field on `WarmupGym`.
  *
  * Equipment decides two things and nothing else.
  *
@@ -71,6 +91,7 @@ export function warmupSets(workLb: number, gym: WarmupGym = {}): WarmupSet[] {
     bar = DEFAULT_BAR_LB,
     plates = DEFAULT_PLATES,
     steps = {},
+    accessory = false,
     maxSets = Infinity,
   } = gym;
 
@@ -83,12 +104,21 @@ export function warmupSets(workLb: number, gym: WarmupGym = {}): WarmupSet[] {
     ? (w: number) => loadBar(w, bar, plates).weightLb
     : (w: number) => Math.floor(w / step) * step;
 
-  const result: WarmupSet[] = barbell ? [{ weightLb: bar, reps: 5, sets: 2 }] : [];
-  const ramps = [
-    { pct: 0.5, reps: 5 },
-    { pct: 0.7, reps: 3 },
-    { pct: 0.9, reps: 2 },
-  ];
+  // The empty-bar opener is a prescribed-lift thing: two sets of an empty bar
+  // before a barbell curl is a warm-up for the warm-up. The floor stays at the
+  // bar either way — nothing loads below it, so a light barbell accessory still
+  // yields no rungs rather than impossible ones.
+  const result: WarmupSet[] = barbell && !accessory ? [{ weightLb: bar, reps: 5, sets: 2 }] : [];
+  const ramps = accessory
+    ? // The lightest rung, and only it. Note this is NOT `maxSets: 1` on the full
+      // ramp: trimToCap sheds from the light end, so a cap of one would keep the
+      // 90% double — a near-max single, which is the opposite of a feeler set.
+      [{ pct: 0.5, reps: 5 }]
+    : [
+        { pct: 0.5, reps: 5 },
+        { pct: 0.7, reps: 3 },
+        { pct: 0.9, reps: 2 },
+      ];
 
   let prev = floor;
   for (const { pct, reps } of ramps) {

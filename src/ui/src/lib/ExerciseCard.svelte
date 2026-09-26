@@ -8,7 +8,7 @@
   import Plus from "@lucide/svelte/icons/plus";
   import PlateBar from "./PlateBar.svelte";
   import { plateLabel } from "./plates";
-  import { equipmentStepLb } from "./library";
+  import { displayLb, displayStepLb, storedLb, weightUnitLabel } from "./library";
   import { barWeightLb, gymSteps, plateInventory } from "./gym.svelte";
   import { warmupSets } from "./warmup";
   import { barFraction } from "./racked";
@@ -20,6 +20,7 @@
     name,
     sets,
     equipment = "barbell",
+    assistance = false,
     onCycle,
     onChangeWeight,
     onAddSet,
@@ -37,6 +38,15 @@
      * card still renders without one, the way `readonly` is.
      */
     equipment?: string;
+    /**
+     * Whether this is assistance rather than the day's prescribed work. Changes
+     * one thing: the warm-up, which collapses to a single feeler set. Passed in
+     * rather than read off `sets[0].kind` so the card keeps taking its cues from
+     * its caller, the way `equipment` and `readonly` do — and because
+     * ActiveSession has already grouped by kind to draw the "Assistance"
+     * heading, so the answer is sitting right there.
+     */
+    assistance?: boolean;
     onCycle: (set: SessionSet) => void;
     onChangeWeight: (delta: number) => void;
     /** Append one more set of this lift. Omitted where sets are fixed. */
@@ -84,13 +94,15 @@
   // Only a barbell has a bar to load, so only a barbell gets the diagram, the
   // per-side plate line and the empty-bar opener in front of its work sets.
   const barbell = $derived(equipment === "barbell");
-  // The smallest change this equipment admits IN THIS GYM, which is what the
-  // stepper should move by: twice the lightest plate owned on a bar, twice the
-  // rack's step on a pair of dumbbells. Shared with the API's progression.Ladder
-  // through `equipmentStepLb`, so the button and the engine agree about what the
-  // next weight up even is — ±5 on a lift whose rack steps 5 lb a bell asks for
-  // a 35 lb pair nobody owns.
-  const stepLb = $derived(equipmentStepLb(equipment, gymSteps()));
+  // The smallest change this equipment admits IN THIS GYM, in the units on the
+  // screen: the lightest plate owned doubled on a bar, the next bell up on a
+  // rack. `displayStepLb` wraps the same `equipmentStepLb` the API's
+  // progression.Ladder uses, so the button and the engine still agree about what
+  // the next weight up even is — the wrapper only says it in bells.
+  //
+  // So a dumbbell stepper reads 5 and moves the stored pair by 10. `stepWeight`
+  // below is where that conversion happens, and it is the only place it may.
+  const stepLb = $derived(displayStepLb(equipment, gymSteps()));
 
   // The last set is the one a "remove a set" control should target: sets are
   // numbered in order and the tail is what an extra one was appended to.
@@ -145,19 +157,32 @@
       : (sets[0]?.weightLb ?? 0),
   );
   const targetReps = $derived(sets[0]?.targetReps ?? 0);
-  // The unit the work weight is in, said out loud where it isn't obvious.
+  // What to chase, as a range where the lift has one.
   //
-  // Every weight in this app is the whole load, and on a pair of dumbbells that
-  // is twice the number stamped on the bell in the lifter's hand. That is fine
-  // on its own, but this card also shows the active rung per hand a line below
-  // — and a lifter reading "10 lb per hand" against a bare "40 lb" concludes
-  // their warm-up is 25% of the work weight, when it is the 50% rung of a 20 lb
-  // bell. Two units ten pixels apart, only one of them labelled.
+  // `targetReps` is the BOTTOM of a range, not a target in its own right: a set
+  // is complete at the bottom and the weight only moves when every set reaches
+  // the top. Drawing it alone told a lifter to do 8 and never mentioned that 12
+  // is what earns the increase — so double progression, the one rule on this
+  // screen nobody could see, looked like an arbitrary rep count that disagreed
+  // with the program's fives.
   //
-  // Only dumbbells get the suffix: a barbell's weight is the whole load and
-  // nothing near it says otherwise, so "lb pair" there would be noise on every
-  // card in the session to disambiguate something that is never ambiguous.
-  const weightUnit = $derived(equipment === "dumbbell" ? "lb pair" : "lb");
+  // Reads `repMax` and not `repMin`, because `targetReps` already IS the bottom
+  // and taking it from there keeps the two ends of the range from ever
+  // disagreeing on a card.
+  const repMax = $derived(sets[0]?.repMax ?? null);
+  const repTarget = $derived(repMax ? `${targetReps}–${repMax}` : `${targetReps}`);
+  // Every weight this card draws, in the units the lifter reads: `shown` for the
+  // work weight and `unit` for what to write after it.
+  //
+  // A dumbbell is stored as the pair and shown as the bell — the number stamped
+  // on the thing being picked up, which is what a lifter says out loud and what
+  // the rack is labelled with. `displayLb` is that conversion and this card is
+  // display-only past `stepWeight`, so every number below goes through it.
+  //
+  // The suffix is "lb each" on dumbbells while the rest of the app still shows
+  // the pair; see `weightUnitLabel`.
+  const shown = (weightLb: number) => displayLb(weightLb, equipment);
+  const weightUnit = $derived(weightUnitLabel(equipment));
   // The rest this lift asks for, shown alongside the rep target because it is
   // half of the prescription and the countdown that enforces it lives in a
   // corner of the screen with no name on it.
@@ -198,6 +223,7 @@
       bar: barWeightLb(),
       plates: plateInventory(),
       steps: gymSteps(),
+      accessory: assistance,
       maxSets: rampCap,
     })) {
       for (let k = 0; k < w.sets; k++) {
@@ -260,18 +286,25 @@
       ? warmups[active].reps
       : (sets[active - warmups.length]?.targetReps ?? targetReps),
   );
+  // The same number the header shows, for whichever step is active — and the
+  // range only on a work set. A warm-up rung's reps are a fixed prescription
+  // (five at 50%, not "five to nine"); the range belongs to the work.
+  const activeRepsLabel = $derived(
+    active < warmups.length ? `${activeReps}` : repTarget,
+  );
 
   // How the active weight is actually carried, said in the terms the equipment
-  // uses. A barbell gets the plates for one side. A dumbbell gets the weight of
-  // one bell, because every weight in this app is the whole load and the number
-  // stamped on the thing in the lifter's hand is half of it. A machine's stack
-  // and a cable's pin are their own label already, so they get nothing rather
-  // than a sentence restating the weight above them.
-  const loadNote = $derived.by(() => {
-    if (barbell) return plateLabel(activeWeight, barWeightLb(), plateInventory());
-    if (equipment === "dumbbell") return `${activeWeight / 2} lb per hand`;
-    return "";
-  });
+  // uses. A barbell gets the plates for one side. A machine's stack and a
+  // cable's pin are their own label already, so they get nothing rather than a
+  // sentence restating the weight above them.
+  //
+  // Dumbbells used to get "N lb per hand" here, computed as half the number
+  // above it. That line is gone because the number above it IS the bell now —
+  // the note would restate it, and two identical weights ten pixels apart read
+  // as a discrepancy rather than a clarification.
+  const loadNote = $derived(
+    barbell ? plateLabel(activeWeight, barWeightLb(), plateInventory()) : "",
+  );
 
   // The goal line and its bar, from the same two helpers the profile's "Closing
   // in" list uses — so the rung a lifter chases at the rack and the rung on their
@@ -313,9 +346,12 @@
     onCycle(set);
   }
 
+  // `delta` arrives in the units on screen — one bell on a dumbbell — and the
+  // session stores the whole load, so it crosses back here. This is the only
+  // outbound conversion on the card; everything else it does is display.
   function stepWeight(delta: number) {
     if (readonly) return;
-    onChangeWeight(delta);
+    onChangeWeight(storedLb(delta, equipment));
   }
 
   function workClass(set: SessionSet, i: number): string {
@@ -366,7 +402,7 @@
         {#if allComplete}
           <Check class="size-4 text-primary" aria-hidden="true" />
         {/if}
-        {doneCount}/{sets.length} sets · {workWeight} {weightUnit}
+        {doneCount}/{sets.length} sets · {shown(workWeight)} {weightUnit}
       </span>
     {:else}
       <div class="flex items-center gap-3">
@@ -376,7 +412,7 @@
           {#if ramping}
             {sets.length} sets, ramping
           {:else}
-            {targetReps} reps
+            {repTarget} reps
           {/if}
           {#if restSeconds > 0}
             · {formatTime(restSeconds)} rest
@@ -388,21 +424,22 @@
             size="icon-sm"
             onclick={() => stepWeight(-stepLb)}
             disabled={readonly}
-            aria-label="Decrease weight by {stepLb} lb"
+            aria-label="Decrease weight by {stepLb} {weightUnit}"
           >
             <Minus />
           </Button>
           <span
             class="min-w-16 text-center text-sm font-bold tabular-nums text-card-foreground"
           >
-            {workWeight} {weightUnit}
+            {shown(workWeight)}
+            {weightUnit}
           </span>
           <Button
             variant="outline"
             size="icon-sm"
             onclick={() => stepWeight(stepLb)}
             disabled={readonly}
-            aria-label="Increase weight by {stepLb} lb"
+            aria-label="Increase weight by {stepLb} {weightUnit}"
           >
             <Plus />
           </Button>
@@ -422,7 +459,8 @@
         <PlateBar weightLb={activeWeight} />
       {/if}
       <p class="text-xs tabular-nums text-muted-foreground">
-        {activeWeight} lb × {activeReps}{loadNote ? ` · ${loadNote}` : ""}
+        {shown(activeWeight)}
+        {weightUnit} × {activeRepsLabel}{loadNote ? ` · ${loadNote}` : ""}
       </p>
 
       <!-- What there is to aim at, if anything. Quiet on purpose: it is a goal, not
@@ -460,7 +498,7 @@
                 : 'cursor-pointer'} {warmClass(i)}"
               onclick={() => cycleWarmup(i)}
               disabled={readonly}
-              aria-label={`Warm-up ${w.weightLb} lb × ${w.reps}: ${
+              aria-label={`Warm-up ${shown(w.weightLb)} ${weightUnit} × ${w.reps}: ${
                 warmupReps[i] ?? 0
               } reps`}
             >
@@ -478,9 +516,11 @@
               : 'cursor-pointer'} {workClass(set, i)}"
             onclick={() => cycleSet(set)}
             disabled={readonly}
-            title={ramping ? `${set.weightLb} lb x ${set.targetReps}` : undefined}
+            title={ramping
+              ? `${shown(set.weightLb)} ${weightUnit} x ${set.targetReps}`
+              : undefined}
             aria-label={ramping
-              ? `Set ${set.setNumber}, ${set.weightLb} lb for ${set.targetReps}: ${
+              ? `Set ${set.setNumber}, ${shown(set.weightLb)} ${weightUnit} for ${set.targetReps}: ${
                   set.actualReps == null ? "not logged" : `${set.actualReps} reps`
                 }`
               : `Set ${set.setNumber}: ${
@@ -529,7 +569,7 @@
       >
         {#each sets as set (set.id)}
           <li class={active === warmups.length + sets.indexOf(set) ? "text-primary" : ""}>
-            {set.weightLb}×{set.targetReps}
+            {shown(set.weightLb)}×{set.targetReps}
           </li>
         {/each}
       </ol>

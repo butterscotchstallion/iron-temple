@@ -531,6 +531,10 @@ func (s *Server) updateSessionSet(w http.ResponseWriter, r *http.Request) {
 		IsBonus:     updated.IsBonus,
 		RestSeconds: current.RestSeconds,
 		Equipment:   current.Equipment,
+		// Read-time fields, so from `current` alongside the name and the rest —
+		// the UPDATE neither sees nor touches the assistance row they come off.
+		RepMin: current.RepMin,
+		RepMax: current.RepMax,
 	})
 }
 
@@ -625,6 +629,8 @@ func (s *Server) addSessionSet(w http.ResponseWriter, r *http.Request) {
 		IsBonus:     created.IsBonus,
 		RestSeconds: full.RestSeconds,
 		Equipment:   full.Equipment,
+		RepMin:      full.RepMin,
+		RepMax:      full.RepMax,
 	})
 }
 
@@ -770,5 +776,7 @@ func sessionSetToDTO(set store.ListSessionSetsRow) sessionSetDTO {
 		IsBonus:      set.IsBonus,
 		RestSeconds:  set.RestSeconds,
 		Equipment:    set.Equipment,
+		RepMin:       set.RepMin,
+		RepMax:       set.RepMax,
 	}
 }

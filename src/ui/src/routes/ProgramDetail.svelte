@@ -41,7 +41,7 @@
   import Loading from "../lib/skeleton/Loading.svelte";
   import SkeletonProgram from "../lib/skeleton/SkeletonProgram.svelte";
   import AssistancePicker from "../lib/AssistancePicker.svelte";
-  import { equipmentStepLb } from "../lib/library";
+  import { displayLb, displayStepLb, storedLb, weightUnitLabel } from "../lib/library";
   import { gymSteps } from "../lib/gym.svelte";
   import { weekdayOptions, nextWeekLabel } from "../lib/weekday";
   import { todayIso } from "../lib/calendar";
@@ -275,9 +275,17 @@
   // The jump this accessory's equipment admits in this lifter's gym — what the
   // weight stepper should move by, and the number the copy below promises when
   // a rep range tops out. The same answer progression.LadderFor gives on the
-  // server, off the same two facts: the movement's equipment and the gym.
+  // server, off the same two facts: the movement's equipment and the gym, said
+  // in the units the box beside it is in: the next bell up rather than the pair.
   function assistanceStepLb(entry: ProgramDayAssistance): number {
-    return equipmentStepLb(entry.equipment, gymSteps());
+    return displayStepLb(entry.equipment, gymSteps());
+  }
+
+  // The border between what the API stores (the whole load) and what this page
+  // shows (one bell, on dumbbells). Every weight rendered or bound below goes
+  // through one of these; see `displayLb` in library.ts.
+  function assistanceShown(entry: ProgramDayAssistance, weightLb: number): number {
+    return displayLb(weightLb, entry.equipment);
   }
 
   function assistanceWeight(day: DayView, entry: ProgramDayAssistance): number {
@@ -346,7 +354,7 @@
   // range shipped; nothing called it.
   let editingId = $state<number | null>(null);
   let editSets = $state(3);
-  let editReps = $state(10);
+  let editReps = $state(5);
   let editWeight = $state(0);
   let editRanged = $state(false);
   let editRepMin = $state(8);
@@ -365,7 +373,13 @@
     // the stored one opened the editor on a number that appeared nowhere on
     // screen: a curl reading 50 offered 0, and "changing" it to 50 looked like
     // a no-op while actually pinning it there.
-    editWeight = assistanceWeight(day, entry);
+    //
+    // In the box's units, and `saveEdit` compares against the same conversion.
+    // Both halves have to agree: comparing a bell against a pair would make
+    // every edit look like a weight change, and naming a weight is what pins an
+    // accessory to it — a lifter changing the set count would drag the lift off
+    // the weight it had carried forward to.
+    editWeight = assistanceShown(entry, assistanceWeight(day, entry));
     // A range is on when the row has one. The defaults behind the checkbox
     // match the picker's, so ticking it on a lift that never had one offers
     // 8–12 rather than whatever the reps happened to be.
@@ -385,13 +399,15 @@
     // the weight it had carried forward to. Compared against what startEdit
     // put in the box — the weight in force — so this is true exactly when the
     // number on screen changed.
-    const inForce = assistanceWeight(day, entry);
+    const inForce = assistanceShown(entry, assistanceWeight(day, entry));
     const saved = await updateAssistance(programId, day.id, entry.id, {
       sets: editSets,
       // With a range the bottom is the rep target, the same rule the picker
       // applies: a set is complete at the bottom and the weight moves at the top.
       reps: editRanged ? editRepMin : editReps,
-      ...(editWeight !== inForce ? { weightLb: editWeight } : {}),
+      ...(editWeight !== inForce
+        ? { weightLb: storedLb(editWeight, entry.equipment) }
+        : {}),
       // null, not omitted. Absent means "leave it alone" on this endpoint, so
       // clearing the range has to be said out loud — that is what puts a lift
       // back on carrying its weight forward.
@@ -927,7 +943,8 @@
                           ? `${entry.repMin}–${entry.repMax}`
                           : entry.reps}
                         {#if assistanceWeight(day, entry) > 0}
-                          · {assistanceWeight(day, entry)} lb
+                          · {assistanceShown(entry, assistanceWeight(day, entry))}
+                          {weightUnitLabel(entry.equipment)}
                         {:else}
                           · bodyweight
                         {/if}
@@ -1008,7 +1025,9 @@
                           </label>
                         {/if}
                         <label class="flex flex-col gap-1">
-                          <span class="text-xs text-muted-foreground">Weight (lb)</span>
+                          <span class="text-xs text-muted-foreground"
+                            >Weight ({weightUnitLabel(entry.equipment)})</span
+                          >
                           <input
                             type="number"
                             min="0"

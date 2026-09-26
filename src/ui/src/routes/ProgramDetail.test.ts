@@ -295,16 +295,19 @@ describe("ProgramDetail assistance editing", () => {
     );
   });
 
-  // The stepper offers the jump this lifter's rack can actually make. A pair of
-  // bells moves 10 with no profile loaded, not the bar's 5 — asking for 5 is
-  // asking for a bell that is not on the rack.
+  // The stepper offers the jump this lifter's rack can actually make, in the
+  // units the box is in: one bell, which is what they reach for. The pair it
+  // stores still moves 10 — see "sends the whole pair" below.
   it("steps the weight by what the movement's equipment builds", async () => {
     await show(todayWeekday(), [], [curl()]);
 
     await fireEvent.click(
       screen.getByRole("button", { name: "Edit Dumbbell Curl on Workout A" }),
     );
-    expect(await screen.findByLabelText("Weight (lb)")).toHaveAttribute("step", "10");
+    expect(await screen.findByLabelText("Weight (lb each)")).toHaveAttribute(
+      "step",
+      "5",
+    );
   });
 });
 
@@ -360,10 +363,15 @@ describe("ProgramDetail assistance weight editing", () => {
       screen.getByRole("button", { name: "Edit Dumbbell Curl on Workout A" }),
     );
 
-    expect(await screen.findByLabelText("Weight (lb)")).toHaveValue(50);
+    // A prescribed 50 lb pair is a pair of 25s, and 25 is what the box says.
+    expect(await screen.findByLabelText("Weight (lb each)")).toHaveValue(25);
   });
 
-  it("sends a weight the lifter changed", async () => {
+  // The box reads bells and the API stores the pair, so both halves convert —
+  // and `saveEdit` compares against the same conversion it filled the box with.
+  // If those two disagreed, every sets-only edit would look like a weight
+  // change, and naming a weight is what PINS an accessory to it.
+  it("sends the whole pair for a weight the lifter changed", async () => {
     prescribedAt(50);
     await show(todayWeekday(), [], [curl({ weightLb: 30 })]);
     updateAssistance.mockResolvedValue({ status: 200, data: curl({ weightLb: 30 }) });
@@ -371,8 +379,9 @@ describe("ProgramDetail assistance weight editing", () => {
     await fireEvent.click(
       screen.getByRole("button", { name: "Edit Dumbbell Curl on Workout A" }),
     );
-    await fireEvent.input(await screen.findByLabelText("Weight (lb)"), {
-      target: { value: "30" },
+    // Reaching for the 15s, down from the 25s in force.
+    await fireEvent.input(await screen.findByLabelText("Weight (lb each)"), {
+      target: { value: "15" },
     });
     await fireEvent.click(screen.getByRole("button", { name: "Save" }));
 

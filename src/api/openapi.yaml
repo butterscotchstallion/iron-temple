@@ -6078,6 +6078,26 @@ components:
         # the weight steps by a bar's 5 lb or a pair of bells' 10.
         equipment:
           $ref: "#/components/schemas/Equipment"
+        repMin:
+          type: integer
+          nullable: true
+          description: >-
+            Bottom of this lift's rep range, or null when it has none — which is
+            every main lift and every accessory not put on double progression.
+
+            targetReps above IS this number when a range is present: a set is
+            complete at the bottom and the weight moves only once every set
+            reaches the top. Both are sent so the workout screen can render
+            "8–12" rather than a bare "8", the way the program page and the
+            prescription endpoint already do. Without them the one screen a
+            lifter reads while deciding how many reps to do is also the only one
+            that never mentions the range exists.
+          example: 8
+        repMax:
+          type: integer
+          nullable: true
+          description: Top of the rep range; hitting it on every set is what advances the weight.
+          example: 12
 
     SessionExerciseWeight:
       description: An exercise's set/rep prescription and top weight for a session.

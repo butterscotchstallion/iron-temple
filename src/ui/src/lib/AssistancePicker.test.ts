@@ -49,10 +49,17 @@ function rowsInOrder(): string[] {
     .filter((name): name is string => name !== undefined);
 }
 
-function open(exercises: Exercise[], props: { exclude?: number[] } = {}) {
+function open(
+  exercises: Exercise[],
+  props: {
+    exclude?: number[];
+    /** Overridden only by the tests that assert on what gets sent. */
+    onAdd?: (choice: unknown, exercise: Exercise) => Promise<boolean>;
+  } = {},
+) {
   listExercises.mockResolvedValue({ status: 200, data: exercises });
   return render(AssistancePicker, {
-    props: { ...props, onAdd: vi.fn(async () => true), onCancel: vi.fn() },
+    props: { onAdd: vi.fn(async () => true), onCancel: vi.fn(), ...props },
   });
 }
 
@@ -160,42 +167,55 @@ describe("the recent section", () => {
     expect(await screen.findByText("Use a rep range")).toBeInTheDocument();
   });
 
-  // On by default. The linear rule does progress, but it advances by the
-  // smallest jump the equipment admits, and on a pair of dumbbells that is
-  // 10 lb every session — a pace the rack chose rather than the lifter. The
-  // range spends those weeks on reps instead, so it is what a new accessory
-  // gets unless asked otherwise.
-  it("defaults the rep range on and promises double progression", async () => {
+  // Off by default, and it has defaulted both ways, so the reason is worth an
+  // assertion rather than a comment alone.
+  //
+  // It was ON because a pair of dumbbells appeared to step 10 lb a session,
+  // which the range softened by spending weeks on reps instead. The premise was
+  // wrong: the pair stepped one bell, 30 to 35, and the app was reporting one
+  // jump as two by showing the whole load. What the default actually cost was
+  // legibility — a ranged lift prescribes its BOTTOM, so every accessory read
+  // "8 reps" beside a program of fives, forever.
+  it("defaults to the linear rule, the same one the program's lifts run", async () => {
     open(library);
     await fireEvent.click(await screen.findByRole("button", { name: /Dip/ }));
-    expect(await screen.findByLabelText("Use a rep range")).toBeChecked();
-    expect(screen.getByText(/never deloads/)).toBeInTheDocument();
-  });
-
-  // Unticking it is still the prescribed lifts' engine, and the copy still has
-  // to say so — it once promised that "nothing moves it but you", which was
-  // true and was the bug.
-  it("offers the linear rule when the range is unticked", async () => {
-    open(library);
-    await fireEvent.click(await screen.findByRole("button", { name: /Dip/ }));
-    await fireEvent.click(await screen.findByLabelText("Use a rep range"));
+    expect(await screen.findByLabelText("Use a rep range")).not.toBeChecked();
     expect(
       await screen.findByText(/the same as the program's own lifts/),
     ).toBeInTheDocument();
     expect(screen.getByText(/miss three times and it drops back/)).toBeInTheDocument();
   });
 
+  it("prescribes fives, like the lifts it sits under", async () => {
+    open(library);
+    await fireEvent.click(await screen.findByRole("button", { name: /Dip/ }));
+    expect(await screen.findByLabelText("Reps")).toHaveValue(5);
+  });
+
+  // Still there for a lift somebody deliberately wants to climb — the range is
+  // now the opt-in it was built as, rather than the default.
+  it("promises double progression when the range is ticked on", async () => {
+    open(library);
+    await fireEvent.click(await screen.findByRole("button", { name: /Dip/ }));
+    await fireEvent.click(await screen.findByLabelText("Use a rep range"));
+    expect(await screen.findByText(/never deloads/)).toBeInTheDocument();
+  });
+
   // The stepper offers the jump the lifter's own equipment makes, not a
-  // constant. With no profile loaded the fallbacks stand in: a bar moves 5, and
-  // a pair of bells 10, because a weight here is the whole load and a rack
-  // steps 5 lb a bell. Asserted on the input's step rather than on the copy,
-  // which interpolates the same number into a split text node.
-  it("steps the weight by what the chosen equipment can build", async () => {
+  // constant, and in the units the box is in. With no profile loaded the
+  // fallbacks stand in: a bar moves 5, and a rack of bells moves 5 too — one
+  // bell, which is what a lifter picks up, though the pair it stores moves 10.
+  // Asserted on the input's step rather than on the copy, which interpolates
+  // the same number into a split text node.
+  it("steps a dumbbell by one bell, and says so on the label", async () => {
     open([
       exercise({ id: 9, name: "Hammer", muscleGroup: "arms", equipment: "dumbbell" }),
     ]);
     await fireEvent.click(await screen.findByRole("button", { name: /Hammer/ }));
-    expect(await screen.findByLabelText("Weight (lb)")).toHaveAttribute("step", "10");
+    expect(await screen.findByLabelText("Weight (lb each)")).toHaveAttribute(
+      "step",
+      "5",
+    );
   });
 
   it("steps a barbell lift by five", async () => {
@@ -204,5 +224,27 @@ describe("the recent section", () => {
     ]);
     await fireEvent.click(await screen.findByRole("button", { name: /Hammer/ }));
     expect(await screen.findByLabelText("Weight (lb)")).toHaveAttribute("step", "5");
+  });
+
+  // The box reads bells and the API stores the pair, so the conversion has to
+  // happen on the way out. Getting this wrong halves a lifter's dumbbell work
+  // every time they touch the editor.
+  it("sends the whole pair, however the box reads", async () => {
+    const onAdd = vi.fn().mockResolvedValue(true);
+    open(
+      [exercise({ id: 9, name: "Hammer", muscleGroup: "arms", equipment: "dumbbell" })],
+      { onAdd },
+    );
+    await fireEvent.click(await screen.findByRole("button", { name: /Hammer/ }));
+    await fireEvent.input(await screen.findByLabelText("Weight (lb each)"), {
+      target: { value: "35" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: /Add to this day/ }));
+    await waitFor(() =>
+      expect(onAdd).toHaveBeenCalledWith(
+        expect.objectContaining({ weightLb: 70, reps: 5 }),
+        expect.anything(),
+      ),
+    );
   });
 });

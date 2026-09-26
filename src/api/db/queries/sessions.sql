@@ -383,6 +383,15 @@ WHERE id = sqlc.arg('id')
 -- up with at all, are properties of the movement and nothing else knows them. The
 -- session screen draws a plate diagram and an empty-bar opener off this, which on
 -- a pair of dumbbells describes equipment that is not in the lifter's hands.
+--
+-- rep_min/rep_max come off the pda row this query was already joining for its
+-- ORDER BY, so they cost nothing. They are here because target_reps alone is a
+-- lie by omission on a ranged accessory: a range prescribes its BOTTOM, so the
+-- set says 8 while what actually moves the weight is 12 on every set. The
+-- program page has shown "3x8-12" since 0014 and the workout screen — the one
+-- place a lifter reads the number while deciding how many to do — showed a bare
+-- 8, with nothing anywhere saying a range existed. NULL on a main lift and on
+-- any accessory without one.
 -- name: ListSessionSets :many
 SELECT ss.id,
        ss.session_id,
@@ -396,7 +405,9 @@ SELECT ss.id,
        ss.is_bonus,
        (pde.id IS NULL)::bool AS is_assistance,
        e.rest_seconds,
-       e.equipment
+       e.equipment,
+       pda.rep_min,
+       pda.rep_max
 FROM session_sets ss
 JOIN exercises e ON e.id = ss.exercise_id
 JOIN sessions s ON s.id = ss.session_id
@@ -415,8 +426,15 @@ ORDER BY COALESCE(pde.position, 1000 + pda.position, 2000), ss.exercise_id, ss.s
 --
 -- is_assistance is derived the same way as in ListSessionSets — absence of a
 -- program_day_exercises row for the day — so the field a PATCH echoes back
--- cannot disagree with the one the session was read with. Only the pde join is
--- needed here; this query does no ordering, so it has no use for pda.
+-- cannot disagree with the one the session was read with.
+--
+-- The pda join is here for the same reason, and only that reason. This query
+-- does no ordering, so it had no use for pda and deliberately omitted it; once
+-- ListSessionSets started returning rep_min/rep_max, omitting it meant a PATCH
+-- echoed back a row whose range was missing. The client replaces the set it
+-- holds with whatever a PATCH returns, so tapping a rep on a ranged accessory
+-- would have collapsed "8-12" to "8" on that card alone, until the next reload
+-- put it back. A row read two ways has to read the same both times.
 -- name: GetSessionSet :one
 SELECT ss.id,
        ss.session_id,
@@ -430,12 +448,18 @@ SELECT ss.id,
        ss.is_bonus,
        (pde.id IS NULL)::bool AS is_assistance,
        e.rest_seconds,
-       e.equipment
+       e.equipment,
+       pda.rep_min,
+       pda.rep_max
 FROM session_sets ss
 JOIN exercises e ON e.id = ss.exercise_id
 JOIN sessions s ON s.id = ss.session_id
 LEFT JOIN program_day_exercises pde
   ON pde.program_day_id = s.program_day_id AND pde.exercise_id = ss.exercise_id
+LEFT JOIN program_day_assistance pda
+  ON pda.program_day_id = s.program_day_id
+ AND pda.exercise_id = ss.exercise_id
+ AND pda.user_id = s.user_id
 WHERE ss.id = sqlc.arg('id')
   AND s.user_id = sqlc.arg('user_id')::int;
 

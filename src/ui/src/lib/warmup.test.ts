@@ -194,3 +194,52 @@ describe("warmupSets off the barbell", () => {
     ]);
   });
 });
+
+// A ramp is for the lift a session is built around. An accessory gets a feeler
+// set: three loaded rungs in front of three sets of curls is a warm-up as long
+// as the lift, and nobody in a gym ramps a lateral raise in three steps.
+describe("warmupSets on assistance work", () => {
+  it("gives one light set instead of a ramp", () => {
+    // The prescribed version of this is bar×2 then 100/140/180.
+    expect(warmupSets(200, { accessory: true })).toEqual([
+      { weightLb: 100, reps: 5, sets: 1 },
+    ]);
+  });
+
+  it("is the LIGHT rung, not the heavy one a cap would have left", () => {
+    // trimToCap sheds from the light end, so `maxSets: 1` keeps the 90% double
+    // — a near-max single, which is the opposite of a feeler set. This is why
+    // the accessory path picks its rung rather than reusing the cap.
+    expect(warmupSets(200, { maxSets: 1 })).toEqual([
+      { weightLb: 180, reps: 2, sets: 1 },
+    ]);
+    expect(warmupSets(200, { accessory: true })[0].weightLb).toBe(100);
+  });
+
+  it("drops the empty-bar opener a barbell accessory does not need", () => {
+    // Two sets of an empty bar before a barbell curl is a warm-up for the
+    // warm-up. The floor stays at the bar, so nothing below it is offered.
+    const ramp = warmupSets(200, { accessory: true, bar: 45 });
+    expect(ramp).toHaveLength(1);
+    expect(ramp[0].weightLb).toBe(100);
+  });
+
+  it("gives a light barbell accessory nothing at all", () => {
+    // 50% of 100 is 50, above a 45 lb bar but only just; at 80 it is under the
+    // bar and there is no honest rung to offer.
+    expect(warmupSets(100, { accessory: true, bar: 80 })).toEqual([]);
+  });
+
+  it("rounds the rung onto the rack, the same as a full ramp", () => {
+    // 50% of a 90 lb pair is 45, and a rack of 5 lb bells makes 40.
+    expect(warmupSets(90, { equipment: "dumbbell", accessory: true })).toEqual([
+      { weightLb: 40, reps: 5, sets: 1 },
+    ]);
+  });
+
+  it("gives bodyweight assistance no warm-up", () => {
+    // Logged at 0, so there is no percentage of it worth doing — and this is
+    // most accessories on the day they are added.
+    expect(warmupSets(0, { equipment: "bodyweight", accessory: true })).toEqual([]);
+  });
+});

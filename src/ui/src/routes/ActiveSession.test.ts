@@ -164,16 +164,15 @@ describe("ActiveSession: adding assistance", () => {
       expect(screen.getByRole("heading", { name: "Barbell Curl" })).toBeInTheDocument(),
     );
     expect(screen.getByText("Assistance")).toBeInTheDocument();
-    // Carrying the range the picker defaults to, with reps at its BOTTOM. A
-    // lift added at the rack progresses either way; the range is what keeps it
-    // from advancing by the whole of the rack's step every session.
+    // Fives and no range, matching the picker's defaults and the lifts the
+    // program itself prescribes. A lift added at the rack runs the linear
+    // engine: hit the reps on every set and it takes the next step its
+    // equipment admits.
     expect(addSessionAssistance).toHaveBeenCalledWith(1, {
       exerciseId: 9,
       sets: 3,
-      reps: 8,
+      reps: 5,
       weightLb: 30,
-      repMin: 8,
-      repMax: 12,
     });
   });
 
@@ -223,22 +222,22 @@ describe("ActiveSession: adding assistance", () => {
     expect(panel?.textContent).not.toContain("Squat");
   });
 
-  // The endpoint carries a rep range now — it could not before, which left
-  // every lift added at the rack with no way to progress at all. Offered here
-  // rather than only on the program page, and on by default like everywhere
-  // else: a lift without one advances by the rack's own step every session,
-  // which on a pair of dumbbells is 10 lb.
-  it("offers a rep range, on by default", async () => {
+  // The endpoint carries a rep range — it could not before, which left every
+  // lift added at the rack with no way to progress at all. Offered here rather
+  // than only on the program page, and OFF by default like everywhere else:
+  // the linear rule is what an accessory does, and the range is a deliberate
+  // choice about a lift somebody wants to climb slowly.
+  it("offers a rep range, off by default", async () => {
     render(ActiveSession, props);
     await pickCurl();
 
     await screen.findByText(/Leave the weight at 0/);
-    expect(screen.getByLabelText(/Use a rep range/)).toBeChecked();
+    expect(screen.getByLabelText(/Use a rep range/)).not.toBeChecked();
   });
 
-  // The range reaches the program day the lift joins — the thing this endpoint
-  // could not express at all before. No click here: it rides along by default,
-  // which is the point of the default.
+  // The range still reaches the program day the lift joins — the thing this
+  // endpoint could not express at all before. Ticked on explicitly now that it
+  // is the opt-in rather than the default.
   it("sends the range with a lift added at the rack", async () => {
     addSessionAssistance.mockResolvedValue(
       ok(
@@ -260,6 +259,7 @@ describe("ActiveSession: adding assistance", () => {
 
     render(ActiveSession, props);
     await pickCurl();
+    await fireEvent.click(await screen.findByLabelText(/Use a rep range/));
     await confirmAdd();
 
     await waitFor(() => expect(addSessionAssistance).toHaveBeenCalled());

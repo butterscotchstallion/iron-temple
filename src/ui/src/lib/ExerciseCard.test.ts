@@ -41,6 +41,14 @@ type SetFixture = {
   actualReps: number | null;
   completed: boolean;
   restSeconds?: number;
+  /**
+   * Top of a rep range, where the lift has one. targetReps is its bottom.
+   *
+   * Nullable to match the wire type rather than merely optional: the tests
+   * below re-spread a rendered SessionSet through `set()`, and a `number` here
+   * would reject the `number | null` those carry.
+   */
+  repMax?: number | null;
 };
 function set(p: SetFixture): SessionSet {
   return p as unknown as SessionSet;
@@ -360,7 +368,16 @@ describe("ExerciseCard", () => {
       expect(screen.queryByText(/bar only/)).not.toBeInTheDocument();
     });
 
-    it("says what one bell weighs, since the prescription is the pair", () => {
+    // A dumbbell is STORED as the pair and READ as the bell. These sets are
+    // built at 30 and 40 lb, which is what the session holds; what the card
+    // draws is 15 and 20, the number stamped on the thing being picked up.
+    //
+    // This used to go the other way — the pair on the card, "N lb per hand" on
+    // a line beneath it — and that is the bug this suite was rewritten for. A
+    // rack of 5 lb bells advances a curl one bell, and shown as the pair that
+    // reads as a 10 lb jump: 60 → 70 for reaching past the 30s to the 35s. The
+    // step was always right. The app was reporting one jump as two.
+    it("shows the bell, not the pair", () => {
       render(ExerciseCard, {
         name: "Dumbbell Curl",
         sets: workSets(30, 3),
@@ -368,15 +385,28 @@ describe("ExerciseCard", () => {
         onCycle: vi.fn(),
         onChangeWeight: vi.fn(),
       });
-      // The ramp opens at 10, so that is the active step: 5 lb in each hand.
-      expect(screen.getByText("10 lb × 5 · 5 lb per hand")).toBeInTheDocument();
+      // 15 lb bells. The ramp opens at a stored 10, which is a 5 lb bell.
+      expect(screen.getByText("15 lb each", { exact: true })).toBeInTheDocument();
+      expect(screen.getByText("5 lb each × 5")).toBeInTheDocument();
     });
 
-    // ...and says which weight the header is, because the two numbers sit a line
-    // apart in different units. A lifter reading "10 lb per hand" against a bare
-    // "40 lb" concludes their warm-up is 25% of the work weight, when it is the
-    // 50% rung of a 20 lb bell.
-    it("labels the work weight as the pair, since the rung under it is per hand", async () => {
+    it("drops the per-hand line, which now restates the number above it", () => {
+      render(ExerciseCard, {
+        name: "Dumbbell Curl",
+        sets: workSets(30, 3),
+        equipment: "dumbbell",
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+      });
+      expect(screen.queryByText(/per hand/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/lb pair/)).not.toBeInTheDocument();
+    });
+
+    // "each" earns its place only while the rest of the app still shows the
+    // pair: history, the progress chart and Racked have no equipment field yet,
+    // so a lifter comparing screens without a word between them would conclude
+    // their curl halved overnight.
+    it("says 'each' so a bell can't be read as a pair", async () => {
       const sets = workSets(40, 3);
       const { rerender } = render(ExerciseCard, {
         name: "Dumbbell Curl",
@@ -385,8 +415,7 @@ describe("ExerciseCard", () => {
         onCycle: vi.fn(),
         onChangeWeight: vi.fn(),
       });
-      expect(screen.getByText("40 lb pair", { exact: true })).toBeInTheDocument();
-      expect(screen.getByText("20 lb × 5 · 10 lb per hand")).toBeInTheDocument();
+      expect(screen.getByText("20 lb each", { exact: true })).toBeInTheDocument();
 
       // The folded card is the same weight with the circles gone, so it carries
       // the same label rather than reverting to the ambiguous one.
@@ -394,13 +423,14 @@ describe("ExerciseCard", () => {
         sets: sets.map((s) => set({ ...s, actualReps: 10, completed: true })),
       });
       await waitFor(() =>
-        expect(screen.getByText("3/3 sets · 40 lb pair")).toBeInTheDocument(),
+        expect(screen.getByText("3/3 sets · 20 lb each")).toBeInTheDocument(),
       );
     });
 
     it("leaves a barbell's weight unlabelled, where nothing is ambiguous", () => {
-      // Every weight on a barbell card is the whole load, so a suffix there is
-      // noise on every lift in the session to disambiguate nothing.
+      // A barbell's weight is the bar and every plate on it — already the
+      // number the lifter reads — so a suffix there is noise on every lift in
+      // the session to disambiguate nothing.
       render(ExerciseCard, {
         name: "Squat",
         sets: workSets(200, 3),
@@ -408,7 +438,7 @@ describe("ExerciseCard", () => {
         onChangeWeight: vi.fn(),
       });
       expect(screen.getByText("200 lb", { exact: true })).toBeInTheDocument();
-      expect(screen.queryByText(/lb pair/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/lb each/)).not.toBeInTheDocument();
     });
 
     it("warms up without the empty bar", () => {
@@ -420,15 +450,23 @@ describe("ExerciseCard", () => {
         onChangeWeight: vi.fn(),
       });
 
+      // Rungs at a stored 10 and 20 — 5 and 10 lb bells. The ramp itself is
+      // still built in whole load; only the label is per bell.
       const warmups = container.querySelectorAll<HTMLButtonElement>(
         'button[aria-label^="Warm-up"]',
       );
       expect(warmups).toHaveLength(2);
-      expect(warmups[0]).toHaveAttribute("aria-label", expect.stringContaining("Warm-up 10 lb"));
-      expect(warmups[1]).toHaveAttribute("aria-label", expect.stringContaining("Warm-up 20 lb"));
+      expect(warmups[0]).toHaveAttribute(
+        "aria-label",
+        expect.stringContaining("Warm-up 5 lb each"),
+      );
+      expect(warmups[1]).toHaveAttribute(
+        "aria-label",
+        expect.stringContaining("Warm-up 10 lb each"),
+      );
     });
 
-    it("steps the weight by 10, which is what a pair of bells can do", async () => {
+    it("steps by one bell on screen and the whole pair underneath", async () => {
       const onChangeWeight = vi.fn();
       render(ExerciseCard, {
         name: "Dumbbell Curl",
@@ -438,13 +476,15 @@ describe("ExerciseCard", () => {
         onChangeWeight,
       });
 
+      // The button offers the next bell up — 5, the rack's own step — and the
+      // session still moves by the pair, because that is what it stores.
       await fireEvent.click(
-        screen.getByRole("button", { name: "Increase weight by 10 lb" }),
+        screen.getByRole("button", { name: "Increase weight by 5 lb each" }),
       );
       expect(onChangeWeight).toHaveBeenCalledWith(10);
 
       await fireEvent.click(
-        screen.getByRole("button", { name: "Decrease weight by 10 lb" }),
+        screen.getByRole("button", { name: "Decrease weight by 5 lb each" }),
       );
       expect(onChangeWeight).toHaveBeenCalledWith(-10);
     });
@@ -461,6 +501,86 @@ describe("ExerciseCard", () => {
       });
       expect(screen.queryByLabelText(/^Barbell loaded to/)).not.toBeInTheDocument();
       expect(screen.getByText("45 lb × 5")).toBeInTheDocument();
+    });
+  });
+
+  // A ramp walks a lifter up to a heavy barbell single digit. Applied to a curl
+  // it was absurd: three loaded rungs in front of three work sets is a warm-up
+  // as long as the lift, and six circles on the card for an accessory.
+  describe("on assistance work", () => {
+    it("warms up with one light set instead of a ramp", () => {
+      const { container } = render(ExerciseCard, {
+        name: "Barbell Curl",
+        sets: workSets(200, 3),
+        assistance: true,
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+      });
+
+      // The prescribed version of this lift gets bar×2 + 100/140/180. As an
+      // accessory: the 50% rung and nothing else, and no empty-bar opener.
+      const warmups = container.querySelectorAll<HTMLButtonElement>(
+        'button[aria-label^="Warm-up"]',
+      );
+      expect(warmups).toHaveLength(1);
+      expect(warmups[0]).toHaveAttribute(
+        "aria-label",
+        expect.stringContaining("Warm-up 100 lb × 5"),
+      );
+    });
+
+    it("still gives the prescribed lifts their full ramp", () => {
+      // Same weight, same sets, assistance off — the control for the above.
+      const { container } = render(ExerciseCard, {
+        name: "Squat",
+        sets: workSets(200, 3),
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+      });
+      expect(
+        container.querySelectorAll('button[aria-label^="Warm-up"]'),
+      ).toHaveLength(3);
+    });
+
+    // targetReps is the BOTTOM of a range, not a target in its own right, and
+    // this card used to draw it alone: "8 reps" beside a program of fives, with
+    // nothing anywhere saying a range existed or that 12 is what moves the
+    // weight. The prescription endpoint has carried both ends since the range
+    // shipped; the session — the one screen read at the rack — did not.
+    it("shows the whole rep range, not just the bottom of it", () => {
+      const ranged = workSets(0, 3).map((s, i) =>
+        set({
+          id: i + 1,
+          setNumber: i + 1,
+          weightLb: s.weightLb,
+          targetReps: 8,
+          actualReps: null,
+          completed: false,
+          repMax: 12,
+        }),
+      );
+      render(ExerciseCard, {
+        name: "Dumbbell Curl",
+        sets: ranged,
+        equipment: "dumbbell",
+        assistance: true,
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+      });
+      expect(screen.getByText(/8–12 reps/)).toBeInTheDocument();
+    });
+
+    it("says a single number for a lift with no range", () => {
+      render(ExerciseCard, {
+        name: "Dumbbell Curl",
+        sets: workSets(0, 3),
+        equipment: "dumbbell",
+        assistance: true,
+        onCycle: vi.fn(),
+        onChangeWeight: vi.fn(),
+      });
+      expect(screen.getByText(/5 reps/)).toBeInTheDocument();
+      expect(screen.queryByText(/–/)).not.toBeInTheDocument();
     });
   });
 
