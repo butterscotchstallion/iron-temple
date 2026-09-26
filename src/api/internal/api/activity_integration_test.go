@@ -279,6 +279,88 @@ func TestActivityStartTwiceReplacesTheLoop(t *testing.T) {
 	e.POST("/admin/activity/stop").Expect().Status(http.StatusNoContent)
 }
 
+// ---- racing for the same persona ----
+
+// Two callers can want the same persona at the same moment, and one of them has to
+// lose gracefully.
+//
+// The roster is fixed and shared: a backfill request and a generation loop already
+// running both walk the same eight names, so both can find judi.bench missing and
+// both try to insert it. Whoever loses gets a duplicate key on users_username_key.
+// Before this was handled, that surfaced as a 500 from the backfill endpoint — an
+// admin pressing Backfill while a loop was running, which is exactly what the
+// Astroturfing screen invites.
+//
+// Driven through the seam rather than through two HTTP requests, which would be a
+// race on a race. What is asserted holds under EVERY interleaving, so the test
+// cannot be flaky: whether the two genuinely collide or happen to serialise, the
+// account exists once, both callers get its id, and exactly one of them reports
+// having created it — which is what the backfill's "accounts added" count reads.
+func TestGeneratedAccountSurvivesTwoCallersRacingForIt(t *testing.T) {
+	// Its own guard, unlike every other test in this file: those reach the server
+	// through expect(t), which skips under -short, and this one goes straight at
+	// testAPI — where a skipped TestMain has left a nil Server to dereference.
+	if testing.Short() {
+		t.Skip("integration test requires a Docker daemon")
+	}
+
+	persona := activity.Roster(activity.MaxRoster)[activity.MaxRoster-1]
+
+	t.Cleanup(func() {
+		_, err := testPool.Exec(context.Background(),
+			"DELETE FROM users WHERE username = $1", persona.Username)
+		if err != nil {
+			t.Fatalf("clean up %s: %v", persona.Username, err)
+		}
+	})
+
+	// Four rather than two, to widen the window. The assertions below hold for any
+	// number and any interleaving; more racers only makes an unhandled collision
+	// likelier to be caught on a machine with few cores, where two callers can
+	// simply take turns.
+	const racers = 4
+
+	type outcome struct {
+		id      int32
+		created bool
+		err     error
+	}
+	results := make(chan outcome, racers)
+	start := make(chan struct{})
+
+	for range racers {
+		go func() {
+			<-start
+			id, created, err := testAPI.EnsureGeneratedAccountNow(
+				context.Background(), persona)
+			results <- outcome{id: id, created: created, err: err}
+		}()
+	}
+	close(start)
+
+	got := make([]outcome, 0, racers)
+	for range racers {
+		got = append(got, <-results)
+	}
+
+	creations := 0
+	for _, o := range got {
+		if o.err != nil {
+			t.Fatalf("racing for %s failed: %v", persona.Username, o.err)
+		}
+		if o.id != got[0].id {
+			t.Errorf("two ids for one persona: %d and %d", got[0].id, o.id)
+		}
+		if o.created {
+			creations++
+		}
+	}
+	if creations != 1 {
+		t.Errorf("%d callers reported creating %s, want exactly 1",
+			creations, persona.Username)
+	}
+}
+
 // ---- what a backfill produces ----
 
 func TestActivityBackfillCreatesLiftersWithHistory(t *testing.T) {

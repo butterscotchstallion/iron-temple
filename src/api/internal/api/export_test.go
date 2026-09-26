@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 
+	"gitea.homelab/gitadmin/iron-temple/api/internal/activity"
 	"gitea.homelab/gitadmin/iron-temple/api/internal/auth"
 )
 
@@ -28,6 +29,20 @@ func (s *Server) SendDueReportsNow(ctx context.Context) { s.sendDueReports(ctx) 
 // must not be announced again. Sleeping cannot distinguish "did nothing, as
 // intended" from "has not run yet".
 func (s *Server) RefreshCrownsNow(ctx context.Context) { s.refreshCrowns(ctx) }
+
+// EnsureGeneratedAccountNow creates or adopts one persona's account.
+//
+// Test-only, and unlike the two above it is not a twin of a scheduled pass — it is
+// a seam onto the middle of a backfill, so a test can call it CONCURRENTLY with
+// itself. That is the only way to reach the race it has to survive: the lookup and
+// the insert are not one atomic step, and a backfill and a running generation loop
+// walk the same fixed roster, so both can miss and both try to insert the same
+// persona. Driving that through two HTTP requests would be a race on a race.
+func (s *Server) EnsureGeneratedAccountNow(
+	ctx context.Context, persona activity.Persona,
+) (int32, bool, error) {
+	return s.ensureGeneratedAccount(ctx, persona)
+}
 
 // SetHasher replaces the password hasher this server uses.
 //

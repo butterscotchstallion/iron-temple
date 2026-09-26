@@ -519,6 +519,16 @@ func (s *Server) ensureGeneratedAccount(
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := s.q.WithTx(tx)
 
+	// The lookup above and this insert are not one atomic step, and two callers
+	// genuinely race for the same persona: a backfill request and a running
+	// generation loop both walk the same fixed roster, so both can miss and both
+	// try to create judi.bench. Whoever loses gets a duplicate-key error on
+	// users_username_key, and the honest answer to that is the same as a hit on
+	// the lookup — the account exists, take theirs.
+	//
+	// Handled here rather than by giving CreateUser an ON CONFLICT: that query is
+	// also registration and the admin form, where a taken username is a 409 the
+	// caller must be told about, not a row to quietly adopt.
 	user, err := qtx.CreateUser(ctx, store.CreateUserParams{
 		Username:    persona.Username,
 		DisplayName: persona.DisplayName,
@@ -537,6 +547,23 @@ func (s *Server) ensureGeneratedAccount(
 		MustChangePassword: false,
 	})
 	if err != nil {
+		if isUniqueViolation(err) {
+			// Lost the race. Roll this transaction back before reading, so the
+			// lookup is not issued on a connection the failed insert has left in
+			// an aborted transaction — where every statement answers 25P02.
+			_ = tx.Rollback(ctx)
+			id, lookupErr := s.q.FindUserIDByUsername(ctx, persona.Username)
+			if lookupErr != nil {
+				// Gone again, which needs somebody to have deleted it in the
+				// meantime. Report the original breach rather than this, since
+				// the duplicate is what actually happened here.
+				return 0, false, err
+			}
+			// created=false, exactly as the lookup path returns: the caller uses
+			// it to count how many accounts a backfill added, and this one added
+			// none.
+			return id, false, nil
+		}
 		return 0, false, err
 	}
 	// Same transaction as the account, exactly as createUser does it: an account
