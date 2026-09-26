@@ -168,6 +168,34 @@ func (h *Hub) Notify(userIDs []int32) {
 	})
 }
 
+// Broadcast tells every connection at once, addressed to nobody.
+//
+// THE ONLY UNADDRESSED FAN-OUT, and it exists for one kind. A level is drawn
+// beside a name on the feed, the roster, the leaderboard and the header, so when
+// one moves the set of clients holding a stale badge is every client — there is
+// no smaller set to compute. Addressing it to the lifter and their followers was
+// the obvious alternative and buys nothing: anybody looking at the roster who
+// does not follow them would keep the old number until the poll, which is the
+// staleness this frame exists to remove.
+//
+// Safe because the frame says nothing. It carries no lifter id and no figure, so
+// a connection learns only that a read is worth repeating, and that read goes
+// through the ordinary authorized endpoint. See the note on Event.
+//
+// Takes a Kind rather than hard-coding one so a second unaddressed frame does not
+// need a second method — but think twice before adding one. Every frame here
+// costs one queue slot on every open connection, and the eviction policy below is
+// what makes that safe rather than free.
+func (h *Hub) Broadcast(kind Kind) {
+	frame, ok := encode(bareEvent(kind))
+	if !ok {
+		return
+	}
+	h.each(func(c *conn) {
+		h.deliver(c, frame)
+	})
+}
+
 // Session tells whoever is watching this session that something happened on it.
 func (h *Hub) Session(kind Kind, sessionID int32) {
 	frame, ok := encode(sessionEvent(kind, sessionID))

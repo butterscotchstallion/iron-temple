@@ -227,12 +227,17 @@
 
   // How much everybody has trained, on exactly the same terms as the two above and
   // for the same reason: a level is drawn beside a name on surfaces that are all
-  // lazy-loaded. No id is handed over because nothing about a level is celebrated
-  // — it ticks over quietly, and the lifter who just earned it is told by the
-  // session they finished rather than by a popup.
+  // lazy-loaded.
+  //
+  // The id is handed over for the crowns' reason, and it is the same hard
+  // constraint: auth already imports this module's reset, so the module reading
+  // auth would be a cycle. It is what lets a level the CALLER just reached be
+  // celebrated — nothing on the server knows a level changed, because the level is
+  // derived from a count rather than written, so the only place the difference
+  // exists is between two of these readings.
   $effect(() => {
     if (!auth.me || auth.me.mustChangePassword) return;
-    return startLevelPolling();
+    return startLevelPolling(auth.me.id);
   });
 
   // The live socket, on exactly the same terms and for the same reasons: the
@@ -240,9 +245,12 @@
   // cannot connect either. The poller above does not stop when this connects —
   // it backs off to a safety net, because a proxy that eats upgrades has to
   // leave a working app behind. See live.svelte.ts.
+  // The id is handed over for the poller's reason above: a `level` frame goes to
+  // every connection and says nothing about whose level moved, so each tab has to
+  // work out for itself whether the refetch it provokes is its own lifter's news.
   $effect(() => {
     if (!auth.me || auth.me.mustChangePassword) return;
-    return startLive();
+    return startLive(auth.me.id);
   });
 </script>
 

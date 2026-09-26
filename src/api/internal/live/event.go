@@ -52,6 +52,13 @@ const (
 	// client has subscribed to. Only the session id travels.
 	KindReaction Kind = "reaction"
 	KindComment  Kind = "comment"
+	// KindLevel says somebody's level moved. THE ONE KIND THAT IS NOT ADDRESSED
+	// — it goes to every connection, because a level is drawn beside a name
+	// wherever a name appears and the set of clients now showing a stale badge is
+	// every client. It carries no lifter id, which is what makes sending it to
+	// everybody say nothing: a client learns only that the levels are worth
+	// asking for again. See Hub.Broadcast.
+	KindLevel Kind = "level"
 	// KindError answers a message the server could not act on. It never closes
 	// the connection — see conn.go.
 	KindError Kind = "error"
@@ -111,11 +118,19 @@ const (
 	msgUnsubscribe = "unsubscribe"
 )
 
-// notificationEvent and sessionEvent build the two frames the API publishes.
-// Constructors rather than literals at the call sites, so the shape of a frame
-// is decided in this file and only in this file.
+// notificationEvent, sessionEvent and levelEvent build the frames the API
+// publishes. Constructors rather than literals at the call sites, so the shape
+// of a frame is decided in this file and only in this file.
 func notificationEvent() Event {
 	return Event{Type: KindNotification}
+}
+
+// bareEvent is a frame that is nothing but its kind, which is what an unaddressed
+// signal is: KindLevel says the levels moved and deliberately not whose. Takes the
+// kind rather than being one function per kind so that Hub.Broadcast stays general,
+// while the shape of the frame it sends is still decided here.
+func bareEvent(kind Kind) Event {
+	return Event{Type: kind}
 }
 
 func sessionEvent(kind Kind, sessionID int32) Event {

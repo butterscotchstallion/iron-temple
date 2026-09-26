@@ -80,6 +80,7 @@ All frames are text, and all are JSON objects with a required `type`.
 {"type":"notification"}             // your panel changed; refetch it
 {"type":"reaction","sessionId":412} // only if subscribed to 412
 {"type":"comment","sessionId":412}  // only if subscribed to 412
+{"type":"level"}                    // somebody levelled up; refetch the levels
 {"type":"error","code":"unknown_type","message":"…"}
 ```
 
@@ -87,6 +88,22 @@ All frames are text, and all are JSON objects with a required `type`.
 server side never got as far as writing anything is not a working connection,
 and the client must not treat it as one — doing so would quiet the poller while
 nothing was arriving.
+
+**`level` is the one frame that goes to everybody**, and it is worth knowing why
+that is not a leak of the rule above it. Every other frame is addressed: to an
+account, or to whoever subscribed to a session. A level is drawn beside a name on
+the feed, the roster, the leaderboard and the header, so the set of people whose
+screen is now wrong is "anybody with a screen open" — addressing it would mean
+either computing that set or accepting that most badges stay stale for ten
+minutes. It says nothing about *whose* level moved, which is what makes
+broadcasting it safe: a client learns only that the levels are worth asking for
+again, and the answer it gets back is the same one it could already have fetched.
+
+It is sent when a session is finished. **A level can also change with no frame at
+all** — an unfinished session ages past the twelve-hour cutoff on its own, and no
+request happens for anything to be published from. The ten-minute poll is what
+covers that, which is the ordinary arrangement here rather than a gap: nothing on
+this socket is the source of truth for anything.
 
 **An `error` frame never closes the connection.** A newer client saying
 something an older server has not heard of must not lose its socket for it. The

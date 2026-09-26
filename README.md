@@ -314,6 +314,18 @@ session and walking away earns nothing at all.
 the twelfth costs sixty-six, the thirtieth four hundred and thirty-five. Everyone
 starts at level 1, including an account that has never trained.
 
+**Reaching one is a moment.** Finish the session that takes you up and you get a line
+saying where you got to, and some confetti — unless your device asks for less motion,
+in which case just the line. It happens once however many levels you crossed at once,
+which is what an offline queue draining looks like.
+
+**And everyone else's badge moves while they watch.** Finishing a session tells every
+open page to fetch the levels again, so a roster or a feed left open on somebody
+else's phone catches up in the moment rather than in ten minutes. The one case it
+can't cover is a session nobody ever finished — that one starts counting twelve hours
+later, with no request for anything to be announced from, and the ordinary refresh
+picks it up.
+
 Nothing is stored: your level is counted from your sessions every time it is asked
 for. So it is never stale, and a session you delete takes its experience with it.
 

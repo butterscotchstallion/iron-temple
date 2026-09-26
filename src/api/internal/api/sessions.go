@@ -327,6 +327,10 @@ func (s *Server) updateSession(w http.ResponseWriter, r *http.Request) {
 
 // finishSession marks a session as ended by hand. It is idempotent — the store
 // keeps the first timestamp — so a double-tap on Finish is harmless.
+//
+// It is also where a level becomes live. Finishing a session is what makes it
+// count towards experience, so this is the one request that can move a badge
+// somebody else is looking at, and it publishes a KindLevel frame to say so.
 func (s *Server) finishSession(w http.ResponseWriter, r *http.Request) {
 	id, ok := idParam(r, "sessionId")
 	if !ok {
@@ -336,6 +340,28 @@ func (s *Server) finishSession(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	userID := userFrom(ctx).ID
+
+	// Read before writing, for one reason: whether this call is what made the
+	// session count. A session that was ALREADY over earns its experience either
+	// way — finished by hand a moment ago, or aged past the twelve-hour cutoff on
+	// its own — so finishing it again moves nobody's level and must not tell the
+	// whole install that it did. Finish is replayed from the offline queue and can
+	// arrive more than once, which makes this the ordinary case rather than a
+	// double-tap nobody manages.
+	//
+	// The read-then-write is not locked. Two finishes racing would both see it
+	// open and both publish, which costs a duplicate frame and a 304 — the same
+	// price the hub's own dedupe declines to pay for elsewhere, and not worth a row
+	// lock on the path a lifter takes at the end of every workout.
+	before, err := s.q.GetSession(ctx, store.GetSessionParams{ID: id, UserID: userID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		notFound(w, "session not found")
+		return
+	} else if err != nil {
+		internalError(w)
+		return
+	}
+
 	if _, err := s.q.FinishSession(ctx, store.FinishSessionParams{
 		ID: id, UserID: userID,
 	}); errors.Is(err, pgx.ErrNoRows) {
@@ -344,6 +370,18 @@ func (s *Server) finishSession(w http.ResponseWriter, r *http.Request) {
 	} else if err != nil {
 		internalError(w)
 		return
+	}
+
+	// After the write and never before it. One statement, so there is no
+	// transaction to be inside of and nothing a rollback could un-write — the
+	// autocommit above is the commit this is "after". PR-sized note for whoever
+	// adds a second write here: the moment there are two, this needs the
+	// s.pool.Begin shape recognition.go uses, and publish() moves to the line
+	// after Commit.
+	if !before.IsOver {
+		events := s.newLiveEvents()
+		events.level()
+		events.publish()
 	}
 
 	full, err := s.buildSession(ctx, id, userID)

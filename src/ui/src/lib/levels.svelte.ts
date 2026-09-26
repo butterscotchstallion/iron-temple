@@ -1,4 +1,7 @@
 import { getLevels, type LifterLevel } from "./api";
+import { celebrate } from "./celebrate";
+import { noteLevel, resetLevelWatch } from "./levelWatch";
+import { pushToast } from "./toast.svelte";
 
 // What level everybody is, for every lifter on the install at once.
 //
@@ -86,13 +89,42 @@ export function levelFor(lifterId: number | undefined): LifterLevel | null {
  * and not worth an error banner on a screen somebody may be mid-set on.
  *
  * `loaded` is deliberately not set on failure, so a surface that wants to tell
- * "nobody has trained" from "we have not been told yet" still can.
+ * "nobody has trained" from "we have not been told yet" still can. That also means
+ * a failed poll cannot be read as a level going DOWN, which matters now that this
+ * announces: the last good list stays, so nothing is compared against nothing.
+ *
+ * `viewerId` is optional, and passing it is what turns a refresh into a
+ * celebration — see announce below.
  */
-export async function loadLevels(): Promise<void> {
+export async function loadLevels(viewerId?: number): Promise<void> {
   const result = await getLevels();
   if (result.status !== 200) return;
   levels.items = result.data.items;
   levels.loaded = true;
+  announce(viewerId);
+}
+
+/**
+ * Tell this lifter if the reading they just caused was their own level going up.
+ *
+ * `viewerId` is what lets this celebrate at all, and it is a PARAMETER rather than
+ * a read of `auth.me` for loadAchievements' reason, which is a hard constraint and
+ * not a preference: auth.svelte.ts imports `resetLevels` from this module, so
+ * importing auth here would close a cycle. The callers that have an id hand it
+ * over; every other caller refreshes the badges and says nothing.
+ *
+ * ONE TOAST AND ONE BURST, however many levels were crossed. Enough sessions
+ * between two readings can span more than one level — an offline queue draining, or
+ * a poll that missed an afternoon — and "you reached Level 14" is the whole of that
+ * news. Three overlapping bursts would not be three times the celebration, it would
+ * be a stutter; achievements.svelte.ts declines the same thing for the same reason.
+ */
+function announce(viewerId: number | undefined): void {
+  const reached = noteLevel(viewerId, levelFor(viewerId)?.level ?? null);
+  if (reached === null) return;
+
+  pushToast({ title: `You reached Level ${reached}`, tone: "success" });
+  celebrate({ particleCount: 140, spread: 75, origin: { y: 0.6 } });
 }
 
 /**
@@ -116,10 +148,10 @@ const POLL_MS = 10 * 60 * 1000;
  * badge are lazy-loaded, and whether anybody is keeping them current must not
  * depend on which chunk has arrived.
  */
-export function startLevelPolling(): () => void {
+export function startLevelPolling(viewerId?: number): () => void {
   const tick = () => {
     if (document.visibilityState !== "visible") return;
-    void loadLevels();
+    void loadLevels(viewerId);
   };
 
   tick();
@@ -137,4 +169,8 @@ export function startLevelPolling(): () => void {
 export function resetLevels(): void {
   levels.items = [];
   levels.loaded = false;
+  // The watch too, and from here rather than from auth: this module already owns
+  // the reset auth calls, and auth importing levelWatch as well would be a second
+  // edge for no gain. resetAchievements does the same for resetCrownWatch.
+  resetLevelWatch();
 }

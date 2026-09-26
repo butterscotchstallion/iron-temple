@@ -202,6 +202,124 @@ func TestLiveDoesNotAnnounceARepeatTap(t *testing.T) {
 	nextEvent(ws).HasValue("type", "notification")
 }
 
+// ---- levels ----
+
+// Finishing a session tells EVERYBODY, which is the whole point of the one
+// unaddressed frame. The socket here belongs to a lifter who has nothing to do with
+// the session being finished — no ownership, no subscription, not following — and
+// it still hears, because a level is drawn beside a name on every surface they
+// might be looking at.
+func TestLiveTellsEveryoneAboutALevel(t *testing.T) {
+	// BOTH accounts before the socket opens, and the session logged before it too.
+	// Registering an account announces itself to the whole install, so a bystander
+	// watching while one is created would see that `joined` frame first and this
+	// would be asserting on the wrong one.
+	_, bystanderToken := secondLifter(t, "live-level-bystander")
+	_, theirToken := secondLifter(t, "live-level-actor")
+
+	theirs := expectAs(t, theirToken)
+	_, dayID := firstProgramAndDay(theirs)
+	created := startSession(t, theirs, dayID)
+	sessionID := int(created.Value("id").Number().Raw())
+	setID := int(created.Value("sets").Array().Value(0).Object().Value("id").Number().Raw())
+	logSet(theirs, sessionID, setID, 5, true)
+
+	ws := liveSocket(t, expectAs(t, bystanderToken))
+
+	// Somebody else entirely finishes. Nothing connects this lifter to that
+	// session — not ownership, not a subscription, not a follow.
+	theirs.POST(fmt.Sprintf("/sessions/%d/finish", sessionID)).
+		Expect().Status(http.StatusOK)
+
+	nextEvent(ws).HasValue("type", "level")
+}
+
+// The frame says the levels moved and deliberately not whose. That is what makes
+// sending it to every connection say nothing — assert it carries no lifter, no
+// figure and no session id, because the moment it did, broadcasting it would be a
+// leak rather than a signal.
+func TestLiveLevelFrameNamesNobody(t *testing.T) {
+	_, token := secondLifter(t, "live-level-shape")
+	e := expectAs(t, token)
+	ws := liveSocket(t, e)
+
+	_, dayID := firstProgramAndDay(e)
+	created := startSession(t, e, dayID)
+	sessionID := int(created.Value("id").Number().Raw())
+	setID := int(created.Value("sets").Array().Value(0).Object().Value("id").Number().Raw())
+	logSet(e, sessionID, setID, 5, true)
+	e.POST(fmt.Sprintf("/sessions/%d/finish", sessionID)).Expect().Status(http.StatusOK)
+
+	frame := nextEvent(ws)
+	frame.HasValue("type", "level")
+	frame.NotContainsKey("sessionId")
+	frame.NotContainsKey("protocol")
+	frame.Keys().ContainsOnly("type")
+}
+
+// A session that was ALREADY over moves nobody's level, so finishing it again
+// announces nothing. Finish is replayed from the offline write queue and can arrive
+// more than once, so this is the ordinary case rather than a double-tap.
+//
+// Absence by ordering, per this file's header: the repeat finishes send nothing,
+// proven by causing a frame that IS due and asserting it is the next to arrive.
+func TestLiveDoesNotAnnounceARepeatFinish(t *testing.T) {
+	_, token := secondLifter(t, "live-level-repeat")
+	e := expectAs(t, token)
+	ws := liveSocket(t, e)
+
+	_, dayID := firstProgramAndDay(e)
+	first := startSession(t, e, dayID)
+	firstID := int(first.Value("id").Number().Raw())
+	firstSet := int(first.Value("sets").Array().Value(0).Object().Value("id").Number().Raw())
+	logSet(e, firstID, firstSet, 5, true)
+
+	path := fmt.Sprintf("/sessions/%d/finish", firstID)
+	for range 3 {
+		e.POST(path).Expect().Status(http.StatusOK)
+	}
+	nextEvent(ws).HasValue("type", "level")
+
+	// The second and third finishes said nothing. Proven by finishing a DIFFERENT
+	// session and asserting that frame is the next one, rather than a second
+	// announcement of the first.
+	second := startSession(t, e, dayID)
+	secondID := int(second.Value("id").Number().Raw())
+	secondSet := int(second.Value("sets").Array().Value(0).Object().Value("id").Number().Raw())
+	logSet(e, secondID, secondSet, 5, true)
+	e.POST(fmt.Sprintf("/sessions/%d/finish", secondID)).Expect().Status(http.StatusOK)
+
+	nextEvent(ws).HasValue("type", "level")
+}
+
+// A session that aged past the twelve-hour cutoff already counts towards
+// experience, so finishing it by hand afterwards changes no level and says nothing.
+// This is the case the is_over guard exists for, as opposed to the repeat above.
+func TestLiveDoesNotAnnounceFinishingAnAgedOutSession(t *testing.T) {
+	_, token := secondLifter(t, "live-level-aged")
+	e := expectAs(t, token)
+	ws := liveSocket(t, e)
+
+	_, dayID := firstProgramAndDay(e)
+	stale := startSession(t, e, dayID)
+	staleID := int(stale.Value("id").Number().Raw())
+	staleSet := int(stale.Value("sets").Array().Value(0).Object().Value("id").Number().Raw())
+	logSet(e, staleID, staleSet, 5, true)
+	backdateSession(t, staleID, 13*time.Hour)
+
+	// Already over, and already earning. Finishing it is a no-op for the levels.
+	e.POST(fmt.Sprintf("/sessions/%d/finish", staleID)).Expect().Status(http.StatusOK)
+
+	// Absence by ordering again: a fresh session's finish is what must arrive next.
+	fresh := startSession(t, e, dayID)
+	freshID := int(fresh.Value("id").Number().Raw())
+	freshSet := int(fresh.Value("sets").Array().Value(0).Object().Value("id").Number().Raw())
+	logSet(e, freshID, freshSet, 5, true)
+	e.POST(fmt.Sprintf("/sessions/%d/finish", freshID)).Expect().Status(http.StatusOK)
+
+	nextEvent(ws).HasValue("type", "level")
+}
+
 // ---- session subscriptions ----
 
 // A subscriber to a session hears about activity on it even though the
