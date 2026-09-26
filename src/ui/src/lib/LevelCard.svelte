@@ -14,12 +14,23 @@
   // request — HouseCard's arrangement and for its reason.
   //
   // NOTHING HERE COMPUTES THE CURVE. Every number below is a field on the wire.
-  // The temptation is to derive "XP to go" or the percentage from a session count,
-  // and doing it would put a second copy of the curve in the browser to disagree
-  // with src/api/internal/levels the first time either changed.
+  // The temptation is to work the percentage below out from a session count, and
+  // doing it would put a second copy of the curve in the browser to disagree with
+  // src/api/internal/levels the first time either changed. A ratio of two figures
+  // the server sent is not that: it knows what a level costs only because it was
+  // told.
   let { level }: { level: LifterLevel } = $props();
 
-  const remaining = $derived(level.xpForNextLevel - level.xpIntoLevel);
+  // ONE figure, drawn twice — as the bar's width and as the sentence under it, so
+  // the two cannot say different things. It replaced an "XP to go" remainder, which
+  // was the more precise number and the less useful one: what a lifter wants from a
+  // glance is how far along they are, and a remainder makes them hold the level's
+  // cost in their head to work that out. The exact figures are still spelled out
+  // beside it for anybody who wants them.
+  //
+  // Rounded, and the fraction next to it is what keeps that honest: a level is
+  // earned in whole sessions, so a reading like "9%" is a rounding of a real
+  // fraction the same sentence shows in full.
   const percent = $derived(
     Math.round((level.xpIntoLevel / level.xpForNextLevel) * 100),
   );
@@ -37,9 +48,11 @@
     </span>
   </div>
 
-  <!-- aria-hidden with the figures spelled out below it: a bar announced as a
-       progressbar gives a screen reader a percentage, and the sentence under it
-       says the same thing in the units the lifter actually earns. -->
+  <!-- aria-hidden with the figures spelled out below it: the sentence under this
+       carries the same percentage the bar is drawn at AND the XP behind it, so
+       announcing the bar as a progressbar would repeat one of those and add
+       nothing. It stays decoration for exactly as long as that sentence says
+       everything it does. -->
   <div
     class="h-1.5 w-full overflow-hidden rounded-full bg-primary/15"
     aria-hidden="true"
@@ -49,6 +62,6 @@
 
   <p class="text-sm text-muted-foreground">
     {grouped(level.xpIntoLevel)} / {grouped(level.xpForNextLevel)} XP —
-    {grouped(remaining)} to Level {level.level + 1}
+    {percent}% of the way to Level {level.level + 1}
   </p>
 </div>

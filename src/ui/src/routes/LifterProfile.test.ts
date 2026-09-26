@@ -206,10 +206,14 @@ describe("the level on a profile", () => {
     expect(section).toHaveTextContent("Level 12");
     // Lifetime, grouped — "6900 XP" is a number nobody reads at a glance.
     expect(section).toHaveTextContent("6,900 XP");
-    // The progress itself: both halves of the bar's fraction, and the remainder
-    // spelled out for a reader who cannot see the bar.
+    // The progress itself: both halves of the bar's fraction, and how far along
+    // that is as a percentage — the bar's own figure, spelled out for a reader who
+    // cannot see the bar.
     expect(section).toHaveTextContent("300 / 1,200 XP");
-    expect(section).toHaveTextContent("900 to Level 13");
+    expect(section).toHaveTextContent("25% of the way to Level 13");
+    // And NOT as a remainder. That was the first wording, and it asked a lifter to
+    // hold the level's cost in their head to learn the thing they wanted.
+    expect(section).not.toHaveTextContent("900 to Level 13");
   });
 
   // Scoped to the lifter the page is about. A section reading the first row of the
@@ -244,6 +248,31 @@ describe("the level on a profile", () => {
     const section = await screen.findByTestId("lifter-level");
     expect(section).toHaveTextContent("Level 1");
     expect(section).toHaveTextContent("0 / 100 XP");
+    // Nought percent, which the percentage has to be able to say: it is the one
+    // reading where a lifter has earned nothing towards the level they are on.
+    expect(section).toHaveTextContent("0% of the way to Level 2");
+  });
+
+  // A level costs a whole number of sessions and each pays a flat hundred, so the
+  // ratio between the two is rarely a round percentage — level 12 costs 1,100 XP,
+  // which no number of sessions divides into tenths. The figure is rounded and the
+  // fraction it was rounded from is printed beside it, so a lifter one session in
+  // reads "9%" and can still see it means one session of eleven.
+  it("rounds the percentage, and shows the fraction it rounded", async () => {
+    standing([
+      testLifterLevel({
+        lifterId: 2,
+        level: 12,
+        xp: 6700,
+        xpIntoLevel: 100,
+        xpForNextLevel: 1100,
+      }),
+    ]);
+    render(LifterProfile, { params: { id: "2" } });
+
+    const section = await screen.findByTestId("lifter-level");
+    expect(section).toHaveTextContent("100 / 1,100 XP");
+    expect(section).toHaveTextContent("9% of the way to Level 13");
   });
 
   // Nothing is fetched for this section, so before the site-wide poll lands there
@@ -480,6 +509,7 @@ describe("your own profile", () => {
     const section = await screen.findByTestId("lifter-level");
     expect(section).toHaveTextContent("Level 12");
     expect(section).toHaveTextContent("300 / 1,200 XP");
+    expect(section).toHaveTextContent("25% of the way to Level 13");
   });
 
   // Somebody else's profile keeps the third person and keeps the Follow control.
