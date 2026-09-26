@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { LifterLevel } from "./api";
+  import { percentIntoLevel } from "./levels.svelte";
 
   // What a level looks like written out: the level itself, and how far into it the
   // lifter is.
@@ -28,12 +29,13 @@
   // cost in their head to work that out. The exact figures are still spelled out
   // beside it for anybody who wants them.
   //
-  // Rounded, and the fraction next to it is what keeps that honest: a level is
-  // earned in whole sessions, so a reading like "9%" is a rounding of a real
-  // fraction the same sentence shows in full.
-  const percent = $derived(
-    Math.round((level.xpIntoLevel / level.xpForNextLevel) * 100),
-  );
+  // From levels.svelte.ts rather than worked out here, now that the line under the
+  // header draws the same progress: both surfaces are on screen at once, and two
+  // roundings of one ratio is exactly the disagreement that file exists to prevent.
+  // It is rounded to whole percent, and the fraction next to it is what keeps that
+  // honest — a level is earned in whole sessions, so a reading like "9%" is a
+  // rounding of a real fraction this same sentence shows in full.
+  const percent = $derived(percentIntoLevel(level));
 
   // Grouped, because lifetime XP reaches five figures on an install that has been
   // running a year and "24350" is a number nobody reads at a glance.

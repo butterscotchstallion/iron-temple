@@ -2,9 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen } from "@testing-library/svelte";
 import HeaderBar from "./HeaderBar.svelte";
 import { auth } from "./auth.svelte";
+import { levels, resetLevels } from "./levels.svelte";
 import { version } from "./version.svelte";
 import type { User } from "./api";
-import { testUser } from "./testFixtures";
+import { testLifterLevel, testUser } from "./testFixtures";
 
 // The bar only renders the version store now — App.svelte owns the polling that
 // fills it, and version.svelte.test.ts covers the fetching. So drive the store
@@ -91,5 +92,90 @@ describe("HeaderBar", () => {
     expect(
       screen.queryByRole("button", { name: /account menu/i }),
     ).not.toBeInTheDocument();
+  });
+});
+
+// The experience line along the bottom edge of the bar.
+//
+// It is decoration with no text in it, which is exactly why it is worth testing: a
+// line drawn from the wrong lifter's row, or drawn full for somebody who has earned
+// nothing, is a claim nobody would notice was wrong. The levels module is seeded
+// rather than mocked, as in LifterName.test.ts, because the per-lifter lookup is
+// half of what can break.
+describe("the experience line", () => {
+  /** The bar's own scale factor, which is the whole of what it draws. */
+  const scale = () => screen.getByTestId("level-line").style.transform;
+
+  afterEach(resetLevels);
+
+  it("scales to how far into their level the reader is", () => {
+    auth.me = ada;
+    levels.items = [
+      testLifterLevel({ lifterId: 1, xpIntoLevel: 300, xpForNextLevel: 1200 }),
+    ];
+    levels.loaded = true;
+    render(HeaderBar);
+
+    expect(scale()).toBe("scaleX(0.25)");
+  });
+
+  // YOUR level, not the first row of a list that holds everybody on the install.
+  it("reads the reader's own standing and nobody else's", () => {
+    auth.me = ada;
+    levels.items = [
+      testLifterLevel({ lifterId: 2, xpIntoLevel: 900, xpForNextLevel: 1200 }),
+      testLifterLevel({ lifterId: 1, xpIntoLevel: 600, xpForNextLevel: 1200 }),
+    ];
+    levels.loaded = true;
+    render(HeaderBar);
+
+    expect(scale()).toBe("scaleX(0.5)");
+  });
+
+  // A level just reached is an empty one, and the line says so by being absent
+  // rather than by sitting at a sliver.
+  it("draws nothing across for a level just started", () => {
+    auth.me = ada;
+    levels.items = [
+      testLifterLevel({ lifterId: 1, level: 13, xpIntoLevel: 0, xpForNextLevel: 1200 }),
+    ];
+    levels.loaded = true;
+    render(HeaderBar);
+
+    expect(scale()).toBe("scaleX(0)");
+  });
+
+  // Nothing is fetched for this, so before the site-wide poll lands there is no
+  // answer — and an empty track is a widget asking to be explained.
+  it("draws no line until the levels have landed", () => {
+    auth.me = ada;
+    render(HeaderBar);
+
+    expect(screen.queryByTestId("level-line")).toBeNull();
+  });
+
+  // Signed out there is no reader to have a level, and the list is not fetched at
+  // all — the endpoint behind it answers 401.
+  it("draws no line for a signed-out reader", () => {
+    levels.items = [testLifterLevel({ lifterId: 1 })];
+    levels.loaded = true;
+    render(HeaderBar);
+
+    expect(screen.queryByTestId("level-line")).toBeNull();
+  });
+
+  // Decoration, and it must not intercept a tap meant for the account button it
+  // runs beneath. The level itself is announced beside the reader's name.
+  it("is hidden from screen readers and takes no clicks", () => {
+    auth.me = ada;
+    levels.items = [testLifterLevel({ lifterId: 1 })];
+    levels.loaded = true;
+    render(HeaderBar);
+
+    const line = screen.getByTestId("level-line");
+    expect(line).toHaveAttribute("aria-hidden", "true");
+    expect(line.className).toContain("pointer-events-none");
+    // And it holds still for anybody who asked the OS for less motion.
+    expect(line.className).toContain("motion-reduce:transition-none");
   });
 });

@@ -1,5 +1,11 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
-import { levelFor, levels, loadLevels, resetLevels } from "./levels.svelte";
+import {
+  levelFor,
+  levels,
+  loadLevels,
+  percentIntoLevel,
+  resetLevels,
+} from "./levels.svelte";
 import { resetLevelWatch } from "./levelWatch";
 import { testLifterLevel } from "./testFixtures";
 
@@ -87,6 +93,44 @@ describe("levelFor", () => {
   // of them should have to handle.
   it("answers undefined like a lifter it has never heard of", () => {
     expect(levelFor(undefined)).toBeNull();
+  });
+});
+
+// One ratio, two surfaces: the Experience card prints it and the line under the
+// header is scaled by it. It lives here so those two cannot round it differently
+// while both are on the screen.
+describe("percentIntoLevel", () => {
+  it("gives the share of the current level that has been earned", () => {
+    expect(
+      percentIntoLevel(testLifterLevel({ xpIntoLevel: 300, xpForNextLevel: 1200 })),
+    ).toBe(25);
+  });
+
+  // Nought and not-yet are different answers, and this is the one that means the
+  // lifter is standing at the bottom of a level they just reached.
+  it("gives nought for a level nothing has been earned towards", () => {
+    expect(
+      percentIntoLevel(testLifterLevel({ xpIntoLevel: 0, xpForNextLevel: 1200 })),
+    ).toBe(0);
+  });
+
+  // A level costs a whole number of 100-XP sessions, and eleven of them divide into
+  // nothing tidy — so rounding is the normal case rather than an edge one. The card
+  // prints the exact fraction beside the percentage for this reason.
+  it("rounds to whole percent", () => {
+    expect(
+      percentIntoLevel(testLifterLevel({ xpIntoLevel: 100, xpForNextLevel: 1100 })),
+    ).toBe(9);
+  });
+
+  // The wire says a level always costs something, so this is a guard rather than a
+  // case: what it buys is which way a bug fails. Dividing by nothing would scale the
+  // header's line to the full width of the screen, and a wrong answer should be the
+  // quiet one.
+  it("gives nought rather than a full bar if a level ever cost nothing", () => {
+    expect(
+      percentIntoLevel(testLifterLevel({ xpIntoLevel: 0, xpForNextLevel: 0 })),
+    ).toBe(0);
   });
 });
 

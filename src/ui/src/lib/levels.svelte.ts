@@ -81,6 +81,28 @@ export function levelFor(lifterId: number | undefined): LifterLevel | null {
 }
 
 /**
+ * How far into the current level this standing is, as a whole percentage.
+ *
+ * Lives here, with one line of arithmetic in it, because two surfaces draw the same
+ * progress and they must not round it differently: the Experience card on a
+ * profile, which prints it, and the line under the header, whose width IS it. A
+ * copy in each would be two answers to "how far along am I" on one screen.
+ *
+ * This is NOT the curve, and nothing here knows it. A ratio of two figures the
+ * server sent stays true whatever internal/levels decides a level costs — see the
+ * note at the top of this file about what does not belong in the browser.
+ *
+ * Rounded to whole percent, which is as fine as either caller can draw: the card
+ * prints the exact fraction beside it, and no display can show a tenth of a pixel.
+ * The zero guard is for a denominator the wire says cannot happen — if it ever did,
+ * dividing by it would draw a FULL bar, and a wrong answer should be the quiet one.
+ */
+export function percentIntoLevel(level: LifterLevel): number {
+  if (level.xpForNextLevel <= 0) return 0;
+  return Math.round((level.xpIntoLevel / level.xpForNextLevel) * 100);
+}
+
+/**
  * Read the levels once.
  *
  * Failures leave the last good list in place and are otherwise silent, for the
