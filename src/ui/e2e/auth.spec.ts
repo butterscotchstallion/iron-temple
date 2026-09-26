@@ -103,6 +103,26 @@ async function mockCommon(page: import("@playwright/test").Page) {
       json: { items: [], total: 0, totalVolumeLb: 0, limit: 20, offset: 0 },
     }),
   );
+  // The other three reads one lifter's profile makes, which the account menu now
+  // links to directly. The body is a `Lifter` plus the two lifetime figures —
+  // the required set on the LifterProfile schema.
+  //
+  // Neither of the sub-resources is covered by the `**/api/v1/racked**` and
+  // `**/api/v1/achievements**` registrations elsewhere in this function: those
+  // globs want that literal path, and /lifters/1/racked does not contain it.
+  //
+  // And no ordering trap between the four, unlike the last-match-wins cases this
+  // function is otherwise full of — Playwright's `*` does not cross a `/`, so
+  // `/lifters/*` matches /lifters/1 and nothing below it.
+  await page.route("**/api/v1/lifters/*", (route) =>
+    route.fulfill({ json: { ...ada, sessionCount: 0, lifetimeVolumeLb: 0 } }),
+  );
+  await page.route("**/api/v1/lifters/*/racked**", (route) =>
+    route.fulfill({ json: emptyRacked }),
+  );
+  await page.route("**/api/v1/lifters/*/achievements**", (route) =>
+    route.fulfill({ json: { items: [] } }),
+  );
 
   // The header bell. This file signs in partway through — see the login test —
   // and the poll starts the moment /me comes back with an account, so it is
@@ -130,6 +150,13 @@ async function mockCommon(page: import("@playwright/test").Page) {
   // here for the same reason. Empty, so no name draws a badge.
   await page.route("**/api/v1/levels**", (route) =>
     route.fulfill({ json: { items: [] } }),
+  );
+  // The Houses, on the same terms again. This one was missing rather than
+  // deliberately absent: the poll has always run here, so every test in this
+  // file was leaking one request to a proxy with nothing behind it, which
+  // reads as an ECONNREFUSED in the CI log. Empty, so no name draws a sigil.
+  await page.route("**/api/v1/houses**", (route) =>
+    route.fulfill({ json: { items: [], memberships: [] } }),
   );
 
   // The two the Astroturfing screen reads on mount. Idle and switched off, which
@@ -252,6 +279,9 @@ test("the account menu offers racked, profile and sign out", async ({ page }) =>
   await page.goto("/");
 
   await page.getByRole("button", { name: /account menu/i }).click();
+  // Two profile entries, and the difference between them is the point: one
+  // shows you the page everybody else reads, the other opens the forms.
+  await expect(page.getByRole("menuitem", { name: /your profile/i })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: /^racked$/i })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: /configure profile/i })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: /sign out/i })).toBeVisible();
@@ -426,6 +456,27 @@ test("the account menu navigates to Racked", async ({ page }) => {
   // Nothing logged in the fixture month, so it says so rather than rendering
   // a page of zeroes.
   await expect(page.getByText(/Nothing logged in March 2026/)).toBeVisible();
+});
+
+// Your own profile is reachable only from this menu — it has no nav-bar tab, and
+// before this entry existed the way in was to open the roster and find the row
+// marked "(you)". So, as with Racked above, the menu entry working is the whole
+// of its discoverability.
+test("the account menu navigates to your own profile", async ({ page }) => {
+  await mockSignedIn(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: /account menu/i }).click();
+  await page.getByRole("menuitem", { name: /your profile/i }).click();
+
+  // Ada's own id, which is what the entry is built from.
+  await expect(page).toHaveURL(/#\/lifters\/1$/);
+  await expect(page.getByRole("heading", { name: "Ada Lovelace" })).toBeVisible();
+  // Reading about yourself, so the page says so rather than talking about you in
+  // the third person — and offers the settings screen where a Follow control
+  // would sit on anybody else's.
+  await expect(page.getByText("You haven't logged anything this month.")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Configure profile" })).toBeVisible();
 });
 
 test("the account menu navigates to the profile page", async ({ page }) => {

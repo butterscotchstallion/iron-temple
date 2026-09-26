@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { link } from "svelte-spa-router";
   import { Card } from "$lib/components/ui/card";
   import Avatar from "../lib/Avatar.svelte";
   import LifterName from "../lib/LifterName.svelte";
@@ -17,7 +18,7 @@
   import { muscleGroupLabel } from "../lib/library";
   import { formatVolume } from "../lib/volume";
   import SessionCards from "../lib/SessionCards.svelte";
-  import { Button } from "$lib/components/ui/button";
+  import { Button, buttonVariants } from "$lib/components/ui/button";
   import {
     getLifter,
     getLifterAchievements,
@@ -128,6 +129,15 @@
   }
 
   const name = $derived(profile?.displayName || profile?.username || "");
+  // Your own profile, which the account menu now links to directly.
+  //
+  // This page is the SAME page whoever is reading it — one lifter's history
+  // drawn once, by the component that draws everybody's. What changes is the
+  // person the prose is written in: "Their training" and "Grace Hopper hasn't
+  // logged anything this month" are the right sentences about somebody else and
+  // an odd way to address the lifter who lived them. The figures, the charts and
+  // the requests behind them are untouched.
+  const isMe = $derived(profile !== null && profile.id === auth.me?.id);
   const totals = $derived(report?.totals ?? null);
   const muscleRows = $derived(report?.muscles ?? []);
   const untrainedMuscles = $derived(
@@ -203,15 +213,33 @@
               value={profile.lastTrainedOn}
               kind="date"
             />
+          {:else if isMe}
+            · you haven't trained yet
           {:else}
             · hasn't trained yet
           {/if}
         </p>
       </div>
       <!-- ml-auto rather than a restructure: the Card is already a flex row, so
-           the button lands right-aligned beside the identity. Absent on your own
-           profile, as on your own roster row. -->
-      {#if profile.id !== auth.me?.id}
+           whatever goes here lands right-aligned beside the identity.
+           Never a Follow control on your own profile, as on your own roster row.
+
+           What takes its place is the way back to the settings screen. This is
+           the page where you notice the display name is stale or the avatar is
+           still initials, and until now the form for that was somewhere else
+           entirely. An anchor styled as a button rather than a button with a
+           push(): it is a navigation, so it should be middle-clickable and show
+           its target in the status bar. Same idiom as the Resume link on
+           ProgramDetail. -->
+      {#if isMe}
+        <a
+          use:link
+          href="/profile"
+          class="ml-auto shrink-0 {buttonVariants({ variant: 'outline', size: 'sm' })}"
+        >
+          Configure profile
+        </a>
+      {:else}
         <div class="ml-auto">
           <FollowButton
             lifter={profile}
@@ -250,7 +278,13 @@
     <Card class="p-6">
       <h3 class="text-lg font-bold text-card-foreground">Achievements</h3>
       <div class="mt-2">
-        <AchievementList items={achievements} {name} />
+        <!-- `you` only reaches the empty state, which is the one line here that
+             has to name somebody. `upcoming` and `onShare` stay unpassed even on
+             your own profile: what you are closing in on, and the button that
+             turns a crown into a share card, belong to the achievements section
+             of the settings screen — this page is the public view of the same
+             history, not a second copy of that one. -->
+        <AchievementList items={achievements} {name} you={isMe} />
       </div>
     </Card>
 
@@ -308,7 +342,7 @@
           <h3
             class="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground"
           >
-            What they trained
+            {isMe ? "What you trained" : "What they trained"}
           </h3>
           <MuscleVolumeBars rows={muscleRows} />
           {#if untrainedMuscles.length > 0}
@@ -338,7 +372,13 @@
            a row of zeroes, which reads as a broken page. -->
       <Card class="p-6 text-center">
         <p class="text-sm text-muted-foreground">
-          {name} hasn't logged anything this month.
+          <!-- Branched rather than interpolated: "You hasn't logged anything"
+               is what passing "You" as the name would produce. -->
+          {#if isMe}
+            You haven't logged anything this month.
+          {:else}
+            {name} hasn't logged anything this month.
+          {/if}
         </p>
       </Card>
     {/if}
@@ -350,7 +390,7 @@
     {#if sessions.length > 0}
       <div data-testid="lifter-sessions" class="flex flex-col gap-3">
         <h3 class="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-          Their training
+          {isMe ? "Your training" : "Their training"}
         </h3>
         <SessionCards {sessions} lifterId={id} />
 
