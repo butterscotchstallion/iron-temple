@@ -101,6 +101,14 @@ type activityRunner struct {
 	// down — by which point the flag and the cancel belong to its successor. gen
 	// is what lets it tell. See finish.
 	gen int
+	// live holds one channel per loop goroutine that has not returned yet, keyed by
+	// generation, and each is closed by its own goroutine on the way out. It is what
+	// makes stop WAIT rather than merely ask.
+	//
+	// More than one entry is an ordinary state, not a leak: starting replaces rather
+	// than refuses and does not block, so a restart leaves the predecessor winding
+	// down alongside its successor. A stop has to wait for all of them.
+	live map[int]chan struct{}
 }
 
 func (a *activityRunner) snapshot() (running bool, tick time.Duration, lifters, actions int, started time.Time, last string) {
@@ -116,15 +124,44 @@ func (a *activityRunner) note(what string) {
 	a.last = what
 }
 
-// stop halts the loop if one is running. Safe to call when none is.
+// stop halts the loop if one is running, and RETURNS ONLY ONCE IT HAS STOPPED.
+// Safe to call when none is.
+//
+// The waiting is the point. Cancelling a context asks a goroutine to wind down; it
+// does not wait for it to notice, and a tick that was already in flight carries on
+// writing for as long as it takes. Both callers need more than the asking:
+// deleteActivity says in its own comment that it stops first so a loop cannot write
+// while its accounts are being deleted, and that was only true by luck. The other
+// symptom was an admin pressing Stop and then Backfill, where the old loop was
+// still creating the very personas the backfill was counting — so the backfill
+// reported having added fewer accounts than it asked for.
+//
+// Waits on a SNAPSHOT of the live set, taken under the lock and drained outside it.
+// Outside, because a goroutine winding down needs the same mutex to release its slot
+// — waiting on it while holding it is the one arrangement that cannot work. A
+// snapshot, because that fixes the set of goroutines this call is responsible for: a
+// loop started after this point is the next caller's problem, and blocking until an
+// install stops starting loops is not a state anybody asked for.
 func (a *activityRunner) stop() {
 	a.mu.Lock()
 	cancel := a.cancel
 	a.cancel = nil
 	a.running = false
+	waiting := make([]chan struct{}, 0, len(a.live))
+	for _, done := range a.live {
+		waiting = append(waiting, done)
+	}
 	a.mu.Unlock()
+
+	// Cancelled before the wait, or the wait is for a loop nobody has asked to
+	// stop. Note this cancels only the incumbent — every predecessor was already
+	// cancelled by the begin that replaced it, so everything in `waiting` is on its
+	// way out.
 	if cancel != nil {
 		cancel()
+	}
+	for _, done := range waiting {
+		<-done
 	}
 }
 
@@ -143,7 +180,9 @@ func (a *activityRunner) stop() {
 // Capturing the predecessor's cancel under the same lock that replaces it is what
 // makes each one cancelled exactly once: only one caller can observe a given
 // CancelFunc as the incumbent, and that caller is obliged to call it.
-func (a *activityRunner) begin(cancel context.CancelFunc, tick time.Duration, lifters int) int {
+func (a *activityRunner) begin(
+	cancel context.CancelFunc, tick time.Duration, lifters int,
+) (gen int, done chan struct{}) {
 	a.mu.Lock()
 	previous := a.cancel
 	a.gen++
@@ -154,7 +193,16 @@ func (a *activityRunner) begin(cancel context.CancelFunc, tick time.Duration, li
 	a.started = time.Now()
 	a.actions = 0
 	a.last = ""
-	gen := a.gen
+	gen = a.gen
+	// Registered here rather than by the goroutine itself, so it is in the live set
+	// before begin returns. Registering inside runActivity would leave a window where
+	// a stop racing the start waits for nothing and returns while a loop it never saw
+	// is coming up.
+	done = make(chan struct{})
+	if a.live == nil {
+		a.live = make(map[int]chan struct{})
+	}
+	a.live[gen] = done
 	a.mu.Unlock()
 
 	// Outside the lock: a CancelFunc does not touch this mutex, but calling arbitrary
@@ -164,7 +212,7 @@ func (a *activityRunner) begin(cancel context.CancelFunc, tick time.Duration, li
 	if previous != nil {
 		previous()
 	}
-	return gen
+	return gen, done
 }
 
 // finish releases a loop's slot as it exits — but only if it still holds it.
@@ -179,13 +227,22 @@ func (a *activityRunner) begin(cancel context.CancelFunc, tick time.Duration, li
 // and installs its successor at once; this goroutine then wakes some time later to
 // wind down. Clearing unconditionally at that point would switch the NEW loop's
 // flag off and fire its cancel, killing a loop the admin had just started.
-func (a *activityRunner) finish(gen int, cancel context.CancelFunc) {
+func (a *activityRunner) finish(gen int, cancel context.CancelFunc, done chan struct{}) {
 	// Released whoever owns the slot: this loop's context is done or about to be,
 	// and a CancelFunc that is never called leaks it.
 	cancel()
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
+	// Leaving the live set is UNCONDITIONAL, unlike everything below it: this
+	// goroutine is returning whether or not it still owns the slot, and a stop
+	// waiting on an orphaned predecessor would otherwise wait forever. Closed under
+	// the lock, which costs nothing — closing a channel does not block — and keeps
+	// the removal and the signal from being two observable steps.
+	delete(a.live, gen)
+	close(done)
+
 	if a.gen != gen {
 		return
 	}
@@ -289,9 +346,9 @@ func (s *Server) postActivityStart(w http.ResponseWriter, r *http.Request) {
 	// lifetime is the server's, and the only things that end it are stop() and
 	// the process exiting.
 	ctx, cancel := context.WithCancel(context.Background())
-	gen := s.activity.begin(cancel, tick, req.Lifters)
+	gen, done := s.activity.begin(cancel, tick, req.Lifters)
 
-	go s.runActivity(ctx, gen, cancel, req.Lifters, tick)
+	go s.runActivity(ctx, gen, cancel, done, req.Lifters, tick)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -951,7 +1008,8 @@ func sessionMention(
 // like a gym instead of a cron job: activity arrives one item at a time while a
 // screen is open, which is the whole reason to watch it.
 func (s *Server) runActivity(
-	ctx context.Context, gen int, cancel context.CancelFunc, lifters int, tick time.Duration,
+	ctx context.Context, gen int, cancel context.CancelFunc, done chan struct{},
+	lifters int, tick time.Duration,
 ) {
 	// Seeded from the tick and the roster size rather than the clock, for the same
 	// reproducibility reason the backfill is.
@@ -965,7 +1023,7 @@ func (s *Server) runActivity(
 	// it is generation-checked rather than a plain stop(). Deferred rather than
 	// repeated at each return, because there are three exits below and the next
 	// one added would not remember.
-	defer s.activity.finish(gen, cancel)
+	defer s.activity.finish(gen, cancel, done)
 
 	// Resolved once, before the ticker, rather than per tick. Per tick it would be
 	// four queries a lifter every few seconds to re-derive a roster that does not
