@@ -6,6 +6,7 @@
   import LifterName from "../lib/LifterName.svelte";
   import FollowButton from "../lib/FollowButton.svelte";
   import AchievementList from "../lib/AchievementList.svelte";
+  import LevelCard from "../lib/LevelCard.svelte";
   import CalendarHeatmap from "../lib/CalendarHeatmap.svelte";
   import ErrorCard from "../lib/ErrorCard.svelte";
   import Loading from "../lib/skeleton/Loading.svelte";
@@ -15,6 +16,7 @@
   import MuscleVolumeBars from "../lib/MuscleVolumeBars.svelte";
   import Timestamp from "../lib/Timestamp.svelte";
   import { auth } from "../lib/auth.svelte";
+  import { levelFor } from "../lib/levels.svelte";
   import { muscleGroupLabel } from "../lib/library";
   import { formatVolume } from "../lib/volume";
   import SessionCards from "../lib/SessionCards.svelte";
@@ -138,6 +140,19 @@
   // an odd way to address the lifter who lived them. The figures, the charts and
   // the requests behind them are untouched.
   const isMe = $derived(profile !== null && profile.id === auth.me?.id);
+  // Their standing, read from the site-wide list the client already holds rather
+  // than fetched here — so the section below costs no request, and so this page
+  // agrees with the badge the header and the feed draw for the same lifter.
+  //
+  // There is no level on the profile response to read instead, and that is
+  // deliberate rather than an omission waiting to be fixed: six queries hydrate a
+  // lifter for the wire, and joining a session count into all of them to draw an
+  // ornament is the cost /achievements and /houses both declined to pay. See
+  // levels.svelte.ts.
+  //
+  // `profile?.id` rather than the `id` off the URL, for isMe's reason — the
+  // subject of this page is the account the server returned.
+  const level = $derived(levelFor(profile?.id));
   const totals = $derived(report?.totals ?? null);
   const muscleRows = $derived(report?.muscles ?? []);
   const untrainedMuscles = $derived(
@@ -204,6 +219,12 @@
       <Avatar user={profile} size={56} />
       <div class="min-w-0">
         <h2 class="flex min-w-0 text-2xl font-black text-foreground">
+          <!-- The badge stays on beside the name even though the Experience card
+               below spells the level out, on the same terms as the crowns here
+               above an Achievements section: the ornaments say what this lifter is
+               wearing right now, and the sections are the history behind them. A
+               name drawn without them here would be the one place in the app where
+               this lifter appears plain. -->
           <LifterName lifter={profile} crownSize="size-5" />
         </h2>
         <p class="truncate text-sm text-muted-foreground">
@@ -270,6 +291,39 @@
         <p class="mt-1 text-xl font-black text-foreground">{profile.sessionCount}</p>
       </Card>
     </div>
+
+    <!-- The same training, counted as experience. Directly under the two lifetime
+         figures because that is what it is one of — a level is a flat 100 XP per
+         qualifying session, so the Sessions tile above is the number this one is
+         drawn from, and putting it in the month's block would say it resets.
+         Its own full-width Card rather than a third tile in that grid: the grid is
+         two columns and a progress bar needs the width to be read as one.
+
+         WHY IT IS DRAWN FOR WHOEVER IS BEING READ ABOUT, not only for you. This
+         page is one lifter's history drawn once, and the rule it follows is that
+         the prose changes person while the figures do not — a section that
+         appeared only on your own profile would make "how far in am I" a
+         different page from "how far in are they". There is nothing to guard
+         anyway: XP is a session count times a hundred, and the session count is
+         the tile immediately above this. The note on LevelBadge is about a badge
+         on a shared row, where a popover per name is thirty popovers; this is one
+         page about one lifter, which is the surface those figures were for.
+
+         Nothing computed here — the bar, the remainder and the percentage are
+         LevelCard's, off fields on the wire. A second copy of the curve in this
+         file would be a number that can disagree with the badge beside the name.
+
+         Absent rather than a placeholder when the list has not landed, or when it
+         does not carry this id: levelFor answers both with null, and the section
+         arrives when the answer does, the way the badge does. -->
+    {#if level}
+      <Card class="p-4" data-testid="lifter-level">
+        <h3 class="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+          Experience
+        </h3>
+        <LevelCard {level} />
+      </Card>
+    {/if}
 
     <!-- What they have won. Above the month's statistics because it is about
          the lifter rather than about a window — the same reason the lifetime

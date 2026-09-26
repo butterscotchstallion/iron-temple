@@ -1,10 +1,16 @@
 <script lang="ts">
   import type { LifterLevel } from "./api";
 
-  // What a level looks like in a hover card: the level itself, and how far into it
-  // the lifter is.
+  // What a level looks like written out: the level itself, and how far into it the
+  // lifter is.
   //
-  // Built entirely from the list the client already holds, so opening this costs no
+  // Two callers, and they are the reason this is a component rather than markup
+  // inside LevelBadge — the header's hover card, and the Experience section of a
+  // lifter's profile, which is the one place these figures get a heading and room
+  // to breathe. Width is the caller's business; everything here lays out against
+  // whatever it is given.
+  //
+  // Built entirely from the list the client already holds, so drawing this costs no
   // request — HouseCard's arrangement and for its reason.
   //
   // NOTHING HERE COMPUTES THE CURVE. Every number below is a field on the wire.

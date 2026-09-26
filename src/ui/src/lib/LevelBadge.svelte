@@ -38,9 +38,10 @@
      * Whether hovering opens the full card instead of a plain tooltip.
      *
      * Off everywhere but the header. A level beside somebody else's name is a
-     * fact about them and the number says all of it; how far into the level they
-     * are is the lifter's own business, and a card on every row of the feed would
-     * be thirty popovers waiting to happen.
+     * fact about them and the number says all of it, and a card on every row of
+     * the feed would be thirty popovers waiting to happen. A reader who wants the
+     * figures behind the number has somewhere to go for them: the Experience
+     * section of that lifter's profile, which the name itself links to.
      */
     card?: boolean;
     /**
