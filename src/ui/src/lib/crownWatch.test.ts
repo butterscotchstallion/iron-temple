@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { noteCrowns, resetCrownWatch } from "./crownWatch";
-import { testAchievement, testAchievementHolders, testLifter } from "./testFixtures";
+import {
+  testAchievement,
+  testAchievementHolders,
+  testLevelAchievement,
+  testLifter,
+} from "./testFixtures";
 
 // The memory behind the celebration.
 //
@@ -171,5 +176,63 @@ describe("without storage", () => {
     } finally {
       denied.mockRestore();
     }
+  });
+});
+
+// THE REGRESSION TEST FOR DEPLOY DAY. The catalogue holds level rungs as well as
+// crowns, and this module's toast says "You took a crown" — so a rung reaching it
+// would congratulate every lifter past Level 5 for taking a crown they never took,
+// on the first poll after the feature shipped. A level reached has its own moment;
+// see levelWatch.ts.
+describe("the other kind of achievement", () => {
+  /** A catalogue carrying one crown and one level rung, both this lifter's. */
+  function mixed(holder: number) {
+    return [
+      testAchievementHolders({
+        achievement: testAchievement({ slug: "crown-streak" }),
+        holders: [testLifter({ id: holder })],
+      }),
+      testAchievementHolders({
+        achievement: testLevelAchievement({ slug: "level-10" }),
+        holders: [testLifter({ id: holder })],
+      }),
+    ];
+  }
+
+  it("never reports a level rung as news", () => {
+    // Past the silent first observation, holding nothing.
+    noteCrowns(ME, standings([{ slug: "a", holders: [THEM] }]));
+
+    const fresh = noteCrowns(ME, mixed(ME));
+
+    expect(fresh.map((a) => a.slug)).toEqual(["crown-streak"]);
+  });
+
+  // And it is not merely filtered out of the RESULT: a rung must not enter the
+  // stored set either, or removing the feature later would report every rung as
+  // newly lost — and, worse, a rung in the baseline would mask nothing while
+  // costing a write on every poll.
+  it("does not record a level rung in the baseline", () => {
+    noteCrowns(ME, mixed(ME));
+
+    const stored = JSON.parse(
+      localStorage.getItem("iron-temple:crowns:v1") ?? "{}",
+    ) as { slugs?: string[] };
+    expect(stored.slugs).toEqual(["crown-streak"]);
+  });
+
+  // A lifter who holds ONLY rungs is the deploy-day case for an account that has
+  // never led a board, which on a single-lifter install is most of them.
+  it("says nothing at all for a lifter who holds only rungs", () => {
+    noteCrowns(ME, standings([{ slug: "a", holders: [THEM] }]));
+
+    const fresh = noteCrowns(ME, [
+      testAchievementHolders({
+        achievement: testLevelAchievement(),
+        holders: [testLifter({ id: ME })],
+      }),
+    ]);
+
+    expect(fresh).toEqual([]);
   });
 });

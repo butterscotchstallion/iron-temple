@@ -63,3 +63,25 @@ SELECT u.id AS user_id,
        )::int AS qualifying_sessions
 FROM users u
 ORDER BY u.id;
+
+-- How much training ONE lifter has behind them.
+--
+-- The per-lifter form of ListLifterLevels above, for the path that needs one answer
+-- rather than the install's: finishing a session, where what matters is whether that
+-- session took this lifter past a rung. Reading the whole install to answer for one
+-- of them would be the wrong shape on the request every workout ends with.
+--
+-- The predicate is the same one, copied rather than shared because the two differ in
+-- everything else — one is grouped over every account, this is a scalar for one — and
+-- because there is no way to share a WHERE clause between two sqlc queries. THAT
+-- MAKES THIS THE FOURTH COPY of the "over" expression that sessions.sql asks to be
+-- kept in sync, and that file names it.
+-- name: CountQualifyingSessionsForLifter :one
+SELECT COUNT(*)::int AS qualifying_sessions
+FROM sessions s
+WHERE s.user_id = sqlc.arg('user_id')::int
+  AND (s.finished_at IS NOT NULL OR s.created_at < now() - INTERVAL '12 hours')
+  AND EXISTS (SELECT 1
+              FROM session_sets ss
+              WHERE ss.session_id = s.id
+                AND ss.actual_reps > 0);

@@ -50,6 +50,12 @@ export const achievements = $state<{
 const byLifter = $derived.by(() => {
   const map = new Map<number, Achievement[]>();
   for (const entry of achievements.items) {
+    // CROWNS ONLY, and this filter is load-bearing rather than tidy. The catalogue
+    // holds levels too now, and `crownsFor` feeds <LifterName>, which draws a Crown
+    // icon per entry it returns — without this, every lifter past Level 5 would wear
+    // a bogus crown beside their name on the feed, the roster, the leaderboard,
+    // comment bylines and the header. A level has its own badge; see levels.svelte.ts.
+    if (entry.achievement.kind !== "crown") continue;
     for (const holder of entry.holders) {
       const held = map.get(holder.id);
       if (held) {

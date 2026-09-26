@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from "@testing-library/svelte";
 import AchievementList from "./AchievementList.svelte";
 import {
   testAchievement,
+  testLevelAchievement,
   testLifterAchievement,
   testUpcomingMilestone,
 } from "./testFixtures";
@@ -11,9 +12,13 @@ describe("the empty state", () => {
   // Second person to yourself and third person about anybody else. Getting this
   // backwards tells a reader that THEY have not won anything while they are
   // looking at somebody else's profile.
+  // Both routes in, since there are two kinds to earn now: a level comes from
+  // training at all, a crown from leading a board. An empty state that named only
+  // the crown would point a new lifter at the one that is hardest to get.
   it("invites you to win something on your own profile", () => {
     render(AchievementList, { props: { items: [], you: true } });
-    expect(screen.getByText(/Lead any board/)).toBeInTheDocument();
+    expect(screen.getByText(/your first level/)).toBeInTheDocument();
+    expect(screen.getByText(/lead any board/)).toBeInTheDocument();
   });
 
   it("names the lifter on somebody else's", () => {
@@ -171,5 +176,73 @@ describe("sharing", () => {
 
     await fireEvent.click(screen.getByRole("button", { name: "Share Top of Week streak" }));
     expect(onShare).toHaveBeenCalledWith(held);
+  });
+});
+
+// A LEVEL RUNG IS NEVER LOST, and almost every word on these rows was written for
+// something that can change hands. "Holding", "Holding it since", "Last held" and
+// "held 3 times" all describe a standing; a crossing has none of those properties,
+// and saying "Holding Level 10" would imply somebody could take it away.
+describe("a level rung", () => {
+  /** One rung, held — which is the only state a rung has. */
+  function rung(overrides = {}) {
+    return testLifterAchievement({
+      achievement: testLevelAchievement(),
+      heldNow: true,
+      timesHeld: 1,
+      ...overrides,
+    });
+  }
+
+  it("says it was reached rather than that it is held", () => {
+    render(AchievementList, { props: { items: [rung()], you: true } });
+
+    expect(screen.getByText("Reached", { selector: "span" })).toBeInTheDocument();
+    expect(screen.queryByText("Holding")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Holding it since/)).not.toBeInTheDocument();
+  });
+
+  it("never says it was last held", () => {
+    render(AchievementList, { props: { items: [rung()], you: true } });
+    expect(screen.queryByText(/Last held/)).not.toBeInTheDocument();
+  });
+
+  it("names the rung and what it took", () => {
+    render(AchievementList, { props: { items: [rung()], you: true } });
+
+    expect(screen.getByText("Journeyman")).toBeInTheDocument();
+    expect(screen.getByText(/forty-five sessions/)).toBeInTheDocument();
+  });
+
+  // The crown's own wording is untouched, which is the other half of the same
+  // assertion: the branch has to be on kind and not on something that happens to
+  // correlate with it.
+  it("leaves a crown reading as a standing", () => {
+    render(AchievementList, {
+      props: {
+        items: [testLifterAchievement({ achievement: testAchievement() })],
+        you: true,
+      },
+    });
+
+    expect(screen.getByText("Holding")).toBeInTheDocument();
+    expect(screen.getByText(/Holding it since/)).toBeInTheDocument();
+  });
+
+  // Both kinds on one profile is the ordinary case for anybody who has trained a
+  // while and led a board, and each row keeps its own words.
+  it("words each kind its own way in one list", () => {
+    render(AchievementList, {
+      props: {
+        items: [
+          rung(),
+          testLifterAchievement({ achievement: testAchievement() }),
+        ],
+        you: true,
+      },
+    });
+
+    expect(screen.getByText("Reached", { selector: "span" })).toBeInTheDocument();
+    expect(screen.getByText("Holding")).toBeInTheDocument();
   });
 });

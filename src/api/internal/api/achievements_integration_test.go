@@ -43,20 +43,33 @@ func refreshCrowns(t *testing.T) {
 		if _, err := testPool.Exec(ctx, "DELETE FROM notifications WHERE kind = 'crown'"); err != nil {
 			t.Errorf("clearing crown notifications: %v", err)
 		}
-		if _, err := testPool.Exec(ctx, "DELETE FROM lifter_achievements"); err != nil {
+		// Scoped to the crowns. An unqualified DELETE would also take the level
+		// rungs, which 0035 backfilled and which no crown test has any business
+		// removing — the level suite asserts on exactly those.
+		if _, err := testPool.Exec(ctx, `DELETE FROM lifter_achievements
+			WHERE achievement_slug IN (SELECT slug FROM achievements WHERE kind = 'crown')`,
+		); err != nil {
 			t.Errorf("clearing reigns: %v", err)
 		}
 	})
 	testAPI.RefreshCrownsNow(ctx)
 }
 
-// holdersByMetric reads /achievements into metric → sorted holder ids.
+// holdersByMetric reads the CROWNS out of /achievements into metric → sorted holder
+// ids.
+//
+// Filtered by kind, because the catalogue holds more than one now. A level rung
+// carries no metric at all, so without the filter four of them would collapse into
+// one entry under the empty string and take whichever holders came last.
 func holdersByMetric(e *httpexpect.Expect) map[string][]int {
 	out := map[string][]int{}
 	items := e.GET("/achievements").Expect().Status(http.StatusOK).
 		JSON().Object().Value("items").Array()
 	for _, item := range items.Iter() {
 		obj := item.Object()
+		if obj.Value("achievement").Object().Value("kind").String().Raw() != "crown" {
+			continue
+		}
 		metric := obj.Value("achievement").Object().Value("metric").String().Raw()
 		ids := []int{}
 		for _, h := range obj.Value("holders").Array().Iter() {
@@ -186,7 +199,11 @@ func TestEveryLeaderboardBoardHasACrown(t *testing.T) {
 	for _, item := range e.GET("/achievements").Expect().Status(http.StatusOK).
 		JSON().Object().Value("items").Array().Iter() {
 		a := item.Object().Value("achievement").Object()
-		a.Value("kind").String().IsEqual("crown")
+		// The catalogue holds two kinds now, so this picks its own out rather than
+		// asserting every row is a crown. A level rung has no board to cover.
+		if a.Value("kind").String().Raw() != "crown" {
+			continue
+		}
 		catalogue[a.Value("metric").String().Raw()] = true
 	}
 
@@ -207,8 +224,11 @@ func TestCrownsAreListedInBoardOrder(t *testing.T) {
 	var crowns []string
 	for _, item := range e.GET("/achievements").Expect().Status(http.StatusOK).
 		JSON().Object().Value("items").Array().Iter() {
-		crowns = append(crowns,
-			item.Object().Value("achievement").Object().Value("metric").String().Raw())
+		a := item.Object().Value("achievement").Object()
+		if a.Value("kind").String().Raw() != "crown" {
+			continue
+		}
+		crowns = append(crowns, a.Value("metric").String().Raw())
 	}
 
 	var boardOrder []string

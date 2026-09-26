@@ -341,15 +341,20 @@ type leaderboardEntryDTO struct {
 // drift into describing themselves differently.
 type achievementDTO struct {
 	Slug string `json:"slug"`
-	// Kind is what a client switches on to decide how to draw this. 'crown'
-	// today; the column exists because the catalogue is meant to hold more.
+	// Kind is what a client switches on to decide how to draw this: 'crown' for a
+	// standing that is lost when somebody else leads a board, 'level' for a rung
+	// that is never lost. The two need different words and a different icon.
 	Kind string `json:"kind"`
 	// Metric ties a crown back to the leaderboard board it comes from, matching
 	// the metric strings on leaderboardBoardDTO. Absent for any kind that is not
-	// a board's.
-	Metric      string `json:"metric,omitempty"`
-	Label       string `json:"label"`
-	Description string `json:"description"`
+	// a board's — a level's, for one.
+	Metric string `json:"metric,omitempty"`
+	// LevelThreshold is which level earns a rung, and absent for every other kind.
+	// It is what lets a surface order the rungs or name the next one without
+	// reading an integer out of the slug.
+	LevelThreshold int32  `json:"levelThreshold,omitempty"`
+	Label          string `json:"label"`
+	Description    string `json:"description"`
 }
 
 // achievementHoldersDTO is one achievement and everybody currently wearing it.

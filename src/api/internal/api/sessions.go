@@ -328,9 +328,10 @@ func (s *Server) updateSession(w http.ResponseWriter, r *http.Request) {
 // finishSession marks a session as ended by hand. It is idempotent — the store
 // keeps the first timestamp — so a double-tap on Finish is harmless.
 //
-// It is also where a level becomes live. Finishing a session is what makes it
-// count towards experience, so this is the one request that can move a badge
-// somebody else is looking at, and it publishes a KindLevel frame to say so.
+// It is also where a level becomes live, and where a rung is earned. Finishing a
+// session is what makes it count towards experience, so this is the one request that
+// can move a badge somebody else is looking at — it publishes a KindLevel frame to
+// say so, and awards any milestone rung the session just crossed.
 func (s *Server) finishSession(w http.ResponseWriter, r *http.Request) {
 	id, ok := idParam(r, "sessionId")
 	if !ok {
@@ -362,7 +363,31 @@ func (s *Server) finishSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := s.q.FinishSession(ctx, store.FinishSessionParams{
+	// The ladder, read before the transaction opens and only when there is any
+	// chance of awarding something. A session that was already over crosses nothing,
+	// so a repeat finish — which the offline queue produces — pays for none of this.
+	var rungs []levelRung
+	if !before.IsOver {
+		catalogue, err := s.q.ListAchievements(ctx)
+		if err != nil {
+			internalError(w)
+			return
+		}
+		rungs = levelLadder(catalogue)
+	}
+
+	// A transaction, because there are two writes now and they belong together: the
+	// finish is what earns the experience, so a rung awarded for a finish that rolled
+	// back would be an achievement for a workout the database does not have.
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		internalError(w)
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := s.q.WithTx(tx)
+
+	if _, err := qtx.FinishSession(ctx, store.FinishSessionParams{
 		ID: id, UserID: userID,
 	}); errors.Is(err, pgx.ErrNoRows) {
 		notFound(w, "session not found")
@@ -372,17 +397,27 @@ func (s *Server) finishSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// After the write and never before it. One statement, so there is no
-	// transaction to be inside of and nothing a rollback could un-write — the
-	// autocommit above is the commit this is "after". PR-sized note for whoever
-	// adds a second write here: the moment there are two, this needs the
-	// s.pool.Begin shape recognition.go uses, and publish() moves to the line
-	// after Commit.
+	// Collected, not sent. Both of these are conditional on this call being the one
+	// that made the session count: a session already over earns either way, so
+	// finishing it again moves nobody's level and awards nobody a rung.
+	events := s.newLiveEvents()
 	if !before.IsOver {
-		events := s.newLiveEvents()
 		events.level()
-		events.publish()
+		// Inside the same transaction as the finish, which is the reason
+		// awardLevelRungs takes a *store.Queries instead of reaching for s.q.
+		if _, err := s.awardLevelRungs(ctx, qtx, userID, rungs, events); err != nil {
+			internalError(w)
+			return
+		}
 	}
+
+	if err := tx.Commit(ctx); err != nil {
+		internalError(w)
+		return
+	}
+	// AFTER the commit, and deliberately not deferred — a defer would fire on the
+	// rollback path too and announce a level nobody reached.
+	events.publish()
 
 	full, err := s.buildSession(ctx, id, userID)
 	if err != nil {

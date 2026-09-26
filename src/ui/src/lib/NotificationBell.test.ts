@@ -8,6 +8,7 @@ import { houses, resetHouses } from "./houses.svelte";
 import {
   testAchievementHolders,
   testHouse,
+  testLevelAchievement,
   testLifter,
   testNotification,
   testUser,
@@ -136,6 +137,24 @@ function crownRow(overrides: Record<string, unknown> = {}) {
     sessionOwnerId: undefined,
     programDayName: undefined,
     achievementSlug: "crown-streak",
+    actor: testLifter({ id: THEM, displayName: "Grace Hopper" }),
+    ...overrides,
+  });
+}
+
+/**
+ * A level row, shaped like a crown's: no session, no emoji, no day name. Its
+ * subject is the rung, carried on achievementSlug exactly as a crown's board is.
+ */
+function levelRow(overrides: Record<string, unknown> = {}) {
+  return testNotification({
+    id: 91,
+    kind: "level",
+    emoji: undefined,
+    sessionId: undefined,
+    sessionOwnerId: undefined,
+    programDayName: undefined,
+    achievementSlug: "level-10",
     actor: testLifter({ id: THEM, displayName: "Grace Hopper" }),
     ...overrides,
   });
@@ -831,5 +850,61 @@ describe("House rows", () => {
     await open();
     await fireEvent.click(await screen.findByText(/let you into/));
     expect(push).not.toHaveBeenCalled();
+  });
+});
+
+// The second kind of achievement row, and it is NOT the crown's row with a
+// different noun: a crown opens a dialog because it has a standing to show and
+// nowhere to send anybody, where a rung goes to the profile that lists it.
+describe("a level", () => {
+  beforeEach(() => {
+    achievements.items = [
+      testAchievementHolders({ achievement: testLevelAchievement() }),
+    ];
+    achievements.loaded = true;
+  });
+  afterEach(() => resetAchievements());
+
+  it("names the rung that was reached", async () => {
+    seed([levelRow()]);
+    render(NotificationBell);
+    await open();
+
+    expect(await screen.findByText(/reached Journeyman/)).toBeInTheDocument();
+  });
+
+  // Same two fallbacks as the crown, for the same two reasons: a folded row of
+  // several rungs withholds the slug, and the catalogue may not have landed.
+  it("says the unnamed thing when the row spans rungs", async () => {
+    seed([levelRow({ achievementSlug: undefined, actorCount: 2 })]);
+    render(NotificationBell);
+    await open();
+
+    expect(await screen.findByText(/reached a new level/)).toBeInTheDocument();
+  });
+
+  it("says the unnamed thing before the catalogue has loaded", async () => {
+    resetAchievements();
+    seed([levelRow()]);
+    render(NotificationBell);
+    await open();
+
+    expect(await screen.findByText(/reached a new level/)).toBeInTheDocument();
+  });
+
+  // Goes to the lifter's profile, where the rung is listed with the ones still to
+  // come — and deliberately not to the crown dialog, whose "still theirs" and
+  // "since taken by" lines are meaningless for something never lost.
+  it("goes to the lifter whose level it is", async () => {
+    seed([levelRow()]);
+    render(NotificationBell);
+    await open();
+
+    // A row is a menu item rather than an anchor — see the note in the component
+    // on why these are not DropdownMenu.Items' default — so navigation is asserted
+    // through the router, the way every other row in this file is.
+    await fireEvent.click(await screen.findByText(/reached Journeyman/));
+
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/lifters/2"));
   });
 });

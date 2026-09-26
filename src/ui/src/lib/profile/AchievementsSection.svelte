@@ -114,14 +114,16 @@
 {#if sharing && shareContent}
   <!-- Outside the Card, which is where every other ShareCardDialog sits relative
        to the button that opens it. The dialog re-renders its image when `content`
-       changes, so switching crowns while it is open swaps the card rather than
-       leaving the previous one's pixels behind. -->
+       changes, so switching achievements while it is open swaps the card rather
+       than leaving the previous one's pixels behind. -->
   <ShareCardDialog
     bind:open={shareOpen}
     content={shareContent}
     filename={achievementShareCardFilename(sharing)}
     alt="{sharing.achievement.label} on Iron Temple"
-    title="Share this crown"
+    title={sharing.achievement.kind === "level"
+      ? "Share this level"
+      : "Share this crown"}
     subtitle="{sharing.achievement.label}, as an image."
     shareTitle={sharing.achievement.label}
   />

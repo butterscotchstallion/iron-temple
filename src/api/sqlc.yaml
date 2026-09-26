@@ -63,6 +63,11 @@ sql:
       # notifications.house_id. Every query in houses.sql needs the three tables
       # declared, and the join-request fan-out needs the new column.
       - "db/migrations/0034_houses.up.sql"
+      # 0035 is mixed like 0032: the ALTER adding achievements.level_threshold is
+      # schema, and the catalogue rows and backfilled reigns below it are DML sqlc
+      # ignores. The reconciler selects the new column, so it cannot be typed
+      # without this line.
+      - "db/migrations/0035_level_achievements.up.sql"
     queries: "db/queries"
     gen:
       go:

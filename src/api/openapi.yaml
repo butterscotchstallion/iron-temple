@@ -3504,7 +3504,17 @@ components:
             Which leaderboard board this crown comes from, matching
             `LeaderboardBoard.metric`. It is what lets a surface take a lifter
             from their crown to the board that awarded it. Absent for any kind
-            that is not a board's.
+            that is not a board's — which now has a real instance: a `level` row
+            carries no metric and a `levelThreshold` instead.
+        levelThreshold:
+          type: integer
+          description: >
+            Which level earns this rung, for `kind: level` and absent for every
+            other kind. `5` is the row awarded on reaching Level 5.
+
+            It is here so a surface can order the rungs, or say what the next one
+            costs, without reading an integer out of the slug — a slug is an opaque
+            identifier everywhere else in this API and should stay one.
         label:
           type: string
         description:
@@ -3519,15 +3529,33 @@ components:
         entry.
 
         `crown` is held for leading a leaderboard board right now, and it is lost
-        the moment somebody else leads it — it describes a standing rather than
-        something done once. A kind for the done-once sort would behave
-        differently and is deliberately not pretended to exist yet.
+        the moment somebody else leads it — it describes a **standing**.
 
-        Note that personal records and lifetime milestones are NOT here. They are
-        derived at read time and reported on the Racked report (`RackedPR`,
-        `RackedMilestone`); restating them as achievements would give the install
-        two answers about one history.
-      enum: [crown]
+        `level` is the opposite sort and the reason this enum has two members: it
+        marks a **crossing**, and once passed it is never lost. A lifter holds
+        every rung they have reached, `heldNow` is always true, and `timesHeld` is
+        always 1. The rung a row is for is `levelThreshold`.
+
+        **Standing and crossing is the line this API draws**, and it is worth
+        being explicit because it replaced a flat refusal. Personal records and
+        lifetime milestones are still NOT here: they are derived at read time and
+        reported on the Racked report (`RackedPR`, `RackedMilestone`), and
+        restating a standing that the sessions already answer would give the
+        install two answers about one history. A level is derived at read time
+        too — see `/levels` — so the old wording ruled it out along with them.
+
+        What makes a crossing different is that a second copy of it cannot
+        contradict the first. "Your best ever squat" is a question the sessions
+        answer, and a stored answer beside them can disagree. "This lifter passed
+        Level 10 on the 14th of March" is an event with a date; no later edit makes
+        it untrue, because it was never a claim about the current level.
+
+        **So `/levels` and a `level` achievement can disagree, on purpose.** A
+        lifter who deletes sessions drops back down — experience is counted from
+        the sessions, so it falls with them — while the rung they reached stays
+        held. Level 9 on the badge and "reached Level 10" on the profile are both
+        right; one is a standing and the other is history.
+      enum: [crown, level]
 
     AchievementHolders:
       type: object
@@ -4322,27 +4350,30 @@ components:
         conversation followable by the people in it. A lifter never gets both
         for one comment.
 
-        `crown` is somebody TAKING a crown, and it is the one kind whose subject
-        is neither your session nor your conversation. It reaches **the lifter who
-        took it, and anybody following them** — nobody else on the install is told.
-        That is about delivery and not about visibility: every crown stays on the
-        leaderboard and beside every name, so this decides what is pushed rather
-        than what may be read.
+        `crown` is somebody TAKING a crown and `level` is somebody reaching a
+        milestone level, and they are the kinds whose subject is neither your
+        session nor your conversation. Both reach **the lifter who earned it, and
+        anybody following them** — nobody else on the install is told. That is
+        about delivery and not about visibility: every crown stays on the
+        leaderboard and every level beside every name, so this decides what is
+        pushed rather than what may be read.
 
-        It is also the **one kind whose recipient may be its own actor**, which is a
-        deliberate exception to the rule the other four keep — being told about your
+        They are also the **kinds whose recipient may be its own actor**, which is a
+        deliberate exception to the rule the others keep — being told about your
         own applause is noise, but your own achievement is the thing you most want a
-        record of, and the row is what survives a missed celebration and what opens
-        the achievement dialog.
+        record of, and the row is what survives a missed celebration.
 
-        Like `joined` it carries no session, so every crown folds into a single row.
+        Like `joined` neither carries a session, so all of one kind folds into a
+        single row. A `crown` row opens the achievement dialog; a `level` row links
+        to the lifter's profile, where the rung is listed — there is no standing to
+        show for something that is never lost.
 
         The three `house-` kinds follow the same rule about who is told. A
         `house-request` goes to the House's owner and not to the lifter who
         asked; `house-approved` and `house-declined` go to that lifter and not to
         the owner who decided. Nobody is ever notified of their own action. None
-        of them carries a session, so like `joined` and `crown` each folds into a
-        single row — see `Notification.houseId` for what that costs.
+        of them carries a session, so like `joined`, `crown` and `level` each folds
+        into a single row — see `Notification.houseId` for what that costs.
 
         Unlike `ReactionEmoji`, this set is never validated on the way in,
         because it never arrives on the way in: a client cannot raise a
@@ -4356,6 +4387,7 @@ components:
           reply,
           joined,
           crown,
+          level,
           house-request,
           house-approved,
           house-declined,

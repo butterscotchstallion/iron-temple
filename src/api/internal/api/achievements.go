@@ -36,6 +36,27 @@ import (
 // The cost is staleness, bounded by the sweeper's interval. The leaderboard page
 // stays live; it is the ornament beside a name that catches up.
 
+// The kinds of achievement this install has, as they appear in the catalogue's
+// `kind` column.
+//
+// ONE CONSTANT SERVES TWO COLUMNS, and that is deliberate rather than a coincidence
+// of spelling. The same word names the catalogue row and the notifications.kind that
+// earning it raises, because what the panel needs in order to word a row is which
+// sort of achievement arrived. Keeping them equal is what lets AchievementKind and
+// NotificationKind be read side by side in the spec without a mapping table between
+// them.
+const (
+	kindCrown = "crown"
+	kindLevel = "level"
+)
+
+// Aliases at the notification call sites, so a reader there is not left wondering
+// whether the catalogue's vocabulary is the panel's. See above: it is.
+const (
+	notificationKindCrown = kindCrown
+	notificationKindLevel = kindLevel
+)
+
 // crownPeriod is the window the crowns are decided over.
 //
 // The month, which is the leaderboard's own default period and therefore the
@@ -132,12 +153,13 @@ func (s *Server) getLifterAchievements(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		items = append(items, lifterAchievementDTO{
 			Achievement: achievementToDTO(store.Achievement{
-				Slug:        row.Slug,
-				Kind:        row.Kind,
-				Metric:      row.Metric,
-				Label:       row.Label,
-				Description: row.Description,
-				SortOrder:   row.SortOrder,
+				Slug:           row.Slug,
+				Kind:           row.Kind,
+				Metric:         row.Metric,
+				Label:          row.Label,
+				Description:    row.Description,
+				SortOrder:      row.SortOrder,
+				LevelThreshold: row.LevelThreshold,
 			}),
 			HeldNow:       row.HeldNow,
 			TimesHeld:     row.TimesHeld,
@@ -158,6 +180,9 @@ func achievementToDTO(a store.Achievement) achievementDTO {
 	}
 	if a.Metric != nil {
 		dto.Metric = *a.Metric
+	}
+	if a.LevelThreshold != nil {
+		dto.LevelThreshold = *a.LevelThreshold
 	}
 	return dto
 }
@@ -209,7 +234,7 @@ func (s *Server) refreshCrowns(ctx context.Context) {
 	}
 	slugFor := make(map[string]string, len(catalogue))
 	for _, a := range catalogue {
-		if a.Kind == "crown" && a.Metric != nil {
+		if a.Kind == kindCrown && a.Metric != nil {
 			slugFor[*a.Metric] = a.Slug
 		}
 	}
@@ -313,8 +338,9 @@ func (s *Server) refreshCrowns(ctx context.Context) {
 				continue
 			}
 
-			told, err := qtx.CreateCrownNotifications(ctx, store.CreateCrownNotificationsParams{
+			told, err := qtx.CreateAchievementNotifications(ctx, store.CreateAchievementNotificationsParams{
 				ActorID:         id,
+				Kind:            notificationKindCrown,
 				AchievementSlug: slug,
 			})
 			if err != nil {

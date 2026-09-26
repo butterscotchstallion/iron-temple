@@ -188,6 +188,31 @@ export function testAchievement(overrides: Partial<Achievement> = {}): Achieveme
 }
 
 /**
+ * A level rung, defaulting to Level 10.
+ *
+ * The other kind, and it exists because two surfaces have to tell them apart at all:
+ * `crownsFor` must not return one (or every lifter past Level 5 wears a bogus crown
+ * beside their name) and `noteCrowns` must not celebrate one (or the first poll after
+ * a deploy congratulates everybody for "taking a crown"). A fixture is what lets
+ * those be asserted rather than reasoned about.
+ *
+ * NO `metric`, deliberately: a rung comes from no board, and the absence is part of
+ * the shape under test. `levelThreshold` is what a board's metric is to a crown.
+ */
+export function testLevelAchievement(
+  overrides: Partial<Achievement> = {},
+): Achievement {
+  return {
+    slug: "level-10",
+    kind: "level",
+    levelThreshold: 10,
+    label: "Journeyman",
+    description: "Reached Level 10 — forty-five sessions.",
+    ...overrides,
+  };
+}
+
+/**
  * One achievement and who is wearing it.
  *
  * Holders default to EMPTY for testBoard's reason: who holds a crown is the thing

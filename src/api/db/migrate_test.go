@@ -178,14 +178,39 @@ func TestMigrateAppliesSchemaAndSeed(t *testing.T) {
 	// because the reconciler maps a board to a crown THROUGH this table — a board
 	// with no row here silently awards nothing, and the only sign would be a
 	// leader who never gets a crown.
-	assertCount(t, sqlDB, "SELECT count(*) FROM achievements", 5)
 	assertCount(t, sqlDB, "SELECT count(*) FROM achievements WHERE kind = 'crown'", 5)
 	// Every crown names the board it comes from. A NULL metric would make the
 	// reconciler skip it, which is the quiet version of the failure above.
-	assertCount(t, sqlDB, "SELECT count(*) FROM achievements WHERE metric IS NULL", 0)
-	// And the ledger ships empty. The reigns are deliberately NOT backfilled —
-	// see the migration on why inventing a held_from would be fiction — so a
-	// fresh install has no crowns until the first sweeper pass.
+	assertCount(t, sqlDB,
+		"SELECT count(*) FROM achievements WHERE kind = 'crown' AND metric IS NULL", 0)
+
+	// 0035's rungs, pinned for the crowns' reason turned around: the level
+	// reconciler reads the LADDER out of this table, so a missing row is a rung
+	// nobody can ever reach and a missing threshold is a row it skips.
+	//
+	// Both counts are now scoped by kind, which the crown assertions above were not
+	// until this migration existed. An unscoped "how many achievements are there"
+	// is a number that changes every time the catalogue grows, and it was asserting
+	// the size of the table where what it meant was the coverage of the boards.
+	assertCount(t, sqlDB, "SELECT count(*) FROM achievements WHERE kind = 'level'", 4)
+	assertCount(t, sqlDB,
+		"SELECT count(*) FROM achievements WHERE kind = 'level' AND level_threshold IS NULL", 0)
+	// The ladder itself, and not merely its size. These four numbers are what the
+	// badge means — changing one is a decision about the feature, not a refactor.
+	assertCount(t, sqlDB,
+		"SELECT count(*) FROM achievements WHERE kind = 'level' AND level_threshold IN (5, 10, 20, 30)", 4)
+	// And no other kind claims a threshold, which is the mirror of the metric rule
+	// above: level_threshold is a level's column the way metric is a board's.
+	assertCount(t, sqlDB,
+		"SELECT count(*) FROM achievements WHERE kind <> 'level' AND level_threshold IS NOT NULL", 0)
+	// And the ledger ships empty. The crown reigns are deliberately NOT backfilled
+	// — see 0032 on why inventing a held_from would be fiction — so a fresh install
+	// has no crowns until the first sweeper pass.
+	//
+	// 0035 DOES backfill, which is what keeps the first pass from announcing rungs
+	// everybody passed months ago, and this still holds anyway: it backfills from
+	// the sessions, and a fresh install has neither accounts nor sessions to match.
+	// That is the case worth pinning here rather than the backfill itself.
 	assertCount(t, sqlDB, "SELECT count(*) FROM lifter_achievements", 0)
 
 	// 0033 ships empty too, and for a different reason worth pinning: nothing is

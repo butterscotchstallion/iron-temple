@@ -64,6 +64,13 @@
     // every crown on the install and a route could only ever show one of them.
     // The leaderboard is still one press away, from inside that dialog.
     if (item.kind === "crown") return null;
+    // A level row goes to the profile, which is where the rung is listed, and
+    // deliberately NOT to the crown's dialog. That dialog is built around a
+    // standing — "still theirs", "since taken by X", and a Leaderboard button —
+    // and every one of those is meaningless for something that is never lost. The
+    // profile is also where the ladder reads as a ladder, with the rungs still to
+    // come under it.
+    if (item.kind === "level") return `/lifters/${item.actor.id}`;
     // The three House rows go to the House, which is where every one of them can
     // be acted on: an owner approves from its page and a requester reads about it
     // there. The id is withheld on a row that folded more than one House — see
@@ -108,6 +115,15 @@
         // fall through to the unnamed sentence rather than to a blank.
         const board = achievementLabel(item.achievementSlug);
         return board ? `took the crown on ${board}` : "took a crown";
+      }
+      case "level": {
+        // The rung's own name — "Journeyman", not "Level 10" — because the
+        // catalogue holds the label and this install's owner may have reworded it.
+        // Same two fallbacks as the crown, for the same two reasons: a folded row
+        // of several rungs withholds the slug, and the catalogue may not have
+        // landed.
+        const rung = achievementLabel(item.achievementSlug);
+        return rung ? `reached ${rung}` : "reached a new level";
       }
       // The House's name when the API named one and the list has loaded, and the
       // unnamed sentence otherwise — the same two fallbacks the crown needs, for
@@ -221,8 +237,11 @@
   /**
    * Whether a row opens a dialog rather than going somewhere.
    *
-   * Only `crown` today. It exists because the row folds every crown on the
-   * install and no single route could show them all — see AchievementDialog.
+   * Only `crown`, and still only `crown` now that a second kind of achievement
+   * exists. It is not "achievements open a dialog": it is that a crown has a
+   * STANDING to show and nowhere to send anybody — the row folds every crown on
+   * the install and no single route could show them all. A level rung has a
+   * profile to go to and no standing to report, so it navigates like `joined`.
    */
   function expandable(item: Notification): boolean {
     return item.kind === "crown";

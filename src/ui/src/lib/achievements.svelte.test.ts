@@ -6,7 +6,12 @@ import {
   loadAchievements,
   resetAchievements,
 } from "./achievements.svelte";
-import { testAchievement, testAchievementHolders, testLifter } from "./testFixtures";
+import {
+  testAchievement,
+  testAchievementHolders,
+  testLevelAchievement,
+  testLifter,
+} from "./testFixtures";
 
 const getAchievements = vi.hoisted(() => vi.fn());
 
@@ -281,5 +286,54 @@ describe("celebrating a crown the caller took", () => {
 
     expect(pushToast).not.toHaveBeenCalled();
     expect(celebrate).not.toHaveBeenCalled();
+  });
+});
+
+// THE REGRESSION TEST FOR EVERY NAME IN THE APP. crownsFor feeds <LifterName>, which
+// draws a Crown icon per entry it returns — so a level rung reaching it would put a
+// bogus crown beside every lifter past Level 5, on the feed, the roster, the
+// leaderboard, comment bylines and the header at once. A level has its own badge.
+describe("telling the two kinds apart", () => {
+  it("does not return a level rung as a crown", async () => {
+    served([
+      testAchievementHolders({
+        achievement: testAchievement({ slug: "crown-streak" }),
+        holders: [testLifter({ id: ME })],
+      }),
+      testAchievementHolders({
+        achievement: testLevelAchievement({ slug: "level-10" }),
+        holders: [testLifter({ id: ME })],
+      }),
+    ]);
+    await loadAchievements();
+
+    expect(crownsFor(ME).map((a) => a.slug)).toEqual(["crown-streak"]);
+  });
+
+  it("gives a lifter who holds only rungs no crowns at all", async () => {
+    served([
+      testAchievementHolders({
+        achievement: testLevelAchievement(),
+        holders: [testLifter({ id: ME })],
+      }),
+    ]);
+    await loadAchievements();
+
+    expect(crownsFor(ME)).toEqual([]);
+  });
+
+  // The catalogue lookups are NOT filtered, and should not be: the notification
+  // panel resolves a level row's slug to its label through achievementLabel, and
+  // the profile reads rungs out of the same list.
+  it("still resolves a rung's label from the catalogue", async () => {
+    served([
+      testAchievementHolders({
+        achievement: testLevelAchievement({ slug: "level-10", label: "Journeyman" }),
+        holders: [],
+      }),
+    ]);
+    await loadAchievements();
+
+    expect(achievementLabel("level-10")).toBe("Journeyman");
   });
 });

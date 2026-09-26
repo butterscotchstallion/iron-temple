@@ -1,5 +1,5 @@
 /**
- * One crown's share card.
+ * One achievement's share card, crown or level.
  *
  * The third selector feeding shareCard.ts's layout and painter, after the monthly
  * recap and the single session. Same `ShareCardContent`, same blocks, same pixels
@@ -15,7 +15,7 @@
  * dropped. A card reading "TOP OF WEEK STREAK" over nothing is a brag nobody
  * outside the install can read.
  *
- * It also carries no lift bars. There is no breakdown of a crown; the reign facts
+ * It also carries no lift bars. There is no breakdown of an achievement; the facts
  * go in the tiles instead, which is the one block whose meaning is "two numbers
  * worth knowing".
  */
@@ -57,11 +57,23 @@ export function achievementShareCardContent(
     moments.push({ label: "Closing in", value: `${nearest.label} · ${formatRemaining(nearest)}` });
   }
 
+  // A rung is REACHED, not held, and every word on this card assumed a standing.
+  // "holds", "times held", "holding since", "Top of the board" — all of them are
+  // about something that can change hands, which a crossing cannot. See
+  // AchievementKind in the spec for the distinction the two kinds turn on.
+  const level = held.achievement.kind === "level";
+
   return {
-    eyebrow: "IRON TEMPLE · CROWN",
+    eyebrow: level ? "IRON TEMPLE · LEVEL" : "IRON TEMPLE · CROWN",
     // Third person when there is a name and second when there is not, matching
     // the other two cards exactly — the sender is showing this to other people.
-    lede: name ? `${name} holds` : "You hold",
+    lede: level
+      ? name
+        ? `${name} reached`
+        : "You reached"
+      : name
+        ? `${name} holds`
+        : "You hold",
     headline: held.achievement.label.toUpperCase(),
     // The description, which on this card is the whole argument for why the
     // headline is worth anything. Never null: the catalogue always carries one.
@@ -69,31 +81,51 @@ export function achievementShareCardContent(
     // Reserved on the other cards for a period-over-period delta, and there is no
     // such thing for a standing.
     change: null,
-    // A judgement about how a month of training went, which a crown is not.
+    // A judgement about how a month of training went, which an achievement is not.
     archetype: null,
-    tiles: [
-      { value: String(held.timesHeld), label: held.timesHeld === 1 ? "time held" : "times held" },
-      {
-        // formatLongDateAt, not formatLongDate: lastHeldFrom is an instant, and
-        // handing one to the date-only formatter silently returns the raw ISO
-        // string. Absolute rather than "3 days ago" because this is baked into a
-        // PNG — there is no hover here to recover the date from.
-        value: formatLongDateAt(held.lastHeldFrom),
-        // Present tense only when it is still theirs. A card saying "holding
-        // since" about a crown somebody lost in August is the one way this could
-        // be dishonest.
-        label: held.heldNow ? "holding since" : "last held",
-      },
-    ],
+    tiles: level
+      ? [
+          // The level itself, which is the whole claim — and the only card in this
+          // app whose headline number is not a weight.
+          {
+            value: String(held.achievement.levelThreshold ?? ""),
+            label: "level reached",
+          },
+          {
+            value: formatLongDateAt(held.lastHeldFrom),
+            label: "reached on",
+          },
+        ]
+      : [
+          {
+            value: String(held.timesHeld),
+            label: held.timesHeld === 1 ? "time held" : "times held",
+          },
+          {
+            // formatLongDateAt, not formatLongDate: lastHeldFrom is an instant, and
+            // handing one to the date-only formatter silently returns the raw ISO
+            // string. Absolute rather than "3 days ago" because this is baked into a
+            // PNG — there is no hover here to recover the date from.
+            value: formatLongDateAt(held.lastHeldFrom),
+            // Present tense only when it is still theirs. A card saying "holding
+            // since" about a crown somebody lost in August is the one way this could
+            // be dishonest.
+            label: held.heldNow ? "holding since" : "last held",
+          },
+        ],
     lifts: [],
     moments,
-    footnote: held.heldNow
-      ? "Top of the board on this install."
-      : "Held the top of this board.",
+    // No tense to get wrong on a level: it was reached, and it stays reached. The
+    // crown needs both because it can have been lost.
+    footnote: level
+      ? "Earned by training on this install."
+      : held.heldNow
+        ? "Top of the board on this install."
+        : "Held the top of this board.",
   };
 }
 
-/** `crown-top-of-week-streak.png`, from the achievement's own slug. */
+/** `crown-top-of-week-streak.png` or `level-10.png`, from the achievement's slug. */
 export function achievementShareCardFilename(held: LifterAchievement): string {
-  return `${held.achievement.slug || "crown"}.png`;
+  return `${held.achievement.slug || "achievement"}.png`;
 }

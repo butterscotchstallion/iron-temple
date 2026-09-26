@@ -46,13 +46,13 @@ func (q *Queries) CloseAchievementReignsExcept(ctx context.Context, arg CloseAch
 	return result.RowsAffected(), nil
 }
 
-const createCrownNotifications = `-- name: CreateCrownNotifications :many
+const createAchievementNotifications = `-- name: CreateAchievementNotifications :many
 
 INSERT INTO notifications (user_id, actor_id, kind, achievement_slug)
 SELECT u.id,
        $1::int,
-       'crown'::text,
-       $2::text
+       $2::text,
+       $3::text
 FROM users u
 WHERE u.id = $1::int
    OR EXISTS (
@@ -63,14 +63,21 @@ WHERE u.id = $1::int
 RETURNING user_id
 `
 
-type CreateCrownNotificationsParams struct {
+type CreateAchievementNotificationsParams struct {
 	ActorID         int32  `json:"actor_id"`
+	Kind            string `json:"kind"`
 	AchievementSlug string `json:"achievement_slug"`
 }
 
 // ---- notifications ----
-// CreateCrownNotifications tells the lifter who took a crown, and anybody who
-// follows them.
+// CreateAchievementNotifications tells the lifter who earned something, and
+// anybody who follows them.
+//
+// Takes the KIND rather than writing one, which is the only thing that changed when
+// levels became the second sort of achievement. A sibling query would have been a
+// second copy of the audience rule below — the part actually worth getting right —
+// kept in step by hand. Every word of the reasoning that follows applies to both
+// kinds unchanged, which is itself the argument for one query.
 //
 // THIS USED TO GO TO THE WHOLE INSTALL AND NOT TO THE HOLDER, and the reversal is
 // deliberate enough to record rather than quietly overwrite. The old comment argued
@@ -88,8 +95,8 @@ type CreateCrownNotificationsParams struct {
 // NOTE WHAT THIS BREAKS, in the table's own terms: notifications.actor_id is
 // NOT NULL and 0026 wrote that every insert filters the actor out of the
 // recipients, "because being told about your own applause is noise". That holds for
-// applause and no longer holds here — this is the first kind whose recipient may be
-// its own actor. The column is nullable-free and unconstrained, so nothing in the
+// applause and no longer holds here — these are the kinds whose recipient may be
+// its own actor, and there are now two of them. The column is nullable-free and unconstrained, so nothing in the
 // schema had to change, but a reader of 0026 should know one kind now disagrees
 // with it.
 //
@@ -97,11 +104,12 @@ type CreateCrownNotificationsParams struct {
 // every crown stays on the leaderboard and beside every name, exactly as before —
 // it is only about what gets pushed. See 0033.
 //
-// No session, no comment, no emoji. achievement_slug is this kind's subject, and
-// it is what lets the panel name WHICH board was won.
+// No session, no comment, no emoji. achievement_slug is the subject for both
+// kinds, and it is what lets the panel name which board was won or which rung was
+// reached.
 // Returns everybody told, so the caller can wake their sockets.
-func (q *Queries) CreateCrownNotifications(ctx context.Context, arg CreateCrownNotificationsParams) ([]int32, error) {
-	rows, err := q.db.Query(ctx, createCrownNotifications, arg.ActorID, arg.AchievementSlug)
+func (q *Queries) CreateAchievementNotifications(ctx context.Context, arg CreateAchievementNotificationsParams) ([]int32, error) {
+	rows, err := q.db.Query(ctx, createAchievementNotifications, arg.ActorID, arg.Kind, arg.AchievementSlug)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +136,8 @@ SELECT slug,
        metric,
        label,
        description,
-       sort_order
+       sort_order,
+       level_threshold
 FROM achievements
 ORDER BY sort_order, slug
 `
@@ -156,6 +165,12 @@ ORDER BY sort_order, slug
 //
 // Ordered by sort_order so every surface lists them the way buildBoards orders
 // the boards they come from, with volume last.
+// The column list names every column of the table IN THE TABLE'S OWN ORDER, which
+// is what makes sqlc reuse the Achievement model struct rather than emit a bespoke
+// row type — the same trade the three RETURNING lists in sessions.sql make, and for
+// the same reason. level_threshold is last here because 0035 added it last. Putting
+// it beside `metric`, where it reads better, split this query off into its own type
+// and broke every caller that passes the result to achievementToDTO.
 func (q *Queries) ListAchievements(ctx context.Context) ([]Achievement, error) {
 	rows, err := q.db.Query(ctx, listAchievements)
 	if err != nil {
@@ -172,6 +187,7 @@ func (q *Queries) ListAchievements(ctx context.Context) ([]Achievement, error) {
 			&i.Label,
 			&i.Description,
 			&i.SortOrder,
+			&i.LevelThreshold,
 		); err != nil {
 			return nil, err
 		}
@@ -260,6 +276,7 @@ SELECT a.slug,
        a.label,
        a.description,
        a.sort_order,
+       a.level_threshold,
        COUNT(*)::bigint AS times_held,
        bool_or(la.held_until IS NULL) AS held_now,
        MIN(la.held_from)::timestamptz AS first_held_from,
@@ -267,21 +284,23 @@ SELECT a.slug,
 FROM lifter_achievements la
 JOIN achievements a ON a.slug = la.achievement_slug
 WHERE la.user_id = $1::int
-GROUP BY a.slug, a.kind, a.metric, a.label, a.description, a.sort_order
+GROUP BY a.slug, a.kind, a.metric, a.label, a.description, a.sort_order,
+         a.level_threshold
 ORDER BY held_now DESC, a.sort_order, a.slug
 `
 
 type ListLifterAchievementsRow struct {
-	Slug          string             `json:"slug"`
-	Kind          string             `json:"kind"`
-	Metric        *string            `json:"metric"`
-	Label         string             `json:"label"`
-	Description   string             `json:"description"`
-	SortOrder     int32              `json:"sort_order"`
-	TimesHeld     int64              `json:"times_held"`
-	HeldNow       bool               `json:"held_now"`
-	FirstHeldFrom pgtype.Timestamptz `json:"first_held_from"`
-	LastHeldFrom  pgtype.Timestamptz `json:"last_held_from"`
+	Slug           string             `json:"slug"`
+	Kind           string             `json:"kind"`
+	Metric         *string            `json:"metric"`
+	Label          string             `json:"label"`
+	Description    string             `json:"description"`
+	SortOrder      int32              `json:"sort_order"`
+	LevelThreshold *int32             `json:"level_threshold"`
+	TimesHeld      int64              `json:"times_held"`
+	HeldNow        bool               `json:"held_now"`
+	FirstHeldFrom  pgtype.Timestamptz `json:"first_held_from"`
+	LastHeldFrom   pgtype.Timestamptz `json:"last_held_from"`
 }
 
 // ListLifterAchievements is one lifter's profile section: what they hold now and
@@ -316,6 +335,7 @@ func (q *Queries) ListLifterAchievements(ctx context.Context, userID int32) ([]L
 			&i.Label,
 			&i.Description,
 			&i.SortOrder,
+			&i.LevelThreshold,
 			&i.TimesHeld,
 			&i.HeldNow,
 			&i.FirstHeldFrom,

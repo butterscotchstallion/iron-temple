@@ -329,6 +329,17 @@ picks it up.
 Nothing is stored: your level is counted from your sessions every time it is asked
 for. So it is never stale, and a session you delete takes its experience with it.
 
+**Four levels are milestones**, and reaching one earns something that keeps: Level 5
+(*Initiate*), Level 10 (*Journeyman*), Level 20 (*Veteran*) and Level 30 (*Master of
+the Temple*). They sit on your profile with your crowns, anybody following you is
+told, and they are **never lost** — unlike a crown, which goes the moment somebody
+else leads that board.
+
+That last part has a consequence worth knowing. Your level is counted from your
+sessions, so deleting sessions lowers it — but a milestone you have reached stays
+reached. Your badge can read Level 9 while your profile says you reached Level 10,
+and both are true: one is where you are now, the other is something you did.
+
 ## Documentation
 
 | | |

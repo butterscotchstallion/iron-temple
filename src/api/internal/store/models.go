@@ -9,12 +9,13 @@ import (
 )
 
 type Achievement struct {
-	Slug        string  `json:"slug"`
-	Kind        string  `json:"kind"`
-	Metric      *string `json:"metric"`
-	Label       string  `json:"label"`
-	Description string  `json:"description"`
-	SortOrder   int32   `json:"sort_order"`
+	Slug           string  `json:"slug"`
+	Kind           string  `json:"kind"`
+	Metric         *string `json:"metric"`
+	Label          string  `json:"label"`
+	Description    string  `json:"description"`
+	SortOrder      int32   `json:"sort_order"`
+	LevelThreshold *int32  `json:"level_threshold"`
 }
 
 type Exercise struct {

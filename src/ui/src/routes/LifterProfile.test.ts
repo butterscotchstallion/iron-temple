@@ -441,7 +441,7 @@ describe("your own profile", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText(/Lead any board on the leaderboard and its crown is yours/),
+        screen.getByText(/Keep training for your first level, or lead any board/),
       ).toBeInTheDocument();
     });
   });

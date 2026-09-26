@@ -130,6 +130,16 @@ export function noteCrowns(
 
   const mine = new Map<string, Achievement>();
   for (const entry of items) {
+    // CROWNS ONLY. The catalogue holds level rungs too, and this file's toast says
+    // "You took a crown" — so without the filter the first poll after a deploy would
+    // congratulate every lifter for "taking a crown" once per rung they had passed
+    // months ago. A level reached has its own moment; see levelWatch.ts.
+    //
+    // A filter rather than a STORAGE_VERSION bump, which would also have silenced the
+    // false toasts and would have cost a real crown its moment on deploy day: a
+    // version mismatch is discarded, and a discarded baseline makes the next
+    // observation the silent first one.
+    if (entry.achievement.kind !== "crown") continue;
     if (entry.holders.some((h) => h.id === viewerId)) {
       mine.set(entry.achievement.slug, entry.achievement);
     }

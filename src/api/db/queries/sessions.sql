@@ -4,9 +4,10 @@
 -- and there is no window in which a stale row disagrees with the clock. The
 -- expression is repeated in the queries below because a generated column cannot
 -- use now(), which Postgres does not consider immutable. Keep the copies in
--- sync — GetSession, ListSessions and ListLiftHistory all depend on it, and so
--- does ListLifterLevels, which is the one copy that lives OUTSIDE this file
--- (levels.sql) and so is the one an editor working here will not see.
+-- sync — GetSession, ListSessions and ListLiftHistory all depend on it, and so do
+-- ListLifterLevels and CountQualifyingSessionsForLifter, which are the copies that
+-- live OUTSIDE this file (levels.sql) and so are the ones an editor working here
+-- will not see.
 --
 --     s.finished_at IS NOT NULL OR s.created_at < now() - INTERVAL '12 hours'
 --

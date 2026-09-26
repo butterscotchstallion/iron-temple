@@ -44,6 +44,15 @@ func (s *Server) EnsureGeneratedAccountNow(
 	return s.ensureGeneratedAccount(ctx, persona)
 }
 
+// RefreshLevelAwardsNow runs exactly one level-rung reconcile and returns when it
+// is done.
+//
+// Test-only, RefreshCrownsNow's twin and for its reason: most of what is worth
+// asserting about this pass is what a SECOND one does not do. A rung already held
+// must not be re-announced, and a lifter who has dropped below one must not have it
+// taken away — neither of which a sleep can tell from "has not run yet".
+func (s *Server) RefreshLevelAwardsNow(ctx context.Context) { s.refreshLevelAwards(ctx) }
+
 // SetHasher replaces the password hasher this server uses.
 //
 // Test-only. The _test.go suffix keeps this file out of every non-test build,
